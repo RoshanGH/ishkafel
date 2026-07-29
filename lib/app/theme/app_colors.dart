@@ -1,0 +1,18 @@
+import 'package:flutter/material.dart';
+
+/// HIG 暗色色板（值来源：项目 CLAUDE.md 设计标准）
+abstract final class AppColors {
+  static const background = Color(0xFF131316);
+  static const surface = Color(0xFF1E1E20);
+  static const surfaceRaised = Color(0xFF232326);
+  static const surfaceCard = Color(0xFF2C2C2E);
+  static const border = Color(0x17FFFFFF); // 白 9%
+  static const accentBlue = Color(0xFF0A84FF);
+  static const green = Color(0xFF30D158);
+  static const orange = Color(0xFFFF9F0A);
+  static const red = Color(0xFFFF453A);
+  static const purple = Color(0xFFBF5AF2);
+  static const textPrimary = Color(0xFFF2F2F7);
+  static const textSecondary = Color(0xFF98989F);
+  static const textTertiary = Color(0xFF636366);
+}
