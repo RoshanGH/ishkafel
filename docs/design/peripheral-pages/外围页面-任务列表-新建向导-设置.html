@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ishkafel · 外围页面设计</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#131316; color:#f2f2f7; font-family:-apple-system,BlinkMacSystemFont,"SF Pro","PingFang SC","Helvetica Neue",sans-serif; font-size:13px; -webkit-font-smoothing:antialiased; }
+  .stage { max-width:1320px; margin:0 auto; padding:20px; }
+  .note { color:#98989f; font-size:12px; margin:6px 2px 16px; }
+  h2.pagetitle { font-size:17px; margin-bottom:2px; }
+  h3.sec { font-size:14px; margin:26px 0 10px; color:#d1d1d6; }
+  .app { background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; overflow:hidden; box-shadow:0 24px 70px rgba(0,0,0,.55); }
+
+  .topbar { display:flex; align-items:center; gap:14px; height:52px; padding:0 16px; background:rgba(37,37,40,.92); border-bottom:1px solid rgba(255,255,255,.08); }
+  .traffic { display:flex; gap:7px; }
+  .traffic i { width:11px; height:11px; border-radius:50%; }
+  .logo { font-weight:700; font-size:15px; }
+  .logo b { color:#0A84FF; }
+  .search { flex:1; max-width:340px; background:#2c2c2e; border-radius:8px; padding:6px 12px; color:#636366; font-size:12px; }
+  .spacer { flex:1; }
+  .iconbtn { width:30px; height:30px; border-radius:8px; background:#2c2c2e; display:flex; align-items:center; justify-content:center; color:#98989f; }
+  .btn { padding:8px 16px; border-radius:9px; font-size:12.5px; border:none; color:#f2f2f7; background:#2c2c2e; }
+  .btn.primary { background:#0A84FF; font-weight:600; }
+
+  /* 任务列表 */
+  .taskgrid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; padding:16px; }
+  .task { background:#232326; border-radius:12px; overflow:hidden; border:1px solid rgba(255,255,255,.07); }
+  .task .cover { position:relative; height:150px; background:#000; }
+  .task .cover img { width:100%; height:100%; object-fit:cover; opacity:.9; }
+  .task .cover .src { position:absolute; top:8px; left:8px; font-size:10px; background:rgba(0,0,0,.55); backdrop-filter:blur(5px); padding:2px 8px; border-radius:999px; color:#fff; }
+  .task .cover .st { position:absolute; right:8px; bottom:8px; font-size:10px; padding:2.5px 9px; border-radius:999px; font-weight:600; }
+  .st-ing { background:rgba(10,132,255,.85); color:#fff; }
+  .st-wait { background:rgba(255,159,10,.85); color:#1a1a1a; }
+  .st-pick { background:rgba(191,90,242,.85); color:#fff; }
+  .st-done { background:rgba(48,209,88,.85); color:#0c2413; }
+  .task .body { padding:10px 12px 12px; }
+  .task .name { font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .task .meta { font-size:10.5px; color:#98989f; margin-top:4px; display:flex; justify-content:space-between; }
+  .task .prog { height:3px; border-radius:2px; background:#3a3a3c; margin-top:8px; overflow:hidden; }
+  .task .prog i { display:block; height:100%; background:#0A84FF; }
+
+  /* 新建向导 */
+  .wizard-wrap { padding:26px; display:flex; justify-content:center; background:rgba(0,0,0,.35); }
+  .wizard { width:640px; background:#232326; border:1px solid rgba(255,255,255,.1); border-radius:14px; padding:20px 22px; box-shadow:0 24px 70px rgba(0,0,0,.5); }
+  .wizard h4 { font-size:15px; font-weight:700; }
+  .wizard .wsub { font-size:11.5px; color:#98989f; margin:4px 0 16px; }
+  .wstep { font-size:11px; color:#0A84FF; font-weight:600; letter-spacing:.4px; margin-bottom:8px; }
+  .srcs { display:flex; gap:12px; margin-bottom:18px; }
+  .srcopt { flex:1; border:1.5px dashed #48484a; border-radius:12px; padding:16px; text-align:center; color:#98989f; }
+  .srcopt.on { border:1.5px solid #0A84FF; background:rgba(10,132,255,.08); color:#f2f2f7; }
+  .srcopt .ic { font-size:22px; margin-bottom:6px; }
+  .srcopt .t { font-size:12.5px; font-weight:600; }
+  .srcopt .d { font-size:10.5px; margin-top:3px; color:#98989f; }
+  .idrow { display:flex; gap:8px; margin-bottom:18px; }
+  .idinput { flex:1; background:#1e1e20; border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:8px 12px; font-size:12px; color:#f2f2f7; display:flex; align-items:center; gap:8px; }
+  .idinput i { font-style:normal; color:#636366; }
+  .fetched { display:flex; gap:10px; background:#1e1e20; border-radius:10px; padding:10px; margin-bottom:18px; align-items:center; }
+  .fetched img { width:38px; height:67px; object-fit:cover; border-radius:6px; }
+  .fetched .fn { font-size:12px; font-weight:600; }
+  .fetched .fm { font-size:10.5px; color:#98989f; margin-top:3px; }
+  .tagsel { display:flex; gap:12px; margin-bottom:6px; }
+  .tgroup { flex:1; background:#1e1e20; border-radius:10px; padding:12px; }
+  .tgroup .tl { font-size:11px; color:#98989f; margin-bottom:8px; }
+  .tgroup .tv { display:flex; align-items:center; justify-content:space-between; font-size:12.5px; font-weight:600; }
+  .tgroup .tv i { font-style:normal; color:#636366; }
+  .tgroup .preview { margin-top:9px; display:flex; flex-wrap:wrap; gap:5px; }
+  .minichip { font-size:10px; padding:2px 8px; border-radius:999px; background:rgba(10,132,255,.13); color:#8db6ff; }
+  .wfoot { display:flex; align-items:center; margin-top:18px; }
+  .wnote { font-size:10.5px; color:#636366; line-height:1.5; }
+
+  /* 设置 */
+  .settings-wrap { display:flex; min-height:330px; }
+  .setnav { width:190px; flex:none; border-right:1px solid rgba(255,255,255,.08); padding:12px 8px; background:#1a1a1d; }
+  .setnav div { padding:8px 12px; border-radius:8px; font-size:12.5px; color:#98989f; margin-bottom:2px; }
+  .setnav div.on { background:rgba(10,132,255,.14); color:#fff; font-weight:600; }
+  .setbody { flex:1; padding:18px 22px; }
+  .setcard { background:#232326; border-radius:12px; padding:14px 16px; margin-bottom:12px; max-width:640px; }
+  .setrow { display:flex; align-items:center; justify-content:space-between; font-size:12.5px; padding:7px 0; }
+  .setrow .k { color:#98989f; }
+  .setrow .v { display:flex; align-items:center; gap:8px; }
+  .setrow .v em { font-style:normal; color:#0A84FF; }
+  .okdot { width:7px; height:7px; border-radius:50%; background:#30D158; display:inline-block; margin-right:6px; }
+  .divider { height:1px; background:rgba(255,255,255,.06); margin:2px 0; }
+
+  .fb { margin-top:26px; }
+  .fb h3 { font-size:15px; margin-bottom:10px; }
+  .options { display:flex; flex-direction:column; gap:10px; }
+  .option { display:flex; gap:12px; align-items:flex-start; background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; padding:14px; cursor:pointer; }
+  .option:hover { border-color:rgba(10,132,255,.6); }
+  .option.selected { border-color:#0A84FF; background:rgba(10,132,255,.10); }
+  .letter { width:26px; height:26px; border-radius:8px; background:#2c2c2e; color:#64a8ff; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none; }
+  .option h4 { font-size:13.5px; margin-bottom:3px; }
+  .option p { font-size:12px; color:#98989f; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <h2 class="pagetitle">ishkafel · 外围页面（设计定稿 2026-07-29）</h2>
+  <p class="note">设计语言沿用审片台定稿。从上到下：任务列表（首页）→ 新建任务向导（模态）→ 设置页。</p>
+
+  <h3 class="sec">1 · 任务列表（首页）</h3>
+  <div class="app">
+    <div class="topbar">
+      <div class="traffic"><i style="background:#ff5f57;"></i><i style="background:#febc2e;"></i><i style="background:#28c840;"></i></div>
+      <div class="logo">ishka<b>fel</b></div>
+      <div class="search">🔍 搜索任务名 / miaoa ID…</div>
+      <div class="spacer"></div>
+      <div class="iconbtn">⚙</div>
+      <button class="btn primary">＋ 新建任务</button>
+    </div>
+    <div class="taskgrid">
+      <div class="task">
+        <div class="cover"><img src="./unit_1.jpg"><span class="src">miaoa #44888</span><span class="st st-pick">选材中</span></div>
+        <div class="body"><div class="name">滴露_植源喷雾_XCT_千川直播</div><div class="meta"><span>01:36 · 6 单元</span><span>组合 24</span></div></div>
+      </div>
+      <div class="task">
+        <div class="cover"><img src="./cand_5.jpg"><span class="src">本地上传</span><span class="st st-ing">分析中 45%</span></div>
+        <div class="body"><div class="name">滴露_自然消毒液_CQX_千川直播</div><div class="meta"><span>01:15</span><span>刚刚</span></div><div class="prog"><i style="width:45%;"></i></div></div>
+      </div>
+      <div class="task">
+        <div class="cover"><img src="./cand_1.jpg"><span class="src">miaoa #38009</span><span class="st st-wait">待切分确认</span></div>
+        <div class="body"><div class="name">滴露_植源喷雾_ZJD_千川直播</div><div class="meta"><span>01:32 · 7 单元</span><span>2 小时前</span></div></div>
+      </div>
+      <div class="task">
+        <div class="cover"><img src="./unit_5.jpg"><span class="src">本地上传</span><span class="st st-done">已导出 18 条</span></div>
+        <div class="body"><div class="name">卫仕洗衣液_竞品爆款_0726</div><div class="meta"><span>00:58 · 5 单元</span><span>昨天</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sec">2 · 新建任务向导（模态弹层）</h3>
+  <div class="app">
+    <div class="wizard-wrap">
+      <div class="wizard">
+        <h4>新建翻新任务</h4>
+        <div class="wsub">选择成片来源与两个标签组，提交后自动完成：ASR → 语义单元切分/打标 → 视觉镜头切分/打标</div>
+
+        <div class="wstep">第 1 步 · 成片来源</div>
+        <div class="srcs">
+          <div class="srcopt"><div class="ic">📂</div><div class="t">本地文件</div><div class="d">拖入或点击选择 mp4 / mov</div></div>
+          <div class="srcopt on"><div class="ic">🔗</div><div class="t">miaoa 成片库</div><div class="d">输入视频 ID 拉取</div></div>
+        </div>
+        <div class="idrow">
+          <div class="idinput">miaoa 视频 ID：<b>44888</b><i>｜当前项目：卫仕洗衣液三组v2</i></div>
+          <button class="btn">拉取</button>
+        </div>
+        <div class="fetched">
+          <img src="./unit_1.jpg">
+          <div><div class="fn">JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427</div><div class="fm">01:36 · 1080×1920 · 62.0 MB · ✓ 已就绪</div></div>
+        </div>
+
+        <div class="wstep">第 2 步 · 标签组（打标受控词表，来自 miaoa）</div>
+        <div class="tagsel">
+          <div class="tgroup">
+            <div class="tl">台词语义单元标签组</div>
+            <div class="tv">衣清.消毒液 <i>▾</i></div>
+            <div class="preview"><span class="minichip">痛点引入</span><span class="minichip">产品引入</span><span class="minichip">功效演示</span><span class="minichip">价格机制</span><span class="minichip">+9</span></div>
+          </div>
+          <div class="tgroup">
+            <div class="tl">视觉镜头标签组</div>
+            <div class="tv">画面类型 <i>▾</i></div>
+            <div class="preview"><span class="minichip">产品特写</span><span class="minichip">使用动作</span><span class="minichip">效果对比</span><span class="minichip">人物口播</span><span class="minichip">+12</span></div>
+          </div>
+        </div>
+
+        <div class="wfoot">
+          <div class="wnote">预计分析耗时 2–4 分钟 · 消耗云端 API 额度<br>分析完成后进入「切分确认」</div>
+          <div class="spacer"></div>
+          <button class="btn" style="margin-right:8px;">取消</button>
+          <button class="btn primary">开始分析 →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 class="sec">3 · 设置页</h3>
+  <div class="app">
+    <div class="settings-wrap">
+      <div class="setnav">
+        <div class="on">miaoa 账号</div>
+        <div>AI 服务</div>
+        <div>导出默认</div>
+        <div>缓存管理</div>
+        <div>关于</div>
+      </div>
+      <div class="setbody">
+        <div class="setcard">
+          <div class="setrow"><span class="k">登录状态</span><span class="v"><span class="okdot"></span>134****0087 · 已登录 <em>退出</em></span></div>
+          <div class="divider"></div>
+          <div class="setrow"><span class="k">租户</span><span class="v">极创美奥 <em>切换</em></span></div>
+          <div class="divider"></div>
+          <div class="setrow"><span class="k">当前项目</span><span class="v">卫仕洗衣液三组v2（42 个可选）<em>切换</em></span></div>
+          <div class="divider"></div>
+          <div class="setrow"><span class="k">检索范围</span><span class="v">我的全部项目 <em>配置</em></span></div>
+        </div>
+        <div class="setcard">
+          <div class="setrow"><span class="k">未登录时</span><span class="v" style="color:#98989f;">手机号 + 短信验证码登录（应用内完成）</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+</div>
+</body>
+</html>
