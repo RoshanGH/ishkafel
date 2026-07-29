@@ -59,4 +59,21 @@ void main() {
     final all = await repo.findAll();
     expect(all.map((t) => t.id).toList(), ['good']);
   });
+
+  test('语法合法但字段类型错误的 JSON 被 findAll 跳过', () async {
+    await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+    final badType = File('${tempDir.path}/tasks/badtype.json');
+    // id 是数字，不是字符串 → RenewTask.fromJson 会抛 TypeError
+    await badType.writeAsString('{"id": 123, "name": "test", "sourcePath": "/v/test.mp4", "status": "analyzing", "createdAt": "2026-07-29T00:00:00.000Z", "updatedAt": "2026-07-29T00:00:00.000Z"}');
+    final all = await repo.findAll();
+    expect(all.map((t) => t.id).toList(), ['good']);
+  });
+
+  test('字段类型错误的 JSON 文件 findById 返回 null', () async {
+    final tasksDir = Directory('${tempDir.path}/tasks');
+    await tasksDir.create(recursive: true);
+    final badType = File('${tempDir.path}/tasks/badtype.json');
+    await badType.writeAsString('{"id": 123, "name": "test", "sourcePath": "/v/test.mp4", "status": "analyzing", "createdAt": "2026-07-29T00:00:00.000Z", "updatedAt": "2026-07-29T00:00:00.000Z"}');
+    expect(await repo.findById('badtype'), isNull);
+  });
 }

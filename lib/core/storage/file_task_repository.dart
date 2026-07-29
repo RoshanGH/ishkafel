@@ -23,8 +23,8 @@ class FileTaskRepository implements TaskRepository {
       try {
         final json = jsonDecode(await entity.readAsString());
         tasks.add(RenewTask.fromJson(json as Map<String, dynamic>));
-      } on FormatException {
-        // 损坏文件跳过，不影响其余任务加载
+      } catch (_) {
+        // 任意解析异常（格式错误、字段类型错误等）都跳过，不影响其余任务加载
         continue;
       }
     }
@@ -36,8 +36,13 @@ class FileTaskRepository implements TaskRepository {
   Future<RenewTask?> findById(String id) async {
     final file = _fileOf(id);
     if (!await file.exists()) return null;
-    final json = jsonDecode(await file.readAsString());
-    return RenewTask.fromJson(json as Map<String, dynamic>);
+    try {
+      final json = jsonDecode(await file.readAsString());
+      return RenewTask.fromJson(json as Map<String, dynamic>);
+    } catch (_) {
+      // 文件损坏返回 null，语义与 findAll 的跳过一致
+      return null;
+    }
   }
 
   @override
