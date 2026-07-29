@@ -45,7 +45,7 @@ void main() {
   AnalysisPipeline makePipeline(FileTaskRepository repo) => AnalysisPipeline(
         audio: AudioExtractor(run: (_, args) async {
           // 假 ffmpeg 音频提取：写入 0.5 秒 16kHz 静音采样
-          await File(args[args.length - 2])
+          await File(args[args.length - 1])
               .writeAsBytes(Uint8List(16000)); // 8000 个零采样
           return ProcessResult(1, 0, '', '');
         }),

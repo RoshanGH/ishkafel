@@ -86,6 +86,83 @@ void main() {
     );
   });
 
+  test('镜头边界未预帧对齐时不应产出毫秒级 sliver shot', () {
+    // shotBoundaryMs=2703 在 30fps 下帧对齐值为 2700；若 inner 分割仍用原始
+    // 2703 而单元边界用吸附后的 2700，会产出 [2700,2703] 这类毫秒级镜头，
+    // 且该边界不满足「所有切点帧对齐」约束。
+    final units = builder.build(
+      drafts: const [
+        UnitDraft(startMs: 0, endMs: 2750, transcript: 'A'),
+        UnitDraft(startMs: 2750, endMs: 6000, transcript: 'B'),
+      ],
+      shotBoundaryMs: const [2703],
+      silenceValleyMs: const [],
+      videoDurationMs: 6000,
+      fps: 30,
+    );
+    const fps = 30.0;
+    const frameWidthMs = 1000 / fps; // ≈33.33ms
+    for (final u in units) {
+      for (final s in u.shots) {
+        expect(s.durationMs, greaterThan(frameWidthMs),
+            reason: 'shot ${s.startMs}-${s.endMs} 不应短于一帧');
+        expect(builder.snapper.snapToFrame(s.startMs, fps), s.startMs,
+            reason: '${s.startMs} 应帧对齐');
+        expect(builder.snapper.snapToFrame(s.endMs, fps), s.endMs,
+            reason: '${s.endMs} 应帧对齐');
+      }
+    }
+  });
+
+  test('draft.endMs 逼近片长时内部边界应夹紧，避免零/负时长单元', () {
+    // draft0.endMs=990 在 30fps 下帧对齐会四舍五入到 1000（与片长相同），
+    // 若不夹紧，会产出 start=1000,end=1000 的零时长单元。
+    final units = builder.build(
+      drafts: const [
+        UnitDraft(startMs: 0, endMs: 990, transcript: 'A'),
+        UnitDraft(startMs: 990, endMs: 1000, transcript: 'B'),
+      ],
+      shotBoundaryMs: const [],
+      silenceValleyMs: const [],
+      videoDurationMs: 1000,
+      fps: 30,
+    );
+    expect(units.length, 2);
+    for (final u in units) {
+      expect(u.durationMs, greaterThan(0));
+    }
+    for (var i = 0; i < units.length - 1; i++) {
+      expect(units[i].endMs, lessThan(units[i + 1].endMs));
+      expect(units[i].endMs, units[i + 1].startMs);
+    }
+    expect(units.last.endMs, 1000);
+  });
+
+  test('两次回退仍越界时强制递增一帧宽度（Task 8 遗留分支）', () {
+    // draft0.endMs=300 与 draft1.endMs=310 在 30fps 下帧对齐均落到 300，
+    // 吸附与原位回退都 <= 上一边界，触发「强制 +1 帧宽度」分支。
+    final units = builder.build(
+      drafts: const [
+        UnitDraft(startMs: 0, endMs: 300, transcript: 'A'),
+        UnitDraft(startMs: 300, endMs: 310, transcript: 'B'),
+        UnitDraft(startMs: 310, endMs: 1000, transcript: 'C'),
+      ],
+      shotBoundaryMs: const [],
+      silenceValleyMs: const [],
+      videoDurationMs: 1000,
+      fps: 30,
+    );
+    expect(units.length, 3);
+    expect(units[0].endMs, 300);
+    expect(units[1].startMs, 300);
+    expect(units[1].endMs, 333); // 300 + round(1000/30)
+    expect(units[2].startMs, 333);
+    expect(units[2].endMs, 1000);
+    for (final u in units) {
+      expect(u.durationMs, greaterThan(0));
+    }
+  });
+
   test('index 按顺序编号', () {
     final units = builder.build(
       drafts: const [

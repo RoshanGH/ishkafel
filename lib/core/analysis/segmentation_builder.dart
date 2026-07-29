@@ -32,17 +32,43 @@ class SegmentationBuilder {
   }) {
     if (drafts.isEmpty) return const [];
 
+    // 镜头边界先统一帧对齐、去重、排序：吸附结果与 inner 分割必须使用同一份
+    // 对齐后的边界，否则吸附得到帧对齐值而 inner 分割仍用原始值，会在两者
+    // 差值处产出毫秒级 sliver shot，且该边界不满足"帧对齐"约束。
+    final alignedShotBoundaries = shotBoundaryMs
+        .map((b) => snapper.snapToFrame(b, fps))
+        .toSet()
+        .toList()
+      ..sort();
+
+    final frameWidthMs = fps > 0 ? (1000 / fps).round() : 1;
+
     final bounds = <int>[0];
     for (var i = 0; i < drafts.length - 1; i++) {
       var b = snapper.snap(
         drafts[i].endMs,
-        shotBoundaries: shotBoundaryMs,
+        shotBoundaries: alignedShotBoundaries,
         silenceValleys: silenceValleyMs,
         fps: fps,
       );
       // 吸附导致越过前一边界时回退为原位帧对齐；仍越界则强制递增一帧宽度
       if (b <= bounds.last) b = snapper.snapToFrame(drafts[i].endMs, fps);
-      if (b <= bounds.last) b = bounds.last + (1000 / fps).round();
+      if (b <= bounds.last) b = bounds.last + frameWidthMs;
+
+      // 夹紧到 [上一边界+一帧, 片长-一帧]，避免 draft.endMs 逼近/超出片长时
+      // 帧对齐把内部边界推到 >= videoDurationMs，产出零/负时长单元。
+      // 若该区间本身无效（片长过短装不下所有边界），退化为「上一边界+一帧」，
+      // 仅保证严格递增，这是最简单的正确兜底。
+      final lowerBound = bounds.last + frameWidthMs;
+      final upperBound = videoDurationMs - frameWidthMs;
+      if (upperBound >= lowerBound) {
+        if (b < lowerBound) b = lowerBound;
+        if (b > upperBound) b = upperBound;
+      } else {
+        b = lowerBound;
+      }
+      // 兜底：无论如何不得达到或超过片长，保证末尾追加的 videoDurationMs 严格更大
+      if (b >= videoDurationMs) b = videoDurationMs - 1;
       bounds.add(b);
     }
     bounds.add(videoDurationMs);
@@ -51,8 +77,9 @@ class SegmentationBuilder {
     for (var i = 0; i < drafts.length; i++) {
       final start = bounds[i];
       final end = bounds[i + 1];
-      final inner = shotBoundaryMs.where((b) => b > start && b < end).toList()
-        ..sort();
+      final inner =
+          alignedShotBoundaries.where((b) => b > start && b < end).toList()
+            ..sort();
       final edges = [start, ...inner, end];
       units.add(SemanticUnit(
         index: i,
