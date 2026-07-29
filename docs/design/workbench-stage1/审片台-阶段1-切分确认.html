@@ -96,6 +96,12 @@
   .thumb-track img { flex:1; min-width:0; object-fit:cover; }
   .wave-track { height:34px; border-radius:7px; background:#232326; display:flex; align-items:center; gap:1.5px; padding:0 2px; overflow:hidden; }
   .wave-track i { flex:1; background:#4d6a8f; border-radius:1px; }
+
+  .shots-track { display:flex; gap:2px; height:26px; }
+  .sgroup { display:flex; gap:1.5px; }
+  .sblock { position:relative; border-radius:5px; font-size:9px; color:#c9cdd8; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.14); background:rgba(255,255,255,.05); overflow:hidden; white-space:nowrap; }
+  .sblock .sh { position:absolute; right:-1px; top:3px; bottom:3px; width:3.5px; background:rgba(255,255,255,.4); border-radius:2px; }
+  .sblock.sel { border-color:#BF5AF2; background:rgba(191,90,242,.22); color:#e6c8ff; box-shadow:0 0 0 1px rgba(191,90,242,.4); }
   .playhead { position:absolute; left:calc(14px + (100% - 28px) * .31); top:22px; bottom:8px; width:2px; background:#FF453A; }
   .playhead::before { content:""; position:absolute; top:-5px; left:-4.5px; width:11px; height:8px; background:#FF453A; border-radius:3px 3px 5px 5px; }
 
@@ -120,15 +126,15 @@
 <body>
 <div class="stage">
 
-  <h2 style="font-size:17px; margin-bottom:2px;">ishkafel · 审片台 · 阶段① 切分确认（设计定稿 2026-07-29）</h2>
-  <p class="note">画面为《JC_滴露_植源喷雾》真实抽帧；台词为示意文案（实际由 ASR 生成）。视觉标准见项目 CLAUDE.md。</p>
+  <h2 style="font-size:17px; margin-bottom:2px;">ishkafel · 审片台 · 阶段① 切分确认（设计定稿 v3 · 2026-07-29）</h2>
+  <p class="note">双层时间线：拖语义单元大边界 / 拖视觉镜头小边界，各自独立编辑，所有修改帧对齐。画面为《JC_滴露_植源喷雾》真实抽帧；台词为示意文案。</p>
 
   <div class="app">
     <div class="topbar">
       <div class="traffic"><i style="background:#ff5f57;"></i><i style="background:#febc2e;"></i><i style="background:#28c840;"></i></div>
       <div>
         <div class="clipname">JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427</div>
-        <div class="clipmeta">来源 <em>miaoa #44888</em> · 01:36 · 1080×1920 · 标签组 <em>衣清.消毒液</em></div>
+        <div class="clipmeta">来源 <em>miaoa #44888</em> · 01:36 · 1080×1920 · 标签组 <em>衣清.消毒液</em> / <em>画面类型</em></div>
       </div>
       <div class="spacer"></div>
       <div class="steps">
@@ -144,7 +150,7 @@
         <div class="unit-list">
           <div class="unit"><img src="./unit_1.jpg"><div class="body"><div class="row1"><span class="uid">U1</span><span class="tc">00:00–00:09</span></div><div class="asr">"衣服洗完还是有异味？其实是细菌没除干净"</div><span class="chip">痛点引入</span></div></div>
           <div class="unit"><img src="./unit_2.jpg"><div class="body"><div class="row1"><span class="uid">U2</span><span class="tc">00:09–00:26</span></div><div class="asr">"滴露植源喷雾，植物来源除菌成分…"</div><span class="chip">产品引入</span></div></div>
-          <div class="unit active"><img src="./unit_3.jpg"><div class="body"><div class="row1"><span class="uid">U3</span><span class="tc">00:26–00:45</span></div><div class="asr">"对着衣物喷一喷，99.9% 除菌除螨…"</div><span class="chip">功效演示</span> <span class="chip warn">复核切点</span></div></div>
+          <div class="unit active"><img src="./unit_3.jpg"><div class="body"><div class="row1"><span class="uid">U3</span><span class="tc">00:26–00:45</span></div><div class="asr">"对着衣物喷一喷，99.9% 除菌除螨…"</div><span class="chip">功效演示</span> <span class="chip" style="background:rgba(191,90,242,.15);color:#d89bff;">3 镜头</span></div></div>
           <div class="unit"><img src="./unit_4.jpg"><div class="body"><div class="row1"><span class="uid">U4</span><span class="tc">00:45–01:04</span></div><div class="asr">"衣柜、床品、鞋袜，随手一喷…"</div><span class="chip">使用场景</span></div></div>
           <div class="unit"><img src="./unit_5.jpg"><div class="body"><div class="row1"><span class="uid">U5</span><span class="tc">01:04–01:21</span></div><div class="asr">"今天进直播间，大瓶装只要这个价…"</div><span class="chip">价格机制</span></div></div>
           <div class="unit"><img src="./unit_6.jpg"><div class="body"><div class="row1"><span class="uid">U6</span><span class="tc">01:21–01:36</span></div><div class="asr">"点击下方小黄车，现在下单立刻发货"</div><span class="chip">行动号召</span></div></div>
@@ -165,21 +171,23 @@
       </div>
 
       <div class="inspector">
-        <h4>单元详情 — U3 · 功效演示</h4>
+        <h4>选中：U3 · S2（视觉镜头）</h4>
         <div class="insp-card">
-          <div class="insp-row"><span class="insp-label">开始</span><div class="stepper"><i>−</i><b>00:26.04</b><i>＋</i></div></div>
-          <div class="insp-row"><span class="insp-label">结束</span><div class="stepper"><i>−</i><b>00:45.18</b><i>＋</i></div></div>
-          <div class="insp-row"><span class="insp-label">时长</span><span style="font-variant-numeric:tabular-nums;">19.14s · 3 个视觉镜头</span></div>
+          <div class="insp-row"><span class="insp-label">所属单元</span><span>U3 · 功效演示 <span style="color:#636366;">19.14s</span></span></div>
+          <div class="insp-row"><span class="insp-label">镜头开始</span><div class="stepper"><i>−</i><b>00:32.11</b><i>＋</i></div></div>
+          <div class="insp-row"><span class="insp-label">镜头结束</span><div class="stepper"><i>−</i><b>00:38.95</b><i>＋</i></div></div>
+          <div class="insp-row"><span class="insp-label">时长</span><span style="font-variant-numeric:tabular-nums;">6.84s</span></div>
         </div>
         <div class="insp-card">
-          <div class="insp-row"><span class="insp-label">台词（可编辑）</span></div>
+          <div class="insp-row"><span class="insp-label">镜头标签 · 组：画面类型</span></div>
+          <div class="tagchips"><span class="chip">使用动作</span><span class="chip">产品特写</span><span class="chip add">＋ 添加</span></div>
+        </div>
+        <div class="insp-card">
+          <div class="insp-row"><span class="insp-label">单元台词（U3，可编辑）</span></div>
           <div class="asr-edit">"对着衣物喷一喷，99.9% 除菌除螨，异味当场消失"</div>
         </div>
-        <div class="insp-card">
-          <div class="insp-row"><span class="insp-label">标签 · 组：衣清.消毒液</span></div>
-          <div class="tagchips"><span class="chip">功效演示</span><span class="chip">除菌除螨</span><span class="chip add">＋ 添加</span></div>
-        </div>
-        <div class="insp-actions"><div class="abtn">✂ 在游标处拆分</div><div class="abtn danger">⇧ 并入上一单元</div></div>
+        <div class="insp-actions"><div class="abtn">✂ 在游标处拆分镜头</div><div class="abtn danger">⇧ 并入前一镜头</div></div>
+      </div>
       </div>
     </div>
 
@@ -192,7 +200,7 @@
       </div>
       <div class="tl-body">
         <div class="ruler"><span>00:00</span><span>00:16</span><span>00:32</span><span>00:48</span><span>01:04</span><span>01:20</span><span>01:36</span></div>
-        <div class="track-label">语义单元</div>
+        <div class="track-label">语义单元（拖大边界调整）</div>
         <div class="units-track">
           <div class="ublock c1" style="flex:9;">U1 痛点引入<small>"衣服洗完还是有异味…"</small><div class="handle"></div></div>
           <div class="ublock c2" style="flex:17;">U2 产品引入<small>"滴露植源喷雾…"</small><div class="handle"></div></div>
@@ -200,6 +208,15 @@
           <div class="ublock c4" style="flex:19;">U4 使用场景<small>"衣柜、床品、鞋袜…"</small><div class="handle"></div></div>
           <div class="ublock c5" style="flex:17;">U5 价格机制<small>"今天进直播间…"</small><div class="handle"></div></div>
           <div class="ublock c6" style="flex:15;">U6 行动号召<small>"点击下方小黄车…"</small></div>
+        </div>
+        <div class="track-label">视觉镜头（拖小边界调整，限制在所属单元内）</div>
+        <div class="shots-track">
+          <div class="sgroup" style="flex:9;"><div class="sblock" style="flex:4;">S1<span class="sh"></span></div><div class="sblock" style="flex:5;">S2</div></div>
+          <div class="sgroup" style="flex:17;"><div class="sblock" style="flex:5;">S1<span class="sh"></span></div><div class="sblock" style="flex:7;">S2<span class="sh"></span></div><div class="sblock" style="flex:5;">S3</div></div>
+          <div class="sgroup" style="flex:19;"><div class="sblock" style="flex:6;">S1<span class="sh"></span></div><div class="sblock sel" style="flex:7;">S2<span class="sh"></span></div><div class="sblock" style="flex:6;">S3</div></div>
+          <div class="sgroup" style="flex:19;"><div class="sblock" style="flex:4;">S1<span class="sh"></span></div><div class="sblock" style="flex:5;">S2<span class="sh"></span></div><div class="sblock" style="flex:5;">S3<span class="sh"></span></div><div class="sblock" style="flex:5;">S4</div></div>
+          <div class="sgroup" style="flex:17;"><div class="sblock" style="flex:9;">S1<span class="sh"></span></div><div class="sblock" style="flex:8;">S2</div></div>
+          <div class="sgroup" style="flex:15;"><div class="sblock" style="flex:7;">S1<span class="sh"></span></div><div class="sblock" style="flex:8;">S2</div></div>
         </div>
         <div class="track-label">画面</div>
         <div class="thumb-track">
@@ -212,7 +229,7 @@
     </div>
 
     <div class="footer">
-      <span class="stat">ASR 完成 · AI 切分 6 单元 · 打标 6/6 · 标签组「衣清.消毒液」</span>
+      <span class="stat">ASR 完成 · 语义单元 6 · 视觉镜头 16 · 两层打标完成（衣清.消毒液 / 画面类型）</span>
       <div class="spacer" style="flex:1;"></div>
       <button class="btn">重新 AI 切分</button>
       <button class="btn primary">确认切分，进入替换选材</button>

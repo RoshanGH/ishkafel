@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ishkafel · 审片台 阶段② 替换选材 v3</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#131316; color:#f2f2f7; font-family:-apple-system,BlinkMacSystemFont,"SF Pro","PingFang SC","Helvetica Neue",sans-serif; font-size:13px; -webkit-font-smoothing:antialiased; }
+  .stage { max-width:1320px; margin:0 auto; padding:20px; }
+  .note { color:#98989f; font-size:12px; margin:6px 2px 14px; }
+  .app { background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.6); }
+
+  .topbar { display:flex; align-items:center; gap:12px; height:52px; padding:0 16px; background:rgba(37,37,40,.92); border-bottom:1px solid rgba(255,255,255,.08); }
+  .traffic { display:flex; gap:7px; }
+  .traffic i { width:11px; height:11px; border-radius:50%; }
+  .clipname { font-size:12.5px; font-weight:600; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .clipmeta { font-size:11px; color:#98989f; }
+  .clipmeta em { font-style:normal; color:#0A84FF; }
+  .spacer { flex:1; }
+  .steps { display:flex; align-items:center; background:#2c2c2e; border-radius:8px; padding:2px; font-size:12px; }
+  .step { padding:5px 14px; border-radius:6px; color:#98989f; }
+  .step.done { color:#30D158; }
+  .step.active { background:#0A84FF; color:#fff; font-weight:600; }
+
+  .main { display:flex; height:520px; }
+
+  .units-pane { width:290px; flex:none; border-right:1px solid rgba(255,255,255,.08); display:flex; flex-direction:column; }
+  .pane-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 8px; }
+  .pane-head h4 { font-size:12px; font-weight:600; color:#98989f; letter-spacing:.3px; }
+  .unit-list { overflow:hidden; padding:0 10px 10px; }
+  .unit { display:flex; gap:9px; padding:8px; border-radius:9px; align-items:center; }
+  .unit img { width:30px; height:53px; object-fit:cover; border-radius:5px; }
+  .unit .body { flex:1; min-width:0; }
+  .unit .row1 { display:flex; align-items:baseline; gap:7px; }
+  .uid { font-size:11px; font-weight:700; color:#0A84FF; }
+  .tc { font-size:10.5px; color:#636366; font-variant-numeric:tabular-nums; }
+  .asr { margin-top:3px; font-size:11.5px; line-height:1.4; color:#d1d1d6; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .badge { flex:none; font-size:10px; padding:3px 8px; border-radius:999px; font-variant-numeric:tabular-nums; text-align:center; line-height:1.35; }
+  .b-whole { background:rgba(48,209,88,.15); color:#5dd884; }
+  .b-shot { background:rgba(191,90,242,.16); color:#d89bff; }
+  .b-keep { background:rgba(255,159,10,.14); color:#ffb340; }
+  .unit.active { background:rgba(10,132,255,.14); box-shadow:inset 0 0 0 1px rgba(10,132,255,.5); }
+
+  .player-pane { flex:1; background:#131316; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; position:relative; }
+  .player { position:relative; height:400px; aspect-ratio:9/16; border-radius:8px; overflow:hidden; background:#000; box-shadow:0 6px 28px rgba(0,0,0,.55); }
+  .player img { width:100%; height:100%; object-fit:cover; }
+  .player .cap { position:absolute; top:10px; left:10px; font-size:10.5px; background:rgba(0,0,0,.55); backdrop-filter:blur(6px); padding:3px 9px; border-radius:999px; color:#fff; }
+  .transport { display:flex; align-items:center; gap:12px; font-size:11.5px; color:#d1d1d6; font-variant-numeric:tabular-nums; }
+  .transport .play { width:28px; height:28px; border-radius:50%; background:#2c2c2e; display:flex; align-items:center; justify-content:center; font-size:11px; }
+  .seg { display:flex; background:#2c2c2e; border-radius:7px; padding:2px; font-size:11.5px; position:absolute; top:12px; right:14px; }
+  .seg span { padding:4px 12px; border-radius:5px; color:#98989f; }
+  .seg span.on { background:#48484a; color:#fff; }
+
+  .cands { width:430px; flex:none; border-left:1px solid rgba(255,255,255,.08); background:#232326; display:flex; flex-direction:column; }
+  .cands .head { padding:12px 14px 0; }
+  .cands .head h4 { font-size:13px; font-weight:600; }
+  .cands .sub { font-size:11px; color:#98989f; margin-top:2px; }
+
+  .modeseg { display:flex; background:#2c2c2e; border-radius:8px; padding:2px; font-size:11.5px; margin:10px 14px 0; }
+  .modeseg span { flex:1; text-align:center; padding:5px 0; border-radius:6px; color:#98989f; }
+  .modeseg span.on { background:#BF5AF2; color:#fff; font-weight:600; }
+  .modeseg span.lock { color:#4d4d52; text-decoration:line-through; }
+
+  .shots { display:flex; gap:6px; margin:10px 14px 0; }
+  .shot { flex:1; display:flex; gap:7px; align-items:center; background:#2c2c2e; border-radius:8px; padding:5px 7px; border:1px solid transparent; }
+  .shot img { width:24px; height:43px; object-fit:cover; border-radius:4px; }
+  .shot .sid { font-size:10.5px; font-weight:700; color:#98989f; }
+  .shot .scnt { font-size:9.5px; color:#5dd884; font-variant-numeric:tabular-nums; }
+  .shot .scnt.keep { color:#ffb340; }
+  .shot.active { border-color:#BF5AF2; background:rgba(191,90,242,.13); }
+  .shot.active .sid { color:#d89bff; }
+
+  .searchseg { display:flex; align-items:center; gap:8px; margin:10px 14px 8px; }
+  .sseg { display:flex; background:#2c2c2e; border-radius:7px; padding:2px; font-size:11px; flex:1; }
+  .sseg span { flex:1; text-align:center; padding:4px 0; border-radius:5px; color:#98989f; }
+  .sseg span.on { background:#48484a; color:#fff; font-weight:600; }
+  .qframe { display:flex; align-items:center; gap:6px; font-size:10px; color:#98989f; }
+  .qframe img { width:20px; height:36px; object-fit:cover; border-radius:3px; border:1px solid rgba(255,255,255,.2); }
+
+  .grid { flex:1; overflow:hidden; padding:2px 14px 0; display:grid; grid-template-columns:1fr 1fr; gap:10px; align-content:start; }
+  .cand { position:relative; border-radius:10px; overflow:hidden; background:#000; aspect-ratio:9/13.5; }
+  .cand img { width:100%; height:100%; object-fit:cover; display:block; }
+  .cand .dur { position:absolute; left:7px; bottom:7px; font-size:10.5px; background:rgba(0,0,0,.6); backdrop-filter:blur(4px); padding:2px 8px; border-radius:999px; color:#fff; font-variant-numeric:tabular-nums; }
+  .cand .dur .plus { color:#ffb340; } .cand .dur .minus { color:#5dd884; }
+  .cand .src { position:absolute; left:7px; top:7px; right:32px; font-size:10px; color:rgba(255,255,255,.9); text-shadow:0 1px 3px #000; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ck { position:absolute; right:7px; top:7px; width:20px; height:20px; border-radius:50%; border:1.5px solid rgba(255,255,255,.75); background:rgba(0,0,0,.3); }
+  .cand.sel { box-shadow:0 0 0 2px #BF5AF2; }
+  .cand.sel .ck { background:#BF5AF2; border-color:#BF5AF2; }
+  .cand.sel .ck::after { content:"✓"; color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; height:100%; }
+  .cand.playing::after { content:"▶ 预览中"; position:absolute; left:0; right:0; bottom:30px; text-align:center; color:#fff; font-size:10.5px; text-shadow:0 1px 4px #000; }
+  .cands .foot { display:flex; align-items:center; padding:10px 14px; border-top:1px solid rgba(255,255,255,.07); font-size:11.5px; color:#98989f; margin-top:10px; }
+
+  .navline { border-top:1px solid rgba(255,255,255,.08); background:#1a1a1d; padding:10px 14px 12px; }
+  .navline .lbl { font-size:10px; color:#636366; margin-bottom:5px; }
+  .units-track { display:flex; gap:2px; height:38px; }
+  .ublock { position:relative; border-radius:7px; padding:4px 9px; font-size:11px; overflow:hidden; white-space:nowrap; color:#eaf0fb; border:1px solid transparent; }
+  .ublock .cnt { position:absolute; right:6px; top:4px; font-size:9.5px; padding:1px 7px; border-radius:999px; background:rgba(48,209,88,.2); color:#5dd884; font-variant-numeric:tabular-nums; }
+  .ublock .cnt.keep { background:rgba(255,159,10,.18); color:#ffb340; }
+  .ublock .cnt.shotm { background:rgba(191,90,242,.2); color:#d89bff; }
+  .ublock small { display:block; font-size:9.5px; opacity:.7; margin-top:1px; }
+  .c1 { background:rgba(10,132,255,.20); border-color:rgba(10,132,255,.4); }
+  .c2 { background:rgba(48,209,88,.16); border-color:rgba(48,209,88,.35); }
+  .c3 { background:rgba(191,90,242,.30); border-color:#BF5AF2; }
+  .c4 { background:rgba(255,159,10,.16); border-color:rgba(255,159,10,.35); }
+  .c5 { background:rgba(255,69,58,.15); border-color:rgba(255,69,58,.33); }
+  .c6 { background:rgba(191,90,242,.16); border-color:rgba(191,90,242,.35); }
+
+  .footer { display:flex; align-items:center; height:54px; padding:0 16px; background:rgba(37,37,40,.92); border-top:1px solid rgba(255,255,255,.08); }
+  .stat { font-size:12px; color:#98989f; font-variant-numeric:tabular-nums; }
+  .stat b { color:#f2f2f7; font-weight:600; }
+  .stat .num { color:#30D158; font-weight:700; font-size:13px; }
+  .btn { padding:8px 16px; border-radius:9px; font-size:12.5px; border:none; color:#f2f2f7; background:#2c2c2e; margin-left:10px; }
+  .btn.primary { background:#0A84FF; font-weight:600; }
+
+  .fb { margin-top:24px; }
+  .fb h3 { font-size:15px; margin-bottom:10px; }
+  .options { display:flex; flex-direction:column; gap:10px; }
+  .option { display:flex; gap:12px; align-items:flex-start; background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; padding:14px; cursor:pointer; transition:.15s; }
+  .option:hover { border-color:rgba(10,132,255,.6); }
+  .option.selected { border-color:#0A84FF; background:rgba(10,132,255,.10); }
+  .letter { width:26px; height:26px; border-radius:8px; background:#2c2c2e; color:#64a8ff; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none; }
+  .option h4 { font-size:13.5px; margin-bottom:3px; }
+  .option p { font-size:12px; color:#98989f; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <h2 style="font-size:17px; margin-bottom:2px;">ishkafel · 审片台 · 阶段② 替换选材（设计定稿 v3 · 2026-07-29）</h2>
+  <p class="note">两级替换互斥模型 + 检索三模式。演示：U3 进入镜头级替换（整体替换锁定），为 S2 挑候选（首帧搜图）。候选为另两条滴露成片真实抽帧。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <div class="traffic"><i style="background:#ff5f57;"></i><i style="background:#febc2e;"></i><i style="background:#28c840;"></i></div>
+      <div>
+        <div class="clipname">JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427</div>
+        <div class="clipmeta">来源 <em>miaoa #44888</em> · 01:36 · 1080×1920 · 标签组 <em>衣清.消毒液</em> / <em>画面类型</em></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="steps">
+        <span class="step done">✓ 切分确认</span>
+        <span class="step active">2 替换选材</span>
+        <span class="step">3 矩阵导出</span>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="units-pane">
+        <div class="pane-head"><h4>台词语义单元 · 已锁定</h4></div>
+        <div class="unit-list">
+          <div class="unit"><img src="./unit_1.jpg"><div class="body"><div class="row1"><span class="uid">U1</span><span class="tc">00:00–00:09</span></div><div class="asr">"衣服洗完还是有异味？其实是…"</div></div><span class="badge b-whole">整体 ×2</span></div>
+          <div class="unit"><img src="./unit_2.jpg"><div class="body"><div class="row1"><span class="uid">U2</span><span class="tc">00:09–00:26</span></div><div class="asr">"滴露植源喷雾，植物来源除菌…"</div></div><span class="badge b-keep">保留原片</span></div>
+          <div class="unit active"><img src="./unit_3.jpg"><div class="body"><div class="row1"><span class="uid">U3</span><span class="tc">00:26–00:45</span></div><div class="asr">"对着衣物喷一喷，99.9% 除菌…"</div></div><span class="badge b-shot">镜头级<br>×6</span></div>
+          <div class="unit"><img src="./unit_4.jpg"><div class="body"><div class="row1"><span class="uid">U4</span><span class="tc">00:45–01:04</span></div><div class="asr">"衣柜、床品、鞋袜，随手一喷…"</div></div><span class="badge b-keep">保留原片</span></div>
+          <div class="unit"><img src="./unit_5.jpg"><div class="body"><div class="row1"><span class="uid">U5</span><span class="tc">01:04–01:21</span></div><div class="asr">"今天进直播间，大瓶装只要…"</div></div><span class="badge b-whole">整体 ×1</span></div>
+          <div class="unit"><img src="./unit_6.jpg"><div class="body"><div class="row1"><span class="uid">U6</span><span class="tc">01:21–01:36</span></div><div class="asr">"点击下方小黄车，现在下单…"</div></div><span class="badge b-whole">整体 ×2</span></div>
+        </div>
+      </div>
+
+      <div class="player-pane">
+        <div class="seg"><span>原片</span><span class="on">候选预览</span></div>
+        <div class="player">
+          <img src="./cand_hero.jpg">
+          <div class="cap">U3 · S2 候选 · 植源喷雾_ZJD</div>
+        </div>
+        <div class="transport">
+          <span>00:02.10</span>
+          <div class="play">▶</div>
+          <span style="color:#636366;">06.84</span>
+        </div>
+      </div>
+
+      <div class="cands">
+        <div class="head">
+          <h4>U3 · 功效演示 <span style="color:#636366; font-weight:400; font-size:11px;">19.1s</span></h4>
+          <div class="sub">替换模式（互斥）：进入镜头级后，整体替换锁定</div>
+        </div>
+
+        <div class="modeseg">
+          <span>保留原片</span>
+          <span class="lock">整体替换 🔒</span>
+          <span class="on">镜头替换</span>
+        </div>
+
+        <div class="shots">
+          <div class="shot"><img src="./shot_1.jpg"><div><div class="sid">S1</div><div class="scnt">×2</div></div></div>
+          <div class="shot active"><img src="./shot_2.jpg"><div><div class="sid">S2</div><div class="scnt">×3</div></div></div>
+          <div class="shot"><img src="./shot_3.jpg"><div><div class="sid">S3</div><div class="scnt keep">原片</div></div></div>
+        </div>
+
+        <div class="searchseg">
+          <div class="sseg"><span>标签</span><span>画面描述</span><span class="on">首帧搜图</span></div>
+          <div class="qframe"><span>查询帧</span><img src="./shot_2.jpg"></div>
+        </div>
+
+        <div class="grid">
+          <div class="cand sel playing"><img src="./cand_2.jpg"><span class="src">植源喷雾_ZJD</span><span class="dur">6.8s <span class="plus">+0.6</span></span><span class="ck"></span></div>
+          <div class="cand sel"><img src="./cand_6.jpg"><span class="src">自然消毒液_CQX</span><span class="dur">5.9s <span class="minus">−0.3</span></span><span class="ck"></span></div>
+          <div class="cand sel"><img src="./cand_7.jpg"><span class="src">自然消毒液_CQX</span><span class="dur">5.4s <span class="minus">−0.8</span></span><span class="ck"></span></div>
+          <div class="cand"><img src="./cand_3.jpg"><span class="src">植源喷雾_ZJD</span><span class="dur">7.7s <span class="plus">+1.5</span></span><span class="ck"></span></div>
+        </div>
+
+        <div class="foot">
+          <span>S2 已选 <b style="color:#d89bff;">3</b> / 18 条 · U3 因子 = 2×1×3 = <b style="color:#d89bff;">6</b></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="navline">
+      <div class="lbl">单元导航 — 徽标为各单元组合因子</div>
+      <div class="units-track">
+        <div class="ublock c1" style="flex:9;">U1<small>痛点引入</small><span class="cnt">×2</span></div>
+        <div class="ublock c2" style="flex:17;">U2<small>产品引入</small><span class="cnt keep">原片</span></div>
+        <div class="ublock c3" style="flex:19;">U3<small>功效演示 · 镜头级</small><span class="cnt shotm">×6</span></div>
+        <div class="ublock c4" style="flex:19;">U4<small>使用场景</small><span class="cnt keep">原片</span></div>
+        <div class="ublock c5" style="flex:17;">U5<small>价格机制</small><span class="cnt">×1</span></div>
+        <div class="ublock c6" style="flex:15;">U6<small>行动号召</small><span class="cnt">×2</span></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span class="stat">当前组合 <b>2 × 1 × 6 × 1 × 1 × 2</b> = <span class="num">24</span> 条 / 上限 100</span>
+      <div class="spacer" style="flex:1;"></div>
+      <button class="btn">← 返回切分</button>
+      <button class="btn primary">进入矩阵导出</button>
+    </div>
+  </div>
+
+
+</div>
+</body>
+</html>
