@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ishkafel · 审片台 阶段③ 矩阵导出</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#131316; color:#f2f2f7; font-family:-apple-system,BlinkMacSystemFont,"SF Pro","PingFang SC","Helvetica Neue",sans-serif; font-size:13px; -webkit-font-smoothing:antialiased; }
+  .stage { max-width:1320px; margin:0 auto; padding:20px; }
+  .note { color:#98989f; font-size:12px; margin:6px 2px 14px; }
+  .app { background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.6); }
+
+  .topbar { display:flex; align-items:center; gap:12px; height:52px; padding:0 16px; background:rgba(37,37,40,.92); border-bottom:1px solid rgba(255,255,255,.08); }
+  .traffic { display:flex; gap:7px; }
+  .traffic i { width:11px; height:11px; border-radius:50%; }
+  .clipname { font-size:12.5px; font-weight:600; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .clipmeta { font-size:11px; color:#98989f; }
+  .clipmeta em { font-style:normal; color:#0A84FF; }
+  .spacer { flex:1; }
+  .steps { display:flex; align-items:center; background:#2c2c2e; border-radius:8px; padding:2px; font-size:12px; }
+  .step { padding:5px 14px; border-radius:6px; color:#98989f; }
+  .step.done { color:#30D158; }
+  .step.active { background:#0A84FF; color:#fff; font-weight:600; }
+
+  .main { display:flex; height:520px; }
+
+  .settings { width:330px; flex:none; border-right:1px solid rgba(255,255,255,.08); background:#232326; padding:14px; }
+  .settings h4 { font-size:12px; color:#98989f; font-weight:600; letter-spacing:.3px; margin-bottom:10px; }
+  .set-card { background:#2c2c2e; border-radius:10px; padding:12px; margin-bottom:10px; }
+  .set-row { display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:10px; }
+  .set-row:last-child { margin-bottom:0; }
+  .set-label { color:#98989f; }
+  .set-val { display:flex; align-items:center; gap:5px; color:#f2f2f7; }
+  .set-val i { font-style:normal; color:#636366; }
+  .pill { background:#1e1e20; border-radius:6px; padding:4px 10px; font-size:11.5px; }
+  .pathbox { background:#1e1e20; border-radius:8px; padding:8px 10px; font-size:11px; color:#d1d1d6; display:flex; align-items:center; gap:8px; }
+  .pathbox span { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .audio-note { display:flex; gap:8px; background:rgba(255,159,10,.1); border:1px solid rgba(255,159,10,.25); border-radius:10px; padding:10px 12px; font-size:11.5px; color:#ffc06e; line-height:1.5; }
+
+  .combos { flex:1; display:flex; flex-direction:column; background:#1e1e20; }
+  .combos .head { display:flex; align-items:center; gap:12px; padding:12px 16px 8px; }
+  .combos .head h4 { font-size:13px; font-weight:600; }
+  .combos .head .sub { font-size:11px; color:#98989f; }
+  .combos .head .tools { margin-left:auto; display:flex; gap:10px; font-size:11.5px; color:#64a8ff; }
+  .list { flex:1; overflow:hidden; padding:0 16px; }
+  .row { display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:10px; margin-bottom:6px; background:#232326; }
+  .row .ck { width:16px; height:16px; border-radius:5px; border:1.5px solid #48484a; flex:none; }
+  .row .ck.on { background:#0A84FF; border-color:#0A84FF; position:relative; }
+  .row .ck.on::after { content:"✓"; position:absolute; inset:0; color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; }
+  .row .no { width:34px; font-size:11.5px; color:#98989f; font-variant-numeric:tabular-nums; }
+  .strip { display:flex; gap:3px; }
+  .strip img { width:26px; height:46px; object-fit:cover; border-radius:4px; opacity:.55; }
+  .strip img.rep { opacity:1; box-shadow:0 0 0 1.5px #30D158; }
+  .strip img.repshot { opacity:1; box-shadow:0 0 0 1.5px #BF5AF2; }
+  .desc { flex:1; min-width:0; font-size:11px; color:#98989f; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .desc b { color:#d1d1d6; font-weight:500; }
+  .dur { font-size:11px; color:#98989f; font-variant-numeric:tabular-nums; width:44px; }
+  .status { width:110px; flex:none; font-size:11px; text-align:right; font-variant-numeric:tabular-nums; }
+  .st-done { color:#5dd884; }
+  .st-run { color:#64a8ff; }
+  .st-wait { color:#636366; }
+  .bar { height:3px; border-radius:2px; background:#3a3a3c; margin-top:5px; overflow:hidden; }
+  .bar i { display:block; height:100%; background:#0A84FF; border-radius:2px; }
+
+  .footer { display:flex; align-items:center; height:60px; padding:0 16px; background:rgba(37,37,40,.92); border-top:1px solid rgba(255,255,255,.08); gap:14px; }
+  .total { flex:1; }
+  .total .t1 { font-size:12px; color:#f2f2f7; margin-bottom:5px; }
+  .total .t1 b { color:#5dd884; }
+  .total .bar { margin:0; height:4px; }
+  .btn { padding:9px 18px; border-radius:9px; font-size:12.5px; border:none; color:#f2f2f7; background:#2c2c2e; }
+  .btn.primary { background:#0A84FF; font-weight:600; }
+
+  .fb { margin-top:24px; }
+  .fb h3 { font-size:15px; margin-bottom:10px; }
+  .options { display:flex; flex-direction:column; gap:10px; }
+  .option { display:flex; gap:12px; align-items:flex-start; background:#1e1e20; border:1px solid rgba(255,255,255,.09); border-radius:12px; padding:14px; cursor:pointer; transition:.15s; }
+  .option:hover { border-color:rgba(10,132,255,.6); }
+  .option.selected { border-color:#0A84FF; background:rgba(10,132,255,.10); }
+  .letter { width:26px; height:26px; border-radius:8px; background:#2c2c2e; color:#64a8ff; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none; }
+  .option h4 { font-size:13.5px; margin-bottom:3px; }
+  .option p { font-size:12px; color:#98989f; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <h2 style="font-size:17px; margin-bottom:2px;">ishkafel · 审片台 · 阶段③ 矩阵导出（设计定稿 2026-07-29）</h2>
+  <p class="note">左侧导出设置，右侧 24 条组合清单（缩略图序列中：绿框 = 整体替换素材、紫框 = 镜头级替换、灰暗 = 原片保留）。演示状态：已完成 8 条、导出中 2 条。</p>
+
+  <div class="app">
+    <div class="topbar">
+      <div class="traffic"><i style="background:#ff5f57;"></i><i style="background:#febc2e;"></i><i style="background:#28c840;"></i></div>
+      <div>
+        <div class="clipname">JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427</div>
+        <div class="clipmeta">来源 <em>miaoa #44888</em> · 01:36 · 1080×1920 · 组合 <em>24 条</em></div>
+      </div>
+      <div class="spacer"></div>
+      <div class="steps">
+        <span class="step done">✓ 切分确认</span>
+        <span class="step done">✓ 替换选材</span>
+        <span class="step active">3 矩阵导出</span>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="settings">
+        <h4>导出设置</h4>
+        <div class="set-card">
+          <div class="set-row"><span class="set-label">输出目录</span></div>
+          <div class="pathbox">📁 <span>~/Movies/ishkafel/滴露_植源喷雾_0729/</span> <i style="color:#64a8ff;font-style:normal;">更改</i></div>
+        </div>
+        <div class="set-card">
+          <div class="set-row"><span class="set-label">分辨率</span><span class="pill">1080×1920（同原片）<i> ▾</i></span></div>
+          <div class="set-row"><span class="set-label">帧率</span><span class="pill">30 fps（同原片）<i> ▾</i></span></div>
+          <div class="set-row"><span class="set-label">编码</span><span class="pill">H.264 · 硬件加速<i> ▾</i></span></div>
+          <div class="set-row"><span class="set-label">命名</span><span class="pill">{原片名}_v{序号}<i> ▾</i></span></div>
+          <div class="set-row"><span class="set-label">同时导出</span><span class="pill">2 条并行<i> ▾</i></span></div>
+        </div>
+        <div class="audio-note">⚠<div>音轨策略暂定：保留原片完整音轨，替换素材仅取画面（声音处理方案后续版本引入）</div></div>
+      </div>
+
+      <div class="combos">
+        <div class="head">
+          <h4>导出清单</h4>
+          <span class="sub">24 条组合 · 已勾选 24</span>
+          <div class="tools"><span>全选</span><span>反选</span><span>随机抽 10</span></div>
+        </div>
+        <div class="list">
+          <div class="row">
+            <span class="ck on"></span><span class="no">#01</span>
+            <div class="strip"><img class="rep" src="./cand_1.jpg"><img src="./unit_2.jpg"><img class="repshot" src="./cand_2.jpg"><img src="./unit_4.jpg"><img class="rep" src="./cand_5.jpg"><img class="rep" src="./cand_8.jpg"></div>
+            <div class="desc"><b>U1</b>·候选A ｜ <b>U3</b>·S1C1+S2C1 ｜ <b>U5</b>·候选A ｜ <b>U6</b>·候选A</div>
+            <span class="dur">01:37</span>
+            <div class="status st-done">✓ 已完成</div>
+          </div>
+          <div class="row">
+            <span class="ck on"></span><span class="no">#09</span>
+            <div class="strip"><img class="rep" src="./cand_4.jpg"><img src="./unit_2.jpg"><img class="repshot" src="./cand_6.jpg"><img src="./unit_4.jpg"><img class="rep" src="./cand_5.jpg"><img class="rep" src="./cand_8.jpg"></div>
+            <div class="desc"><b>U1</b>·候选B ｜ <b>U3</b>·S1C1+S2C2 ｜ <b>U5</b>·候选A ｜ <b>U6</b>·候选A</div>
+            <span class="dur">01:35</span>
+            <div class="status st-run">导出中 · 62%<div class="bar"><i style="width:62%;"></i></div></div>
+          </div>
+          <div class="row">
+            <span class="ck on"></span><span class="no">#10</span>
+            <div class="strip"><img class="rep" src="./cand_1.jpg"><img src="./unit_2.jpg"><img class="repshot" src="./cand_7.jpg"><img src="./unit_4.jpg"><img class="rep" src="./cand_5.jpg"><img class="rep" src="./cand_3.jpg"></div>
+            <div class="desc"><b>U1</b>·候选A ｜ <b>U3</b>·S1C2+S2C3 ｜ <b>U5</b>·候选A ｜ <b>U6</b>·候选B</div>
+            <span class="dur">01:36</span>
+            <div class="status st-run">导出中 · 18%<div class="bar"><i style="width:18%;"></i></div></div>
+          </div>
+          <div class="row">
+            <span class="ck on"></span><span class="no">#11</span>
+            <div class="strip"><img class="rep" src="./cand_4.jpg"><img src="./unit_2.jpg"><img class="repshot" src="./cand_2.jpg"><img src="./unit_4.jpg"><img class="rep" src="./cand_5.jpg"><img class="rep" src="./cand_3.jpg"></div>
+            <div class="desc"><b>U1</b>·候选B ｜ <b>U3</b>·S1C2+S2C1 ｜ <b>U5</b>·候选A ｜ <b>U6</b>·候选B</div>
+            <span class="dur">01:38</span>
+            <div class="status st-wait">排队中</div>
+          </div>
+          <div class="row">
+            <span class="ck on"></span><span class="no">#12</span>
+            <div class="strip"><img class="rep" src="./cand_1.jpg"><img src="./unit_2.jpg"><img class="repshot" src="./cand_6.jpg"><img src="./unit_4.jpg"><img class="rep" src="./cand_5.jpg"><img class="rep" src="./cand_8.jpg"></div>
+            <div class="desc"><b>U1</b>·候选A ｜ <b>U3</b>·S1C1+S2C2 ｜ <b>U5</b>·候选A ｜ <b>U6</b>·候选A</div>
+            <span class="dur">01:36</span>
+            <div class="status st-wait">排队中</div>
+          </div>
+          <div class="row" style="opacity:.6;">
+            <span class="ck on"></span><span class="no">…</span>
+            <div class="desc">其余 19 条排队中</div>
+            <div class="status st-wait"></div>
+          </div>
+        </div>
+        <div class="footer">
+          <div class="total">
+            <div class="t1">总进度 <b>8</b> / 24 · 预计剩余 11 分钟 · 产物已占用 1.9 GB</div>
+            <div class="bar"><i style="width:34%;"></i></div>
+          </div>
+          <button class="btn">⏸ 暂停</button>
+          <button class="btn">打开输出目录</button>
+          <button class="btn primary">全部完成后通知</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+</div>
+</body>
+</html>
