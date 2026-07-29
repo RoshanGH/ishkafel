@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import '../models/renew_task.dart';
 import 'task_repository.dart';
@@ -23,8 +24,13 @@ class FileTaskRepository implements TaskRepository {
       try {
         final json = jsonDecode(await entity.readAsString());
         tasks.add(RenewTask.fromJson(json as Map<String, dynamic>));
-      } catch (_) {
-        // 任意解析异常（格式错误、字段类型错误等）都跳过，不影响其余任务加载
+      } on FormatException catch (e) {
+        // JSON 格式错误：跳过该文件，不影响其余任务加载
+        debugPrint('跳过格式错误的任务文件 ${entity.path}：$e');
+        continue;
+      } on TypeError catch (e) {
+        // 字段类型不符预期：同样跳过，不吞掉其他类型的异常（如 I/O 错误）
+        debugPrint('跳过字段类型错误的任务文件 ${entity.path}：$e');
         continue;
       }
     }
@@ -39,8 +45,13 @@ class FileTaskRepository implements TaskRepository {
     try {
       final json = jsonDecode(await file.readAsString());
       return RenewTask.fromJson(json as Map<String, dynamic>);
-    } catch (_) {
-      // 文件损坏返回 null，语义与 findAll 的跳过一致
+    } on FormatException catch (e) {
+      // JSON 格式错误：文件损坏返回 null，语义与 findAll 的跳过一致
+      debugPrint('读取任务文件失败（格式错误） ${file.path}：$e');
+      return null;
+    } on TypeError catch (e) {
+      // 字段类型不符预期：同样返回 null，不吞掉其他类型的异常（如 I/O 错误）
+      debugPrint('读取任务文件失败（字段类型错误） ${file.path}：$e');
       return null;
     }
   }
@@ -48,7 +59,11 @@ class FileTaskRepository implements TaskRepository {
   @override
   Future<void> save(RenewTask task) async {
     await _tasksDir.create(recursive: true);
-    await _fileOf(task.id).writeAsString(jsonEncode(task.toJson()));
+    final target = _fileOf(task.id);
+    // 原子写入：先写临时文件，再 rename 覆盖目标，避免写到一半被读到半截内容
+    final tmp = File('${target.path}.tmp');
+    await tmp.writeAsString(jsonEncode(task.toJson()));
+    await tmp.rename(target.path);
   }
 
   @override
