@@ -1,4 +1,6 @@
+import 'package:collection/collection.dart';
 import 'video_info.dart';
+import 'semantic_unit.dart';
 
 /// 任务状态：分析中 / 待切分确认 / 选材中 / 已导出
 enum RenewTaskStatus { analyzing, awaitingCut, picking, exported }
@@ -14,6 +16,7 @@ class RenewTask {
   final RenewTaskStatus status;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final List<SemanticUnit>? units;
 
   const RenewTask({
     required this.id,
@@ -25,6 +28,7 @@ class RenewTask {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.units,
   });
 
   RenewTask copyWith({
@@ -37,6 +41,7 @@ class RenewTask {
     RenewTaskStatus? status,
     DateTime? createdAt,
     DateTime? updatedAt,
+    List<SemanticUnit>? units,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -48,6 +53,7 @@ class RenewTask {
         status: status ?? this.status,
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
+        units: units ?? this.units,
       );
 
   Map<String, dynamic> toJson() => {
@@ -60,6 +66,7 @@ class RenewTask {
         'status': status.name,
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
+        'units': units?.map((u) => u.toJson()).toList(),
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -74,6 +81,9 @@ class RenewTask {
         status: RenewTaskStatus.values.byName(json['status'] as String),
         createdAt: DateTime.parse(json['createdAt'] as String),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
+        units: (json['units'] as List<dynamic>?)
+            ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   @override
@@ -87,9 +97,10 @@ class RenewTask {
       other.coverPath == coverPath &&
       other.status == status &&
       other.createdAt == createdAt &&
-      other.updatedAt == updatedAt;
+      other.updatedAt == updatedAt &&
+      const DeepCollectionEquality().equals(other.units, units);
 
   @override
   int get hashCode => Object.hash(id, name, sourcePath, miaoaVideoId, videoInfo,
-      coverPath, status, createdAt, updatedAt);
+      coverPath, status, createdAt, updatedAt, units == null ? null : Object.hashAll(units!));
 }

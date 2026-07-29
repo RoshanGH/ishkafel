@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
 
 void main() {
   final task = RenewTask(
@@ -40,5 +42,26 @@ void main() {
     expect(RenewTaskStatus.awaitingCut.name, 'awaitingCut');
     expect(RenewTaskStatus.picking.name, 'picking');
     expect(RenewTaskStatus.exported.name, 'exported');
+  });
+
+  test('旧 JSON（无 units 键）解析为 units == null（向后兼容）', () {
+    final json = task.toJson()..remove('units');
+    final parsed = RenewTask.fromJson(json);
+    expect(parsed.units, isNull);
+  });
+
+  test('units 序列化往返一致且深度相等', () {
+    final withUnits = task.copyWith(units: const [
+      SemanticUnit(
+        index: 0,
+        startMs: 0,
+        endMs: 9000,
+        transcript: '台词',
+        shots: [Shot(startMs: 0, endMs: 9000)],
+      ),
+    ]);
+    final parsed = RenewTask.fromJson(withUnits.toJson());
+    expect(parsed, withUnits);
+    expect(parsed.units!.single.shots.single.endMs, 9000);
   });
 }
