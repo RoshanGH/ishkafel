@@ -91,7 +91,6 @@
 
 # Lockfiles
 Podfile.lock
-pubspec.lock
 yarn.lock
 
 # Project-specific
