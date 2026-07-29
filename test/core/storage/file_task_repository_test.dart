@@ -76,4 +76,24 @@ void main() {
     await badType.writeAsString('{"id": 123, "name": "test", "sourcePath": "/v/test.mp4", "status": "analyzing", "createdAt": "2026-07-29T00:00:00.000Z", "updatedAt": "2026-07-29T00:00:00.000Z"}');
     expect(await repo.findById('badtype'), isNull);
   });
+
+  test('status 为未知枚举名的 JSON 被 findAll 跳过', () async {
+    await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+    final bad = File('${tempDir.path}/tasks/bad_enum.json');
+    await bad.create(recursive: true);
+    await bad.writeAsString(
+        '{"id":"bad_enum","name":"n","sourcePath":"/x.mp4","status":"notAStatus",'
+        '"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}');
+    final all = await repo.findAll();
+    expect(all.map((t) => t.id).toList(), ['good']);
+  });
+
+  test('status 为未知枚举名的文件 findById 返回 null', () async {
+    final bad = File('${tempDir.path}/tasks/x.json');
+    await bad.create(recursive: true);
+    await bad.writeAsString(
+        '{"id":"x","name":"n","sourcePath":"/x.mp4","status":"notAStatus",'
+        '"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}');
+    expect(await repo.findById('x'), isNull);
+  });
 }
