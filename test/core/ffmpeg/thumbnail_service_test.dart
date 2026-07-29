@@ -9,6 +9,7 @@ void main() {
       ThumbnailService.buildArgs(
           videoPath: '/v/a.mp4', outPath: '/o/c.jpg', atSeconds: 1.5, height: 480),
       [
+        '-y',
         '-loglevel', 'error',
         '-ss', '1.5',
         '-i', '/v/a.mp4',
@@ -16,7 +17,6 @@ void main() {
         '-vf', 'scale=-2:480',
         '-q:v', '3',
         '/o/c.jpg',
-        '-y',
       ],
     );
   });

@@ -14,12 +14,12 @@ class AudioExtractor {
     int sampleRate = 16000,
   }) =>
       [
+        '-y',
         '-loglevel', 'error',
         '-i', videoPath,
         '-vn', '-ac', '1', '-ar', '$sampleRate',
         '-f', 's16le',
         outPcmPath,
-        '-y',
       ];
 
   /// 提取并读取采样；小端序有符号 16 位

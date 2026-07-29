@@ -13,6 +13,7 @@ class ThumbnailService {
     required int height,
   }) =>
       [
+        '-y',
         '-loglevel', 'error',
         '-ss', '$atSeconds',
         '-i', videoPath,
@@ -20,7 +21,6 @@ class ThumbnailService {
         '-vf', 'scale=-2:$height',
         '-q:v', '3',
         outPath,
-        '-y',
       ];
 
   Future<String> extractCover({

@@ -10,12 +10,12 @@ void main() {
       AudioExtractor.buildArgs(
           videoPath: '/v/a.mp4', outPcmPath: '/o/a.pcm', sampleRate: 16000),
       [
+        '-y',
         '-loglevel', 'error',
         '-i', '/v/a.mp4',
         '-vn', '-ac', '1', '-ar', '16000',
         '-f', 's16le',
         '/o/a.pcm',
-        '-y',
       ],
     );
   });
@@ -31,7 +31,7 @@ void main() {
     final pcmPath = '${tempDir.path}/out.pcm';
     final extractor = AudioExtractor(run: (_, args) async {
       // 假 ffmpeg：把 3 个采样 [100, -200, 300] 写入目标文件
-      await File(args[args.length - 2]).writeAsBytes(
+      await File(args[args.length - 1]).writeAsBytes(
           Uint8List.fromList([0x64, 0x00, 0x38, 0xFF, 0x2C, 0x01]));
       return ProcessResult(1, 0, '', '');
     });
