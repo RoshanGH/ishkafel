@@ -208,7 +208,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
           ]),
           const SizedBox(height: 10),
           inspectorCard([
-            inspectorLabel('单元台词（可编辑）'),
+            // 回看模式下台词框是禁用的，标题必须如实反映，不能继续声称可编辑
+            inspectorLabel(
+                widget.readOnly ? '单元台词（只读）' : '单元台词（可编辑）'),
             const SizedBox(height: 6),
             _transcriptField(unitIndex),
           ]),

@@ -175,6 +175,19 @@ void main() {
         expect(field.enabled, isFalse);
       });
 
+      testWidgets('台词标题标注为「只读」而不是「可编辑」（真机验收发现）', (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(0));
+        await _pump(
+          tester,
+          InspectorPanel(controller: controller, fps: _fps, readOnly: true),
+        );
+
+        expect(find.text('单元台词（可编辑）'), findsNothing,
+            reason: '回看模式下台词实际不可编辑，标题不应继续声称可编辑');
+        expect(find.text('单元台词（只读）'), findsOneWidget);
+      });
+
       testWidgets('拆分/并入按钮禁用', (tester) async {
         final controller =
             _fixtureController(selection: const EditorSelection.unit(1));
