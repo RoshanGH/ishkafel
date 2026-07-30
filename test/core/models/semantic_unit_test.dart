@@ -45,4 +45,20 @@ void main() {
     expect(copy == unit, true);
     expect(copy.hashCode, unit.hashCode);
   });
+
+  test('Shot.tags 序列化往返且旧 JSON 兼容', () {
+    const tagged = Shot(startMs: 0, endMs: 1000, tags: ['产品特写']);
+    expect(Shot.fromJson(tagged.toJson()), tagged);
+    final legacy = Shot.fromJson(const {'startMs': 0, 'endMs': 1000});
+    expect(legacy.tags, isEmpty);
+    expect(legacy == const Shot(startMs: 0, endMs: 1000), true);
+  });
+
+  test('Shot.copyWith 不改原对象', () {
+    const shot = Shot(startMs: 0, endMs: 1000);
+    final tagged = shot.copyWith(tags: ['使用动作']);
+    expect(tagged.tags, ['使用动作']);
+    expect(shot.tags, isEmpty);
+    expect(tagged.startMs, 0);
+  });
 }
