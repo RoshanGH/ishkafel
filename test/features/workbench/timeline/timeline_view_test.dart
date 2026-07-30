@@ -46,6 +46,7 @@ Widget _wrap({
   required TimelineGeometry geometry,
   required ValueChanged<int> onSeek,
   required ValueChanged<TimelineGeometry> onGeometryChanged,
+  bool readOnly = false,
 }) =>
     MaterialApp(
       home: Scaffold(
@@ -58,6 +59,7 @@ Widget _wrap({
             playheadMs: 0,
             onSeek: onSeek,
             onGeometryChanged: onGeometryChanged,
+            readOnly: readOnly,
           ),
         ),
       ),
@@ -259,5 +261,81 @@ void main() {
       isFalse,
       reason: '双击过程中不应出现中间的单元层选中（selectionLog=$selectionLog）',
     );
+  });
+
+  group('readOnly（评审 Important 1：回看模式不可编辑）', () {
+    testWidgets('readOnly 时拖拽单元交界处不改变 units', (tester) async {
+      final controller = _makeController();
+      final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+      await tester.pumpWidget(_wrap(
+        controller: controller,
+        geometry: geometry,
+        onSeek: (_) {},
+        onGeometryChanged: (_) {},
+        readOnly: true,
+      ));
+
+      await tester.dragFrom(const Offset(400, 46), const Offset(40, 0));
+      await tester.pump();
+
+      expect(controller.units[0].endMs, 2000);
+      expect(controller.units[1].startMs, 2000);
+      expect(controller.canUndo, isFalse);
+    });
+
+    testWidgets('readOnly 时点选单元块仍可用', (tester) async {
+      final controller = _makeController();
+      final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+      await tester.pumpWidget(_wrap(
+        controller: controller,
+        geometry: geometry,
+        onSeek: (_) {},
+        onGeometryChanged: (_) {},
+        readOnly: true,
+      ));
+
+      await tester.tapAt(const Offset(200, 46));
+      await tester.pump();
+
+      expect(controller.selection?.unitIndex, 0);
+    });
+
+    testWidgets('readOnly 时点击刻度区仍可 seek', (tester) async {
+      final controller = _makeController();
+      final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+      int? seekedMs;
+      await tester.pumpWidget(_wrap(
+        controller: controller,
+        geometry: geometry,
+        onSeek: (ms) => seekedMs = ms,
+        onGeometryChanged: (_) {},
+        readOnly: true,
+      ));
+
+      await tester.tapAt(const Offset(100, 10));
+      await tester.pump();
+
+      expect(seekedMs, isNotNull);
+    });
+
+    testWidgets('readOnly 时空白处水平拖拽仍可滚动', (tester) async {
+      final controller = _makeController();
+      final zoomed = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800)
+          .zoomAt(400, 2.0, viewportWidthPx: 800);
+      TimelineGeometry? received;
+      await tester.pumpWidget(_wrap(
+        controller: controller,
+        geometry: zoomed,
+        onSeek: (_) {},
+        onGeometryChanged: (g) => received = g,
+        readOnly: true,
+      ));
+
+      await tester.dragFrom(const Offset(100, 46), const Offset(-150, 0));
+      await tester.pump();
+
+      expect(received, isNotNull);
+      expect(received!.scrollPx, isNot(zoomed.scrollPx));
+    });
   });
 }

@@ -30,6 +30,10 @@ class WorkbenchBody extends StatefulWidget {
   final TimelineMedia? media;
   final int playheadMs;
 
+  /// 只读回看模式（评审 Important 1）：picking/exported 状态下已确认的
+  /// 切分结构不允许再被静默改写，下发到 [TimelineView]/[InspectorPanel]。
+  final bool readOnly;
+
   const WorkbenchBody({
     super.key,
     required this.editor,
@@ -37,6 +41,7 @@ class WorkbenchBody extends StatefulWidget {
     this.videoWidget,
     this.media,
     required this.playheadMs,
+    this.readOnly = false,
   });
 
   @override
@@ -119,6 +124,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       fps: editor.fps,
                       onSplitAtPlayhead: () =>
                           editor.splitSelectedAt(playback.positionMs),
+                      readOnly: widget.readOnly,
                     ),
                   ),
                 ],
@@ -163,6 +169,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   playheadMs: widget.playheadMs,
                   onSeek: (ms) => playback.seekMs(ms),
                   onGeometryChanged: (g) => setState(() => _geometry = g),
+                  readOnly: widget.readOnly,
                 );
               },
             ),

@@ -144,5 +144,65 @@ void main() {
       expect(controller.units.length, 1);
       expect(controller.units[0].transcript, contains('第一句台词'));
     });
+
+    group('readOnly（评审 Important 1：回看模式不可编辑）', () {
+      testWidgets('单元步进按钮均禁用', (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(1));
+        await _pump(
+          tester,
+          InspectorPanel(controller: controller, fps: _fps, readOnly: true),
+        );
+
+        final startMinus = tester.widget<InkWell>(
+            find.byKey(const Key('inspector-start-minus')));
+        final startPlus = tester
+            .widget<InkWell>(find.byKey(const Key('inspector-start-plus')));
+        expect(startMinus.onTap, isNull);
+        expect(startPlus.onTap, isNull);
+      });
+
+      testWidgets('台词 TextField 禁用', (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(0));
+        await _pump(
+          tester,
+          InspectorPanel(controller: controller, fps: _fps, readOnly: true),
+        );
+
+        final field = tester.widget<TextField>(
+            find.byKey(const Key('inspector-transcript-field')));
+        expect(field.enabled, isFalse);
+      });
+
+      testWidgets('拆分/并入按钮禁用', (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(1));
+        await _pump(
+          tester,
+          InspectorPanel(controller: controller, fps: _fps, readOnly: true),
+        );
+
+        final splitBtn =
+            tester.widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
+        final mergeBtn =
+            tester.widget<InkWell>(find.byKey(const Key('inspector-merge-btn')));
+        expect(splitBtn.onTap, isNull);
+        expect(mergeBtn.onTap, isNull);
+      });
+
+      testWidgets('镜头步进按钮同理禁用', (tester) async {
+        final controller = _fixtureController(
+            selection: const EditorSelection.shot(0, 1));
+        await _pump(
+          tester,
+          InspectorPanel(controller: controller, fps: _fps, readOnly: true),
+        );
+
+        final endPlus = tester
+            .widget<InkWell>(find.byKey(const Key('inspector-end-plus')));
+        expect(endPlus.onTap, isNull);
+      });
+    });
   });
 }

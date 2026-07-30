@@ -132,10 +132,12 @@ Widget inspectorTagChips(List<String> tags) {
   );
 }
 
+/// [onSplit]/[onMerge] 为 null 时按钮禁用（降透明度且不响应点击）——
+/// 只读回看模式（评审 Important 1）下不允许拆分/合并已确认的切分结构。
 Widget inspectorActionsRow({
   required String mergeLabel,
-  required VoidCallback onSplit,
-  required VoidCallback onMerge,
+  required VoidCallback? onSplit,
+  required VoidCallback? onMerge,
 }) {
   return Row(
     children: [
@@ -161,8 +163,9 @@ Widget inspectorActionsRow({
 Widget _actionButton({
   required Key key,
   required String label,
-  required VoidCallback onTap,
+  required VoidCallback? onTap,
 }) {
+  final enabled = onTap != null;
   return InkWell(
     key: key,
     onTap: onTap,
@@ -175,7 +178,11 @@ Widget _actionButton({
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(label,
-          style: const TextStyle(color: AppColors.textPrimary, fontSize: 12)),
+          style: TextStyle(
+              color: enabled
+                  ? AppColors.textPrimary
+                  : AppColors.textPrimary.withValues(alpha: 0.35),
+              fontSize: 12)),
     ),
   );
 }

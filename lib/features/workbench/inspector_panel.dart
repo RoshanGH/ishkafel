@@ -41,11 +41,17 @@ class InspectorPanel extends StatefulWidget {
   /// 决定，本面板只负责转发点击事件。
   final VoidCallback? onSplitAtPlayhead;
 
+  /// 只读回看模式（评审 Important 1）：true 时步进按钮、台词输入框、拆分/
+  /// 并入按钮全部禁用——已确认（picking/exported）的切分结构不允许被
+  /// 静默改写。默认 false（编辑态，行为与此前一致）。
+  final bool readOnly;
+
   const InspectorPanel({
     super.key,
     required this.controller,
     required this.fps,
     this.onSplitAtPlayhead,
+    this.readOnly = false,
   });
 
   @override
@@ -134,9 +140,10 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final units = widget.controller.units;
     if (unitIndex < 0 || unitIndex >= units.length) return _buildPlaceholder();
     final unit = units[unitIndex];
-    // 首单元没有前一个单元可合并边界，末单元没有后一个单元可合并边界。
-    final canNudgeStart = unitIndex > 0;
-    final canNudgeEnd = unitIndex < units.length - 1;
+    // 首单元没有前一个单元可合并边界，末单元没有后一个单元可合并边界；
+    // 只读模式下一律禁用（回看不允许改写已确认的结构）。
+    final canNudgeStart = unitIndex > 0 && !widget.readOnly;
+    final canNudgeEnd = unitIndex < units.length - 1 && !widget.readOnly;
 
     return SingleChildScrollView(
       child: Column(
@@ -188,8 +195,12 @@ class _InspectorPanelState extends State<InspectorPanel> {
           const SizedBox(height: 10),
           inspectorActionsRow(
             mergeLabel: '⇧ 并入上一单元',
-            onSplit: () => widget.onSplitAtPlayhead?.call(),
-            onMerge: widget.controller.mergeSelectedWithPrevious,
+            onSplit: widget.readOnly
+                ? null
+                : () => widget.onSplitAtPlayhead?.call(),
+            onMerge: widget.readOnly
+                ? null
+                : widget.controller.mergeSelectedWithPrevious,
           ),
         ],
       ),
@@ -203,9 +214,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final shots = unit.shots;
     if (shotIndex < 0 || shotIndex >= shots.length) return _buildPlaceholder();
     final shot = shots[shotIndex];
-    // 单元内首/末镜头同理没有对应方向的相邻边界可调。
-    final canNudgeStart = shotIndex > 0;
-    final canNudgeEnd = shotIndex < shots.length - 1;
+    // 单元内首/末镜头同理没有对应方向的相邻边界可调；只读模式下同样禁用。
+    final canNudgeStart = shotIndex > 0 && !widget.readOnly;
+    final canNudgeEnd = shotIndex < shots.length - 1 && !widget.readOnly;
 
     return SingleChildScrollView(
       child: Column(
@@ -252,8 +263,12 @@ class _InspectorPanelState extends State<InspectorPanel> {
           const SizedBox(height: 10),
           inspectorActionsRow(
             mergeLabel: '⇧ 并入前一镜头',
-            onSplit: () => widget.onSplitAtPlayhead?.call(),
-            onMerge: widget.controller.mergeSelectedWithPrevious,
+            onSplit: widget.readOnly
+                ? null
+                : () => widget.onSplitAtPlayhead?.call(),
+            onMerge: widget.readOnly
+                ? null
+                : widget.controller.mergeSelectedWithPrevious,
           ),
         ],
       ),
@@ -264,6 +279,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
     return TextField(
       key: const Key('inspector-transcript-field'),
       controller: _transcriptController,
+      enabled: !widget.readOnly,
       maxLines: null,
       minLines: 2,
       style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),

@@ -107,6 +107,20 @@ void main() {
       expect(find.byType(WorkbenchPage), findsOneWidget);
     });
 
+    testWidgets('exported 状态点击不进入审片台（评审 Important 1：路由口径收回）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeCuttableTask(RenewTaskStatus.exported));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('可进入审片台的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('已导出的任务'), findsOneWidget);
+    });
+
     testWidgets('analyzing 状态点击不进入审片台，提示分析中', (tester) async {
       final repo = InMemoryTaskRepository();
       await repo.save(makeTask('a2', '分析中的任务', RenewTaskStatus.analyzing));

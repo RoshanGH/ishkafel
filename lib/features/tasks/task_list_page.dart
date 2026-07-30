@@ -26,9 +26,12 @@ class TaskListPage extends ConsumerWidget {
 
   /// 任务卡点击路由：analysisError 非空（分析失败）优先级最高——不进入审片台，
   /// 只弹出失败原因与「重试」action；其次 `analyzing` 状态或缺少 units（尚未
-  /// 完成分析）不响应，只提示「分析中」；其余状态（待切分确认/选材中/已导出）
-  /// 且 units 非空均可进入审片台——选材中/已导出仅允许回看（WorkbenchPage
-  /// 内部按状态禁用「确认切分」主按钮）。
+  /// 完成分析）不响应，只提示「分析中」；`exported`（已导出）已流转到下一
+  /// 阶段之外，不再进入审片台（评审 Important 1：路由口径收回到计划范围，
+  /// 避免已导出任务被回看入口误导成"可再修改"）；只有待切分确认/选材中
+  /// 且 units 非空可进入审片台——选材中为只读回看（WorkbenchPage 内部把
+  /// `readOnly` 下发到时间线与检查器，禁用一切会改数据的交互，并禁用
+  /// 「确认切分」主按钮）。
   void _openTask(BuildContext context, WidgetRef ref, RenewTask task) {
     if (task.analysisError != null) {
       _showAnalysisFailedSnackBar(context, ref, task);
@@ -37,6 +40,11 @@ class TaskListPage extends ConsumerWidget {
     if (task.status == RenewTaskStatus.analyzing || task.units == null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('任务分析中，请稍候')));
+      return;
+    }
+    if (task.status == RenewTaskStatus.exported) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已导出的任务不再支持进入审片台')));
       return;
     }
     Navigator.of(context).push(

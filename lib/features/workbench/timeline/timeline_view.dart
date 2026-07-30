@@ -45,6 +45,11 @@ class TimelineView extends StatefulWidget {
   final ValueChanged<int> onSeek;
   final ValueChanged<TimelineGeometry> onGeometryChanged;
 
+  /// 只读回看模式（评审 Important 1）：true 时忽略会改数据的手势（边界
+  /// 拖拽），但保留选中、滚动、缩放、点刻度 seek——回看仍要能浏览。
+  /// 默认 false（编辑态，行为与此前一致）。
+  final bool readOnly;
+
   const TimelineView({
     super.key,
     required this.controller,
@@ -53,6 +58,7 @@ class TimelineView extends StatefulWidget {
     required this.playheadMs,
     required this.onSeek,
     required this.onGeometryChanged,
+    this.readOnly = false,
   });
 
   @override
@@ -201,8 +207,12 @@ class _TimelineViewState extends State<TimelineView> {
   /// [DragStartBehavior.down]（见 [build]）确保这里拿到的是指针刚按下时的
   /// 原始坐标，落在边界手柄 ±6px 的判定窗口内。
   void _handleDragStart(DragStartDetails details) {
-    final hit = TimelineHitTester.hitTest(
-        details.localPosition, widget.controller.units, widget.geometry);
+    // 只读模式下不识别边界手柄命中（视为普通滚动手势），从而忽略会改数据
+    // 的边界拖拽，同时仍保留滚动能力（见 _handleDragUpdate 的 else 分支）。
+    final hit = widget.readOnly
+        ? null
+        : TimelineHitTester.hitTest(
+            details.localPosition, widget.controller.units, widget.geometry);
     _dragHit = hit;
     if (hit is UnitBoundaryHit || hit is ShotBoundaryHit) {
       widget.controller.beginDragSession();

@@ -449,4 +449,55 @@ void main() {
       expect(saved!.units, task.units, reason: '按钮撤销应与快捷键撤销效果一致');
     });
   });
+
+  group('只读回看模式（评审 Important 1：picking 状态不可再编辑已确认数据）', () {
+    testWidgets('检查器步进/台词/拆分/合并按钮禁用，直接返回不弹保存草稿确认框', (tester) async {
+      final pickingTask = _fixtureTask(status: RenewTaskStatus.picking);
+      await repo.save(pickingTask);
+      await tester.pumpWidget(
+          _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('unit-row-0')));
+      await tester.pump();
+
+      final endPlus = tester
+          .widget<InkWell>(find.byKey(const Key('inspector-end-plus')));
+      expect(endPlus.onTap, isNull, reason: '只读模式下步进按钮应禁用');
+
+      final field = tester.widget<TextField>(
+          find.byKey(const Key('inspector-transcript-field')));
+      expect(field.enabled, isFalse, reason: '只读模式下台词框应禁用');
+
+      final splitBtn =
+          tester.widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
+      expect(splitBtn.onTap, isNull, reason: '只读模式下拆分按钮应禁用');
+
+      // 无 dirty 可言，返回应直接 pop，不弹「保存草稿」确认框
+      await tester.tap(find.byKey(const Key('workbench-back-btn')));
+      await tester.pumpAndSettle();
+      expect(find.text('列表页占位'), findsOneWidget);
+    });
+
+    testWidgets('时间线拖拽边界不改变仓库中的 units', (tester) async {
+      final pickingTask = _fixtureTask(status: RenewTaskStatus.picking);
+      await repo.save(pickingTask);
+      await tester.pumpWidget(
+          _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      // 仍可点选列表行（回看要能浏览）
+      await tester.tap(find.byKey(const Key('unit-row-1')));
+      await tester.pump();
+      expect(find.byType(InspectorPanel), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('workbench-back-btn')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('wb-1');
+      expect(saved!.units, pickingTask.units);
+    });
+  });
 }

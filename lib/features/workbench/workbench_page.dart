@@ -77,8 +77,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   bool get _isEditable => widget.task.status == RenewTaskStatus.awaitingCut;
 
+  /// 只读回看模式（picking/exported）下没有 dirty 可言——所有会改数据的
+  /// 手势/输入在 [WorkbenchBody] 内已被禁用，直接允许返回，不弹「保存
+  /// 草稿」确认框（评审 Important 1）。
   bool get _needsLeaveConfirm =>
-      _editor != null && _editor!.dirty && !_confirmed;
+      _isEditable && _editor != null && _editor!.dirty && !_confirmed;
 
   @override
   void initState() {
@@ -271,6 +274,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 videoWidget: _videoWidget,
                 media: _media,
                 playheadMs: _playheadMs,
+                readOnly: !_isEditable,
               ),
             ),
           ],
