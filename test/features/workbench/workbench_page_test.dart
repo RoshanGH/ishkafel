@@ -480,7 +480,12 @@ void main() {
       expect(find.text('列表页占位'), findsOneWidget);
     });
 
-    testWidgets('时间线拖拽边界不改变仓库中的 units', (tester) async {
+    // 注：本用例只覆盖"点选列表行浏览 + 返回不写回仓库"这一行为——它
+    // 不做任何拖拽，标题曾误写为"时间线拖拽边界不改变仓库中的 units"，
+    // 名不副实（评审 Minor D）。真正的"只读模式下拖拽边界不改变 units"
+    // 覆盖在 timeline_view_test.dart 的 readOnly 分组（4 条用例），此处
+    // 不重复。
+    testWidgets('只读模式下浏览（点选列表行）不写回仓库 units', (tester) async {
       final pickingTask = _fixtureTask(status: RenewTaskStatus.picking);
       await repo.save(pickingTask);
       await tester.pumpWidget(
