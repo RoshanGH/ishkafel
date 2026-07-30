@@ -194,4 +194,88 @@ void main() {
       expect(SegmentationEditOps.holdsInvariants(out, 200, fps), true);
     });
   });
+
+  group('末端边界非帧点片长回归（Critical 1：真实片长几乎必然非帧点）', () {
+    // 30fps 下 durationMs=4001 非帧点（真实视频片长常见情形）。末单元
+    // endMs 与其末镜头 endMs 都等于 4001，理应被 holdsInvariants 豁免帧点
+    // 检查（片长是外部数据，强行帧对齐会丢失片尾内容）；除此之外的一切
+    // 边界（含首边界 0、单元间边界、所有其余镜头间边界）仍必须帧对齐。
+    const durationMs = 4001;
+
+    List<SemanticUnit> fixtureNonFrameDuration() => const [
+          SemanticUnit(index: 0, startMs: 0, endMs: 2000, transcript: 'A', shots: [
+            Shot(startMs: 0, endMs: 1000),
+            Shot(startMs: 1000, endMs: 2000),
+          ]),
+          SemanticUnit(
+              index: 1, startMs: 2000, endMs: durationMs, transcript: 'B', shots: [
+            Shot(startMs: 2000, endMs: 3000),
+            Shot(startMs: 3000, endMs: durationMs),
+          ]),
+        ];
+
+    test('holdsInvariants 对非帧点片长的合法结构返回 true', () {
+      expect(
+          SegmentationEditOps.holdsInvariants(
+              fixtureNonFrameDuration(), durationMs, fps),
+          true);
+    });
+
+    test('moveUnitBoundary 移动末单元与前一单元的边界后，末单元 endMs 仍为 4001', () {
+      List<SemanticUnit>? out;
+      expect(() {
+        out = SegmentationEditOps.moveUnitBoundary(
+            fixtureNonFrameDuration(), 0, 2500,
+            fps: fps);
+      }, returnsNormally);
+      expect(out, isNotNull);
+      expect(out![1].endMs, durationMs);
+      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    });
+
+    test('moveShotBoundary 在末单元内部移动，不影响末尾非帧点边界', () {
+      List<SemanticUnit>? out;
+      expect(() {
+        out = SegmentationEditOps.moveShotBoundary(
+            fixtureNonFrameDuration(), 1, 0, 3300,
+            fps: fps);
+      }, returnsNormally);
+      expect(out, isNotNull);
+      expect(out![1].shots.last.endMs, durationMs);
+      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    });
+
+    test('splitUnitAt 拆分末单元后，新末单元 endMs 仍为 4001', () {
+      List<SemanticUnit>? out;
+      expect(() {
+        out = SegmentationEditOps.splitUnitAt(fixtureNonFrameDuration(), 1, 3000,
+            fps: fps, sentences: const []);
+      }, returnsNormally);
+      expect(out, isNotNull);
+      expect(out!.last.endMs, durationMs);
+      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    });
+
+    test('splitShotAt 拆分末单元最后一个镜头后仍满足不变量', () {
+      List<SemanticUnit>? out;
+      expect(() {
+        out = SegmentationEditOps.splitShotAt(fixtureNonFrameDuration(), 1, 3500,
+            fps: fps);
+      }, returnsNormally);
+      expect(out, isNotNull);
+      expect(out![1].shots.last.endMs, durationMs);
+      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    });
+
+    test('mergeUnitWithPrevious 合并末单元后，合并结果 endMs 仍为 4001', () {
+      List<SemanticUnit>? out;
+      expect(() {
+        out = SegmentationEditOps.mergeUnitWithPrevious(
+            fixtureNonFrameDuration(), 1);
+      }, returnsNormally);
+      expect(out, isNotNull);
+      expect(out!.single.endMs, durationMs);
+      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    });
+  });
 }

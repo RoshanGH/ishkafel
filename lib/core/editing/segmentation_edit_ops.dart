@@ -240,6 +240,17 @@ abstract final class SegmentationEditOps {
       ];
 
   /// 校验不变量（供测试与调试断言用）
+  ///
+  /// 豁免说明（末端边界不要求帧点）：`durationMs`（真实素材片长）是外部
+  /// 数据、不是我们能选择的值——30fps 下 4001/4017/12345/59987 这类非帧点
+  /// 片长在真实视频里几乎必然出现。若强行把它对齐到最近帧点，时间线就会
+  /// 覆盖不到片尾的那几毫秒，直接违反"单元序列无缝覆盖 `[0,durationMs]`"
+  /// 这条优先级更高的不变量。因此这里只豁免**末单元的 `endMs`**（以及随之
+  /// 恒等的**末单元内末镜头的 `endMs`**）的帧点检查——两者恒等于
+  /// `durationMs`，豁免它们不会破坏"无缝覆盖"，因为 [units.last.endMs] ==
+  /// `durationMs` 这条检查依然在上面强制执行。除这两处外，一切边界
+  /// （首边界 0、单元间边界、所有单元内的镜头间边界、非末单元的 endMs）
+  /// 仍必须是合法帧点。
   static bool holdsInvariants(
       List<SemanticUnit> units, int durationMs, double fps) {
     if (units.isEmpty) return durationMs == 0;
@@ -251,10 +262,10 @@ abstract final class SegmentationEditOps {
 
     for (var i = 0; i < units.length; i++) {
       final unit = units[i];
+      final isLastUnit = i == units.length - 1;
       if (unit.durationMs < frame) return false;
-      if (!isFramePoint(unit.startMs) || !isFramePoint(unit.endMs)) {
-        return false;
-      }
+      if (!isFramePoint(unit.startMs)) return false;
+      if (!isLastUnit && !isFramePoint(unit.endMs)) return false;
       if (i > 0 && units[i - 1].endMs != unit.startMs) return false;
 
       if (unit.shots.isEmpty) return false;
@@ -262,10 +273,10 @@ abstract final class SegmentationEditOps {
       if (unit.shots.last.endMs != unit.endMs) return false;
       for (var j = 0; j < unit.shots.length; j++) {
         final shot = unit.shots[j];
+        final isLastShotOfLastUnit = isLastUnit && j == unit.shots.length - 1;
         if (shot.durationMs < frame) return false;
-        if (!isFramePoint(shot.startMs) || !isFramePoint(shot.endMs)) {
-          return false;
-        }
+        if (!isFramePoint(shot.startMs)) return false;
+        if (!isLastShotOfLastUnit && !isFramePoint(shot.endMs)) return false;
         if (j > 0 && unit.shots[j - 1].endMs != shot.startMs) return false;
       }
     }
