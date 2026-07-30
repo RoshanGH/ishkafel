@@ -1,0 +1,9 @@
+# integration 标签默认跳过：真实调用云端 ASR/LLM 与本地 ffmpeg，避免每次
+# `flutter test` 都产生真实网络请求、计费与 1-2 分钟耗时。
+#
+# 注意：test 包里 tag 级 skip 配置的优先级高于命令行 --tags 选择器——即使显式
+# 传 --tags integration 也不会自动执行，必须额外加 --run-skipped 才能强制跑：
+#   flutter test test/integration --tags integration --run-skipped
+tags:
+  integration:
+    skip: "默认跳过：真凭据+真实网络+真实 ffmpeg，强制执行需加 --run-skipped"
