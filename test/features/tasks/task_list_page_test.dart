@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
+import 'package:ishkafel/features/workbench/workbench_page.dart';
 
 /// 内存假实现，避免 UI 测试碰文件系统
 class InMemoryTaskRepository implements TaskRepository {
@@ -51,5 +55,69 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  group('任务卡点击路由', () {
+    RenewTask makeCuttableTask(RenewTaskStatus status) => RenewTask(
+          id: 'r1',
+          name: '可进入审片台的任务',
+          sourcePath: '/v/r1.mp4',
+          status: status,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: [
+            SemanticUnit(
+              index: 0,
+              startMs: 0,
+              endMs: 1000,
+              transcript: 't',
+              shots: const [Shot(startMs: 0, endMs: 1000)],
+            ),
+          ],
+          videoInfo: const VideoInfo(
+            width: 1080,
+            height: 1920,
+            duration: Duration(milliseconds: 1000),
+            fps: 30,
+            fileSizeBytes: 10,
+          ),
+        );
+
+    testWidgets('awaitingCut 且有 units 时点击进入审片台', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeCuttableTask(RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('可进入审片台的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsOneWidget);
+    });
+
+    testWidgets('picking 状态点击也可进入审片台（允许回看）', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeCuttableTask(RenewTaskStatus.picking));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('可进入审片台的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsOneWidget);
+    });
+
+    testWidgets('analyzing 状态点击不进入审片台，提示分析中', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('a2', '分析中的任务', RenewTaskStatus.analyzing));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('分析中的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('分析中'), findsWidgets);
+    });
   });
 }

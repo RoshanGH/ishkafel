@@ -12,6 +12,8 @@ import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
@@ -197,5 +199,61 @@ void main() {
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
     expect(task.status, RenewTaskStatus.analyzing);
+  });
+
+  group('confirmSegmentation / saveSegmentationDraft', () {
+    List<SemanticUnit> makeUnits() => [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '编辑后的台词',
+            shots: const [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ];
+
+    RenewTask makeAwaitingCutTask() => RenewTask(
+          id: 'cut-1',
+          name: '待切分任务',
+          sourcePath: '/v/cut-1.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    test('confirmSegmentation 保存编辑后的 units 并流转为 picking', () async {
+      final task = makeAwaitingCutTask();
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+
+      final units = makeUnits();
+      await container
+          .read(taskListProvider.notifier)
+          .confirmSegmentation(task, units);
+
+      final saved = await repo.findById('cut-1');
+      expect(saved!.status, RenewTaskStatus.picking);
+      expect(saved.units, units);
+
+      final tasks = container.read(taskListProvider).value!;
+      expect(tasks.firstWhere((t) => t.id == 'cut-1').status,
+          RenewTaskStatus.picking);
+    });
+
+    test('saveSegmentationDraft 只保存 units 不改变状态', () async {
+      final task = makeAwaitingCutTask();
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+
+      final units = makeUnits();
+      await container
+          .read(taskListProvider.notifier)
+          .saveSegmentationDraft(task, units);
+
+      final saved = await repo.findById('cut-1');
+      expect(saved!.status, RenewTaskStatus.awaitingCut);
+      expect(saved.units, units);
+    });
   });
 }

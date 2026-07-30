@@ -2,6 +2,8 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../core/models/renew_task.dart';
+import '../workbench/workbench_page.dart';
 import 'task_card.dart';
 import 'task_list_controller.dart';
 
@@ -20,6 +22,21 @@ class TaskListPage extends ConsumerWidget {
             .showSnackBar(SnackBar(content: Text('导入失败：$e')));
       }
     }
+  }
+
+  /// 任务卡点击路由：`analyzing` 状态或缺少 units（尚未完成分析）不响应，
+  /// 只提示「分析中」；其余状态（待切分确认/选材中/已导出）且 units 非空
+  /// 均可进入审片台——选材中/已导出仅允许回看（WorkbenchPage 内部按状态
+  /// 禁用「确认切分」主按钮）。
+  void _openTask(BuildContext context, RenewTask task) {
+    if (task.status == RenewTaskStatus.analyzing || task.units == null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('任务分析中，请稍候')));
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
+    );
   }
 
   @override
@@ -59,7 +76,10 @@ class TaskListPage extends ConsumerWidget {
                   mainAxisSpacing: 14,
                 ),
                 itemCount: list.length,
-                itemBuilder: (_, i) => TaskCard(task: list[i]),
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () => _openTask(context, list[i]),
+                  child: TaskCard(task: list[i]),
+                ),
               ),
       ),
     );
