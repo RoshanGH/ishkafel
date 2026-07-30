@@ -90,7 +90,8 @@
 **/web/**/lib/generated_plugin_registrant.dart
 
 # Lockfiles
-Podfile.lock
+# 注意：本项目是应用工程（非库），锁文件必须入库以锁定可复现构建——
+# Podfile.lock 与 pubspec.lock 均不忽略（同族问题：pubspec.lock 曾被误忽略）。
 yarn.lock
 
 # Project-specific
