@@ -23,6 +23,21 @@ abstract final class SegmentationEditOps {
 
   static int _snap(int ms, double fps) => _snapper.snapToFrame(ms, fps);
 
+  // 帧序号域算术：30fps 下帧点在 ms 轴非等距（0,33,67,100,133,167…，
+  // 间距在 33/34ms 间交替），因此"向内收缩一帧"不能用 ms 域常数偏移
+  // （如 ms±frameMs(fps)），必须先转换到帧序号，加减 1 帧后再换算回 ms，
+  // 这样得到的边界本身即为合法帧点，clamp 结果必然合法。
+  static int _frameIndex(int ms, double fps) => (ms * fps / 1000).round();
+  static int _msOfFrame(int idx, double fps) => (idx * 1000 / fps).round();
+
+  /// ms 处的帧点向后收缩一帧得到的合法帧点（用作区间下界）
+  static int _frameAfter(int ms, double fps) =>
+      _msOfFrame(_frameIndex(ms, fps) + 1, fps);
+
+  /// ms 处的帧点向前收缩一帧得到的合法帧点（用作区间上界）
+  static int _frameBefore(int ms, double fps) =>
+      _msOfFrame(_frameIndex(ms, fps) - 1, fps);
+
   static List<SemanticUnit> _reindex(List<SemanticUnit> units) => [
         for (var i = 0; i < units.length; i++) units[i].copyWith(index: i),
       ];
@@ -32,11 +47,11 @@ abstract final class SegmentationEditOps {
       List<SemanticUnit> units, int i, int rawMs,
       {required double fps}) {
     if (i < 0 || i + 1 >= units.length) return null;
+    final durationMs = units.last.endMs;
     final left = units[i];
     final right = units[i + 1];
-    final frame = frameMs(fps);
-    final minB = left.startMs + frame;
-    final maxB = right.endMs - frame;
+    final minB = _frameAfter(left.startMs, fps);
+    final maxB = _frameBefore(right.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps).clamp(minB, maxB);
 
@@ -62,7 +77,7 @@ abstract final class SegmentationEditOps {
       newRight,
       ...units.sublist(i + 2),
     ]);
-    assert(holdsInvariants(result, result.last.endMs, fps));
+    assert(holdsInvariants(result, durationMs, fps));
     return result;
   }
 
@@ -71,13 +86,13 @@ abstract final class SegmentationEditOps {
       List<SemanticUnit> units, int u, int s, int rawMs,
       {required double fps}) {
     if (u < 0 || u >= units.length) return null;
+    final durationMs = units.last.endMs;
     final unit = units[u];
     if (s < 0 || s + 1 >= unit.shots.length) return null;
-    final frame = frameMs(fps);
     final left = unit.shots[s];
     final right = unit.shots[s + 1];
-    final minB = left.startMs + frame;
-    final maxB = right.endMs - frame;
+    final minB = _frameAfter(left.startMs, fps);
+    final maxB = _frameBefore(right.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps).clamp(minB, maxB);
 
@@ -93,7 +108,7 @@ abstract final class SegmentationEditOps {
       newUnit,
       ...units.sublist(u + 1),
     ]);
-    assert(holdsInvariants(result, result.last.endMs, fps));
+    assert(holdsInvariants(result, durationMs, fps));
     return result;
   }
 
@@ -102,10 +117,10 @@ abstract final class SegmentationEditOps {
       List<SemanticUnit> units, int u, int rawMs,
       {required double fps, required List<AsrSentence> sentences}) {
     if (u < 0 || u >= units.length) return null;
+    final durationMs = units.last.endMs;
     final unit = units[u];
-    final frame = frameMs(fps);
-    final minB = unit.startMs + frame;
-    final maxB = unit.endMs - frame;
+    final minB = _frameAfter(unit.startMs, fps);
+    final maxB = _frameBefore(unit.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps);
     if (b < minB || b > maxB) return null;
@@ -139,7 +154,7 @@ abstract final class SegmentationEditOps {
       rightUnit,
       ...units.sublist(u + 1),
     ]);
-    assert(holdsInvariants(result, result.last.endMs, fps));
+    assert(holdsInvariants(result, durationMs, fps));
     return result;
   }
 
@@ -166,11 +181,11 @@ abstract final class SegmentationEditOps {
   static List<SemanticUnit>? splitShotAt(
       List<SemanticUnit> units, int u, int rawMs, {required double fps}) {
     if (u < 0 || u >= units.length) return null;
+    final durationMs = units.last.endMs;
     final unit = units[u];
-    final frame = frameMs(fps);
     final b = _snap(rawMs, fps);
-    final s = unit.shots
-        .indexWhere((shot) => shot.startMs + frame <= b && b <= shot.endMs - frame);
+    final s = unit.shots.indexWhere(
+        (shot) => _frameAfter(shot.startMs, fps) <= b && b <= _frameBefore(shot.endMs, fps));
     if (s == -1) return null;
 
     final shot = unit.shots[s];
@@ -186,7 +201,7 @@ abstract final class SegmentationEditOps {
       newUnit,
       ...units.sublist(u + 1),
     ]);
-    assert(holdsInvariants(result, result.last.endMs, fps));
+    assert(holdsInvariants(result, durationMs, fps));
     return result;
   }
 
