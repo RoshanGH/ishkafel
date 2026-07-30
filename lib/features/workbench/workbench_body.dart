@@ -123,7 +123,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       controller: editor,
                       fps: editor.fps,
                       onSplitAtPlayhead: () =>
-                          editor.splitSelectedAt(playback.positionMs),
+                          _splitAtPlayhead(context, editor, playback),
                       readOnly: widget.readOnly,
                     ),
                   ),
@@ -139,6 +139,20 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
         ),
       ),
     );
+  }
+
+  /// 「在游标处拆分」：播放头不落在所选单元/镜头范围内时 [SegmentationEditorController.
+  /// splitSelectedAt] 会返回 false（纯函数拒绝了非法拆分点），此前这里直接
+  /// 丢弃返回值，用户点击按钮却毫无反应，体验上像是按钮失灵。补一条
+  /// SnackBar 提示，让"为什么没有拆分"这件事对用户可见（Minor）。
+  void _splitAtPlayhead(BuildContext context, SegmentationEditorController editor,
+      PlaybackController playback) {
+    final ok = editor.splitSelectedAt(playback.positionMs);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('播放头不在所选范围内，无法在此处拆分')),
+      );
+    }
   }
 
   Widget _buildTimelineArea(

@@ -71,8 +71,11 @@ class SegmentationEditorController extends ChangeNotifier {
   /// 当前是否处于台词编辑会话中
   bool get inTextSession => _sessionSnapshot != null;
 
+  /// 设置选中对象；若 [s] 越界（unitIndex/shotIndex 超出当前 units 结构）
+  /// 则置为 null，而不是保留一个悬空的选中态（调用方可能传入过期下标，
+  /// 例如异步回调延迟到达时结构已变化）。
   void select(EditorSelection? s) {
-    _selection = s;
+    _selection = _clampSelection(s);
     notifyListeners();
   }
 

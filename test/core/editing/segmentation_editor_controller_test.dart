@@ -261,6 +261,26 @@ void main() {
     expect(c.updateTranscript(5, '新台词'), false);
   });
 
+  group('select 越界校验（Minor）', () {
+    test('unitIndex 越界时置为 null', () {
+      final c = buildController(); // 2 单元
+      c.select(const EditorSelection.unit(5));
+      expect(c.selection, isNull);
+    });
+
+    test('shotIndex 越界时置为 null', () {
+      final c = buildController();
+      c.select(const EditorSelection.shot(0, 99));
+      expect(c.selection, isNull);
+    });
+
+    test('合法选中不受影响', () {
+      final c = buildController();
+      c.select(const EditorSelection.unit(1));
+      expect(c.selection?.unitIndex, 1);
+    });
+  });
+
   test('select 触发 notifyListeners', () {
     final c = buildController();
     var notifyCount = 0;

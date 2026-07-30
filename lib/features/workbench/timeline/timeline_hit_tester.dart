@@ -2,12 +2,12 @@ import 'package:flutter/material.dart' show Offset;
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 
-/// 時間線命中結果基類（sealed 以強制完整分支處理）
+/// 时间线命中结果基类（sealed 以强制完整分支处理）
 sealed class TimelineHit {
   const TimelineHit();
 }
 
-/// 單元邊界命中（拖大邊界操作）
+/// 单元边界命中（拖大边界操作）
 final class UnitBoundaryHit extends TimelineHit {
   final int leftUnitIndex;
 
@@ -22,7 +22,7 @@ final class UnitBoundaryHit extends TimelineHit {
   int get hashCode => leftUnitIndex.hashCode;
 }
 
-/// 鏡頭邊界命中（單元內部鏡頭間邊界）
+/// 镜头边界命中（单元内部镜头间边界）
 final class ShotBoundaryHit extends TimelineHit {
   final int unitIndex;
   final int leftShotIndex;
@@ -41,7 +41,7 @@ final class ShotBoundaryHit extends TimelineHit {
   int get hashCode => Object.hash(unitIndex, leftShotIndex);
 }
 
-/// 單元塊體命中（點選單元）
+/// 单元块体命中（点选单元）
 final class UnitBlockHit extends TimelineHit {
   final int unitIndex;
 
@@ -56,7 +56,7 @@ final class UnitBlockHit extends TimelineHit {
   int get hashCode => unitIndex.hashCode;
 }
 
-/// 鏡頭塊體命中
+/// 镜头块体命中
 final class ShotBlockHit extends TimelineHit {
   final int unitIndex;
   final int shotIndex;
@@ -75,7 +75,7 @@ final class ShotBlockHit extends TimelineHit {
   int get hashCode => Object.hash(unitIndex, shotIndex);
 }
 
-/// 刻度軌命中（尋軌操作）
+/// 刻度轨命中（寻轨操作）
 final class RulerHit extends TimelineHit {
   final int ms;
 
@@ -89,7 +89,7 @@ final class RulerHit extends TimelineHit {
   int get hashCode => ms.hashCode;
 }
 
-/// 時間線軌道縱向布局常量（與 Painter 共享）
+/// 时间线轨道纵向布局常量（与 Painter 共享）
 abstract final class TimelineTracks {
   static const rulerH = 20.0;
   static const unitsH = 44.0;
@@ -98,51 +98,51 @@ abstract final class TimelineTracks {
   static const waveH = 34.0;
   static const gap = 4.0;
 
-  /// 刻度軌頂部
+  /// 刻度轨顶部
   static double get rulerTop => 0;
 
-  /// 刻度軌底部
+  /// 刻度轨底部
   static double get rulerBottom => rulerTop + rulerH;
 
-  /// 單元軌頂部
+  /// 单元轨顶部
   static double get unitsTop => rulerBottom + gap;
 
-  /// 單元軌底部
+  /// 单元轨底部
   static double get unitsBottom => unitsTop + unitsH;
 
-  /// 鏡頭軌頂部
+  /// 镜头轨顶部
   static double get shotsTop => unitsBottom + gap;
 
-  /// 鏡頭軌底部
+  /// 镜头轨底部
   static double get shotsBottom => shotsTop + shotsH;
 
-  /// 縮圖軌頂部
+  /// 缩图轨顶部
   static double get thumbsTop => shotsBottom + gap;
 
-  /// 縮圖軌底部
+  /// 缩图轨底部
   static double get thumbsBottom => thumbsTop + thumbsH;
 
-  /// 波形軌頂部
+  /// 波形轨顶部
   static double get waveTop => thumbsBottom + gap;
 
-  /// 波形軌底部
+  /// 波形轨底部
   static double get waveBottom => waveTop + waveH;
 }
 
-/// 時間線命中判定器（純函數，靜態方法）
+/// 时间线命中判定器（纯函数，静态方法）
 class TimelineHitTester {
-  /// 邊界容差（像素）：±6px 範圍內視為邊界命中
+  /// 边界容差（像素）：±6px 范围内视为边界命中
   static const boundaryTolerancePx = 6.0;
 
-  /// 命中測試
+  /// 命中测试
   ///
-  /// 優先級：邊界手柄（±6px）> 塊體
+  /// 优先级：边界手柄（±6px）> 块体
   ///
-  /// 不同軌道返回不同結果：
-  /// - 刻度軌：返回 [RulerHit]
-  /// - 單元軌：返回 [UnitBoundaryHit] 或 [UnitBlockHit]
-  /// - 鏡頭軌：返回 [UnitBoundaryHit]（單元交界邊界屬單元層）、[ShotBoundaryHit] 或 [ShotBlockHit]
-  /// - 軌道外：返回 null
+  /// 不同轨道返回不同结果：
+  /// - 刻度轨：返回 [RulerHit]
+  /// - 单元轨：返回 [UnitBoundaryHit] 或 [UnitBlockHit]
+  /// - 镜头轨：返回 [UnitBoundaryHit]（单元交界边界属单元层）、[ShotBoundaryHit] 或 [ShotBlockHit]
+  /// - 轨道外：返回 null
   static TimelineHit? hitTest(
     Offset localPos,
     List<SemanticUnit> units,
@@ -151,28 +151,28 @@ class TimelineHitTester {
     final x = localPos.dx;
     final y = localPos.dy;
 
-    // 刻度軌：y in [0, 20]
+    // 刻度轨：y in [0, 20]
     if (y >= TimelineTracks.rulerTop && y < TimelineTracks.rulerBottom) {
       return RulerHit(ms: geometry.pxToMs(x));
     }
 
-    // 單元軌：y in [24, 68]
+    // 单元轨：y in [24, 68]
     if (y >= TimelineTracks.unitsTop && y < TimelineTracks.unitsBottom) {
       return _hitTestUnitTrack(x, units, geometry);
     }
 
-    // 鏡頭軌：y in [72, 98]
+    // 镜头轨：y in [72, 98]
     if (y >= TimelineTracks.shotsTop && y < TimelineTracks.shotsBottom) {
       return _hitTestShotTrack(x, units, geometry);
     }
 
-    // 軌道外
+    // 轨道外
     return null;
   }
 
-  /// 單元軌命中判定
-  /// 邊界優先：檢查是否靠近單元邊界（±6px）
-  /// 否則檢查塊體
+  /// 单元轨命中判定
+  /// 边界优先：检查是否靠近单元边界（±6px）
+  /// 否则检查块体
   static TimelineHit? _hitTestUnitTrack(
     double x,
     List<SemanticUnit> units,
@@ -180,21 +180,21 @@ class TimelineHitTester {
   ) {
     if (units.isEmpty) return null;
 
-    // 遍歷單元邊界，檢查是否靠近邊界（優先級高）
+    // 遍历单元边界，检查是否靠近边界（优先级高）
     for (int i = 0; i < units.length - 1; i++) {
       final currentUnit = units[i];
 
-      // 邊界應該相鄰（currentUnit.endMs == nextUnit.startMs）
+      // 边界应该相邻（currentUnit.endMs == nextUnit.startMs）
       final boundaryMs = currentUnit.endMs;
       final boundaryPx = geometry.msToPx(boundaryMs);
 
-      // 檢查 x 是否在邊界的容差範圍內
+      // 检查 x 是否在边界的容差范围内
       if ((x - boundaryPx).abs() <= boundaryTolerancePx) {
         return UnitBoundaryHit(leftUnitIndex: i);
       }
     }
 
-    // 邊界未命中，檢查塊體
+    // 边界未命中，检查块体
     for (final unit in units) {
       final startPx = geometry.msToPx(unit.startMs);
       final endPx = geometry.msToPx(unit.endMs);
@@ -207,9 +207,9 @@ class TimelineHitTester {
     return null;
   }
 
-  /// 鏡頭軌命中判定
-  /// 特殊邏輯：如果命中的邊界恰好是單元邊界，返回 UnitBoundaryHit（優先級更高）
-  /// 否則檢查鏡頭邊界、鏡頭塊體
+  /// 镜头轨命中判定
+  /// 特殊逻辑：如果命中的边界恰好是单元边界，返回 UnitBoundaryHit（优先级更高）
+  /// 否则检查镜头边界、镜头块体
   static TimelineHit? _hitTestShotTrack(
     double x,
     List<SemanticUnit> units,
@@ -217,7 +217,7 @@ class TimelineHitTester {
   ) {
     if (units.isEmpty) return null;
 
-    // 首先檢查是否靠近單元邊界（優先級最高）
+    // 首先检查是否靠近单元边界（优先级最高）
     for (int i = 0; i < units.length - 1; i++) {
       final currentUnit = units[i];
 
@@ -229,11 +229,11 @@ class TimelineHitTester {
       }
     }
 
-    // 檢查鏡頭邊界（優先級次高）
+    // 检查镜头边界（优先级次高）
     for (int unitIdx = 0; unitIdx < units.length; unitIdx++) {
       final unit = units[unitIdx];
 
-      // 遍歷該單元內的鏡頭邊界
+      // 遍历该单元内的镜头边界
       for (int shotIdx = 0; shotIdx < unit.shots.length - 1; shotIdx++) {
         final currentShot = unit.shots[shotIdx];
 
@@ -246,7 +246,7 @@ class TimelineHitTester {
       }
     }
 
-    // 檢查鏡頭塊體
+    // 检查镜头块体
     for (int unitIdx = 0; unitIdx < units.length; unitIdx++) {
       final unit = units[unitIdx];
 

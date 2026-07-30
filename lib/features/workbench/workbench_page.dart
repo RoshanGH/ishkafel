@@ -148,6 +148,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void dispose() {
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
+    _editor?.dispose();
     unawaited(_playback?.dispose());
     super.dispose();
   }

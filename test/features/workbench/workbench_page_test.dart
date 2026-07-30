@@ -500,4 +500,23 @@ void main() {
       expect(saved!.units, pickingTask.units);
     });
   });
+
+  testWidgets('在游标处拆分：播放头不在所选范围内时提示而非静默无操作（Minor）', (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
+    await tester.pumpAndSettle();
+
+    // 选中单元1（[2000,4000]ms），但播放头仍在初始位置 0（不在该单元范围内）
+    await tester.tap(find.byKey(const Key('unit-row-1')));
+    await tester.pump();
+
+    // 检查器面板内容在窄栏 + 小测试视口下可能需要滚动才可见
+    await tester.ensureVisible(find.byKey(const Key('inspector-split-btn')));
+    await tester.tap(find.byKey(const Key('inspector-split-btn')));
+    await tester.pump(); // SnackBar 入场动画的第一帧
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.textContaining('播放头不在所选范围内'), findsOneWidget);
+  });
 }
