@@ -21,11 +21,18 @@ class EditorSelection {
 ///   清空 redo 栈、notifyListeners、返回 true
 /// - 纯函数返回 null（非法操作）→ 不入栈、不 notify、返回 false
 /// - [dirty] 用深度相等（[SemanticUnit] 已实现 ==）判断当前 units 是否偏离 initialUnits
-/// - 拖拽会话（[beginDragSession]/[endDragSession]）：连续拖拽一次边界手柄会
-///   触发几十次 moveUnitBoundary/moveShotBoundary 调用，若每次都单独入栈，
-///   用户要撤销几十次才能回退一次拖动。会话期间移动操作直接替换 _units、
-///   notify，但不入栈；会话结束时若相对会话开始快照确有变化，才把快照作为
-///   **单条** undo 记录压栈。
+/// - 编辑会话（[beginDragSession]/[endDragSession]、[beginTextSession]/
+///   [endTextSession]）：两者共用同一套"开始时记快照、结束时按差异合并为
+///   单条记录"的机制（内部共享 [_sessionSnapshot] 一个字段）——
+///   拖拽一次边界手柄会触发几十次 moveUnitBoundary/moveShotBoundary 调用，
+///   台词框聚焦期间的连续键入同理会触发几十次 updateTranscript 调用；若
+///   每次都单独入栈，用户要撤销几十次才能回退一次拖动/一次编辑。会话期间
+///   操作直接替换 _units、notify，但不入栈；会话结束时若相对会话开始快照
+///   确有变化，才把快照作为**单条** undo 记录压栈。
+///   两种会话不会同时发生（拖拽边界手柄与台词框聚焦是互斥的交互），共享
+///   同一个字段是安全的：[_beginSession] 用 `??=` 保证幂等（嵌套 begin
+///   不会覆盖已有快照），[_endSession] 只在快照非空时才消费一次；即便未来
+///   出现意外嵌套，也只会导致两个会话被合并成一条记录，不会崩溃或丢数据。
 class SegmentationEditorController extends ChangeNotifier {
   final int durationMs;
   final double fps;
@@ -38,8 +45,9 @@ class SegmentationEditorController extends ChangeNotifier {
   final List<List<SemanticUnit>> _undoStack = [];
   final List<List<SemanticUnit>> _redoStack = [];
 
-  /// 拖拽会话开始时的 units 快照；非 null 表示当前处于会话中
-  List<SemanticUnit>? _dragSessionSnapshot;
+  /// 编辑会话（拖拽/台词）开始时的 units 快照；非 null 表示当前处于会话中。
+  /// 拖拽会话与台词编辑会话共享此字段，见类文档「编辑会话」。
+  List<SemanticUnit>? _sessionSnapshot;
 
   static const _unitsEq = ListEquality<SemanticUnit>();
 
@@ -57,30 +65,45 @@ class SegmentationEditorController extends ChangeNotifier {
   bool get canRedo => _redoStack.isNotEmpty;
   bool get dirty => !_unitsEq.equals(_units, _initialUnits);
 
-  /// 当前是否处于拖拽会话中
-  bool get inDragSession => _dragSessionSnapshot != null;
+  /// 当前是否处于拖拽会话中（与台词编辑会话共享同一份底层状态，见类文档）
+  bool get inDragSession => _sessionSnapshot != null;
+
+  /// 当前是否处于台词编辑会话中
+  bool get inTextSession => _sessionSnapshot != null;
 
   void select(EditorSelection? s) {
     _selection = s;
     notifyListeners();
   }
 
-  /// 开启拖拽会话：记录当前 units 作为会话快照；重复调用无副作用（幂等）
-  void beginDragSession() {
-    _dragSessionSnapshot ??= _units;
+  void _beginSession() {
+    _sessionSnapshot ??= _units;
   }
 
-  /// 结束拖拽会话：若相对会话开始时的快照确有变化，把快照作为单条 undo 记录
-  /// 压栈（并清空 redo 栈）；无变化则什么都不做。不在会话中时调用无副作用。
-  void endDragSession() {
-    final snapshot = _dragSessionSnapshot;
+  void _endSession() {
+    final snapshot = _sessionSnapshot;
     if (snapshot == null) return;
-    _dragSessionSnapshot = null;
+    _sessionSnapshot = null;
     if (!_unitsEq.equals(_units, snapshot)) {
       _undoStack.add(snapshot);
       _redoStack.clear();
     }
   }
+
+  /// 开启拖拽会话：记录当前 units 作为会话快照；重复调用无副作用（幂等）
+  void beginDragSession() => _beginSession();
+
+  /// 结束拖拽会话：若相对会话开始时的快照确有变化，把快照作为单条 undo 记录
+  /// 压栈（并清空 redo 栈）；无变化则什么都不做。不在会话中时调用无副作用。
+  void endDragSession() => _endSession();
+
+  /// 开启台词编辑会话：语义与 [beginDragSession] 完全一致（见类文档「编辑
+  /// 会话」），供 InspectorPanel 在台词 TextField 获得焦点时调用，使聚焦
+  /// 期间连续多次 [updateTranscript]（逐击键入）合并为一条 undo 记录。
+  void beginTextSession() => _beginSession();
+
+  /// 结束台词编辑会话：供 InspectorPanel 在台词 TextField 失去焦点时调用。
+  void endTextSession() => _endSession();
 
   /// 校验 selection 是否仍落在当前 _units 结构内；越界则置为 null（安全兜底）
   EditorSelection? _clampSelection(EditorSelection? sel) {
@@ -104,8 +127,9 @@ class SegmentationEditorController extends ChangeNotifier {
   bool _apply(List<SemanticUnit>? result,
       {EditorSelection? Function()? remapSelection}) {
     if (result == null) return false;
-    // 拖拽会话中：不逐次入栈，交由 endDragSession 合并为一条记录
-    if (!inDragSession) {
+    // 会话中（拖拽或台词编辑）：不逐次入栈，交由 endDragSession/
+    // endTextSession 合并为一条记录
+    if (_sessionSnapshot == null) {
       _undoStack.add(_units);
       _redoStack.clear();
     }

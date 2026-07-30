@@ -61,11 +61,25 @@ class InspectorPanel extends StatefulWidget {
 class _InspectorPanelState extends State<InspectorPanel> {
   final _transcriptController = TextEditingController();
 
+  /// 台词 TextField 专用 FocusNode：聚焦时开启编辑会话、失焦时结束（评审
+  /// Important 3），使聚焦期间连续多次 updateTranscript（逐击键入）合并
+  /// 为一条 undo 记录，而不是每个字符都单独入栈。
+  final _transcriptFocusNode = FocusNode(debugLabel: 'InspectorTranscript');
+
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
+    _transcriptFocusNode.addListener(_onTranscriptFocusChanged);
     _syncTranscript();
+  }
+
+  void _onTranscriptFocusChanged() {
+    if (_transcriptFocusNode.hasFocus) {
+      widget.controller.beginTextSession();
+    } else {
+      widget.controller.endTextSession();
+    }
   }
 
   @override
@@ -81,7 +95,13 @@ class _InspectorPanelState extends State<InspectorPanel> {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    _transcriptFocusNode.removeListener(_onTranscriptFocusChanged);
+    // 兜底：若卸载发生在台词编辑会话进行中（如切换选中对象导致本面板随之
+    // 重建/卸载而非正常失焦），必须显式结束会话，否则 controller 的会话
+    // 快照永久非空、此后所有编辑都会静默跳过 undo 入栈。该方法本身幂等。
+    widget.controller.endTextSession();
     _transcriptController.dispose();
+    _transcriptFocusNode.dispose();
     super.dispose();
   }
 
@@ -279,6 +299,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
     return TextField(
       key: const Key('inspector-transcript-field'),
       controller: _transcriptController,
+      focusNode: _transcriptFocusNode,
       enabled: !widget.readOnly,
       maxLines: null,
       minLines: 2,

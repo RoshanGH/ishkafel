@@ -204,5 +204,66 @@ void main() {
         expect(endPlus.onTap, isNull);
       });
     });
+
+    group('台词编辑会话（评审 Important 3：逐击键入不应逐条入 undo 栈）', () {
+      testWidgets('聚焦期间连续多次输入合并为一条 undo 记录，失焦后一次 undo 回到编辑前原文',
+          (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(0));
+        await _pump(tester, InspectorPanel(controller: controller, fps: _fps));
+
+        await tester
+            .tap(find.byKey(const Key('inspector-transcript-field')));
+        await tester.pump();
+        await tester.enterText(
+            find.byKey(const Key('inspector-transcript-field')), '第一');
+        await tester.pump();
+        await tester.enterText(
+            find.byKey(const Key('inspector-transcript-field')), '第一句');
+        await tester.pump();
+        await tester.enterText(
+            find.byKey(const Key('inspector-transcript-field')), '第一句话');
+        await tester.pump();
+
+        expect(controller.canUndo, isFalse, reason: '聚焦会话进行中不应提前入栈');
+
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+
+        expect(controller.canUndo, isTrue);
+        controller.undo();
+        expect(controller.units[0].transcript, '第一句台词',
+            reason: '一次 undo 应直接回到聚焦编辑前的原文，而非逐字符回退');
+      });
+
+      testWidgets('失焦后再次聚焦输入产生独立的一条 undo 记录', (tester) async {
+        final controller =
+            _fixtureController(selection: const EditorSelection.unit(0));
+        await _pump(tester, InspectorPanel(controller: controller, fps: _fps));
+
+        await tester.enterText(
+            find.byKey(const Key('inspector-transcript-field')), '第一版');
+        await tester.pump();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+        expect(controller.canUndo, isTrue);
+
+        await tester
+            .tap(find.byKey(const Key('inspector-transcript-field')));
+        await tester.pump();
+        await tester.enterText(
+            find.byKey(const Key('inspector-transcript-field')), '第二版');
+        await tester.pump();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pump();
+
+        expect(controller.units[0].transcript, '第二版');
+        controller.undo();
+        expect(controller.units[0].transcript, '第一版',
+            reason: '两次聚焦分属两条独立记录，第一次 undo 应只回退到上一条记录点');
+        controller.undo();
+        expect(controller.units[0].transcript, '第一句台词');
+      });
+    });
   });
 }

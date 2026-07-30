@@ -432,4 +432,52 @@ void main() {
       expect(c.units, fixture());
     });
   });
+
+  group('台词编辑会话（beginTextSession/endTextSession，评审 Important 3）', () {
+    test('会话内多次 updateTranscript 合并为一条 undo 记录：一次 undo 回到编辑前原文', () {
+      final c = buildController();
+      c.beginTextSession();
+      expect(c.updateTranscript(0, '第一'), true);
+      expect(c.updateTranscript(0, '第一段'), true);
+      expect(c.updateTranscript(0, '第一段台'), true);
+      // 会话进行中：不应提前压栈
+      expect(c.canUndo, false);
+      c.endTextSession();
+
+      expect(c.units[0].transcript, '第一段台');
+      expect(c.canUndo, true);
+
+      c.undo();
+      expect(c.units, fixture());
+      expect(c.canUndo, false);
+    });
+
+    test('失焦（endTextSession）后再输入属于新的一条记录', () {
+      final c = buildController();
+      c.beginTextSession();
+      c.updateTranscript(0, 'A');
+      c.endTextSession();
+      expect(c.canUndo, true);
+
+      c.beginTextSession();
+      c.updateTranscript(0, 'AB');
+      c.endTextSession();
+
+      expect(c.units[0].transcript, 'AB');
+      c.undo();
+      expect(c.units[0].transcript, 'A', reason: '第一次 undo 应只回到上一条会话记录点');
+      expect(c.canUndo, true);
+      c.undo();
+      expect(c.units, fixture());
+      expect(c.canUndo, false);
+    });
+
+    test('会话内实际无变化（未调用 updateTranscript）则不压入 undo 记录', () {
+      final c = buildController();
+      c.beginTextSession();
+      c.endTextSession();
+
+      expect(c.canUndo, false);
+    });
+  });
 }
