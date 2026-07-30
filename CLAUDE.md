@@ -19,6 +19,11 @@
 
 任何 UI 相关的实现、评审、验收都以本节为准绳。
 
+## 工作流要求（强制）
+
+- **每次代码改动落地后（任务波/里程碑收尾时），必须重新构建并启动 app**（`flutter run -d macos` 或构建产物 `open`），让用户能立即看到效果；不允许只报告"测试通过"就结束
+- macOS 调试运行若出现 `Failed to foreground app`，需主动用 `open build/macos/Build/Products/Debug/ishkafel.app` 或 AppleScript activate 把窗口带到前台并核实可见
+
 ## 语言
 
 回复、注释、提交信息一律中文（继承全局配置）。
