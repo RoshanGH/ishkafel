@@ -92,6 +92,12 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void dispose() {
     _pendingUnitSelectTimer?.cancel();
+    // 兜底：若卸载发生在拖拽会话进行中（Flutter 手势系统在卸载路径下不保证
+    // onHorizontalDragEnd/onHorizontalDragCancel 一定会触发），必须显式结束
+    // 会话，否则 controller._dragSessionSnapshot 永久非空，此后所有编辑都会
+    // 静默跳过 undo 入栈，用户撤销功能彻底失效且无任何提示。该方法本身是
+    // 幂等的：不在会话中调用无副作用。
+    widget.controller.endDragSession();
     _disposeThumbImages(_thumbImages);
     super.dispose();
   }

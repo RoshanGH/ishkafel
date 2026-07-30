@@ -156,6 +156,40 @@ void main() {
     expect(controller.canUndo, isFalse, reason: '一次拖拽应只产生一条撤销记录');
   });
 
+  testWidgets('③c TimelineView 在拖拽会话进行中被卸载 → dispose 兜底结束会话', (tester) async {
+    final controller = _makeController();
+    final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+    await tester.pumpWidget(_wrap(
+      controller: controller,
+      geometry: geometry,
+      onSeek: (_) {},
+      onGeometryChanged: (_) {},
+    ));
+
+    // 在单元边界处按下并移动，开启拖拽会话，但不 up（模拟手势尚未走完、
+    // onHorizontalDragEnd/Cancel 均未触发的情况下 widget 就被移除）；
+    // 分多次 moveBy 累积位移，确保超过触摸容差、真正触发 onHorizontalDragStart
+    final gesture = await tester.startGesture(const Offset(400, 46));
+    await tester.pump();
+    for (var i = 0; i < 5; i++) {
+      await gesture.moveBy(const Offset(10, 0));
+      await tester.pump();
+    }
+
+    expect(controller.inDragSession, isTrue, reason: '此时应已开启拖拽会话');
+
+    // 把 TimelineView 从树上整体移除
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.inDragSession, isFalse, reason: 'dispose 应兜底结束会话');
+
+    // 会话已被结束，之后的正常编辑应能照常入 undo 栈（撤销功能未失效）
+    expect(controller.moveUnitBoundary(0, 2500), isTrue);
+    expect(controller.canUndo, isTrue);
+  });
+
   testWidgets('④在空白块体处拖拽 → onGeometryChanged 收到滚动后的 geometry（zoom 后可滚状态）',
       (tester) async {
     final controller = _makeController();
