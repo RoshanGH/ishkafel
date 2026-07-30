@@ -161,4 +161,37 @@ void main() {
     expect(out[0].transcript, '新台词');
     expect(out[0].shots, fixture()[0].shots);
   });
+
+  group('帧网格非等距回归（30fps 帧点间距在 33/34ms 间交替）', () {
+    // 30fps 帧点：0,33,67,100,133,167,200...；clamp 若用 ms 域常数偏移
+    // （如 start+33）而非帧序号域算术，算出的边界可能落在网格之外。
+    List<SemanticUnit> gridFixture() => const [
+          SemanticUnit(index: 0, startMs: 0, endMs: 33, transcript: 'A', shots: [
+            Shot(startMs: 0, endMs: 33),
+          ]),
+          SemanticUnit(index: 1, startMs: 33, endMs: 67, transcript: 'B', shots: [
+            Shot(startMs: 33, endMs: 67),
+          ]),
+          SemanticUnit(index: 2, startMs: 67, endMs: 200, transcript: 'C', shots: [
+            Shot(startMs: 67, endMs: 200),
+          ]),
+        ];
+
+    test('moveUnitBoundary 在非 100ms 倍数网格上 clamp 结果仍是合法帧点', () {
+      final out = SegmentationEditOps.moveUnitBoundary(gridFixture(), 1, 0, fps: fps)!;
+      expect(SegmentationEditOps.holdsInvariants(out, 200, fps), true);
+    });
+
+    test('moveShotBoundary 在非 100ms 倍数网格上 clamp 结果仍是合法帧点', () {
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 200, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 33),
+          Shot(startMs: 33, endMs: 67),
+          Shot(startMs: 67, endMs: 200),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 0, 1, 0, fps: fps)!;
+      expect(SegmentationEditOps.holdsInvariants(out, 200, fps), true);
+    });
+  });
 }
