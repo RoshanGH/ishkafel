@@ -65,7 +65,8 @@ void main() {
         if (shouldFail != null && shouldFail(outPath)) {
           return ProcessResult(1, 1, '', '模拟抽帧失败');
         }
-        await File(outPath).writeAsBytes([0]);
+        // 模拟真实 ffmpeg 输出的 jpg 大小（需超过有效缓存阈值）
+        await File(outPath).writeAsBytes(List<int>.filled(600, 1));
         return ProcessResult(1, 0, '', '');
       });
       return (service: service, calls: calls);
@@ -213,6 +214,55 @@ void main() {
 
       expect(media.thumbPaths.length, 2);
       expect(media.waveEnvelope, List.filled(6, 0.0));
+    });
+
+    test('缩略图缓存文件为 0 字节（损坏）时应重新抽帧，不复用坏文件', () async {
+      // 预置一个 0 字节的坏缓存文件（模拟上次运行中途失败留下的产物）
+      final badPath = '${workDir.path}/t6_tl_0.jpg';
+      await File(badPath).writeAsBytes(const []);
+
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      final media = await builder.build(
+        videoPath: '/v/a.mp4',
+        taskId: 't6',
+        durationMs: 6000,
+        workDir: workDir,
+        thumbCount: 2,
+        waveBuckets: 4,
+      );
+
+      // 两张都应触发真实抽帧：坏缓存不能被当成命中
+      expect(thumbs.calls.length, 2);
+      expect(media.thumbPaths, [
+        '${workDir.path}/t6_tl_0.jpg',
+        '${workDir.path}/t6_tl_1.jpg',
+      ]);
+    });
+
+    test('PCM 缓存文件为 0 字节（损坏）时应重新提取音频，不复用坏文件', () async {
+      // 预置一个 0 字节的坏 PCM 缓存（模拟上次运行中途失败留下的产物）
+      final badPcmPath = '${workDir.path}/t7_tl.pcm';
+      await File(badPcmPath).writeAsBytes(const []);
+
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      await builder.build(
+        videoPath: '/v/a.mp4',
+        taskId: 't7',
+        durationMs: 6000,
+        workDir: workDir,
+        thumbCount: 2,
+        waveBuckets: 4,
+      );
+
+      expect(audio.calls.length, 1);
     });
   });
 }
