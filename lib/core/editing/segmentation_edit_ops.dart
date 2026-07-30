@@ -34,9 +34,32 @@ abstract final class SegmentationEditOps {
   static int _frameAfter(int ms, double fps) =>
       _msOfFrame(_frameIndex(ms, fps) + 1, fps);
 
-  /// ms 处的帧点向前收缩一帧得到的合法帧点（用作区间上界）
-  static int _frameBefore(int ms, double fps) =>
-      _msOfFrame(_frameIndex(ms, fps) - 1, fps);
+  /// clamp 上界：返回满足 "endMs - p >= frameMs(fps)"（即收缩后至少留出
+  /// 一帧尾段）的最大合法帧点 p。
+  ///
+  /// 用于替换此前直接用 `_msOfFrame(_frameIndex(endMs, fps) - 1, fps)`
+  /// （"单纯回退一帧"）作为区间上界的写法：当 [endMs] 本身是合法帧点时，
+  /// 两者结果相同——因为 30fps 下任意两个相邻帧点间距恒为 33/34ms，都
+  /// >= frameMs(30)=33，回退一帧天然满足留白约束。但当 [endMs] 非帧点
+  /// （真实素材片长的常态，因为 `durationMs` 是外部数据、我们无法选择）
+  /// 时，"单纯回退一帧"只是"严格小于 endMs 的最大帧点"，它与 endMs 的
+  /// 实际间距可能远小于一帧（最小可至 1ms）——把边界 clamp 到这个上界会
+  /// 产出短于一帧的末段，违反"任何单元/镜头时长不小于一帧"这条不变量
+  /// （复审实测：30fps 下 durationMs=3984/59987/92253 等真实片长会因此
+  /// 触发 `holdsInvariants` 断言失败）。这里改为直接在帧序号域里找"退让
+  /// 一帧时长"之后落在的帧点，从根源上保证退让幅度恒 >= 一帧。
+  static int _maxBoundaryLeavingOneFrame(int endMs, double fps) {
+    final gap = frameMs(fps);
+    final threshold = endMs - gap;
+    var idx = _frameIndex(threshold, fps);
+    if (idx < 0) idx = 0;
+    // _msOfFrame 的四舍五入可能让换算回来的 ms 略大于 threshold（超出退让
+    // 幅度要求），需要回退校正，确保结果严格满足 endMs - p >= gap
+    while (idx > 0 && _msOfFrame(idx, fps) > threshold) {
+      idx--;
+    }
+    return _msOfFrame(idx, fps);
+  }
 
   static List<SemanticUnit> _reindex(List<SemanticUnit> units) => [
         for (var i = 0; i < units.length; i++) units[i].copyWith(index: i),
@@ -51,7 +74,7 @@ abstract final class SegmentationEditOps {
     final left = units[i];
     final right = units[i + 1];
     final minB = _frameAfter(left.startMs, fps);
-    final maxB = _frameBefore(right.endMs, fps);
+    final maxB = _maxBoundaryLeavingOneFrame(right.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps).clamp(minB, maxB);
 
@@ -92,7 +115,7 @@ abstract final class SegmentationEditOps {
     final left = unit.shots[s];
     final right = unit.shots[s + 1];
     final minB = _frameAfter(left.startMs, fps);
-    final maxB = _frameBefore(right.endMs, fps);
+    final maxB = _maxBoundaryLeavingOneFrame(right.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps).clamp(minB, maxB);
 
@@ -120,7 +143,7 @@ abstract final class SegmentationEditOps {
     final durationMs = units.last.endMs;
     final unit = units[u];
     final minB = _frameAfter(unit.startMs, fps);
-    final maxB = _frameBefore(unit.endMs, fps);
+    final maxB = _maxBoundaryLeavingOneFrame(unit.endMs, fps);
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps);
     if (b < minB || b > maxB) return null;
@@ -184,8 +207,9 @@ abstract final class SegmentationEditOps {
     final durationMs = units.last.endMs;
     final unit = units[u];
     final b = _snap(rawMs, fps);
-    final s = unit.shots.indexWhere(
-        (shot) => _frameAfter(shot.startMs, fps) <= b && b <= _frameBefore(shot.endMs, fps));
+    final s = unit.shots.indexWhere((shot) =>
+        _frameAfter(shot.startMs, fps) <= b &&
+        b <= _maxBoundaryLeavingOneFrame(shot.endMs, fps));
     if (s == -1) return null;
 
     final shot = unit.shots[s];

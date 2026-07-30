@@ -196,86 +196,217 @@ void main() {
   });
 
   group('末端边界非帧点片长回归（Critical 1：真实片长几乎必然非帧点）', () {
-    // 30fps 下 durationMs=4001 非帧点（真实视频片长常见情形）。末单元
-    // endMs 与其末镜头 endMs 都等于 4001，理应被 holdsInvariants 豁免帧点
-    // 检查（片长是外部数据，强行帧对齐会丢失片尾内容）；除此之外的一切
-    // 边界（含首边界 0、单元间边界、所有其余镜头间边界）仍必须帧对齐。
-    const durationMs = 4001;
+    // 30fps 下真实视频片长几乎必然落在帧点之外。末单元 endMs 与其末镜头
+    // endMs 都恒等于 durationMs，理应被 holdsInvariants 豁免帧点检查（片长
+    // 是外部数据，强行帧对齐会丢失片尾内容）；除此之外的一切边界（含首边界
+    // 0、单元间边界、所有其余镜头间边界）仍必须帧对齐——且任何操作产出的
+    // 结构，其末段时长仍必须 >= 1 帧（这是本组回归新增的重点：clamp 上界
+    // 若只满足"帧点"而不保证"距 endMs >= 1 帧"，会在把边界推到极右时产出
+    // 短于一帧的末段）。
+    //
+    // 七个片长覆盖三类情形（用 python 独立复算校验，见提交信息）：
+    // - 3984 / 59987 / 92253：复审实测在旧实现下会触发非法结构（旧
+    //   `_frameBefore` 退让幅度 20~17ms，不足一帧 33ms）
+    // - 4001 / 4016 / 12345 / 75302：旧实现退让幅度恰好 >= 一帧，本就不崩，
+    //   列入是为了确认修复不改变这些已经正确的既有行为
+    // - 75302 与 92253 是本项目真实测试素材的实际片长
+    const durations = [3984, 4001, 4016, 12345, 59987, 75302, 92253];
 
-    List<SemanticUnit> fixtureNonFrameDuration() => const [
-          SemanticUnit(index: 0, startMs: 0, endMs: 2000, transcript: 'A', shots: [
+    List<SemanticUnit> fixtureFor(int durationMs) => [
+          const SemanticUnit(
+              index: 0, startMs: 0, endMs: 2000, transcript: 'A', shots: [
             Shot(startMs: 0, endMs: 1000),
             Shot(startMs: 1000, endMs: 2000),
           ]),
           SemanticUnit(
               index: 1, startMs: 2000, endMs: durationMs, transcript: 'B', shots: [
-            Shot(startMs: 2000, endMs: 3000),
+            const Shot(startMs: 2000, endMs: 3000),
             Shot(startMs: 3000, endMs: durationMs),
           ]),
         ];
 
-    test('holdsInvariants 对非帧点片长的合法结构返回 true', () {
-      expect(
-          SegmentationEditOps.holdsInvariants(
-              fixtureNonFrameDuration(), durationMs, fps),
-          true);
+    test('holdsInvariants 对非帧点片长的合法结构返回 true（对全部片长成立）', () {
+      for (final d in durations) {
+        expect(SegmentationEditOps.holdsInvariants(fixtureFor(d), d, fps), true,
+            reason: 'durationMs=$d');
+      }
     });
 
-    test('moveUnitBoundary 移动末单元与前一单元的边界后，末单元 endMs 仍为 4001', () {
-      List<SemanticUnit>? out;
-      expect(() {
-        out = SegmentationEditOps.moveUnitBoundary(
-            fixtureNonFrameDuration(), 0, 2500,
-            fps: fps);
-      }, returnsNormally);
-      expect(out, isNotNull);
-      expect(out![1].endMs, durationMs);
-      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    for (final d in durations) {
+      group('durationMs=$d', () {
+        test('moveUnitBoundary 推到极右：末单元 endMs 保持、末段不短于一帧', () {
+          List<SemanticUnit>? out;
+          expect(() {
+            out = SegmentationEditOps.moveUnitBoundary(fixtureFor(d), 0, 999999,
+                fps: fps);
+          }, returnsNormally);
+          expect(out, isNotNull);
+          expect(out![1].endMs, d);
+          expect(SegmentationEditOps.holdsInvariants(out!, d, fps), true);
+        });
+
+        test('moveShotBoundary 在末单元内推到极右：末镜头 endMs 保持、末段不短于一帧',
+            () {
+          List<SemanticUnit>? out;
+          expect(() {
+            out = SegmentationEditOps.moveShotBoundary(fixtureFor(d), 1, 0, 999999,
+                fps: fps);
+          }, returnsNormally);
+          expect(out, isNotNull);
+          expect(out![1].shots.last.endMs, d);
+          expect(SegmentationEditOps.holdsInvariants(out!, d, fps), true);
+        });
+
+        test('splitUnitAt 在末单元可达的最远合法点拆分：末段不短于一帧', () {
+          final maxB = _expectedMaxBoundary(d, fps);
+          List<SemanticUnit>? out;
+          expect(() {
+            out = SegmentationEditOps.splitUnitAt(fixtureFor(d), 1, maxB,
+                fps: fps, sentences: const []);
+          }, returnsNormally);
+          expect(out, isNotNull, reason: 'maxB=$maxB 应是一个合法拆分点');
+          expect(out!.last.endMs, d);
+          expect(SegmentationEditOps.holdsInvariants(out!, d, fps), true);
+        });
+
+        test('splitShotAt 在末单元末镜头可达的最远合法点拆分：末段不短于一帧', () {
+          final maxB = _expectedMaxBoundary(d, fps);
+          List<SemanticUnit>? out;
+          expect(() {
+            out = SegmentationEditOps.splitShotAt(fixtureFor(d), 1, maxB, fps: fps);
+          }, returnsNormally);
+          expect(out, isNotNull, reason: 'maxB=$maxB 应是一个合法拆分点');
+          expect(out![1].shots.last.endMs, d);
+          expect(SegmentationEditOps.holdsInvariants(out!, d, fps), true);
+        });
+
+        test('mergeUnitWithPrevious 合并末单元后，合并结果 endMs 仍为 $d', () {
+          List<SemanticUnit>? out;
+          expect(() {
+            out = SegmentationEditOps.mergeUnitWithPrevious(fixtureFor(d), 1);
+          }, returnsNormally);
+          expect(out, isNotNull);
+          expect(out!.single.endMs, d);
+          expect(SegmentationEditOps.holdsInvariants(out!, d, fps), true);
+        });
+      });
+    }
+  });
+
+  group('clamp 上界收缩幅度不小于一帧（Critical 1 修法自检：帧点 endMs 上新旧算法一致）', () {
+    // 当 endMs 本身就是合法帧点时，新的 clamp 上界算法必须与旧的
+    // `_frameBefore(endMs, fps)`（单纯回退一帧）给出相同结果——因为任意
+    // 两个相邻帧点间距在 30fps 下恒为 33 或 34ms，都 >= frameMs(30)=33，
+    // 回退一帧天然满足"留白 >= 一帧"的约束。下列数值（67/100/4000/96233）
+    // 用 python 独立复算验证过与旧 `_frameBefore` 结果一致（见提交信息），
+    // 通过 moveShotBoundary 这一个调用点验证，因为四处 clamp 上界共享同一
+        // 私有帮助函数。
+    test('endMs=67（帧点）：推到极右夹到 33（与旧 _frameBefore 结果一致）', () {
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 67, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 33),
+          Shot(startMs: 33, endMs: 67),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 0, 0, 999999, fps: fps)!;
+      expect(out[0].shots[0].endMs, 33);
+      expect(SegmentationEditOps.holdsInvariants(out, 67, fps), true);
     });
 
-    test('moveShotBoundary 在末单元内部移动，不影响末尾非帧点边界', () {
-      List<SemanticUnit>? out;
-      expect(() {
-        out = SegmentationEditOps.moveShotBoundary(
-            fixtureNonFrameDuration(), 1, 0, 3300,
-            fps: fps);
-      }, returnsNormally);
-      expect(out, isNotNull);
-      expect(out![1].shots.last.endMs, durationMs);
-      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    test('endMs=100（帧点）：推到极右夹到 67（与旧 _frameBefore 结果一致）', () {
+      final units = [
+        const SemanticUnit(
+            index: 0, startMs: 0, endMs: 100, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 33),
+          Shot(startMs: 33, endMs: 100),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 0, 0, 999999, fps: fps)!;
+      expect(out[0].shots[0].endMs, 67);
+      expect(SegmentationEditOps.holdsInvariants(out, 100, fps), true);
     });
 
-    test('splitUnitAt 拆分末单元后，新末单元 endMs 仍为 4001', () {
-      List<SemanticUnit>? out;
-      expect(() {
-        out = SegmentationEditOps.splitUnitAt(fixtureNonFrameDuration(), 1, 3000,
-            fps: fps, sentences: const []);
-      }, returnsNormally);
-      expect(out, isNotNull);
-      expect(out!.last.endMs, durationMs);
-      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    test('endMs=4000（帧点）：推到极右夹到 3967（与旧 _frameBefore 结果一致）', () {
+      final units = [
+        const SemanticUnit(
+            index: 0, startMs: 0, endMs: 2000, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 2000),
+        ]),
+        const SemanticUnit(
+            index: 1, startMs: 2000, endMs: 4000, transcript: 'B', shots: [
+          Shot(startMs: 2000, endMs: 3000),
+          Shot(startMs: 3000, endMs: 4000),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 1, 0, 999999, fps: fps)!;
+      expect(out[1].shots[0].endMs, 3967);
+      expect(SegmentationEditOps.holdsInvariants(out, 4000, fps), true);
     });
 
-    test('splitShotAt 拆分末单元最后一个镜头后仍满足不变量', () {
-      List<SemanticUnit>? out;
-      expect(() {
-        out = SegmentationEditOps.splitShotAt(fixtureNonFrameDuration(), 1, 3500,
-            fps: fps);
-      }, returnsNormally);
-      expect(out, isNotNull);
-      expect(out![1].shots.last.endMs, durationMs);
-      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
-    });
-
-    test('mergeUnitWithPrevious 合并末单元后，合并结果 endMs 仍为 4001', () {
-      List<SemanticUnit>? out;
-      expect(() {
-        out = SegmentationEditOps.mergeUnitWithPrevious(
-            fixtureNonFrameDuration(), 1);
-      }, returnsNormally);
-      expect(out, isNotNull);
-      expect(out!.single.endMs, durationMs);
-      expect(SegmentationEditOps.holdsInvariants(out!, durationMs, fps), true);
+    test('endMs=96233（帧点）：推到极右夹到 96200（与旧 _frameBefore 结果一致）', () {
+      final units = [
+        const SemanticUnit(
+            index: 0, startMs: 0, endMs: 90000, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 90000),
+        ]),
+        const SemanticUnit(
+            index: 1, startMs: 90000, endMs: 96233, transcript: 'B', shots: [
+          Shot(startMs: 90000, endMs: 93000),
+          Shot(startMs: 93000, endMs: 96233),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 1, 0, 999999, fps: fps)!;
+      expect(out[1].shots[0].endMs, 96200);
+      expect(SegmentationEditOps.holdsInvariants(out, 96233, fps), true);
     });
   });
+
+  group('边界情形：无合法移动/拆分位置时不产出非法结构（Critical 1 修法自检）', () {
+    // 每个单元都恰好卡在"1 帧最小时长"上：unit0=[0,33]（帧点终点），
+    // unit1=[33,73]（末单元，非帧点终点，尾段刚好 40ms，仍 >= 1 帧）——
+    // 两侧都已贴着各自的最小时长下限，没有任何位置可再移动/拆分。
+    List<SemanticUnit> tightFixture() => const [
+          SemanticUnit(index: 0, startMs: 0, endMs: 33, transcript: 'A', shots: [
+            Shot(startMs: 0, endMs: 33),
+          ]),
+          SemanticUnit(index: 1, startMs: 33, endMs: 73, transcript: 'B', shots: [
+            Shot(startMs: 33, endMs: 73),
+          ]),
+        ];
+    const tightDuration = 73;
+
+    test('moveUnitBoundary 推到极右：无合法位置，边界原地不变（no-op），不产出非法结构', () {
+      final out =
+          SegmentationEditOps.moveUnitBoundary(tightFixture(), 0, 999999, fps: fps)!;
+      expect(out[0].endMs, 33, reason: '两侧都已是最小时长，边界无法移动');
+      expect(SegmentationEditOps.holdsInvariants(out, tightDuration, fps), true);
+    });
+
+    test('splitUnitAt 尝试拆分已贴最小时长的末单元：无合法拆分点，返回 null 而非非法结构', () {
+      final out = SegmentationEditOps.splitUnitAt(tightFixture(), 1, 999999,
+          fps: fps, sentences: const []);
+      expect(out, isNull);
+    });
+
+    test('splitShotAt 尝试拆分已贴最小时长的末单元末镜头：无合法拆分点，返回 null', () {
+      final out =
+          SegmentationEditOps.splitShotAt(tightFixture(), 1, 999999, fps: fps);
+      expect(out, isNull);
+    });
+  });
+}
+
+/// 与实现里 clamp 上界所用私有算法（帧序号域回退一帧，必要时回退校正）的
+/// 独立测试参考实现：给定 endMs，返回"收缩后至少留一帧尾段"的最大合法帧
+/// 点。仅用于在测试里独立算出各片长下拆分操作可达的最远合法拆分点（构造
+/// 输入），不依赖被测实现本身的私有函数。
+int _expectedMaxBoundary(int endMs, double fps) {
+  final gap = SegmentationEditOps.frameMs(fps);
+  final threshold = endMs - gap;
+  var idx = (threshold * fps / 1000).round();
+  if (idx < 0) idx = 0;
+  while (idx > 0 && (idx * 1000 / fps).round() > threshold) {
+    idx--;
+  }
+  return (idx * 1000 / fps).round();
 }
