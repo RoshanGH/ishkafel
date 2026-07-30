@@ -118,6 +118,16 @@ Widget _wrapWithNavigator({
   );
 }
 
+/// 模拟按下 ⌘Z（撤销）/ ⇧⌘Z（重做）：分别按下修饰键再敲 Z，再释放修饰键，
+/// 与真实键盘按键顺序一致，确保 SingleActivator 的 meta/shift 判定命中。
+Future<void> _pressUndoShortcut(WidgetTester tester, {bool redo = false}) async {
+  await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+  if (redo) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+  if (redo) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+  await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+}
+
 void main() {
   late InMemoryTaskRepository repo;
   late FakePlaybackController playback;
@@ -342,5 +352,101 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byType(PlayerPanel), findsNothing);
+  });
+
+  group('undo/redo（评审 Critical 2：全局无 UI 入口）', () {
+    testWidgets('按 ⌘Z 撤销一次编辑：确认后落库为编辑前的原始 units', (tester) async {
+      await repo.save(task);
+      await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('unit-row-1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('inspector-start-minus')));
+      await tester.pump();
+
+      await _pressUndoShortcut(tester);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('wb-1');
+      expect(saved!.units, task.units, reason: '⌘Z 应已把编辑撤销回原始状态');
+    });
+
+    testWidgets('canUndo=false 时按 ⌘Z 不崩溃', (tester) async {
+      await repo.save(task);
+      await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      await _pressUndoShortcut(tester);
+      await tester.pump();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(TimelineView), findsOneWidget);
+    });
+
+    testWidgets('台词 TextField 获焦时按 ⌘Z 不触发编辑器 undo（让路给系统文本撤销）',
+        (tester) async {
+      await repo.save(task);
+      await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('unit-row-1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('inspector-start-minus')));
+      await tester.pump();
+
+      await tester.showKeyboard(find.byKey(const Key('inspector-transcript-field')));
+      await tester.pump();
+      await _pressUndoShortcut(tester);
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('wb-1');
+      expect(saved!.units, isNot(equals(task.units)),
+          reason: '焦点在文本框时 ⌘Z 不应触发编辑器 undo，编辑应保留');
+    });
+
+    testWidgets('时间线工具条撤销/重做按钮：禁用态正确且点击生效', (tester) async {
+      await repo.save(task);
+      await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      IconButton undoBtn() =>
+          tester.widget<IconButton>(find.byKey(const Key('timeline-undo-btn')));
+      IconButton redoBtn() =>
+          tester.widget<IconButton>(find.byKey(const Key('timeline-redo-btn')));
+
+      expect(undoBtn().onPressed, isNull, reason: '尚无编辑，撤销按钮应禁用');
+      expect(redoBtn().onPressed, isNull, reason: '尚无撤销，重做按钮应禁用');
+
+      await tester.tap(find.byKey(const Key('unit-row-1')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('inspector-start-minus')));
+      await tester.pump();
+
+      expect(undoBtn().onPressed, isNotNull, reason: '编辑后撤销按钮应可用');
+      expect(redoBtn().onPressed, isNull);
+
+      await tester.tap(find.byKey(const Key('timeline-undo-btn')));
+      await tester.pump();
+
+      expect(undoBtn().onPressed, isNull, reason: '撤销到底后按钮应重新禁用');
+      expect(redoBtn().onPressed, isNotNull, reason: '撤销后重做按钮应可用');
+
+      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('wb-1');
+      expect(saved!.units, task.units, reason: '按钮撤销应与快捷键撤销效果一致');
+    });
   });
 }

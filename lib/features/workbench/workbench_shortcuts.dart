@@ -20,6 +20,16 @@ class PageStepFrameIntent extends Intent {
   const PageStepFrameIntent(this.frames);
 }
 
+/// 页面级「撤销」意图：转发到 [SegmentationEditorController.undo]
+class PageUndoIntent extends Intent {
+  const PageUndoIntent();
+}
+
+/// 页面级「重做」意图：转发到 [SegmentationEditorController.redo]
+class PageRedoIntent extends Intent {
+  const PageRedoIntent();
+}
+
 /// 判断当前键盘焦点是否落在可编辑文本控件（如台词输入框）内。
 ///
 /// 页面级快捷键必须在这种情况下"放行"——不拦截空格/方向键，让它们正常
@@ -58,20 +68,58 @@ class PageStepFrameAction extends Action<PageStepFrameIntent> {
   void invoke(PageStepFrameIntent intent) => _callback(intent.frames);
 }
 
-/// 快捷键激活表：空格→切换播放，←/→→逐帧步进 ±1 帧
+/// 页面级「撤销」Action：焦点在文本框时禁用，让路给系统文本撤销（而不是
+/// 撤销切分编辑器的结构性修改）——语义与 [PageTogglePlayAction] 一致。
+class PageUndoAction extends Action<PageUndoIntent> {
+  PageUndoAction(this._callback);
+  final VoidCallback _callback;
+
+  @override
+  bool isEnabled(PageUndoIntent intent) => !isEditableTextFocused();
+
+  @override
+  void invoke(PageUndoIntent intent) => _callback();
+}
+
+/// 页面级「重做」Action，同上原因用 `isEnabled` 在文本框聚焦时让路
+class PageRedoAction extends Action<PageRedoIntent> {
+  PageRedoAction(this._callback);
+  final VoidCallback _callback;
+
+  @override
+  bool isEnabled(PageRedoIntent intent) => !isEditableTextFocused();
+
+  @override
+  void invoke(PageRedoIntent intent) => _callback();
+}
+
+/// 快捷键激活表：空格→切换播放，←/→→逐帧步进 ±1 帧，
+/// ⌘Z/Ctrl+Z→撤销，⇧⌘Z/Ctrl+⇧Z→重做（macOS 用 ⌘，同时绑 Ctrl 供
+/// Windows/Linux 使用，本项目跨平台）
 const Map<ShortcutActivator, Intent> workbenchPlaybackShortcuts =
     <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.space): PageTogglePlayIntent(),
   SingleActivator(LogicalKeyboardKey.arrowLeft): PageStepFrameIntent(-1),
   SingleActivator(LogicalKeyboardKey.arrowRight): PageStepFrameIntent(1),
+  SingleActivator(LogicalKeyboardKey.keyZ, meta: true): PageUndoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
+      PageRedoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, control: true): PageUndoIntent(),
+  SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true):
+      PageRedoIntent(),
 };
 
-/// 快捷键动作表：组装 [PageTogglePlayAction]/[PageStepFrameAction]
+/// 快捷键动作表：组装 [PageTogglePlayAction]/[PageStepFrameAction]/
+/// [PageUndoAction]/[PageRedoAction]
 Map<Type, Action<Intent>> workbenchPlaybackActions({
   required VoidCallback onTogglePlay,
   required ValueChanged<int> onStepFrame,
+  required VoidCallback onUndo,
+  required VoidCallback onRedo,
 }) =>
     <Type, Action<Intent>>{
       PageTogglePlayIntent: PageTogglePlayAction(onTogglePlay),
       PageStepFrameIntent: PageStepFrameAction(onStepFrame),
+      PageUndoIntent: PageUndoAction(onUndo),
+      PageRedoIntent: PageRedoAction(onRedo),
     };

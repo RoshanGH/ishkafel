@@ -85,6 +85,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
         actions: workbenchPlaybackActions(
           onTogglePlay: _togglePlaybackFromShortcut,
           onStepFrame: _stepPlaybackFromShortcut,
+          onUndo: editor.undo,
+          onRedo: editor.redo,
         ),
         child: Column(
           children: [
@@ -139,7 +141,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       color: AppColors.surface,
       child: Column(
         children: [
-          _buildTimelineToolbar(),
+          _buildTimelineToolbar(widget.editor),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -170,11 +172,24 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     );
   }
 
-  Widget _buildTimelineToolbar() {
+  Widget _buildTimelineToolbar(SegmentationEditorController editor) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       child: Row(
         children: [
+          _undoRedoButton(
+            key: const Key('timeline-undo-btn'),
+            icon: Icons.undo,
+            enabled: editor.canUndo,
+            onTap: editor.undo,
+          ),
+          _undoRedoButton(
+            key: const Key('timeline-redo-btn'),
+            icon: Icons.redo,
+            enabled: editor.canRedo,
+            onTap: editor.redo,
+          ),
+          const SizedBox(width: 8),
           const Icon(Icons.zoom_out, color: AppColors.textTertiary, size: 16),
           Expanded(
             child: Slider(
@@ -187,6 +202,28 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           ),
           const Icon(Icons.zoom_in, color: AppColors.textTertiary, size: 16),
         ],
+      ),
+    );
+  }
+
+  /// 时间线工具条的撤销/重做按钮：对标剪映的可发现性，与 ⌘Z/⇧⌘Z 快捷键
+  /// 是同一份撤销栈；[enabled] 为 false 时降透明度且不响应点击。
+  Widget _undoRedoButton({
+    required Key key,
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) {
+    return IconButton(
+      key: key,
+      onPressed: enabled ? onTap : null,
+      visualDensity: VisualDensity.compact,
+      icon: Icon(
+        icon,
+        size: 16,
+        color: enabled
+            ? AppColors.textPrimary
+            : AppColors.textTertiary.withValues(alpha: 0.35),
       ),
     );
   }
