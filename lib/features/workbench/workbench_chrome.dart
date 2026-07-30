@@ -36,6 +36,38 @@ Future<LeaveAction?> showLeaveConfirmDialog(BuildContext context) {
   );
 }
 
+/// 播放后端降级（如构造真实播放器失败）时的常驻提示条（橙色系语义色）。
+///
+/// 用常驻 banner 而非一次性 SnackBar：一是不依赖计时器（widget 测试里更好
+/// 断言，不用担心自动消失的时序问题），二是审片台一旦进入无播放模式会
+/// 持续影响体验，用户应该随时能看到原因，而不是错过一闪而过的提示。
+class PlaybackDegradedBanner extends StatelessWidget {
+  const PlaybackDegradedBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('playback-degraded-banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: AppColors.orange.withValues(alpha: 0.16),
+      child: const Row(
+        children: [
+          Icon(Icons.warning_amber_rounded, color: AppColors.orange, size: 16),
+          SizedBox(width: 8),
+          Expanded(
+            child: Text('播放器不可用，当前仅可编辑切分',
+                style: TextStyle(
+                    color: AppColors.orange,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 审片台顶栏：返回按钮 + 成片信息 + 三步流程指示（阶段①激活）
 ///
 /// 纯展示组件，不持有状态；由 [WorkbenchPage] 传入文案与回调。

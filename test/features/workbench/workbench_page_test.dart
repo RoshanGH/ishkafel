@@ -232,6 +232,78 @@ void main() {
     expect(playback.calls, contains('stepFrames(-1, 30.0)'));
   });
 
+  testWidgets('播放器初始化异常时不崩溃且显示可见提示（评审 Important 1）', (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+      child: MaterialApp(
+        home: WorkbenchPage(
+          task: task,
+          playbackFactory: () => throw Exception(
+              'MediaKit.ensureInitialized must be called before using any API from package:media_kit.'),
+          mediaBuilder: _fakeMediaBuilder(),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('播放器不可用，当前仅可编辑切分'), findsOneWidget);
+    // 页面其余交互仍可用：三栏与时间线照常渲染
+    expect(find.byType(UnitListPanel), findsOneWidget);
+    expect(find.byType(TimelineView), findsOneWidget);
+  });
+
+  testWidgets('焦点在单元列表行（非 PlayerPanel）时按空格 → playback.isPlaying 仍能切换（评审 Important 2）',
+      (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
+    await tester.pumpAndSettle();
+
+    // 显式把键盘焦点移到单元列表某一行的内部 Focus 节点（而非 PlayerPanel）。
+    // 注：flutter_test 里 tester.tap() 并不会像真实桌面鼠标点击那样把焦点
+    // 转移到 InkWell/IconButton 等普通可聚焦控件（已用独立探针验证），因此
+    // 用 Focus.of(descendantContext).requestFocus() 显式复现"焦点落在别处"
+    // 这一评审场景，而不是依赖 tap 的副作用。
+    final rowTextContext = tester.element(find.text('第二句台词'));
+    Focus.of(rowTextContext).requestFocus();
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(playback.calls, contains('play()'));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(playback.calls, contains('pause()'));
+  });
+
+  testWidgets('焦点在台词 TextField 时按空格 → playback 未被触发（评审 Important 2）',
+      (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
+    await tester.pumpAndSettle();
+
+    // 选中单元后让台词输入框真正获得键盘焦点（用 showKeyboard 而非 tap，
+    // 避免坐标命中问题，且与 TextField 在真实场景下的聚焦方式一致）
+    await tester.tap(find.byKey(const Key('unit-row-0')));
+    await tester.pump();
+    await tester.showKeyboard(find.byKey(const Key('inspector-transcript-field')));
+    await tester.pump();
+
+    final callsBefore = List<String>.from(playback.calls);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+
+    // 播放未被触发（calls 未新增 play()/pause()）——即便 flutter_test 的
+    // sendKeyEvent 并不会像真实平台 IME 那样把空格真正打进文本框（已用独立
+    // 探针验证：字符输入走 TextInput 通道而非原始按键事件），本用例仍能
+    // 忠实验证"页面级快捷键在文本框聚焦时必须放行按键、不拦截"这一核心诉求。
+    expect(playback.calls, callsBefore);
+  });
+
   testWidgets('任务缺少 units 时显示错误占位而非崩溃', (tester) async {
     final brokenTask = RenewTask(
       id: 'wb-broken',
