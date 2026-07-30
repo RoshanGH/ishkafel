@@ -126,6 +126,36 @@ void main() {
     );
   });
 
+  testWidgets('③b 一次拖拽（多次 update）应合并为一条撤销记录', (tester) async {
+    final controller = _makeController();
+    final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+    await tester.pumpWidget(_wrap(
+      controller: controller,
+      geometry: geometry,
+      onSeek: (_) {},
+      onGeometryChanged: (_) {},
+    ));
+
+    // unit0/unit1 边界在 x=400px；手动分多次 moveBy 模拟一次连续拖拽触发的
+    // 多次 DragUpdate（真实拖拽一次会产生几十次 update）
+    final gesture = await tester.startGesture(const Offset(400, 46));
+    await tester.pump();
+    for (var i = 0; i < 5; i++) {
+      await gesture.moveBy(const Offset(10, 0));
+      await tester.pump();
+    }
+    await gesture.up();
+    await tester.pump();
+
+    expect(controller.units[0].endMs, isNot(2000));
+    expect(controller.canUndo, isTrue);
+
+    controller.undo();
+    expect(controller.units[0].endMs, 2000, reason: '一次 undo 应完全回到拖拽前状态');
+    expect(controller.units[1].startMs, 2000);
+    expect(controller.canUndo, isFalse, reason: '一次拖拽应只产生一条撤销记录');
+  });
+
   testWidgets('④在空白块体处拖拽 → onGeometryChanged 收到滚动后的 geometry（zoom 后可滚状态）',
       (tester) async {
     final controller = _makeController();
@@ -167,5 +197,33 @@ void main() {
 
     expect(controller.selection?.unitIndex, 0);
     expect(controller.selection?.shotIndex, 0);
+  });
+
+  testWidgets('⑤b 双击镜头块过程中不应出现中间的单元选中', (tester) async {
+    final controller = _makeController();
+    final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
+    final selectionLog = <EditorSelection?>[];
+    controller.addListener(() => selectionLog.add(controller.selection));
+    await tester.pumpWidget(_wrap(
+      controller: controller,
+      geometry: geometry,
+      onSeek: (_) {},
+      onGeometryChanged: (_) {},
+    ));
+
+    const shotPos = Offset(100, 85);
+    await tester.tapAt(shotPos);
+    await tester.pump(const Duration(milliseconds: 80)); // 双击窗口内，未超时
+    await tester.tapAt(shotPos);
+    // 冲掉可能残留的挂起定时器（若有），避免测试框架的 pending timer 检查报错
+    await tester.pump(const Duration(milliseconds: 350));
+
+    expect(controller.selection?.unitIndex, 0);
+    expect(controller.selection?.shotIndex, 0);
+    expect(
+      selectionLog.any((s) => s != null && s.shotIndex == null),
+      isFalse,
+      reason: '双击过程中不应出现中间的单元层选中（selectionLog=$selectionLog）',
+    );
   });
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -20,9 +21,22 @@ import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 /// （细粒度编辑入口），点击刻度轨触发 [onSeek]。
 ///
 /// 双击通过在 [onTapUp] 里手动记录上一次点击的时间与位置来判定，不使用
-/// [GestureDetector.onDoubleTapDown]：同一个手势识别器上同时挂载双击与水平
-/// 拖拽会让 `DoubleTapGestureRecognizer` 占住手势竞技场，拖动的判定被延后
-/// 甚至丢失，因此改为在单击回调里自行判断"双击"。
+/// [GestureDetector.onDoubleTapDown]：同一个手势识别器上同时挂载双击与单击/拖拽
+/// 会让 `DoubleTapGestureRecognizer` 在竞技场里持有指针，测试结束时它仍握着一个
+/// 未消解的 [kDoubleTapTimeout]（300ms）倒计时定时器，触发测试框架的
+/// "timer still pending" 检查失败；因此改为在单击回调里自行判断"双击"。
+///
+/// 拖拽起点的坐标读取使用 [DragStartBehavior.down]（见 [GestureDetector] 构造），
+/// 让 [onHorizontalDragStart] 报告的是指针刚按下时的原始坐标，而非默认
+/// [DragStartBehavior.start] 下"越过系统触摸容差（约 18~20px）后手势识别器胜出
+/// 时"的坐标——边界手柄的命中容差只有 ±6px，用默认行为会把合法的边界拖拽误判
+/// 成滚动。这与双击定时器泄漏是两个独立问题。
+///
+/// 命中边界手柄时会开启一个"拖拽会话"（[SegmentationEditorController.
+/// beginDragSession]/[endDragSession]）：一次连续拖拽会触发几十次
+/// [onHorizontalDragUpdate]，若每次都单独调用 moveUnitBoundary/moveShotBoundary
+/// 都各自入 undo 栈，用户要撤销几十次才能回退一次拖动；会话期间的移动不逐次
+/// 入栈，拖拽结束时才合并为一条记录。
 class TimelineView extends StatefulWidget {
   final SegmentationEditorController controller;
   final TimelineGeometry geometry;
@@ -52,6 +66,15 @@ class _TimelineViewState extends State<TimelineView> {
   DateTime? _lastTapTime;
   Offset? _lastTapPosition;
 
+  /// 单击镜头块后延迟到双击窗口超时才执行的"选中所在单元"任务；若窗口内
+  /// 来了第二击，则取消该任务、直接选中镜头层，避免选中态先跳单元再跳镜头
+  /// 的闪烁。
+  Timer? _pendingUnitSelectTimer;
+
+  /// 缩略图解码请求的递增序号：连续两次 media 变更时，慢的那次解码结果到达
+  /// 时已不是最新请求，需丢弃并 dispose，避免覆盖新结果（竞态）。
+  int _decodeRequestId = 0;
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +91,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   void dispose() {
+    _pendingUnitSelectTimer?.cancel();
     _disposeThumbImages(_thumbImages);
     super.dispose();
   }
@@ -81,7 +105,12 @@ class _TimelineViewState extends State<TimelineView> {
 
   /// 把 [media] 的缩略图文件路径解码为 [ui.Image]；文件不存在或解码失败均跳过
   /// 并记录警告日志（时间线缩略图是辅助视觉，不应阻断审片台）。
+  ///
+  /// 用递增的 [_decodeRequestId] 作为"取消令牌"：解码是异步 IO，若 media 连续
+  /// 变更两次，先发出的慢请求可能比后发出的快请求更晚完成；写回前比对请求号，
+  /// 不是最新请求就丢弃解码结果（并 dispose），不覆盖新结果。
   Future<void> _decodeThumbs(TimelineMedia? media) async {
+    final requestId = ++_decodeRequestId;
     final paths = media?.thumbPaths ?? const <String>[];
     final decoded = <ui.Image>[];
     for (final path in paths) {
@@ -96,7 +125,7 @@ class _TimelineViewState extends State<TimelineView> {
         AppLog.warn('时间线缩略图解码失败：$path，$e');
       }
     }
-    if (!mounted) {
+    if (!mounted || requestId != _decodeRequestId) {
       _disposeThumbImages(decoded);
       return;
     }
@@ -115,18 +144,26 @@ class _TimelineViewState extends State<TimelineView> {
         position, widget.controller.units, widget.geometry);
     switch (hit) {
       case RulerHit(:final ms):
+        _cancelPendingUnitSelect();
         widget.onSeek(ms);
       case UnitBlockHit(:final unitIndex):
+        _cancelPendingUnitSelect();
         widget.controller.select(EditorSelection.unit(unitIndex));
       case ShotBlockHit(:final unitIndex, :final shotIndex):
-        // 双击镜头块才进入镜头层选中（细粒度）；单击只选中所在单元（粗粒度）
-        widget.controller.select(isDoubleTap
-            ? EditorSelection.shot(unitIndex, shotIndex)
-            : EditorSelection.unit(unitIndex));
+        if (isDoubleTap) {
+          // 双击：取消尚未触发的"选中单元"延迟任务，直接进入镜头层选中，
+          // 避免选中态先跳单元再跳镜头的闪烁
+          _cancelPendingUnitSelect();
+          widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
+        } else {
+          // 单击：不立即选中单元，先等一个双击窗口——如果双击窗口内没有
+          // 第二击，才真正选中所在单元（粗粒度）
+          _schedulePendingUnitSelect(unitIndex);
+        }
       case UnitBoundaryHit():
       case ShotBoundaryHit():
       case null:
-        break;
+        _cancelPendingUnitSelect();
     }
   }
 
@@ -141,13 +178,29 @@ class _TimelineViewState extends State<TimelineView> {
     return withinTime && withinSlop;
   }
 
-  /// 用 onHorizontalDragDown（原始按下位置）而非 onHorizontalDragStart 做命中
-  /// 判定：onHorizontalDragStart 要等指针移动超过系统触摸容差（约 18~20px）才
-  /// 触发，此时坐标早已偏出边界手柄 ±6px 的判定窗口，会把合法的边界拖拽误判为
-  /// 滚动。
-  void _handleDragDown(DragDownDetails details) {
-    _dragHit = TimelineHitTester.hitTest(
+  void _schedulePendingUnitSelect(int unitIndex) {
+    _cancelPendingUnitSelect();
+    _pendingUnitSelectTimer = Timer(kDoubleTapTimeout, () {
+      _pendingUnitSelectTimer = null;
+      widget.controller.select(EditorSelection.unit(unitIndex));
+    });
+  }
+
+  void _cancelPendingUnitSelect() {
+    _pendingUnitSelectTimer?.cancel();
+    _pendingUnitSelectTimer = null;
+  }
+
+  /// 命中边界手柄时开启拖拽会话（多次 update 合并为一条撤销记录）；
+  /// [DragStartBehavior.down]（见 [build]）确保这里拿到的是指针刚按下时的
+  /// 原始坐标，落在边界手柄 ±6px 的判定窗口内。
+  void _handleDragStart(DragStartDetails details) {
+    final hit = TimelineHitTester.hitTest(
         details.localPosition, widget.controller.units, widget.geometry);
+    _dragHit = hit;
+    if (hit is UnitBoundaryHit || hit is ShotBoundaryHit) {
+      widget.controller.beginDragSession();
+    }
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
@@ -168,9 +221,15 @@ class _TimelineViewState extends State<TimelineView> {
     widget.onGeometryChanged(scrolled);
   }
 
-  void _handleDragEnd(DragEndDetails details) {
+  void _endDrag() {
     _dragHit = null;
+    // 不在会话中时调用无副作用；在会话中则把本次拖拽合并为一条撤销记录
+    widget.controller.endDragSession();
   }
+
+  void _handleDragEnd(DragEndDetails details) => _endDrag();
+
+  void _handleDragCancel() => _endDrag();
 
   @override
   Widget build(BuildContext context) {
@@ -179,10 +238,15 @@ class _TimelineViewState extends State<TimelineView> {
         _viewportWidth = constraints.maxWidth;
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
+          // 让 onHorizontalDragStart 报告指针刚按下时的原始坐标（而非默认的
+          // "越过触摸容差后手势识别器胜出时"的坐标），边界手柄 ±6px 的命中
+          // 判定才不会被拖拽启动阈值带偏
+          dragStartBehavior: DragStartBehavior.down,
           onTapUp: _handleTapUp,
-          onHorizontalDragDown: _handleDragDown,
+          onHorizontalDragStart: _handleDragStart,
           onHorizontalDragUpdate: _handleDragUpdate,
           onHorizontalDragEnd: _handleDragEnd,
+          onHorizontalDragCancel: _handleDragCancel,
           child: AnimatedBuilder(
             animation: widget.controller,
             builder: (context, _) => CustomPaint(
