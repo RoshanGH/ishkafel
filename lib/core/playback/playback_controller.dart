@@ -22,6 +22,11 @@ abstract class PlaybackController {
   /// 播放位置流（毫秒）。
   Stream<int> get positionMsStream;
 
+  /// 播放/暂停状态流：随 [play]/[pause] 或任何外部原因（如播放到片尾自动
+  /// 暂停）变化而推送最新值，供 UI 保持图标与真实状态同步，而不是靠本地
+  /// 变量盲目翻转。
+  Stream<bool> get playingStream;
+
   /// 当前播放位置（毫秒）。
   int get positionMs;
 
@@ -38,6 +43,8 @@ class FakePlaybackController implements PlaybackController {
 
   final StreamController<int> _positionController =
       StreamController<int>.broadcast();
+  final StreamController<bool> _playingController =
+      StreamController<bool>.broadcast();
 
   int _positionMs = 0;
   bool _isPlaying = false;
@@ -48,18 +55,21 @@ class FakePlaybackController implements PlaybackController {
     _positionMs = 0;
     _isPlaying = false;
     _positionController.add(_positionMs);
+    _playingController.add(_isPlaying);
   }
 
   @override
   Future<void> play() async {
     calls.add('play()');
     _isPlaying = true;
+    _playingController.add(_isPlaying);
   }
 
   @override
   Future<void> pause() async {
     calls.add('pause()');
     _isPlaying = false;
+    _playingController.add(_isPlaying);
   }
 
   @override
@@ -81,6 +91,9 @@ class FakePlaybackController implements PlaybackController {
   Stream<int> get positionMsStream => _positionController.stream;
 
   @override
+  Stream<bool> get playingStream => _playingController.stream;
+
+  @override
   int get positionMs => _positionMs;
 
   @override
@@ -90,5 +103,6 @@ class FakePlaybackController implements PlaybackController {
   Future<void> dispose() async {
     calls.add('dispose()');
     await _positionController.close();
+    await _playingController.close();
   }
 }

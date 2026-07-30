@@ -49,6 +49,7 @@ class PlayerPanel extends StatefulWidget {
 class PlayerPanelState extends State<PlayerPanel> {
   final _focusNode = FocusNode(debugLabel: 'PlayerPanel');
   late StreamSubscription<int> _positionSub;
+  late StreamSubscription<bool> _playingSub;
   int _positionMs = 0;
   bool _isPlaying = false;
 
@@ -61,6 +62,13 @@ class PlayerPanelState extends State<PlayerPanel> {
       if (!mounted) return;
       setState(() => _positionMs = ms);
     });
+    // 订阅播放状态流：无论状态变化来自本面板按钮、页面级快捷键，还是外部
+    // 原因（如播放到片尾自动暂停），图标都只有一份真源（真实 isPlaying），
+    // 不再靠本地变量盲目翻转（评审 Important 2）。
+    _playingSub = widget.playback.playingStream.listen((playing) {
+      if (!mounted) return;
+      setState(() => _isPlaying = playing);
+    });
   }
 
   @override
@@ -68,11 +76,16 @@ class PlayerPanelState extends State<PlayerPanel> {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.playback, widget.playback)) {
       _positionSub.cancel();
+      _playingSub.cancel();
       _positionMs = widget.playback.positionMs;
       _isPlaying = widget.playback.isPlaying;
       _positionSub = widget.playback.positionMsStream.listen((ms) {
         if (!mounted) return;
         setState(() => _positionMs = ms);
+      });
+      _playingSub = widget.playback.playingStream.listen((playing) {
+        if (!mounted) return;
+        setState(() => _isPlaying = playing);
       });
     }
   }
@@ -80,10 +93,18 @@ class PlayerPanelState extends State<PlayerPanel> {
   @override
   void dispose() {
     _positionSub.cancel();
+    _playingSub.cancel();
     _focusNode.dispose();
     super.dispose();
   }
 
+  /// 切换播放/暂停：翻转决策仍取自"翻转前"的 [_isPlaying]（决定该调用
+  /// play() 还是 pause()），但翻转后的显示状态改为 await 完成后重新读取
+  /// [PlaybackController.isPlaying] 这一真实状态，而不是对本地变量取反
+  /// ——快速连按两次时，两次调用都可能基于翻转前的旧状态判定为同一个
+  /// 操作（例如都调用 play()），若仍对本地变量取反两次，图标会错误地翻回
+  /// 与真实状态相反的一面（评审 Important 2）。订阅 [PlaybackController.
+  /// playingStream]（见 [initState]）进一步保证外部状态变化也能同步图标。
   Future<void> _togglePlay() async {
     if (_isPlaying) {
       await widget.playback.pause();
@@ -91,7 +112,7 @@ class PlayerPanelState extends State<PlayerPanel> {
       await widget.playback.play();
     }
     if (!mounted) return;
-    setState(() => _isPlaying = !_isPlaying);
+    setState(() => _isPlaying = widget.playback.isPlaying);
   }
 
   Future<void> _stepFrame(int frames) => widget.playback.stepFrames(frames, widget.fps);

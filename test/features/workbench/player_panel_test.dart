@@ -99,6 +99,60 @@ void main() {
     expect(playback.calls, contains('stepFrames(-1, $_fps)'));
   });
 
+  group('播放状态同步（评审 Important 2：盲翻转）', () {
+    testWidgets('快速连按两次播放按钮后，图标与真实 isPlaying 保持一致', (tester) async {
+      final playback = FakePlaybackController();
+      await tester.pumpWidget(_wrap(playback));
+      await tester.pump();
+
+      // 直接同步调用两次 onPressed（不经过 tester.tap()/await，也不在两次
+      // 调用间 pump）：两次 _togglePlay() 的决策都发生在第一次 play() 的
+      // await 完成之前（微任务尚未有机会执行），复现"双双调用 play()"的
+      // 竞态——若用 await tester.tap() 顺序点两次，两次调用间的 await 会
+      // 让微任务先跑完，退化为普通顺序切换，测不出这个问题
+      final button =
+          tester.widget<IconButton>(find.byKey(const Key('player-toggle-play')));
+      button.onPressed!();
+      button.onPressed!();
+      // 两次 setState 均发生在 await 之后的微任务里；第一次 pump 只驱动
+      // 微任务队列排空，第二次 pump 才让由此触发的 rebuild 真正落到树上
+      await tester.pump();
+      await tester.pump();
+
+      expect(playback.isPlaying, isTrue,
+          reason: '两次点击都判定为需要 play()，真实状态应为播放中');
+      final icon = tester.widget<Icon>(find.descendant(
+          of: find.byKey(const Key('player-toggle-play')),
+          matching: find.byType(Icon)));
+      expect(icon.icon, Icons.pause_circle_filled,
+          reason: '图标应与真实播放状态一致，而不是盲目翻转两次回到暂停图标');
+    });
+
+    testWidgets('外部改变 isPlaying（如自动暂停）后图标经 playingStream 同步', (tester) async {
+      final playback = FakePlaybackController();
+      await tester.pumpWidget(_wrap(playback));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('player-toggle-play')));
+      await tester.pump();
+      var icon = tester.widget<Icon>(find.descendant(
+          of: find.byKey(const Key('player-toggle-play')),
+          matching: find.byType(Icon)));
+      expect(icon.icon, Icons.pause_circle_filled);
+
+      // 不经过面板按钮，外部直接暂停（模拟播放到片尾自动暂停）
+      await playback.pause();
+      await tester.pump();
+      await tester.pump();
+
+      icon = tester.widget<Icon>(find.descendant(
+          of: find.byKey(const Key('player-toggle-play')),
+          matching: find.byType(Icon)));
+      expect(icon.icon, Icons.play_circle_fill,
+          reason: '外部暂停后图标应同步变为播放态图标');
+    });
+  });
+
   testWidgets('点击首尾按钮调用 seekMs(0)/seekMs(durationMs)', (tester) async {
     final playback = FakePlaybackController();
     await tester.pumpWidget(_wrap(playback));

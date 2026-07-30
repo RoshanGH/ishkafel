@@ -57,6 +57,18 @@ void main() {
       expect(controller.isPlaying, isFalse);
     });
 
+    test('playingStream 随 play/pause 切换发出对应布尔值（评审 Important 2）', () async {
+      final emitted = <bool>[];
+      final sub = controller.playingStream.listen(emitted.add);
+
+      await controller.play();
+      await controller.pause();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(emitted, [true, false]);
+      await sub.cancel();
+    });
+
     test('调用记录（calls 列表）可断言', () async {
       await controller.open('/tmp/fake.mp4');
       await controller.play();

@@ -26,6 +26,9 @@ class NoopPlaybackController implements PlaybackController {
   Stream<int> get positionMsStream => const Stream.empty();
 
   @override
+  Stream<bool> get playingStream => const Stream.empty();
+
+  @override
   int get positionMs => 0;
 
   @override

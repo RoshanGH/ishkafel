@@ -45,6 +45,9 @@ class MediaKitPlaybackController implements PlaybackController {
       player.stream.position.map((d) => d.inMilliseconds);
 
   @override
+  Stream<bool> get playingStream => player.stream.playing;
+
+  @override
   int get positionMs => player.state.position.inMilliseconds;
 
   @override
