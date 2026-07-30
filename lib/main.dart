@@ -24,6 +24,8 @@ import 'features/tasks/task_list_controller.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // 尽早接管：框架异常默认经 debugPrint 输出，真机直接跑二进制时不可见
+  AppLog.installFlutterErrorForwarding();
   MediaKit.ensureInitialized();
   final supportDir = await getApplicationSupportDirectory();
   final dataDir = Directory(p.join(supportDir.path, 'ishkafel_data'));
