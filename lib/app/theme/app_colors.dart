@@ -18,4 +18,8 @@ abstract final class AppColors {
   static const textPrimary = Color(0xFFF2F2F7);
   static const textSecondary = Color(0xFF98989F);
   static const textTertiary = Color(0xFF636366);
+
+  /// 播放器舞台底色：视频画面区域背后的纯黑背景，与其余暗色层级区分，
+  /// 让内容（画面/占位图标）在舞台内保持最高对比度。
+  static const stageBackground = Color(0xFF000000);
 }

@@ -39,10 +39,14 @@ class PlayerPanel extends StatefulWidget {
   });
 
   @override
-  State<PlayerPanel> createState() => _PlayerPanelState();
+  State<PlayerPanel> createState() => PlayerPanelState();
 }
 
-class _PlayerPanelState extends State<PlayerPanel> {
+/// 公开 State 类型（而非常见的 `_PlayerPanelState`私有类）：审片台页面级
+/// 全局快捷键（见 `workbench_page.dart`）需要通过 `GlobalKey<PlayerPanelState>`
+/// 转发到 [togglePlay]/[stepFrame]，与本面板内部按钮走同一份播放/暂停状态，
+/// 避免页面级与面板内部各自维护一份 `_isPlaying` 导致图标显示不同步。
+class PlayerPanelState extends State<PlayerPanel> {
   final _focusNode = FocusNode(debugLabel: 'PlayerPanel');
   late StreamSubscription<int> _positionSub;
   int _positionMs = 0;
@@ -96,6 +100,13 @@ class _PlayerPanelState extends State<PlayerPanel> {
 
   Future<void> _seekToEnd() => widget.playback.seekMs(widget.durationMs);
 
+  /// 供外部（审片台页面级全局快捷键）转发调用：与本面板内部按钮/快捷键
+  /// 完全一致的播放切换逻辑，确保 `_isPlaying` 显示状态只有一份真源。
+  Future<void> togglePlay() => _togglePlay();
+
+  /// 供外部（审片台页面级全局快捷键）转发调用的逐帧步进。
+  Future<void> stepFrame(int frames) => _stepFrame(frames);
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
@@ -134,7 +145,7 @@ class _PlayerPanelState extends State<PlayerPanel> {
         aspectRatio: 9 / 16,
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.black,
+            color: AppColors.stageBackground,
             borderRadius: BorderRadius.circular(12),
           ),
           clipBehavior: Clip.antiAlias,
