@@ -499,5 +499,42 @@ void main() {
 
       expect(c.canUndo, false);
     });
+
+    test(
+        '会话隔离（Minor B/C，评审复现）：文本会话进行中调用 endDragSession 不应提交/结束文本会话',
+        () {
+      final c = buildController();
+      c.beginTextSession();
+      expect(c.updateTranscript(0, '新台词'), true);
+
+      // 模拟一次未命中边界手柄的纯滚动拖拽结束：TimelineView._endDrag() 会
+      // 无条件调用 endDragSession()，即便当前根本没有拖拽会话在进行——
+      // 但此时台词会话仍在进行中，两者不应被同一个字段混为一谈
+      c.endDragSession();
+
+      expect(c.inTextSession, true, reason: 'endDragSession 不应结束正在进行的文本会话');
+      expect(c.canUndo, false, reason: '文本会话仍未结束，不应提前提交为 undo 记录');
+
+      c.endTextSession();
+      expect(c.canUndo, true);
+      c.undo();
+      expect(c.units[0].transcript, '第一段台词。');
+    });
+
+    test('会话隔离：拖拽会话进行中调用 endTextSession 不应提交/结束拖拽会话', () {
+      final c = buildController();
+      c.beginDragSession();
+      expect(c.moveUnitBoundary(0, 7000), true);
+
+      c.endTextSession();
+
+      expect(c.inDragSession, true, reason: 'endTextSession 不应结束正在进行的拖拽会话');
+      expect(c.canUndo, false, reason: '拖拽会话仍未结束，不应提前提交为 undo 记录');
+
+      c.endDragSession();
+      expect(c.canUndo, true);
+      c.undo();
+      expect(c.units, fixture());
+    });
   });
 }
