@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
@@ -39,5 +40,27 @@ void main() {
     const e = AiHttpException('boom', statusCode: 429);
     expect(e.statusCode, 429);
     expect(e.toString(), contains('boom'));
+  });
+
+  test('httpJsonPoster 响应体读取 hang 时按超时抛异常', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((req) async {
+      // 发送响应头但故意不结束响应体
+      req.response.statusCode = 200;
+      req.response.headers.set('x-test', 'hang');
+      req.response.write('partial');
+      // 故意不调用 close()，让响应 hang
+    });
+    // 用短超时调用，验证会抛出 TimeoutException
+    expect(
+      () => httpJsonPoster(
+        Uri.parse('http://127.0.0.1:${server.port}/api'),
+        {},
+        '{"test": "data"}',
+        timeout: const Duration(seconds: 1),
+      ),
+      throwsA(isA<TimeoutException>()),
+    );
   });
 }

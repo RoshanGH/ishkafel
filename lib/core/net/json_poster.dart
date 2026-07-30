@@ -27,25 +27,28 @@ class AiHttpException implements Exception {
   String toString() => 'AiHttpException($statusCode): $message';
 }
 
-/// 默认实现：dart:io HttpClient，120 秒超时
+/// 默认实现：dart:io HttpClient，超时覆盖完整请求-响应往返
 Future<JsonPostResult> httpJsonPoster(
-    Uri url, Map<String, String> headers, String body) async {
+    Uri url, Map<String, String> headers, String body,
+    {Duration timeout = const Duration(seconds: 120)}) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 30);
   try {
-    final request = await client.postUrl(url);
-    request.headers.contentType = ContentType.json;
-    headers.forEach(request.headers.set);
-    request.write(body);
-    final response =
-        await request.close().timeout(const Duration(seconds: 120));
-    final responseBody = await utf8.decoder.bind(response).join();
-    final responseHeaders = <String, String>{};
-    response.headers.forEach((k, v) => responseHeaders[k] = v.join(','));
-    return JsonPostResult(
-      statusCode: response.statusCode,
-      body: responseBody,
-      headers: responseHeaders,
-    );
+    // 将整个请求-响应往返包装在超时内
+    return await (() async {
+      final request = await client.postUrl(url);
+      request.headers.contentType = ContentType.json;
+      headers.forEach(request.headers.set);
+      request.write(body);
+      final response = await request.close();
+      final responseBody = await utf8.decoder.bind(response).join();
+      final responseHeaders = <String, String>{};
+      response.headers.forEach((k, v) => responseHeaders[k] = v.join(','));
+      return JsonPostResult(
+        statusCode: response.statusCode,
+        body: responseBody,
+        headers: responseHeaders,
+      );
+    }()).timeout(timeout);
   } finally {
     client.close();
   }
