@@ -18,7 +18,10 @@ class TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badge = statusBadge(task.status);
+    // 分析失败优先级高于普通状态徽标：只要 analysisError 非空就顶替显示
+    final badge = task.analysisError != null
+        ? (label: '分析失败', color: AppColors.red)
+        : statusBadge(task.status);
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,

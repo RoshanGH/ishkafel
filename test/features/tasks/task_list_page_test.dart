@@ -120,4 +120,38 @@ void main() {
       expect(find.textContaining('分析中'), findsWidgets);
     });
   });
+
+  group('分析失败反馈', () {
+    RenewTask makeFailedTask() => makeTask('f1', '失败任务', RenewTaskStatus.analyzing)
+        .copyWith(analysisError: '网络连接超时，请检查凭据配置');
+
+    testWidgets('分析失败任务显示红色「分析失败」徽标，优先于状态徽标', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeFailedTask());
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.text('分析失败'), findsOneWidget);
+      // 状态徽标文案「分析中」不应再出现（被失败徽标顶替）
+      expect(find.text('分析中'), findsNothing);
+    });
+
+    testWidgets('点击失败任务卡不进入审片台，显示失败原因与「重试」action', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeFailedTask());
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('失败任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('网络连接超时，请检查凭据配置'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+
+      // 点击「重试」不应崩溃（pipeline 未配置场景，controller 内部会直接返回）
+      await tester.tap(find.text('重试'));
+      await tester.pumpAndSettle();
+    });
+  });
 }

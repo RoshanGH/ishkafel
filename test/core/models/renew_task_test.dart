@@ -88,4 +88,28 @@ void main() {
     expect(parsed, withAsr);
     expect(parsed.asrSentences!.single.words.first.confidence, 0.9);
   });
+
+  test('analysisError 序列化往返一致', () {
+    final failed = task.copyWith(analysisError: '网络超时，请重试');
+    final parsed = RenewTask.fromJson(failed.toJson());
+    expect(parsed, failed);
+    expect(parsed.analysisError, '网络超时，请重试');
+  });
+
+  test('旧 JSON（无 analysisError 键）解析为 analysisError == null（向后兼容）', () {
+    final json = task.toJson()..remove('analysisError');
+    final parsed = RenewTask.fromJson(json);
+    expect(parsed.analysisError, isNull);
+  });
+
+  test('copyWith(clearAnalysisError: true) 清空 analysisError，其余字段不变', () {
+    final failed = task.copyWith(analysisError: '分析失败（模拟）');
+    final cleared = failed.copyWith(clearAnalysisError: true);
+    expect(cleared.analysisError, isNull);
+    expect(cleared.status, failed.status);
+    expect(cleared.id, failed.id);
+    // 不传 clearAnalysisError 时，普通 copyWith 不会清空既有错误信息
+    final untouched = failed.copyWith(name: '改名');
+    expect(untouched.analysisError, '分析失败（模拟）');
+  });
 }

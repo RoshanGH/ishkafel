@@ -16,6 +16,9 @@ final importServiceProvider = Provider<ImportService>(
 /// 分析管线：null 表示凭据未配置，导入后跳过自动分析（main.dart 按凭据完整性 override）
 final analysisPipelineProvider = Provider<AnalysisPipeline?>((ref) => null);
 
+/// 分析失败原因落库前的最大长度，避免超长堆栈/报错文本污染任务 JSON
+const _maxAnalysisErrorLength = 300;
+
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
   @override
   Future<List<RenewTask>> build() => ref.read(taskRepositoryProvider).findAll();
@@ -32,8 +35,54 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
     final pipeline = ref.read(analysisPipelineProvider);
     if (pipeline == null) return;
-    unawaited(pipeline.analyze(task).then((_) => reload()).catchError((e) {
+    unawaited(pipeline.analyze(task).then((_) => reload()).catchError((e) async {
       AppLog.warn('任务 ${task.id} 自动分析失败：$e');
+      await _markAnalysisFailed(task, e);
+    }));
+  }
+
+  /// 分析失败反馈：落库 analysisError（保持原状态，通常仍是 analyzing），
+  /// 供任务列表展示红色失败徽标并支持用户手动重试
+  Future<void> _markAnalysisFailed(RenewTask task, Object error) async {
+    final repo = ref.read(taskRepositoryProvider);
+    final current = await repo.findById(task.id) ?? task;
+    final failed = current.copyWith(
+      analysisError: _truncateAnalysisError(error),
+      updatedAt: DateTime.now(),
+    );
+    await repo.save(failed);
+    await reload();
+  }
+
+  String _truncateAnalysisError(Object error) {
+    final message = error.toString();
+    return message.length > _maxAnalysisErrorLength
+        ? message.substring(0, _maxAnalysisErrorLength)
+        : message;
+  }
+
+  /// 分析失败后手动重试：清空 analysisError、状态置回 analyzing 并落库刷新，
+  /// 随后重新触发分析管线；管线未配置（凭据缺失）时记录告警并直接返回。
+  Future<void> retryAnalysis(RenewTask task) async {
+    final pipeline = ref.read(analysisPipelineProvider);
+    if (pipeline == null) {
+      AppLog.warn('任务 ${task.id} 重试分析已跳过：分析管线未配置');
+      return;
+    }
+
+    final repo = ref.read(taskRepositoryProvider);
+    final resetTask = task.copyWith(
+      clearAnalysisError: true,
+      status: RenewTaskStatus.analyzing,
+      updatedAt: DateTime.now(),
+    );
+    await repo.save(resetTask);
+    await reload();
+
+    unawaited(
+        pipeline.analyze(resetTask).then((_) => reload()).catchError((e) async {
+      AppLog.warn('任务 ${resetTask.id} 重试分析失败：$e');
+      await _markAnalysisFailed(resetTask, e);
     }));
   }
 

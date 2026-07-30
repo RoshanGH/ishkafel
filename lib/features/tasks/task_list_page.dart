@@ -24,11 +24,16 @@ class TaskListPage extends ConsumerWidget {
     }
   }
 
-  /// 任务卡点击路由：`analyzing` 状态或缺少 units（尚未完成分析）不响应，
-  /// 只提示「分析中」；其余状态（待切分确认/选材中/已导出）且 units 非空
-  /// 均可进入审片台——选材中/已导出仅允许回看（WorkbenchPage 内部按状态
-  /// 禁用「确认切分」主按钮）。
-  void _openTask(BuildContext context, RenewTask task) {
+  /// 任务卡点击路由：analysisError 非空（分析失败）优先级最高——不进入审片台，
+  /// 只弹出失败原因与「重试」action；其次 `analyzing` 状态或缺少 units（尚未
+  /// 完成分析）不响应，只提示「分析中」；其余状态（待切分确认/选材中/已导出）
+  /// 且 units 非空均可进入审片台——选材中/已导出仅允许回看（WorkbenchPage
+  /// 内部按状态禁用「确认切分」主按钮）。
+  void _openTask(BuildContext context, WidgetRef ref, RenewTask task) {
+    if (task.analysisError != null) {
+      _showAnalysisFailedSnackBar(context, ref, task);
+      return;
+    }
     if (task.status == RenewTaskStatus.analyzing || task.units == null) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('任务分析中，请稍候')));
@@ -36,6 +41,20 @@ class TaskListPage extends ConsumerWidget {
     }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
+    );
+  }
+
+  void _showAnalysisFailedSnackBar(
+      BuildContext context, WidgetRef ref, RenewTask task) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('分析失败：${task.analysisError}'),
+        action: SnackBarAction(
+          label: '重试',
+          onPressed: () =>
+              ref.read(taskListProvider.notifier).retryAnalysis(task),
+        ),
+      ),
     );
   }
 
@@ -77,7 +96,7 @@ class TaskListPage extends ConsumerWidget {
                 ),
                 itemCount: list.length,
                 itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => _openTask(context, list[i]),
+                  onTap: () => _openTask(context, ref, list[i]),
                   child: TaskCard(task: list[i]),
                 ),
               ),

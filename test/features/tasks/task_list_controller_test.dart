@@ -33,9 +33,13 @@ class _NoopSplitter implements SemanticSplitter {
 class _FakePipeline extends AnalysisPipeline {
   final TaskRepository repo;
   final bool shouldFail;
+  final String failMessage;
 
-  _FakePipeline({required this.repo, this.shouldFail = false})
-      : super(
+  _FakePipeline({
+    required this.repo,
+    this.shouldFail = false,
+    this.failMessage = '分析失败（模拟）',
+  }) : super(
           audio: AudioExtractor(run: (_, _) async => ProcessResult(1, 0, '', '')),
           silence: const SilenceDetector(),
           scenes: SceneDetector(run: (_, _) async => ProcessResult(1, 0, '', '')),
@@ -48,7 +52,7 @@ class _FakePipeline extends AnalysisPipeline {
 
   @override
   Future<RenewTask> analyze(RenewTask task) async {
-    if (shouldFail) throw StateError('分析失败（模拟）');
+    if (shouldFail) throw StateError(failMessage);
     final updated =
         task.copyWith(status: RenewTaskStatus.awaitingCut, updatedAt: DateTime.now());
     await repo.save(updated);
@@ -180,7 +184,7 @@ void main() {
     expect(task.status, RenewTaskStatus.awaitingCut);
   });
 
-  test('分析失败时任务保持 analyzing 且不崩溃', () async {
+  test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       importServiceProvider.overrideWithValue(importService),
@@ -199,6 +203,78 @@ void main() {
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
     expect(task.status, RenewTaskStatus.analyzing);
+    expect(task.analysisError, contains('分析失败（模拟）'));
+
+    // 仓库中同样落库，保证重启后仍能读到失败原因
+    final persisted = await repo.findById('new-id');
+    expect(persisted!.analysisError, isNotNull);
+  });
+
+  test('分析失败信息落库前按 300 字截断，避免超长堆栈污染 JSON', () async {
+    final longMessage = '错' * 500;
+    final pipelineContainer = ProviderContainer(overrides: [
+      taskRepositoryProvider.overrideWithValue(repo),
+      importServiceProvider.overrideWithValue(importService),
+      analysisPipelineProvider.overrideWithValue(
+          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+    ]);
+    addTearDown(pipelineContainer.dispose);
+
+    await pipelineContainer.read(taskListProvider.future);
+    await pipelineContainer
+        .read(taskListProvider.notifier)
+        .importFile('/videos/新片.mp4');
+
+    await pumpEventQueue();
+
+    final tasks = pipelineContainer.read(taskListProvider).value!;
+    final task = tasks.firstWhere((t) => t.id == 'new-id');
+    expect(task.analysisError!.length, lessThanOrEqualTo(300));
+  });
+
+  group('retryAnalysis', () {
+    RenewTask makeFailedTask() => RenewTask(
+          id: 'fail-1',
+          name: '失败任务',
+          sourcePath: '/v/fail-1.mp4',
+          status: RenewTaskStatus.analyzing,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          analysisError: '分析失败（模拟）',
+        );
+
+    test('retryAnalysis 清空错误、重跑假管线成功后进入 awaitingCut', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+
+      await pipelineContainer.read(taskListProvider.future);
+      await pipelineContainer.read(taskListProvider.notifier).retryAnalysis(task);
+      await pumpEventQueue();
+
+      final tasks = pipelineContainer.read(taskListProvider).value!;
+      final updated = tasks.firstWhere((t) => t.id == 'fail-1');
+      expect(updated.status, RenewTaskStatus.awaitingCut);
+      expect(updated.analysisError, isNull);
+    });
+
+    test('retryAnalysis 在 pipeline 未配置时直接返回，不修改任务', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+
+      await container.read(taskListProvider.notifier).retryAnalysis(task);
+
+      final persisted = await repo.findById('fail-1');
+      expect(persisted!.analysisError, '分析失败（模拟）');
+      expect(persisted.status, RenewTaskStatus.analyzing);
+    });
   });
 
   group('confirmSegmentation / saveSegmentationDraft', () {

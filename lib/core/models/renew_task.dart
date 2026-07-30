@@ -20,6 +20,9 @@ class RenewTask {
   final List<SemanticUnit>? units;
   final List<AsrSentence>? asrSentences;
 
+  /// 最近一次分析失败的原因摘要（已按长度截断）；为 null 表示未失败或已重试清除
+  final String? analysisError;
+
   const RenewTask({
     required this.id,
     required this.name,
@@ -32,8 +35,11 @@ class RenewTask {
     required this.updatedAt,
     this.units,
     this.asrSentences,
+    this.analysisError,
   });
 
+  /// [clearAnalysisError] 为 true 时显式清空 analysisError（重试分析时使用）；
+  /// 其余可空字段沿用 units/asrSentences 的简单覆盖模式（不支持单独清空）。
   RenewTask copyWith({
     String? id,
     String? name,
@@ -46,6 +52,8 @@ class RenewTask {
     DateTime? updatedAt,
     List<SemanticUnit>? units,
     List<AsrSentence>? asrSentences,
+    String? analysisError,
+    bool clearAnalysisError = false,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -59,6 +67,8 @@ class RenewTask {
         updatedAt: updatedAt ?? this.updatedAt,
         units: units ?? this.units,
         asrSentences: asrSentences ?? this.asrSentences,
+        analysisError:
+            clearAnalysisError ? null : (analysisError ?? this.analysisError),
       );
 
   Map<String, dynamic> toJson() => {
@@ -73,6 +83,7 @@ class RenewTask {
         'updatedAt': updatedAt.toIso8601String(),
         'units': units?.map((u) => u.toJson()).toList(),
         'asrSentences': asrSentences?.map((s) => s.toJson()).toList(),
+        'analysisError': analysisError,
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -93,6 +104,7 @@ class RenewTask {
         asrSentences: (json['asrSentences'] as List<dynamic>?)
             ?.map((e) => AsrSentence.fromJson(e as Map<String, dynamic>))
             .toList(),
+        analysisError: json['analysisError'] as String?,
       );
 
   @override
@@ -107,6 +119,7 @@ class RenewTask {
       other.status == status &&
       other.createdAt == createdAt &&
       other.updatedAt == updatedAt &&
+      other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences);
 
@@ -121,6 +134,7 @@ class RenewTask {
       status,
       createdAt,
       updatedAt,
+      analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!));
 }
