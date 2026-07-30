@@ -21,6 +21,11 @@ class EditorSelection {
 ///   清空 redo 栈、notifyListeners、返回 true
 /// - 纯函数返回 null（非法操作）→ 不入栈、不 notify、返回 false
 /// - [dirty] 用深度相等（[SemanticUnit] 已实现 ==）判断当前 units 是否偏离 initialUnits
+/// - 拖拽会话（[beginDragSession]/[endDragSession]）：连续拖拽一次边界手柄会
+///   触发几十次 moveUnitBoundary/moveShotBoundary 调用，若每次都单独入栈，
+///   用户要撤销几十次才能回退一次拖动。会话期间移动操作直接替换 _units、
+///   notify，但不入栈；会话结束时若相对会话开始快照确有变化，才把快照作为
+///   **单条** undo 记录压栈。
 class SegmentationEditorController extends ChangeNotifier {
   final int durationMs;
   final double fps;
@@ -32,6 +37,9 @@ class SegmentationEditorController extends ChangeNotifier {
 
   final List<List<SemanticUnit>> _undoStack = [];
   final List<List<SemanticUnit>> _redoStack = [];
+
+  /// 拖拽会话开始时的 units 快照；非 null 表示当前处于会话中
+  List<SemanticUnit>? _dragSessionSnapshot;
 
   static const _unitsEq = ListEquality<SemanticUnit>();
 
@@ -49,9 +57,29 @@ class SegmentationEditorController extends ChangeNotifier {
   bool get canRedo => _redoStack.isNotEmpty;
   bool get dirty => !_unitsEq.equals(_units, _initialUnits);
 
+  /// 当前是否处于拖拽会话中
+  bool get inDragSession => _dragSessionSnapshot != null;
+
   void select(EditorSelection? s) {
     _selection = s;
     notifyListeners();
+  }
+
+  /// 开启拖拽会话：记录当前 units 作为会话快照；重复调用无副作用（幂等）
+  void beginDragSession() {
+    _dragSessionSnapshot ??= _units;
+  }
+
+  /// 结束拖拽会话：若相对会话开始时的快照确有变化，把快照作为单条 undo 记录
+  /// 压栈（并清空 redo 栈）；无变化则什么都不做。不在会话中时调用无副作用。
+  void endDragSession() {
+    final snapshot = _dragSessionSnapshot;
+    if (snapshot == null) return;
+    _dragSessionSnapshot = null;
+    if (!_unitsEq.equals(_units, snapshot)) {
+      _undoStack.add(snapshot);
+      _redoStack.clear();
+    }
   }
 
   /// 校验 selection 是否仍落在当前 _units 结构内；越界则置为 null（安全兜底）
@@ -76,8 +104,11 @@ class SegmentationEditorController extends ChangeNotifier {
   bool _apply(List<SemanticUnit>? result,
       {EditorSelection? Function()? remapSelection}) {
     if (result == null) return false;
-    _undoStack.add(_units);
-    _redoStack.clear();
+    // 拖拽会话中：不逐次入栈，交由 endDragSession 合并为一条记录
+    if (!inDragSession) {
+      _undoStack.add(_units);
+      _redoStack.clear();
+    }
     _units = result;
     _selection =
         remapSelection != null ? remapSelection() : _clampSelection(_selection);

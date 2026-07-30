@@ -361,4 +361,75 @@ void main() {
       expect(c.selection, isNull);
     });
   });
+
+  group('拖拽会话（beginDragSession/endDragSession）', () {
+    test('会话内多次移动合并为一条 undo 记录：一次 undo 即回到会话前状态', () {
+      final c = buildController();
+      c.beginDragSession();
+      expect(c.moveUnitBoundary(0, 6500), true);
+      expect(c.moveUnitBoundary(0, 7000), true);
+      expect(c.moveUnitBoundary(0, 7500), true);
+      // 会话进行中：不应提前压栈
+      expect(c.canUndo, false);
+      c.endDragSession();
+
+      expect(c.units[0].endMs, 7500);
+      expect(c.canUndo, true);
+
+      c.undo();
+      expect(c.units, fixture());
+      expect(c.canUndo, false);
+    });
+
+    test('会话中途的非法移动不产生额外记录、不中断会话', () {
+      final c = buildController();
+      c.beginDragSession();
+      expect(c.moveUnitBoundary(0, 7000), true);
+      // i=1 时 i+1>=units.length，非法
+      expect(c.moveUnitBoundary(1, 99999), false);
+      expect(c.moveUnitBoundary(0, 7500), true);
+      c.endDragSession();
+
+      expect(c.units[0].endMs, 7500);
+      c.undo();
+      expect(c.units, fixture());
+      expect(c.canUndo, false);
+    });
+
+    test('会话内实际无变化（未调用任何移动）则不压入 undo 记录', () {
+      final c = buildController();
+      c.beginDragSession();
+      c.endDragSession();
+
+      expect(c.canUndo, false);
+    });
+
+    test('镜头边界会话同理合并为一条记录', () {
+      final c = buildController();
+      c.beginDragSession();
+      expect(c.moveShotBoundary(0, 0, 2000), true);
+      expect(c.moveShotBoundary(0, 0, 2500), true);
+      c.endDragSession();
+
+      expect(c.units[0].shots[0].endMs, 2500);
+      expect(c.canUndo, true);
+      c.undo();
+      expect(c.units, fixture());
+      expect(c.canUndo, false);
+    });
+
+    test('会话结束后新的普通操作仍按原语义每次入栈', () {
+      final c = buildController();
+      c.beginDragSession();
+      c.moveUnitBoundary(0, 7000);
+      c.endDragSession();
+
+      expect(c.moveUnitBoundary(0, 7500), true);
+      expect(c.canUndo, true);
+      c.undo();
+      expect(c.units[0].endMs, 7000); // 回到会话结束时的状态，而非初始状态
+      c.undo();
+      expect(c.units, fixture());
+    });
+  });
 }
