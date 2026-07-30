@@ -50,6 +50,6 @@ Future<JsonPostResult> httpJsonPoster(
       );
     }()).timeout(timeout);
   } finally {
-    client.close();
+    client.close(force: true);
   }
 }
