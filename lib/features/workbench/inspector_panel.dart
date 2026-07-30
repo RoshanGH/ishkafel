@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
+import 'inspector_widgets.dart';
 
 /// 把毫秒时间戳格式化为 `mm:ss.ff`（ff 为两位帧号，前补 0）。
 ///
@@ -10,6 +11,11 @@ import '../../core/models/semantic_unit.dart';
 /// 运算截断：例如 70033ms/30fps 精确对应第 2101 帧（70.033*30=2100.99，
 /// 四舍五入为 2101），落在第 70 秒的第 1 帧上，若直接对毫秒余数取整会因浮
 /// 点误差把这一帧算漏、显示成 00 帧。
+///
+/// `fps.round()` 用作 mm:ss 的秒数除数是显示层的可接受近似：非整数帧率
+/// （如 29.97）下会有亚帧级漂移，但不会导致 ff 达到/超过 fpsRound（帧号
+/// 始终落在 [0, fpsRound) 内），因此只影响显示，不影响编辑运算的帧精度
+/// （编辑运算走 SegmentationEditOps.frameMs，独立于这里的显示格式化）。
 String formatTimecode(int ms, double fps) {
   final fpsRound = fps.round();
   final totalFrames = (ms * fps / 1000).round();
@@ -24,6 +30,9 @@ String _pad2(int n) => n.toString().padLeft(2, '0');
 
 /// 属性检查器：右栏，跟随 [SegmentationEditorController.selection] 三态渲染
 /// ——选中单元 / 选中镜头 / 无选中占位。
+///
+/// 纯展示型辅助组件（卡片/步进按钮/标签 chips 等）拆在 [inspector_widgets.dart]
+/// 里，本文件只负责三态判断、与 controller 的数据/事件绑定。
 class InspectorPanel extends StatefulWidget {
   final SegmentationEditorController controller;
   final double fps;
@@ -125,50 +134,61 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final units = widget.controller.units;
     if (unitIndex < 0 || unitIndex >= units.length) return _buildPlaceholder();
     final unit = units[unitIndex];
+    // 首单元没有前一个单元可合并边界，末单元没有后一个单元可合并边界。
+    final canNudgeStart = unitIndex > 0;
+    final canNudgeEnd = unitIndex < units.length - 1;
 
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _title('单元详情 — U${unit.index + 1}'),
+          inspectorTitle('单元详情 — U${unit.index + 1}'),
           const SizedBox(height: 10),
-          _card([
-            _timeRow(
+          inspectorCard([
+            inspectorTimeRow(
               label: '开始',
-              ms: unit.startMs,
-              keyPrefix: 'start',
+              valueText: formatTimecode(unit.startMs, widget.fps),
+              minusKey: const Key('inspector-start-minus'),
+              plusKey: const Key('inspector-start-plus'),
+              minusEnabled: canNudgeStart,
+              plusEnabled: canNudgeStart,
               onMinus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: true, frames: -1),
               onPlus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: true, frames: 1),
             ),
-            _timeRow(
+            inspectorTimeRow(
               label: '结束',
-              ms: unit.endMs,
-              keyPrefix: 'end',
+              valueText: formatTimecode(unit.endMs, widget.fps),
+              minusKey: const Key('inspector-end-minus'),
+              plusKey: const Key('inspector-end-plus'),
+              minusEnabled: canNudgeEnd,
+              plusEnabled: canNudgeEnd,
               onMinus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: false, frames: -1),
               onPlus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: false, frames: 1),
             ),
-            _infoRow('时长', '${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
-            _infoRow('镜头数', '${unit.shots.length}'),
+            inspectorInfoRow(
+                '时长', '${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
+            inspectorInfoRow('镜头数', '${unit.shots.length}'),
           ]),
           const SizedBox(height: 10),
-          _card([
-            _label('标签'),
+          inspectorCard([
+            inspectorLabel('标签'),
             const SizedBox(height: 6),
-            _tagChips(unit.tags),
+            inspectorTagChips(unit.tags),
           ]),
           const SizedBox(height: 10),
-          _card([
-            _label('单元台词（可编辑）'),
+          inspectorCard([
+            inspectorLabel('单元台词（可编辑）'),
             const SizedBox(height: 6),
             _transcriptField(unitIndex),
           ]),
           const SizedBox(height: 10),
-          _actionsRow(
+          inspectorActionsRow(
             mergeLabel: '⇧ 并入上一单元',
+            onSplit: () => widget.onSplitAtPlayhead?.call(),
             onMerge: widget.controller.mergeSelectedWithPrevious,
           ),
         ],
@@ -183,45 +203,56 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final shots = unit.shots;
     if (shotIndex < 0 || shotIndex >= shots.length) return _buildPlaceholder();
     final shot = shots[shotIndex];
+    // 单元内首/末镜头同理没有对应方向的相邻边界可调。
+    final canNudgeStart = shotIndex > 0;
+    final canNudgeEnd = shotIndex < shots.length - 1;
 
     return SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _title('镜头详情 — U${unit.index + 1} · S${shotIndex + 1}'),
+          inspectorTitle('镜头详情 — U${unit.index + 1} · S${shotIndex + 1}'),
           const SizedBox(height: 10),
-          _card([
-            _infoRow('所属单元',
+          inspectorCard([
+            inspectorInfoRow('所属单元',
                 'U${unit.index + 1} · ${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
-            _timeRow(
+            inspectorTimeRow(
               label: '镜头开始',
-              ms: shot.startMs,
-              keyPrefix: 'start',
+              valueText: formatTimecode(shot.startMs, widget.fps),
+              minusKey: const Key('inspector-start-minus'),
+              plusKey: const Key('inspector-start-plus'),
+              minusEnabled: canNudgeStart,
+              plusEnabled: canNudgeStart,
               onMinus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: true, frames: -1),
               onPlus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: true, frames: 1),
             ),
-            _timeRow(
+            inspectorTimeRow(
               label: '镜头结束',
-              ms: shot.endMs,
-              keyPrefix: 'end',
+              valueText: formatTimecode(shot.endMs, widget.fps),
+              minusKey: const Key('inspector-end-minus'),
+              plusKey: const Key('inspector-end-plus'),
+              minusEnabled: canNudgeEnd,
+              plusEnabled: canNudgeEnd,
               onMinus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: false, frames: -1),
               onPlus: () => widget.controller
                   .nudgeSelectedEdge(startEdge: false, frames: 1),
             ),
-            _infoRow('时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),
+            inspectorInfoRow(
+                '时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),
           ]),
           const SizedBox(height: 10),
-          _card([
-            _label('镜头标签'),
+          inspectorCard([
+            inspectorLabel('镜头标签'),
             const SizedBox(height: 6),
-            _tagChips(shot.tags),
+            inspectorTagChips(shot.tags),
           ]),
           const SizedBox(height: 10),
-          _actionsRow(
+          inspectorActionsRow(
             mergeLabel: '⇧ 并入前一镜头',
+            onSplit: () => widget.onSplitAtPlayhead?.call(),
             onMerge: widget.controller.mergeSelectedWithPrevious,
           ),
         ],
@@ -241,171 +272,6 @@ class _InspectorPanelState extends State<InspectorPanel> {
         border: InputBorder.none,
       ),
       onChanged: (text) => widget.controller.updateTranscript(unitIndex, text),
-    );
-  }
-
-  Widget _title(String text) => Text(
-        text,
-        style: const TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.3,
-        ),
-      );
-
-  Widget _label(String text) => Text(
-        text,
-        style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
-      );
-
-  Widget _card(List<Widget> children) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceCard,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          for (var i = 0; i < children.length; i++) ...[
-            if (i > 0) const SizedBox(height: 8),
-            children[i],
-          ],
-        ]),
-      );
-
-  Widget _infoRow(String label, String value) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _label(label),
-          Text(value,
-              style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 12,
-                  fontFeatures: [FontFeature.tabularFigures()])),
-        ],
-      );
-
-  Widget _timeRow({
-    required String label,
-    required int ms,
-    required String keyPrefix,
-    required VoidCallback onMinus,
-    required VoidCallback onPlus,
-  }) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        _label(label),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _stepButton(Key('inspector-$keyPrefix-minus'), '−', onMinus),
-              const SizedBox(width: 6),
-              Text(
-                formatTimecode(ms, widget.fps),
-                style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 11.5,
-                    fontFeatures: [FontFeature.tabularFigures()]),
-              ),
-              const SizedBox(width: 6),
-              _stepButton(Key('inspector-$keyPrefix-plus'), '＋', onPlus),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _stepButton(Key key, String glyph, VoidCallback onTap) {
-    return InkWell(
-      key: key,
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: Text(glyph,
-            style: const TextStyle(color: AppColors.textTertiary, fontSize: 13)),
-      ),
-    );
-  }
-
-  Widget _tagChips(List<String> tags) {
-    if (tags.isEmpty) {
-      return const Text('无标签',
-          style: TextStyle(color: AppColors.textTertiary, fontSize: 11));
-    }
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: tags
-          .map((t) => Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.accentBlue.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(t,
-                    style: const TextStyle(
-                        color: Color(0xFF64A8FF), fontSize: 10.5)),
-              ))
-          .toList(growable: false),
-    );
-  }
-
-  Widget _actionsRow({
-    required String mergeLabel,
-    required VoidCallback onMerge,
-  }) {
-    return Row(
-      children: [
-        Expanded(
-          child: _actionButton(
-            key: const Key('inspector-split-btn'),
-            label: '✂ 在游标处拆分',
-            onTap: () => widget.onSplitAtPlayhead?.call(),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _actionButton(
-            key: const Key('inspector-merge-btn'),
-            label: mergeLabel,
-            onTap: onMerge,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _actionButton({
-    required Key key,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      key: key,
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceCard,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(label,
-            style:
-                const TextStyle(color: AppColors.textPrimary, fontSize: 12)),
-      ),
     );
   }
 }

@@ -143,7 +143,8 @@ class _Chip extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(text,
-          style: const TextStyle(color: Color(0xFF64A8FF), fontSize: 10)),
+          style:
+              const TextStyle(color: AppColors.accentBlueLight, fontSize: 10)),
     );
   }
 }

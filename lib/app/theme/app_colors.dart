@@ -8,6 +8,9 @@ abstract final class AppColors {
   static const surfaceCard = Color(0xFF2C2C2E);
   static const border = Color(0x17FFFFFF); // 白 9%
   static const accentBlue = Color(0xFF0A84FF);
+  /// accentBlue 的高亮变体：用于 accentBlue 半透明底上的文字（如标签 chip），
+  /// 保证在深色 tint 底上的对比度。
+  static const accentBlueLight = Color(0xFF64A8FF);
   static const green = Color(0xFF30D158);
   static const orange = Color(0xFFFF9F0A);
   static const red = Color(0xFFFF453A);
