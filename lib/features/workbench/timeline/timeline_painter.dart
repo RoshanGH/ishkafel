@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -21,6 +22,9 @@ class TimelinePainter extends CustomPainter {
   final List<ui.Image>? thumbImages;
   final List<double>? waveEnvelope;
   final int playheadMs;
+
+  /// 单元色块内标签文字的左右内边距（左右各一份）
+  static const _unitLabelPadding = 6.0;
 
   /// 单元色块 6 色循环
   static const _unitColors = [
@@ -110,15 +114,21 @@ class TimelinePainter extends CustomPainter {
           ..strokeWidth = selected ? 2 : 1,
       );
 
+      // 块体窄到放不下左右内边距时（拖边界产生的亚像素单元），标签无处可画，
+      // 直接跳过：此时 `rect.width - 内边距*2` 为负，交给 TextPainter 会在
+      // 绘制中途抛异常，让本帧后续所有绘制丢失（见 [_drawText] 文档）。
+      final labelMaxWidth = rect.width - _unitLabelPadding * 2;
+      if (labelMaxWidth <= 0) continue;
+
       canvas.save();
       canvas.clipRect(rect);
       _drawText(
         canvas,
         'U${unit.index + 1} ${unit.transcript}',
-        Offset(rect.left + 6, rect.top + 6),
+        Offset(rect.left + _unitLabelPadding, rect.top + _unitLabelPadding),
         AppColors.textPrimary,
         fontSize: 12,
-        maxWidth: rect.width - 12,
+        maxWidth: labelMaxWidth,
       );
       canvas.restore();
     }
@@ -224,6 +234,17 @@ class TimelinePainter extends CustomPainter {
     );
   }
 
+  /// 画一行单行省略文字。
+  ///
+  /// [maxWidth] 一律夹紧到非负：`TextPainter.layout` 内部会执行
+  /// `clampDouble(行宽, minWidth = 0, maxWidth)`，而 `clampDouble` 断言
+  /// `min <= max`，负数会直接抛 `AssertionError`。该异常发生在
+  /// `CustomPainter.paint` 中途，被 `RenderObject._paintWithContext` 吞进
+  /// 「rendering library」错误通道，屏幕上的表现是**本帧从抛点起的所有绘制
+  /// 全部丢失**——不仅是时间线剩余的镜头/抽帧/波形轨，还包括 `Scaffold` 里
+  /// 晚于 body 绘制的顶栏与底部栏（控件仍在树里、布局与命中测试都正常，
+  /// 只是画不出来）。因此这里把夹紧放在绘制边界上兜底，调用方另有各自的
+  /// 「放不下就不画」判断。
   void _drawText(
     Canvas canvas,
     String text,
@@ -238,7 +259,7 @@ class TimelinePainter extends CustomPainter {
       maxLines: 1,
       ellipsis: '…',
     );
-    painter.layout(maxWidth: maxWidth ?? double.infinity);
+    painter.layout(maxWidth: math.max(0, maxWidth ?? double.infinity));
     painter.paint(canvas, offset);
   }
 

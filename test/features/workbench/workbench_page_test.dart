@@ -70,6 +70,25 @@ List<SemanticUnit> _fixtureUnits() => [
       ),
     ];
 
+/// 真机缺陷复现数据：末单元只有 53ms，在时间线上宽度不足 1px。
+/// 这类「亚像素」单元是编辑期把边界拖到极右端后确认落库产生的合法数据。
+List<SemanticUnit> _unitsWithSliverTail() => const [
+      SemanticUnit(
+        index: 0,
+        startMs: 0,
+        endMs: 92200,
+        transcript: '主体台词',
+        shots: [Shot(startMs: 0, endMs: 92200)],
+      ),
+      SemanticUnit(
+        index: 1,
+        startMs: 92200,
+        endMs: 92253,
+        transcript: '极窄末单元',
+        shots: [Shot(startMs: 92200, endMs: 92253)],
+      ),
+    ];
+
 RenewTask _fixtureTask({RenewTaskStatus status = RenewTaskStatus.awaitingCut}) =>
     RenewTask(
       id: 'wb-1',
@@ -505,6 +524,35 @@ void main() {
       expect(saved!.units, pickingTask.units);
     });
   });
+
+  // 真机缺陷回归：时间线上存在亚像素宽的单元块体时，绘制在 paint() 中途抛出
+  // AssertionError，本帧后续所有绘制指令（镜头/抽帧/波形轨，以及 Scaffold 在
+  // body 之后才绘制的顶栏与底部栏）全部丢失——控件在树里、布局正确、命中测试
+  // 也正常，但屏幕上什么都看不到。这里断言"这一帧没有绘制异常"。
+  for (final status in [RenewTaskStatus.awaitingCut, RenewTaskStatus.picking]) {
+    testWidgets('存在亚像素宽单元时绘制不抛异常（status=${status.name}）', (tester) async {
+      final sliverTask = _fixtureTask(status: status).copyWith(
+        units: _unitsWithSliverTail(),
+        videoInfo: const VideoInfo(
+          width: 1080,
+          height: 1920,
+          duration: Duration(milliseconds: 92253),
+          fps: 30,
+          fileSizeBytes: 1000,
+        ),
+      );
+      await repo.save(sliverTask);
+      await tester.pumpWidget(
+          _wrapWithNavigator(task: sliverTask, repo: repo, playback: playback));
+      await tester.tap(find.byKey(const Key('open-workbench')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      // 顶栏与底部栏在 Scaffold 里晚于 body 绘制，是最先被"吞掉"的两处
+      expect(find.byKey(const Key('workbench-back-btn')), findsOneWidget);
+      expect(find.byKey(const Key('workbench-confirm-btn')), findsOneWidget);
+    });
+  }
 
   testWidgets('在游标处拆分：播放头不在所选范围内时提示而非静默无操作（Minor）', (tester) async {
     await repo.save(task);
