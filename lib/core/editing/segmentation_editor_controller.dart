@@ -54,12 +54,33 @@ class SegmentationEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 将纯函数结果应用到当前状态：成功则入栈、清 redo、notify；失败返回 false
-  bool _apply(List<SemanticUnit>? result) {
+  /// 校验 selection 是否仍落在当前 _units 结构内；越界则置为 null（安全兜底）
+  EditorSelection? _clampSelection(EditorSelection? sel) {
+    if (sel == null) return null;
+    final u = sel.unitIndex;
+    if (u < 0 || u >= _units.length) return null;
+    final s = sel.shotIndex;
+    if (s == null) return sel;
+    final shots = _units[u].shots;
+    if (s < 0 || s >= shots.length) return null;
+    return sel;
+  }
+
+  /// 将纯函数结果应用到当前状态：成功则入栈、清 redo、（按需重映射 selection 或做
+  /// 越界兜底）、notify；失败返回 false。
+  ///
+  /// [remapSelection] 用于结构会改变（如合并导致单元/镜头数量减少）而需要显式指定
+  /// 新 selection 的场景；仅在操作成功时才会被调用。不传时默认对现有 selection 做
+  /// 越界兜底（结构不变的操作如移动边界、拆分前半部分天然保持有效，因此这里的兜底
+  /// 只是防御，不会误伤合法 selection）。
+  bool _apply(List<SemanticUnit>? result,
+      {EditorSelection? Function()? remapSelection}) {
     if (result == null) return false;
     _undoStack.add(_units);
     _redoStack.clear();
     _units = result;
+    _selection =
+        remapSelection != null ? remapSelection() : _clampSelection(_selection);
     notifyListeners();
     return true;
   }
@@ -83,14 +104,21 @@ class SegmentationEditorController extends ChangeNotifier {
   }
 
   /// 按选中层分派：选中单元→mergeUnitWithPrevious；选中镜头→mergeShotWithPrevious
+  ///
+  /// 合并会让目标少一个单元/镜头，因此成功后需显式把 selection 重映射到合并后的
+  /// 对象（单元层→unit(u-1)；镜头层→shot(u, s-1)），而不是留着指向被吞并前的下标。
   bool mergeSelectedWithPrevious() {
     final sel = _selection;
     if (sel == null) return false;
     if (sel.shotIndex == null) {
-      return _apply(SegmentationEditOps.mergeUnitWithPrevious(_units, sel.unitIndex));
+      final u = sel.unitIndex;
+      return _apply(SegmentationEditOps.mergeUnitWithPrevious(_units, u),
+          remapSelection: () => EditorSelection.unit(u - 1));
     }
-    return _apply(SegmentationEditOps.mergeShotWithPrevious(
-        _units, sel.unitIndex, sel.shotIndex!));
+    final u = sel.unitIndex;
+    final s = sel.shotIndex!;
+    return _apply(SegmentationEditOps.mergeShotWithPrevious(_units, u, s),
+        remapSelection: () => EditorSelection.shot(u, s - 1));
   }
 
   /// ±N 帧步进调整选中对象的边缘：
@@ -100,12 +128,14 @@ class SegmentationEditorController extends ChangeNotifier {
   /// - 选中镜头：同理在单元内换算为 moveShotBoundary
   /// 目标 ms = 当前边界 + frames*frameMs（frames 可为负，表示反方向）
   bool nudgeSelectedEdge({required bool startEdge, required int frames}) {
-    final sel = _selection;
+    final sel = _clampSelection(_selection);
     if (sel == null) return false;
     final delta = frames * SegmentationEditOps.frameMs(fps);
 
     if (sel.shotIndex == null) {
       final u = sel.unitIndex;
+      // 双保险：即便 selection 因某种原因未被及时清理，这里也不会越界解引用
+      if (u < 0 || u >= _units.length) return false;
       if (startEdge) {
         if (u <= 0) return false;
         final target = _units[u].startMs + delta;
@@ -118,8 +148,10 @@ class SegmentationEditorController extends ChangeNotifier {
     }
 
     final u = sel.unitIndex;
+    if (u < 0 || u >= _units.length) return false;
     final s = sel.shotIndex!;
     final shots = _units[u].shots;
+    if (s < 0 || s >= shots.length) return false;
     if (startEdge) {
       if (s <= 0) return false;
       final target = shots[s].startMs + delta;
@@ -141,6 +173,9 @@ class SegmentationEditorController extends ChangeNotifier {
     final previous = _undoStack.removeLast();
     _redoStack.add(_units);
     _units = previous;
+    // 撤销可能让 units 数量发生变化（如撤销一次拆分会变少），
+    // 需要重新校验 selection 是否仍落在有效范围内
+    _selection = _clampSelection(_selection);
     notifyListeners();
   }
 
@@ -149,6 +184,7 @@ class SegmentationEditorController extends ChangeNotifier {
     final next = _redoStack.removeLast();
     _undoStack.add(_units);
     _units = next;
+    _selection = _clampSelection(_selection);
     notifyListeners();
   }
 }

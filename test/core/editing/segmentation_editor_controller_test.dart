@@ -30,6 +30,30 @@ SegmentationEditorController buildController() => SegmentationEditorController(
       sentences: sentences,
     );
 
+// 3 单元夹具：用于验证合并后 selection 重映射（合并只影响相邻两单元，
+// 需要第三个单元确认索引不是巧合对齐）
+List<SemanticUnit> fixture3() => const [
+      SemanticUnit(index: 0, startMs: 0, endMs: 4000, transcript: 'A', shots: [
+        Shot(startMs: 0, endMs: 2000),
+        Shot(startMs: 2000, endMs: 4000),
+      ]),
+      SemanticUnit(index: 1, startMs: 4000, endMs: 8000, transcript: 'B', shots: [
+        Shot(startMs: 4000, endMs: 6000),
+        Shot(startMs: 6000, endMs: 8000),
+      ]),
+      SemanticUnit(index: 2, startMs: 8000, endMs: 12000, transcript: 'C', shots: [
+        Shot(startMs: 8000, endMs: 10000),
+        Shot(startMs: 10000, endMs: 12000),
+      ]),
+    ];
+
+SegmentationEditorController buildController3() => SegmentationEditorController(
+      initialUnits: fixture3(),
+      durationMs: 12000,
+      fps: fps,
+      sentences: const [],
+    );
+
 void main() {
   test('操作成功：推入 undo 栈、canUndo 为 true、notify 一次、返回 true', () {
     final c = buildController();
@@ -247,5 +271,94 @@ void main() {
     expect(notifyCount, 1);
     expect(c.selection?.unitIndex, 0);
     expect(c.selection?.shotIndex, isNull);
+  });
+
+  group('selection 不变量（合并/拆分/撤销后不悬空）', () {
+    test('回归：合并后紧跟 nudge 不再抛 RangeError（原崩溃复现路径）', () {
+      final c = buildController(); // 2 单元
+      c.select(const EditorSelection.unit(1));
+
+      expect(c.mergeSelectedWithPrevious(), true); // units 变为 1 个
+      expect(c.units.length, 1);
+
+      // 合并后仅剩 1 个单元，selection 应已重映射到 unit(0)；
+      // 对 unit(0) 而言没有"前一单元"，nudge 应安全返回 false，而不是抛异常
+      expect(() => c.nudgeSelectedEdge(startEdge: true, frames: 1), returnsNormally);
+      expect(c.nudgeSelectedEdge(startEdge: true, frames: 1), false);
+    });
+
+    test('合并后 selection 指向合并后的单元（3 单元夹具，排除巧合对齐）', () {
+      final c = buildController3();
+      c.select(const EditorSelection.unit(1)); // 合并 unit1 并入 unit0
+
+      expect(c.mergeSelectedWithPrevious(), true);
+      expect(c.units.length, 2);
+      expect(c.selection?.unitIndex, 0);
+      expect(c.selection?.shotIndex, isNull);
+
+      // nudge 应作用在"合并后"的边界（原 unit0.endMs=4000 已变为 8000），
+      // 而不是合并前的陈旧边界
+      final ok = c.nudgeSelectedEdge(startEdge: false, frames: 1);
+      expect(ok, true);
+      expect(c.units[0].endMs, 8033);
+      expect(c.units[1].startMs, 8033);
+    });
+
+    test('镜头层合并后 selection 指向合并后的镜头', () {
+      final c = buildController();
+      c.select(const EditorSelection.shot(0, 1));
+
+      expect(c.mergeSelectedWithPrevious(), true);
+      expect(c.selection?.unitIndex, 0);
+      expect(c.selection?.shotIndex, 0);
+    });
+
+    test('单元拆分后 selection 仍指向拆分后的前半单元（索引不变）', () {
+      final c = buildController();
+      c.select(const EditorSelection.unit(0));
+
+      expect(c.splitSelectedAt(3000), true);
+
+      expect(c.selection?.unitIndex, 0);
+      expect(c.selection?.shotIndex, isNull);
+      expect(c.units[0].endMs, 3000); // 确实是前半单元
+    });
+
+    test('镜头拆分后 selection 仍指向拆分后的前半镜头（索引不变）', () {
+      final c = buildController();
+      c.select(const EditorSelection.shot(0, 0));
+
+      expect(c.splitSelectedAt(1500), true);
+
+      expect(c.selection?.unitIndex, 0);
+      expect(c.selection?.shotIndex, 0);
+      expect(c.units[0].shots[0].endMs, 1500);
+    });
+
+    test('撤销一次合并（units 变多）后 selection 不越界', () {
+      final c = buildController3();
+      c.select(const EditorSelection.unit(1));
+      expect(c.mergeSelectedWithPrevious(), true); // 3 → 2 个单元
+
+      c.undo(); // 撤销合并，units 变回 3 个
+
+      expect(c.units.length, 3);
+      expect(c.selection, isNotNull);
+      expect(c.selection!.unitIndex, inInclusiveRange(0, 2));
+    });
+
+    test('撤销一次拆分（units 变少）后若 selection 越界则置为 null', () {
+      final c = buildController(); // 2 单元
+      c.select(const EditorSelection.unit(0));
+      expect(c.splitSelectedAt(3000), true); // 2 → 3 个单元
+
+      // 手动选中拆分产生的第三个单元（原 unit1，现 index 2）
+      c.select(const EditorSelection.unit(2));
+
+      c.undo(); // 撤销拆分，units 变回 2 个：index 2 越界
+
+      expect(c.units.length, 2);
+      expect(c.selection, isNull);
+    });
   });
 }
