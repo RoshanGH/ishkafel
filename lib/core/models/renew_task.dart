@@ -1,4 +1,5 @@
 import 'package:collection/collection.dart';
+import '../analysis/providers.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
 
@@ -17,6 +18,7 @@ class RenewTask {
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<SemanticUnit>? units;
+  final List<AsrSentence>? asrSentences;
 
   const RenewTask({
     required this.id,
@@ -29,6 +31,7 @@ class RenewTask {
     required this.createdAt,
     required this.updatedAt,
     this.units,
+    this.asrSentences,
   });
 
   RenewTask copyWith({
@@ -42,6 +45,7 @@ class RenewTask {
     DateTime? createdAt,
     DateTime? updatedAt,
     List<SemanticUnit>? units,
+    List<AsrSentence>? asrSentences,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -54,6 +58,7 @@ class RenewTask {
         createdAt: createdAt ?? this.createdAt,
         updatedAt: updatedAt ?? this.updatedAt,
         units: units ?? this.units,
+        asrSentences: asrSentences ?? this.asrSentences,
       );
 
   Map<String, dynamic> toJson() => {
@@ -67,6 +72,7 @@ class RenewTask {
         'createdAt': createdAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         'units': units?.map((u) => u.toJson()).toList(),
+        'asrSentences': asrSentences?.map((s) => s.toJson()).toList(),
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -84,6 +90,9 @@ class RenewTask {
         units: (json['units'] as List<dynamic>?)
             ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
             .toList(),
+        asrSentences: (json['asrSentences'] as List<dynamic>?)
+            ?.map((e) => AsrSentence.fromJson(e as Map<String, dynamic>))
+            .toList(),
       );
 
   @override
@@ -98,9 +107,20 @@ class RenewTask {
       other.status == status &&
       other.createdAt == createdAt &&
       other.updatedAt == updatedAt &&
-      const DeepCollectionEquality().equals(other.units, units);
+      const DeepCollectionEquality().equals(other.units, units) &&
+      const DeepCollectionEquality().equals(other.asrSentences, asrSentences);
 
   @override
-  int get hashCode => Object.hash(id, name, sourcePath, miaoaVideoId, videoInfo,
-      coverPath, status, createdAt, updatedAt, units == null ? null : Object.hashAll(units!));
+  int get hashCode => Object.hash(
+      id,
+      name,
+      sourcePath,
+      miaoaVideoId,
+      videoInfo,
+      coverPath,
+      status,
+      createdAt,
+      updatedAt,
+      units == null ? null : Object.hashAll(units!),
+      asrSentences == null ? null : Object.hashAll(asrSentences!));
 }

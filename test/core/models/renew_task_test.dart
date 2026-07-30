@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
@@ -63,5 +64,28 @@ void main() {
     final parsed = RenewTask.fromJson(withUnits.toJson());
     expect(parsed, withUnits);
     expect(parsed.units!.single.shots.single.endMs, 9000);
+  });
+
+  test('旧 JSON（无 asrSentences 键）解析为 asrSentences == null（向后兼容）', () {
+    final json = task.toJson()..remove('asrSentences');
+    final parsed = RenewTask.fromJson(json);
+    expect(parsed.asrSentences, isNull);
+  });
+
+  test('asrSentences（含字级时间戳）序列化往返一致且深度相等', () {
+    final withAsr = task.copyWith(asrSentences: const [
+      AsrSentence(
+        startMs: 0,
+        endMs: 4100,
+        text: '第一句',
+        words: [
+          AsrWord(startMs: 0, endMs: 1000, text: '第', confidence: 0.9),
+          AsrWord(startMs: 1000, endMs: 4100, text: '一句'),
+        ],
+      ),
+    ]);
+    final parsed = RenewTask.fromJson(withAsr.toJson());
+    expect(parsed, withAsr);
+    expect(parsed.asrSentences!.single.words.first.confidence, 0.9);
   });
 }
