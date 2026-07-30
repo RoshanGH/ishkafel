@@ -107,9 +107,16 @@ void main() {
 
       // 直接同步调用两次 onPressed（不经过 tester.tap()/await，也不在两次
       // 调用间 pump）：两次 _togglePlay() 的决策都发生在第一次 play() 的
-      // await 完成之前（微任务尚未有机会执行），复现"双双调用 play()"的
-      // 竞态——若用 await tester.tap() 顺序点两次，两次调用间的 await 会
-      // 让微任务先跑完，退化为普通顺序切换，测不出这个问题
+      // await 完成之前（微任务尚未有机会执行）——若用 await tester.tap()
+      // 顺序点两次，两次调用间的 await 会让微任务先跑完，退化为普通顺序
+      // 切换，测不出这个竞态场景。
+      //
+      // 决策已改为读取 [PlaybackController.isPlaying]（评审 Minor E），
+      // 而非本地镜像字段：第一次调用 play() 时，FakePlaybackController 会
+      // 同步把自己的 isPlaying 置为 true（异步只体现在 Future 完成通知被
+      // 推迟到微任务），因此第二次调用能读到"已经播放中"这一真实状态，
+      // 正确判定为暂停——不再像"决策读本地字段"时那样，两次都因为本地
+      // 镜像字段的 setState 更新被推迟而误判成同一个操作（都调用 play()）。
       final button =
           tester.widget<IconButton>(find.byKey(const Key('player-toggle-play')));
       button.onPressed!();
@@ -119,13 +126,15 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      expect(playback.isPlaying, isTrue,
-          reason: '两次点击都判定为需要 play()，真实状态应为播放中');
+      expect(playback.calls, ['play()', 'pause()'],
+          reason: '第一次判定为播放、第二次基于真实状态正确判定为暂停');
+      expect(playback.isPlaying, isFalse,
+          reason: '第二次点击应正确生效为暂停，而不是被第一次未完成的 await 悄悄吞掉');
       final icon = tester.widget<Icon>(find.descendant(
           of: find.byKey(const Key('player-toggle-play')),
           matching: find.byType(Icon)));
-      expect(icon.icon, Icons.pause_circle_filled,
-          reason: '图标应与真实播放状态一致，而不是盲目翻转两次回到暂停图标');
+      expect(icon.icon, Icons.play_circle_fill,
+          reason: '图标应与真实播放状态一致（暂停态）');
     });
 
     testWidgets('外部改变 isPlaying（如自动暂停）后图标经 playingStream 同步', (tester) async {

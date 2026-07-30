@@ -98,15 +98,19 @@ class PlayerPanelState extends State<PlayerPanel> {
     super.dispose();
   }
 
-  /// 切换播放/暂停：翻转决策仍取自"翻转前"的 [_isPlaying]（决定该调用
-  /// play() 还是 pause()），但翻转后的显示状态改为 await 完成后重新读取
-  /// [PlaybackController.isPlaying] 这一真实状态，而不是对本地变量取反
-  /// ——快速连按两次时，两次调用都可能基于翻转前的旧状态判定为同一个
-  /// 操作（例如都调用 play()），若仍对本地变量取反两次，图标会错误地翻回
-  /// 与真实状态相反的一面（评审 Important 2）。订阅 [PlaybackController.
-  /// playingStream]（见 [initState]）进一步保证外部状态变化也能同步图标。
+  /// 切换播放/暂停：翻转决策读取 [PlaybackController.isPlaying] 这一真实
+  /// 状态（而不是本地镜像字段 [_isPlaying]），翻转后的显示状态同样在 await
+  /// 完成后重新读取该真实状态——快速连按两次时，本地镜像字段的 setState
+  /// 更新会被推迟到第一次 await 完成之后的微任务里，若决策仍依赖本地字段，
+  /// 两次调用会都读到"翻转前"的旧值、都判定为同一个操作（例如都调用
+  /// play()），第二次点击（用户意图是反向操作）就被悄悄吞掉（评审
+  /// Minor E）。真实播放器（如 media_kit）的 isPlaying 在 play()/pause()
+  /// 内部通常会同步或近乎同步地更新，能及时反映"上一次点击已经生效"这一
+  /// 事实，让第二次点击基于最新真实状态正确判定为反向操作。订阅
+  /// [PlaybackController.playingStream]（见 [initState]）进一步保证外部
+  /// 状态变化也能同步图标。
   Future<void> _togglePlay() async {
-    if (_isPlaying) {
+    if (widget.playback.isPlaying) {
       await widget.playback.pause();
     } else {
       await widget.playback.play();
