@@ -34,6 +34,7 @@ class _FakePipeline extends AnalysisPipeline {
   final TaskRepository repo;
   final bool shouldFail;
   final String failMessage;
+  int analyzeCallCount = 0;
 
   _FakePipeline({
     required this.repo,
@@ -52,6 +53,7 @@ class _FakePipeline extends AnalysisPipeline {
 
   @override
   Future<RenewTask> analyze(RenewTask task) async {
+    analyzeCallCount++;
     if (shouldFail) throw StateError(failMessage);
     final updated =
         task.copyWith(status: RenewTaskStatus.awaitingCut, updatedAt: DateTime.now());
@@ -232,6 +234,42 @@ void main() {
     expect(task.analysisError!.length, lessThanOrEqualTo(300));
   });
 
+  test('分析失败信息截断码点安全，不切断 UTF-16 代理对（含 emoji 的错误信息）', () async {
+    // 落库前的原始异常经 StateError.toString() 会加上「Bad state: 」前缀，
+    // 这里按前缀长度动态推算 ASCII 填充数，使「前缀 + ASCII」恰好占满 299 个
+    // UTF-16 code unit——这样后面第一个 emoji（占 2 个 code unit）恰好横跨
+    // 第 300 个截断边界，若按 code unit 朴素 substring(0, 300) 截断会切在
+    // 代理对中间，留下落单的高位 surrogate。
+    final prefixLength = StateError('').toString().length;
+    final asciiCount = 299 - prefixLength;
+    final longMessage = '${'a' * asciiCount}${'😀' * 10}';
+    final pipelineContainer = ProviderContainer(overrides: [
+      taskRepositoryProvider.overrideWithValue(repo),
+      importServiceProvider.overrideWithValue(importService),
+      analysisPipelineProvider.overrideWithValue(
+          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+    ]);
+    addTearDown(pipelineContainer.dispose);
+
+    await pipelineContainer.read(taskListProvider.future);
+    await pipelineContainer
+        .read(taskListProvider.notifier)
+        .importFile('/videos/新片.mp4');
+    await pumpEventQueue();
+
+    final tasks = pipelineContainer.read(taskListProvider).value!;
+    final task = tasks.firstWhere((t) => t.id == 'new-id');
+    final result = task.analysisError!;
+
+    // 不应以落单的高位代理（high surrogate, U+D800-U+DBFF）结尾
+    expect(result.codeUnits.last, isNot(inInclusiveRange(0xD800, 0xDBFF)));
+    // UTF-8 编解码往返一致（无落单 surrogate 才能安全编解码）
+    expect(utf8.decode(utf8.encode(result)), result);
+    // JSON 落库/读取往返一致
+    final decoded = RenewTask.fromJson(jsonDecode(jsonEncode(task.toJson())));
+    expect(decoded.analysisError, result);
+  });
+
   group('retryAnalysis', () {
     RenewTask makeFailedTask() => RenewTask(
           id: 'fail-1',
@@ -274,6 +312,34 @@ void main() {
       final persisted = await repo.findById('fail-1');
       expect(persisted!.analysisError, '分析失败（模拟）');
       expect(persisted.status, RenewTaskStatus.analyzing);
+    });
+
+    test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+
+      final pipeline = _FakePipeline(repo: repo);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(pipeline),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      // 模拟用户快速连点：不等待第一次调用完成即触发第二次
+      final first = notifier.retryAnalysis(task);
+      final second = notifier.retryAnalysis(task);
+      await Future.wait([first, second]);
+      await pumpEventQueue();
+
+      expect(pipeline.analyzeCallCount, 1);
+
+      final updated = pipelineContainer.read(taskListProvider).value!
+          .firstWhere((t) => t.id == 'fail-1');
+      expect(updated.status, RenewTaskStatus.awaitingCut);
     });
   });
 

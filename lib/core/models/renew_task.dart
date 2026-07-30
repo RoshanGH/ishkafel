@@ -40,6 +40,10 @@ class RenewTask {
 
   /// [clearAnalysisError] 为 true 时显式清空 analysisError（重试分析时使用）；
   /// 其余可空字段沿用 units/asrSentences 的简单覆盖模式（不支持单独清空）。
+  /// 技术债备注：清空可空字段目前是 per-field 布尔标志（每加一个需要清空的
+  /// 字段就多一个 `clearXxx` 参数），若后续 videoInfo/coverPath 等字段也需要
+  /// 支持清空，应收敛为统一的 sentinel 方案（例如用一个私有 `_unset` 哨兵对象
+  /// 区分「未传参」与「显式传 null」），而不是继续堆叠布尔参数。
   RenewTask copyWith({
     String? id,
     String? name,
