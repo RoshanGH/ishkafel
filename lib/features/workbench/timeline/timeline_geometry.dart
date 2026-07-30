@@ -1,0 +1,91 @@
+/// 时间线视口（不可变）：缩放与滚动状态 + ms↔px 换算
+class TimelineGeometry {
+  final int durationMs;
+  final double msPerPx; // 缩放：每像素毫秒数（越小越放大）
+  final double scrollPx; // 水平滚动（像素）
+
+  const TimelineGeometry({
+    required this.durationMs,
+    required this.msPerPx,
+    this.scrollPx = 0,
+  });
+
+  /// 毫秒转像素坐标
+  double msToPx(int ms) => ms / msPerPx - scrollPx;
+
+  /// 像素坐标转毫秒，有界 [0, durationMs]
+  int pxToMs(double px) => ((px + scrollPx) * msPerPx).round().clamp(0, durationMs);
+
+  /// 总时长对应的像素宽度
+  double get totalWidthPx => durationMs / msPerPx;
+
+  /// 返回新实例，保留未指定字段
+  TimelineGeometry copyWith({double? msPerPx, double? scrollPx}) {
+    return TimelineGeometry(
+      durationMs: durationMs,
+      msPerPx: msPerPx ?? this.msPerPx,
+      scrollPx: scrollPx ?? this.scrollPx,
+    );
+  }
+
+  /// 以锚点像素位置为中心缩放（zoomFactor>1 放大）
+  /// scroll 同步补偿，并 clamp 到合法范围 [0, max(0, totalWidth - viewport)]
+  TimelineGeometry zoomAt(double anchorPx, double zoomFactor, {required double viewportWidthPx}) {
+    // 锚点对应的时间（毫秒）
+    final anchorMs = pxToMs(anchorPx);
+    // 新的缩放系数
+    final newMsPerPx = msPerPx / zoomFactor;
+    // 计算新的 scrollPx 使得锚点时间在 anchorPx 处
+    final newScrollPx = anchorMs / newMsPerPx - anchorPx;
+    // 新的总宽度
+    final newTotalWidthPx = durationMs / newMsPerPx;
+    // clamp 到合法范围
+    final maxScroll = (newTotalWidthPx - viewportWidthPx).clamp(0.0, double.infinity);
+    final clampedScrollPx = newScrollPx.clamp(0.0, maxScroll);
+
+    return TimelineGeometry(
+      durationMs: durationMs,
+      msPerPx: newMsPerPx,
+      scrollPx: clampedScrollPx,
+    );
+  }
+
+  /// 滚动并 clamp 到 [0, max(0, totalWidth - viewport)]
+  TimelineGeometry scrolledBy(double deltaPx, {required double viewportWidthPx}) {
+    final newScrollPx = scrollPx + deltaPx;
+    final maxScroll = (totalWidthPx - viewportWidthPx).clamp(0.0, double.infinity);
+    final clampedScrollPx = newScrollPx.clamp(0.0, maxScroll);
+
+    return TimelineGeometry(
+      durationMs: durationMs,
+      msPerPx: msPerPx,
+      scrollPx: clampedScrollPx,
+    );
+  }
+
+  /// 适配整个时长到给定视口宽（初始状态）
+  static TimelineGeometry fit({required int durationMs, required double viewportWidthPx}) {
+    final msPerPx = durationMs / viewportWidthPx;
+    return TimelineGeometry(
+      durationMs: durationMs,
+      msPerPx: msPerPx,
+      scrollPx: 0,
+    );
+  }
+
+  /// 刻度间隔选择：返回不小于 minLabelSpacingPx 像素间距的"整"毫秒步长
+  /// 档位：1s/2s/5s/10s/30s/60s
+  int rulerStepMs({double minLabelSpacingPx = 80}) {
+    const steps = [1000, 2000, 5000, 10000, 30000, 60000];
+
+    for (final step in steps) {
+      final pxSpacing = step / msPerPx;
+      if (pxSpacing >= minLabelSpacingPx) {
+        return step;
+      }
+    }
+
+    // 全部超出，返回最大档位
+    return 60000;
+  }
+}
