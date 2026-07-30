@@ -254,6 +254,28 @@ void main() {
     expect(find.byType(TimelineView), findsOneWidget);
   });
 
+  testWidgets('播放器工厂抛出 Error（编程错误）时不被静默吞掉（评审 Important 1 收窄捕获）',
+      (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+      child: MaterialApp(
+        home: WorkbenchPage(
+          task: task,
+          playbackFactory: () => throw StateError('模拟编程错误（非 media_kit 异常）'),
+          mediaBuilder: _fakeMediaBuilder(),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // `on Exception catch` 不捕获 Error 子类，异常应继续抛出（被 Flutter
+    // 框架捕获为 FlutterError 并可经 tester.takeException 取回），而不是
+    // 被静默包装成「播放器不可用」提示
+    expect(tester.takeException(), isA<StateError>());
+    expect(find.text('播放器不可用，当前仅可编辑切分'), findsNothing);
+  });
+
   testWidgets('焦点在单元列表行（非 PlayerPanel）时按空格 → playback.isPlaying 仍能切换（评审 Important 2）',
       (tester) async {
     await repo.save(task);
