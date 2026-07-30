@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ai/ark_chat_client.dart';
+import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
@@ -8,8 +10,10 @@ import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/analysis/scene_detector.dart';
 import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/silence_detector.dart';
+import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/net/json_poster.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 /// 假 ASR：返回固定句子
@@ -113,4 +117,150 @@ void main() {
         makePipeline(repo).analyze(noInfo), throwsA(isA<StateError>()));
     expect(await repo.findById('t2'), isNull);
   });
+
+  test('analyze 后 asrSentences 与 FakeAsr 输出逐值相等（精度红线）', () async {
+    final repo = FileTaskRepository(tempDir);
+    final task = makeTask();
+    await repo.save(task);
+
+    final result = await makePipeline(repo).analyze(task);
+
+    expect(result.asrSentences, await FakeAsr().transcribe(''));
+    final persisted = await repo.findById('t1');
+    expect(persisted!.asrSentences, result.asrSentences);
+  });
+
+  test('配置 taggers 后单元与镜头被打标，且打标失败不中断', () async {
+    final repo = FileTaskRepository(tempDir);
+    final task = makeTask();
+    await repo.save(task);
+    var unitCalls = 0;
+    final pipeline = AnalysisPipeline(
+      audio: AudioExtractor(run: (_, args) async {
+        await File(args.last).writeAsBytes(Uint8List(16000));
+        return ProcessResult(1, 0, '', '');
+      }),
+      silence: const SilenceDetector(),
+      scenes: SceneDetector(
+          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
+      asr: FakeAsr(),
+      splitter: FakeSplitter(),
+      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
+      repository: repo,
+      workDir: Directory('${tempDir.path}/work'),
+      clock: () => DateTime.utc(2026, 7, 30),
+      unitTagger: _FakeUnitTagger(onTag: () => unitCalls++),
+      unitVocabulary: const ['功效演示'],
+    );
+    final result = await pipeline.analyze(task);
+    expect(unitCalls, result.units!.length);
+    expect(result.units!.first.tags, ['功效演示']);
+  });
+
+  test('shotTagger 配置后镜头被打标（抽帧+词表）', () async {
+    final repo = FileTaskRepository(tempDir);
+    final task = makeTask();
+    await repo.save(task);
+    var shotCalls = 0;
+    final pipeline = AnalysisPipeline(
+      audio: AudioExtractor(run: (_, args) async {
+        await File(args.last).writeAsBytes(Uint8List(16000));
+        return ProcessResult(1, 0, '', '');
+      }),
+      silence: const SilenceDetector(),
+      scenes: SceneDetector(
+          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
+      asr: FakeAsr(),
+      splitter: FakeSplitter(),
+      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
+      repository: repo,
+      workDir: Directory('${tempDir.path}/work'),
+      clock: () => DateTime.utc(2026, 7, 30),
+      thumbnails: ThumbnailService(run: (_, args) async {
+        await File(args.last).writeAsBytes(Uint8List.fromList([1, 2, 3]));
+        return ProcessResult(1, 0, '', '');
+      }),
+      shotTagger: _FakeShotTagger(onTag: () => shotCalls++),
+      shotVocabulary: const ['开箱'],
+    );
+    final result = await pipeline.analyze(task);
+    final totalShots =
+        result.units!.fold<int>(0, (n, u) => n + u.shots.length);
+    expect(shotCalls, totalShots);
+    expect(result.units!.first.shots.first.tags, ['开箱']);
+  });
+
+  test('unitTagger 抛异常不中断分析，该单元 tags 留空', () async {
+    final repo = FileTaskRepository(tempDir);
+    final task = makeTask();
+    await repo.save(task);
+    final pipeline = AnalysisPipeline(
+      audio: AudioExtractor(run: (_, args) async {
+        await File(args.last).writeAsBytes(Uint8List(16000));
+        return ProcessResult(1, 0, '', '');
+      }),
+      silence: const SilenceDetector(),
+      scenes: SceneDetector(
+          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
+      asr: FakeAsr(),
+      splitter: FakeSplitter(),
+      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
+      repository: repo,
+      workDir: Directory('${tempDir.path}/work'),
+      clock: () => DateTime.utc(2026, 7, 30),
+      unitTagger: _ThrowingUnitTagger(),
+      unitVocabulary: const ['功效演示'],
+    );
+    final result = await pipeline.analyze(task);
+    expect(result.units, isNotNull);
+    for (final u in result.units!) {
+      expect(u.tags, isEmpty);
+    }
+  });
+}
+
+class _FakeUnitTagger extends UnitTagger {
+  final void Function() onTag;
+  _FakeUnitTagger({required this.onTag})
+      : super(
+            chat: ArkChatClient(
+                apiKey: 'x',
+                post: (_, _, _) async =>
+                    const JsonPostResult(statusCode: 200, body: '{}')));
+  @override
+  Future<List<String>> tag(
+      {required String transcript, required List<String> vocabulary}) async {
+    onTag();
+    return ['功效演示'];
+  }
+}
+
+class _ThrowingUnitTagger extends UnitTagger {
+  _ThrowingUnitTagger()
+      : super(
+            chat: ArkChatClient(
+                apiKey: 'x',
+                post: (_, _, _) async =>
+                    const JsonPostResult(statusCode: 200, body: '{}')));
+  @override
+  Future<List<String>> tag(
+      {required String transcript, required List<String> vocabulary}) async {
+    throw StateError('打标服务不可用');
+  }
+}
+
+class _FakeShotTagger extends ShotTagger {
+  final void Function() onTag;
+  _FakeShotTagger({required this.onTag})
+      : super(
+            chat: ArkChatClient(
+                apiKey: 'x',
+                post: (_, _, _) async =>
+                    const JsonPostResult(statusCode: 200, body: '{}')));
+  @override
+  Future<List<String>> tag(
+      {required List<int> frameJpeg, required List<String> vocabulary}) async {
+    onTag();
+    return ['开箱'];
+  }
 }
