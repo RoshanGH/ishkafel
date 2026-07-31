@@ -168,6 +168,29 @@ void main() {
       final c = buildController();
       expect(c.splitSelectedAt(3000), false);
     });
+
+    group('镜头层拆分只作用于选中的那个镜头（Critical 2）', () {
+      test('播放头落在别的镜头内 → 返回 false 且结构一字不动', () {
+        final c = buildController();
+        // 选中 unit0 的镜头 0（[0,3000]），播放头停在 4500（落在镜头 1 内）
+        c.select(const EditorSelection.shot(0, 0));
+
+        expect(c.splitSelectedAt(4500), false,
+            reason: '不能静默去拆播放头所在的镜头 1');
+        expect(c.units, fixture());
+        expect(c.canUndo, false);
+      });
+
+      test('播放头落在选中镜头内 → 正常拆分该镜头', () {
+        final c = buildController();
+        c.select(const EditorSelection.shot(0, 1));
+
+        expect(c.splitSelectedAt(4500), true);
+        expect(c.units[0].shots.length, 3);
+        expect(c.units[0].shots[1].endMs, 4500);
+        expect(c.units[0].shots[2].startMs, 4500);
+      });
+    });
   });
 
   group('mergeSelectedWithPrevious', () {

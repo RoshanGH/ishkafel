@@ -226,24 +226,34 @@ abstract final class SegmentationEditOps {
     ]);
   }
 
-  /// 在 rawMs 处把单元 u 内包含该点的镜头拆成两个
+  /// 在 rawMs 处把单元 [u] 内**指定的**镜头 [shotIndex] 拆成两个。
+  ///
+  /// 语义（评审 Critical 2）：只拆调用方点名的那个镜头。此前这里用
+  /// `indexWhere` 找"包含拆分点的"镜头，而上层控制器又把选中的 shotIndex
+  /// 丢掉了，于是用户选中 S1、播放头停在 S3 时点「在游标处拆分」会拆掉 S3，
+  /// 选中态却仍停在 S1——用户完全不知道刚才改了什么、也无从撤回认知。
+  /// 现在拆分点不落在指定镜头内部（未能给两侧各留出至少一帧）时一律返回
+  /// null，由上层提示"播放头不在所选范围内"，绝不静默改拆别的镜头。
   static List<SemanticUnit>? splitShotAt(
-      List<SemanticUnit> units, int u, int rawMs, {required double fps}) {
+      List<SemanticUnit> units, int u, int rawMs,
+      {required double fps, required int shotIndex}) {
     if (u < 0 || u >= units.length) return null;
     final durationMs = units.last.endMs;
     final unit = units[u];
-    final b = _snap(rawMs, fps);
-    final s = unit.shots.indexWhere((shot) =>
-        _frameAfter(shot.startMs, fps) <= b &&
-        b <= _maxBoundaryLeavingOneFrame(shot.endMs, fps));
-    if (s == -1) return null;
+    if (shotIndex < 0 || shotIndex >= unit.shots.length) return null;
 
-    final shot = unit.shots[s];
+    final shot = unit.shots[shotIndex];
+    final minB = _frameAfter(shot.startMs, fps);
+    final maxB = _maxBoundaryLeavingOneFrame(shot.endMs, fps);
+    if (minB > maxB) return null;
+    final b = _snap(rawMs, fps);
+    if (b < minB || b > maxB) return null;
+
     final newShots = [
-      ...unit.shots.sublist(0, s),
+      ...unit.shots.sublist(0, shotIndex),
       shot.copyWith(endMs: b),
       Shot(startMs: b, endMs: shot.endMs, tags: shot.tags),
-      ...unit.shots.sublist(s + 1),
+      ...unit.shots.sublist(shotIndex + 1),
     ];
     final newUnit = unit.copyWith(shots: newShots);
     final result = _reindex([

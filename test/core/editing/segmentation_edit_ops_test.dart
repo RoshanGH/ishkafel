@@ -164,12 +164,63 @@ void main() {
 
   group('splitShotAt / mergeShotWithPrevious', () {
     test('镜头拆分保持单元边界不动', () {
-      final out = SegmentationEditOps.splitShotAt(fixture(), 0, 1500, fps: fps)!;
+      final out = SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+          fps: fps, shotIndex: 0)!;
       expect(out[0].shots.length, 3);
       expect(out[0].shots[0].endMs, 1500);
       expect(out[0].startMs, 0);
       expect(out[0].endMs, 6000);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    group('只拆指定的那个镜头（Critical 2）', () {
+      test('拆分点落在别的镜头内 → 返回 null，绝不改拆别的镜头', () {
+        // shotIndex=0 是 [0,3000]，拆分点 4500 落在镜头 1 内
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 4500,
+                fps: fps, shotIndex: 0),
+            isNull);
+      });
+
+      test('拆分点贴指定镜头边界（两侧留不出一帧）→ 返回 null', () {
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 10,
+                fps: fps, shotIndex: 0),
+            isNull);
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 3000,
+                fps: fps, shotIndex: 0),
+            isNull);
+      });
+
+      test('shotIndex 越界 → 返回 null', () {
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+                fps: fps, shotIndex: 9),
+            isNull);
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+                fps: fps, shotIndex: -1),
+            isNull);
+      });
+
+      test('拆分点落在指定镜头内 → 只有该镜头被一分为二，标签继承', () {
+        final tagged = [
+          fixture()[0].copyWith(shots: const [
+            Shot(startMs: 0, endMs: 3000, tags: ['A']),
+            Shot(startMs: 3000, endMs: 6000, tags: ['B']),
+          ]),
+          fixture()[1],
+        ];
+        final out = SegmentationEditOps.splitShotAt(tagged, 0, 4500,
+            fps: fps, shotIndex: 1)!;
+        expect(out[0].shots.length, 3);
+        expect(out[0].shots[0], tagged[0].shots[0], reason: '镜头 0 不受影响');
+        expect(out[0].shots[1].endMs, 4500);
+        expect(out[0].shots[2].startMs, 4500);
+        expect(out[0].shots[2].tags, ['B']);
+        expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+      });
     });
 
     test('镜头合并保留标签并集', () {
@@ -308,7 +359,9 @@ void main() {
           final maxB = _expectedMaxBoundary(d, fps);
           List<SemanticUnit>? out;
           expect(() {
-            out = SegmentationEditOps.splitShotAt(fixtureFor(d), 1, maxB, fps: fps);
+            // maxB 落在末单元的末镜头（下标 1）内
+            out = SegmentationEditOps.splitShotAt(fixtureFor(d), 1, maxB,
+                fps: fps, shotIndex: 1);
           }, returnsNormally);
           expect(out, isNotNull, reason: 'maxB=$maxB 应是一个合法拆分点');
           expect(out![1].shots.last.endMs, d);
@@ -424,8 +477,8 @@ void main() {
     });
 
     test('splitShotAt 尝试拆分已贴最小时长的末单元末镜头：无合法拆分点，返回 null', () {
-      final out =
-          SegmentationEditOps.splitShotAt(tightFixture(), 1, 999999, fps: fps);
+      final out = SegmentationEditOps.splitShotAt(tightFixture(), 1, 999999,
+          fps: fps, shotIndex: 0);
       expect(out, isNull);
     });
   });
