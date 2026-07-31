@@ -69,7 +69,7 @@ class TaskCard extends StatelessWidget {
                     ),
                     child: Text(badge.label,
                         style: const TextStyle(
-                            fontSize: 10,
+                            fontSize: AppFontSize.micro,
                             fontWeight: FontWeight.w600,
                             color: Colors.black)),
                   ),
@@ -82,11 +82,13 @@ class TaskCard extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
+                  // 12.5 不在阶梯上（相邻两级只差 0.5px 读不出层级），
+                  // 收敛到 body 级
                   child: Text(task.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                          fontSize: 12.5,
+                          fontSize: AppFontSize.body,
                           fontWeight: FontWeight.w600,
                           color: AppColors.textPrimary)),
                 ),

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,13 +11,17 @@ import 'package:ishkafel/core/analysis/scene_detector.dart';
 import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
+import 'package:ishkafel/core/ffmpeg/process_runner.dart';
+import 'package:ishkafel/core/net/json_poster.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
+import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
+import 'package:ishkafel/features/tasks/analysis_error_message.dart';
 import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
@@ -35,13 +40,15 @@ class _NoopSplitter implements SemanticSplitter {
 class _FakePipeline extends AnalysisPipeline {
   final TaskRepository repo;
   final bool shouldFail;
-  final String failMessage;
+
+  /// 非 null 时直接抛出这个对象（用于验证各类真实异常的展示文案）
+  final Object? failWith;
   int analyzeCallCount = 0;
 
   _FakePipeline({
     required this.repo,
     this.shouldFail = false,
-    this.failMessage = '分析失败（模拟）',
+    this.failWith,
   }) : super(
           audio: AudioExtractor(run: (_, _) async => ProcessResult(1, 0, '', '')),
           silence: const SilenceDetector(),
@@ -56,7 +63,8 @@ class _FakePipeline extends AnalysisPipeline {
   @override
   Future<RenewTask> analyze(RenewTask task) async {
     analyzeCallCount++;
-    if (shouldFail) throw StateError(failMessage);
+    if (failWith != null) throw failWith!;
+    if (shouldFail) throw StateError('分析失败（模拟）');
     final updated =
         task.copyWith(status: RenewTaskStatus.awaitingCut, updatedAt: DateTime.now());
     await repo.save(updated);
@@ -95,6 +103,47 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> save(RenewTask task) async => _store[task.id] = task;
   @override
   Future<void> delete(String id) async => _store.remove(id);
+}
+
+/// save 可被开关成「必定抛 I/O 异常」的假仓库：模拟磁盘写满 / 数据目录只读
+class _SaveFailingRepository extends InMemoryTaskRepository {
+  bool failSave = false;
+
+  @override
+  Future<void> save(RenewTask task) async {
+    if (failSave) throw const FileSystemException('磁盘写入失败（模拟）');
+    return super.save(task);
+  }
+}
+
+/// findAll 可被开关成「必定抛 I/O 异常」的假仓库：模拟数据目录整体读不出来
+class _FindAllFailingRepository extends InMemoryTaskRepository {
+  bool failFindAll = false;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    if (failFindAll) {
+      throw const PathNotFoundException('/tasks', OSError('No such file', 2));
+    }
+    return super.findAll();
+  }
+}
+
+/// findAll 取完快照后可被挂起的假仓库。
+///
+/// 精确复刻真实行为：`findAll` 的结果是「**开始那一刻**的磁盘快照」
+///（真实实现里是后台 isolate 遍历目录读盘，100 条约 131 ms），
+/// 期间发生的写盘不会进入这一份快照。
+class _SnapshotGatedRepository extends InMemoryTaskRepository {
+  Completer<void>? gate;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    final snapshot = await super.findAll();
+    final pending = gate;
+    if (pending != null) await pending.future;
+    return snapshot;
+  }
 }
 
 /// 记录 findAll 调用次数的假仓库：用于证明「保存一条任务不再全量重读」
@@ -250,7 +299,8 @@ void main() {
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
     expect(task.status, RenewTaskStatus.analyzing);
-    expect(task.analysisError, contains('分析失败（模拟）'));
+    // 未知异常统一落成一句中文（详见 Important 5 分组），不再是 toString()
+    expect(task.analysisError, unknownAnalysisErrorMessage);
 
     // 仓库中同样落库，保证重启后仍能读到失败原因
     final persisted = await repo.findById('new-id');
@@ -258,12 +308,14 @@ void main() {
   });
 
   test('分析失败信息落库前按 300 字截断，避免超长堆栈污染 JSON', () async {
+    // 用「上层直接给出的中文原因」这条会原样透传的路径来验证截断
+    // （未知异常已被翻译成固定短句，走不到截断逻辑）
     final longMessage = '错' * 500;
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       importServiceProvider.overrideWithValue(importService),
-      analysisPipelineProvider.overrideWithValue(
-          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+      analysisPipelineProvider
+          .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
     ]);
     addTearDown(pipelineContainer.dispose);
 
@@ -280,19 +332,15 @@ void main() {
   });
 
   test('分析失败信息截断码点安全，不切断 UTF-16 代理对（含 emoji 的错误信息）', () async {
-    // 落库前的原始异常经 StateError.toString() 会加上「Bad state: 」前缀，
-    // 这里按前缀长度动态推算 ASCII 填充数，使「前缀 + ASCII」恰好占满 299 个
-    // UTF-16 code unit——这样后面第一个 emoji（占 2 个 code unit）恰好横跨
-    // 第 300 个截断边界，若按 code unit 朴素 substring(0, 300) 截断会切在
-    // 代理对中间，留下落单的高位 surrogate。
-    final prefixLength = StateError('').toString().length;
-    final asciiCount = 299 - prefixLength;
-    final longMessage = '${'a' * asciiCount}${'😀' * 10}';
+    // ASCII 填充恰好占满 299 个 UTF-16 code unit，后面第一个 emoji
+    //（占 2 个 code unit）恰好横跨第 300 个截断边界：若按 code unit 朴素
+    // substring(0, 300) 截断会切在代理对中间，留下落单的高位 surrogate。
+    final longMessage = '${'a' * 299}${'😀' * 10}';
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       importServiceProvider.overrideWithValue(importService),
-      analysisPipelineProvider.overrideWithValue(
-          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+      analysisPipelineProvider
+          .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
     ]);
     addTearDown(pipelineContainer.dispose);
 
@@ -479,6 +527,35 @@ void main() {
       expect(container.read(taskListProvider).value!.single.name, '滴露_植源喷雾');
     });
 
+    test('renameTask 以磁盘上的当前记录为基线，不把对话框打开时的旧快照写回去', () async {
+      await repo.save(makeTask('r3'));
+      await container.read(taskListProvider.future);
+      // 重命名对话框停留期间后台分析完成，磁盘上多了 units 与新状态
+      final analyzed = makeTask('r3').copyWith(
+        status: RenewTaskStatus.picking,
+        units: [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '分析产出的台词',
+            shots: const [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ],
+      );
+      await repo.save(analyzed);
+
+      // 传入的是对话框打开时捕获的旧对象（units 为空、状态是 awaitingCut）
+      await container
+          .read(taskListProvider.notifier)
+          .renameTask(makeTask('r3'), '新名字');
+
+      final saved = await repo.findById('r3');
+      expect(saved!.name, '新名字');
+      expect(saved.units, hasLength(1), reason: '重命名不该抹掉后台分析的成果');
+      expect(saved.status, RenewTaskStatus.picking);
+    });
+
     test('renameTask 空名称被拒绝，原名保留', () async {
       await repo.save(makeTask('r2'));
       await container.read(taskListProvider.future);
@@ -489,6 +566,304 @@ void main() {
           );
 
       expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
+  group('reload 的旧快照不能覆盖期间的局部更新（Important 3）', () {
+    late _SnapshotGatedRepository gated;
+    late ProviderContainer gatedContainer;
+
+    RenewTask makeAwaitingCut(String id) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    List<SemanticUnit> makeUnits() => const [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '确认切分后的台词',
+            shots: [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ];
+
+    setUp(() async {
+      gated = _SnapshotGatedRepository();
+      await gated.save(makeAwaitingCut('b'));
+      gatedContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(gated),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(gatedContainer.dispose);
+      await gatedContainer.read(taskListProvider.future);
+    });
+
+    test('后台分析结束触发的 reload 不把「确认切分」的结果冲掉', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      // ① 后台分析结束 → reload 起步，快照此刻已定格（任务 B 仍是 awaitingCut）
+      final gate = Completer<void>();
+      gated.gate = gate;
+      final reloading = notifier.reload();
+
+      // ② 这段时间里用户在审片台点了「确认切分」，落库成功、页面已 pop
+      //（这条路径走局部更新，不会再碰 findAll，因此闸门保持关着）
+      await notifier.confirmSegmentation(makeAwaitingCut('b'), makeUnits());
+
+      // ③ 步骤①的快照这才返回
+      gate.complete();
+      await reloading;
+
+      final inMemory = gatedContainer
+          .read(taskListProvider)
+          .value!
+          .firstWhere((t) => t.id == 'b');
+      expect(inMemory.status, RenewTaskStatus.picking,
+          reason: '内存态落后磁盘且不自愈：用户再进审片台会以旧 units 为基线，'
+              '再保存就把上一次确认的切分永久覆盖');
+      expect(inMemory.units, makeUnits());
+    });
+
+    test('reload 期间被删除的任务不会被旧快照带回列表', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      final gate = Completer<void>();
+      gated.gate = gate;
+      final reloading = notifier.reload();
+
+      await notifier.deleteTask(makeAwaitingCut('b'));
+
+      gate.complete();
+      await reloading;
+
+      expect(gatedContainer.read(taskListProvider).value, isEmpty);
+    });
+
+    test('没有并发局部更新时，reload 照常反映磁盘上的外部变化', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      await gated.save(makeAwaitingCut('ext'));
+
+      await notifier.reload();
+
+      expect(gatedContainer.read(taskListProvider).value!.map((t) => t.id).toSet(),
+          {'b', 'ext'});
+    });
+  });
+
+  group('分析失败原因要说人话（Important 5）', () {
+    /// 让假管线抛出 [error]，返回落库后的 analysisError
+    Future<String> analysisErrorFor(Object error) async {
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider
+            .overrideWithValue(_FakePipeline(repo: repo, failWith: error)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      await pipelineContainer
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+      await pumpEventQueue();
+      return (await repo.findById('new-id'))!.analysisError!;
+    }
+
+    test('MediaToolMissingException 的中文安装引导不再挂类名前缀', () async {
+      final message =
+          await analysisErrorFor(const MediaToolMissingException('ffmpeg'));
+
+      expect(message, missingToolMessage('ffmpeg'),
+          reason: 'message 本身就是可直接展示的安装引导，上层不该再包一层类名');
+    });
+
+    test('AiHttpException 不把类名与服务端英文原文摊给用户', () async {
+      final message = await analysisErrorFor(const AiHttpException(
+          'ASR 调用失败 [X-Api-Status-Code=45000001]：Invalid request parameter',
+          statusCode: 400));
+
+      expect(message, isNot(contains('AiHttpException')));
+      expect(message, isNot(contains('Invalid request parameter')));
+      expect(message, contains('AI'));
+    });
+
+    test('FfmpegException 不把类名与 ffmpeg 英文 stderr 摊给用户', () async {
+      final message = await analysisErrorFor(const FfmpegException(
+          'ffmpeg 音频提取失败（exit=1）：Invalid data found when processing input'));
+
+      expect(message, isNot(contains('FfmpegException')));
+      expect(message, isNot(contains('Invalid data found')));
+    });
+
+    test('未知异常统一落成一句中文，原始文本只进日志', () async {
+      final captured = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = captured.add;
+      addTearDown(() => AppLog.sink = original);
+
+      final message =
+          await analysisErrorFor(StateError('Concurrent modification'));
+
+      expect(message, isNot(contains('Bad state')));
+      expect(message, isNot(contains('Concurrent modification')));
+      expect(captured.where((l) => l.contains('Concurrent modification')),
+          isNotEmpty,
+          reason: '原始文本要能在日志里查到');
+    });
+
+    test('已经是中文人话的原因（AI 未配置）原样保留', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      expect((await repo.findById('new-id'))!.analysisError,
+          pipelineUnavailableMessage);
+    });
+  });
+
+  group('装载整体失败不清空任务网格（Important 7）', () {
+    RenewTask makeStored(String id) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    test('reload 失败时保留上一次装载到的列表，并把失败标成可重试', () async {
+      final failing = _FindAllFailingRepository();
+      await failing.save(makeStored('keep'));
+      final failContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(failContainer.dispose);
+      await failContainer.read(taskListProvider.future);
+
+      final captured = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = captured.add;
+      addTearDown(() => AppLog.sink = original);
+
+      failing.failFindAll = true;
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      final state = failContainer.read(taskListProvider);
+      expect(state.valueOrNull?.map((t) => t.id), ['keep'],
+          reason: '一次性 I/O 抖动不该让整个任务网格清空');
+      expect(state.hasError, isTrue, reason: 'UI 需要据此给出可重试的提示');
+      expect(captured.where((l) => l.contains('PathNotFoundException')),
+          isNotEmpty,
+          reason: '原始异常不能被静默吞进 state，排查时要能在日志里找到');
+    });
+
+    test('恢复正常后再次 reload 能自愈', () async {
+      final failing = _FindAllFailingRepository();
+      await failing.save(makeStored('keep'));
+      final failContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(failContainer.dispose);
+      await failContainer.read(taskListProvider.future);
+      failing.failFindAll = true;
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      failing.failFindAll = false;
+      await failing.save(makeStored('added'));
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      final state = failContainer.read(taskListProvider);
+      expect(state.hasError, isFalse);
+      expect(state.value!.map((t) => t.id).toSet(), {'keep', 'added'});
+    });
+  });
+
+  group('已删除的任务不能被「复活」回磁盘（Critical 3）', () {
+    RenewTask makeDeletableTask() => RenewTask(
+          id: 'gone',
+          name: '已删除的任务',
+          sourcePath: '/v/gone.mp4',
+          status: RenewTaskStatus.analyzing,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          analysisError: '分析失败（模拟）',
+        );
+
+    test('SnackBar 上残留的「重试」点下去，不会把已删除的任务写回磁盘', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      final pipeline = _FakePipeline(repo: repo);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(pipeline),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      // 用户在 SnackBar 停留期间删掉了这条任务（封面/PCM/抽帧已被清理）
+      await notifier.deleteTask(task);
+      // 闭包里捕获的仍是删除前的 task 对象
+      final outcome = await notifier.retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.taskMissing);
+      expect(await repo.findById('gone'), isNull,
+          reason: '中间产物已被清理，复活出来的任务不会自愈');
+      expect(pipelineContainer.read(taskListProvider).value, isEmpty);
+      expect(pipeline.analyzeCallCount, 0);
+    });
+
+    test('重命名对话框上残留的「保存」点下去，不会把已删除的任务写回磁盘', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+      final notifier = container.read(taskListProvider.notifier);
+
+      await notifier.deleteTask(task);
+      await notifier.renameTask(task, '新名字');
+
+      expect(await repo.findById('gone'), isNull);
+      expect(container.read(taskListProvider).value, isEmpty);
+    });
+
+    test('分析进行中任务被删除：失败落库不能把它复活', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider
+            .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      await notifier.retryAnalysis(task);
+      await notifier.deleteTask(task);
+      await pumpEventQueue();
+
+      expect(await repo.findById('gone'), isNull);
+    });
+
+    test('导入新任务不受影响（同样走 save，但记录本来就该被创建）', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      expect(await repo.findById('new-id'), isNotNull);
     });
   });
 
@@ -584,6 +959,36 @@ void main() {
       final updated = pipelineContainer.read(taskListProvider).value!
           .firstWhere((t) => t.id == 'fail-1');
       expect(updated.status, RenewTaskStatus.awaitingCut);
+    });
+
+    test('落库失败时并发守卫必须释放，否则该任务本次会话再也无法重试（Critical 2）',
+        () async {
+      final task = makeFailedTask();
+      final failing = _SaveFailingRepository();
+      await failing.save(task);
+      final pipeline = _FakePipeline(repo: failing);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(pipeline),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      // 第一次：磁盘写入失败，异常应冒泡给 UI（UI 提示「请稍后再试」）
+      failing.failSave = true;
+      await expectLater(
+          notifier.retryAnalysis(task), throwsA(isA<FileSystemException>()));
+
+      // 用户照提示再点一次：磁盘恢复后必须能真的重新开始分析
+      failing.failSave = false;
+      final outcome = await notifier.retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.started,
+          reason: '写盘失败没有跑过 _runAnalyze，守卫不能留在集合里假装「正在分析中」');
+      expect(pipeline.analyzeCallCount, 1);
     });
   });
 

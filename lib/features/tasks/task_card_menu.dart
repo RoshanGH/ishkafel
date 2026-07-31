@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
 
 /// 任务卡上下文菜单动作
@@ -42,8 +43,10 @@ Future<TaskCardAction?> showTaskCardMenu(
   );
 }
 
-const _itemStyle = TextStyle(fontSize: 13, color: AppColors.textPrimary);
-const _destructiveItemStyle = TextStyle(fontSize: 13, color: AppColors.red);
+const _itemStyle =
+    TextStyle(fontSize: AppFontSize.emphasis, color: AppColors.textPrimary);
+const _destructiveItemStyle =
+    TextStyle(fontSize: AppFontSize.emphasis, color: AppColors.red);
 
 /// 删除二次确认（破坏性操作）；返回 true 表示用户确认删除
 Future<bool> confirmDeleteTask(BuildContext context, RenewTask task) async {
@@ -51,11 +54,12 @@ Future<bool> confirmDeleteTask(BuildContext context, RenewTask task) async {
     context: context,
     builder: (dialogContext) => AlertDialog(
       backgroundColor: AppColors.surfaceRaised,
-      title: const Text('删除任务', style: TextStyle(fontSize: 15)),
+      title: const Text('删除任务',
+          style: TextStyle(fontSize: AppFontSize.title)),
       content: Text(
         '将删除「${task.name}」及其分析产物（封面、抽帧、音频缓存），原始素材文件不受影响。'
         '此操作无法撤销。',
-        style: const TextStyle(fontSize: 13, height: 1.5),
+        style: const TextStyle(fontSize: AppFontSize.emphasis, height: 1.5),
       ),
       actions: [
         TextButton(
@@ -107,12 +111,13 @@ class _RenameDialogState extends State<_RenameDialog> {
   @override
   Widget build(BuildContext context) => AlertDialog(
         backgroundColor: AppColors.surfaceRaised,
-        title: const Text('重命名任务', style: TextStyle(fontSize: 15)),
+        title: const Text('重命名任务',
+            style: TextStyle(fontSize: AppFontSize.title)),
         content: TextField(
           controller: _controller,
           autofocus: true,
           maxLength: 80,
-          style: const TextStyle(fontSize: 13),
+          style: const TextStyle(fontSize: AppFontSize.emphasis),
           decoration: const InputDecoration(
               counterText: '', hintText: '输入新的任务名称'),
           onSubmitted: (_) => _submit(),

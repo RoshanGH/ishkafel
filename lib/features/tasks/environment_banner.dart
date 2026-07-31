@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/ffmpeg/media_tools_locator.dart';
 import 'task_list_controller.dart';
 
@@ -16,38 +18,68 @@ class NoticeBanner extends StatelessWidget {
   final Color color;
   final String message;
 
+  /// 可选的行动按钮（如「重试」）；两者必须同时给出才会渲染
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
   const NoticeBanner({
     super.key,
     required this.icon,
     required this.color,
     required this.message,
+    this.actionLabel,
+    this.onAction,
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-        width: double.infinity,
-        margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 15, color: color),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(
-                    fontSize: 12, height: 1.4, color: AppColors.textPrimary),
+  Widget build(BuildContext context) {
+    final label = actionLabel;
+    final action = onAction;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 0),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                  fontSize: AppFontSize.body,
+                  height: 1.4,
+                  color: AppColors.textPrimary),
+            ),
+          ),
+          if (label != null && action != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            TextButton(
+              onPressed: action,
+              style: TextButton.styleFrom(
+                foregroundColor: color,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.body, fontWeight: FontWeight.w600)),
             ),
           ],
-        ),
-      );
+        ],
+      ),
+    );
+  }
 }
 
 /// 列表页顶部的环境提示区：把「装不了/跑不了」的前置条件常驻展示

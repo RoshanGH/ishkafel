@@ -39,6 +39,27 @@ final missingSourceTaskIdsProvider = FutureProvider<Set<String>>((ref) async {
   };
 });
 
+/// 点击进入前的实时校验：返回该任务的源文件此刻是否已不存在。
+///
+/// [missingSourceTaskIdsProvider] 的缓存只用于「列表上提前打红标」，绝不能
+/// 作为拦截判定的唯一依据：它唯一的重算触发是任务列表本身变化，用户在
+/// Finder 里删掉源视频后，只要不发生导入/删除/重命名/分析完成，缓存里那条
+/// 仍是「存在」——拦截不触发，用户照常进审片台，然后播放器黑屏、两条辅助
+/// 轨报失败；反方向（文件放回来了）则是红标不消、入口一直被挡。
+///
+/// 一次 stat 的成本完全可接受：它只在用户点击时发生一次，不是逐帧。
+/// 结果与缓存不一致时顺手让缓存重算，列表上的标记随即跟上。
+Future<bool> isSourceMissingNow(WidgetRef ref, RenewTask task) async {
+  final probe = ref.read(fileExistsProbeProvider);
+  final exists = await _probeQuietly(probe, task.sourcePath);
+  final cachedMissing =
+      ref.read(missingSourceTaskIdsProvider).valueOrNull ?? const <String>{};
+  if (cachedMissing.contains(task.id) == exists) {
+    ref.invalidate(missingSourceTaskIdsProvider);
+  }
+  return !exists;
+}
+
 /// 探测失败（权限不足、外接卷未挂载、路径过长等）不当作「缺失」：
 /// 误报会把一条完全正常的任务标成红字并挡住入口，代价比漏报大得多。
 /// 但异常不能静默吞掉，仍要落日志。

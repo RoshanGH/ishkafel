@@ -51,6 +51,20 @@ class _BlockingRepository extends InMemoryTaskRepository {
   }
 }
 
+/// findAll 可被开关成「必定抛 I/O 异常」的假仓库
+class _FailingRepository extends InMemoryTaskRepository {
+  bool failFindAll = false;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    if (failFindAll) {
+      throw const PathNotFoundException(
+          '/tasks/x.json', OSError('No such file or directory', 2));
+    }
+    return super.findAll();
+  }
+}
+
 /// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
 class _SkippingRepository extends InMemoryTaskRepository
     implements TaskLoadDiagnostics {
@@ -304,6 +318,45 @@ void main() {
     });
   });
 
+  group('装载失败要说人话且能重试（Important 7）', () {
+    testWidgets('首次装载失败：不摊原始异常，给中文说明与「重试」按钮', (tester) async {
+      final repo = _FailingRepository()..failFindAll = true;
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('PathNotFoundException'), findsNothing,
+          reason: '异常类名与 errno 只该进日志');
+      expect(find.textContaining('加载失败：'), findsNothing);
+      expect(find.textContaining('任务列表读取失败'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '重试'), findsOneWidget);
+
+      // 点「重试」应真的重新装载，恢复正常后列表出得来
+      repo.failFindAll = false;
+      await repo.save(makeTask('ok', '恢复的任务', RenewTaskStatus.awaitingCut));
+      await tester.tap(find.widgetWithText(FilledButton, '重试'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('恢复的任务'), findsOneWidget);
+    });
+
+    testWidgets('已有列表时刷新失败：列表继续显示，顶部横幅给可重试的提示', (tester) async {
+      final repo = _FailingRepository();
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+          tester.element(find.byType(TaskListPage)));
+      repo.failFindAll = true;
+      await container.read(taskListProvider.notifier).reload();
+      await tester.pumpAndSettle();
+
+      expect(find.text('已有任务'), findsOneWidget,
+          reason: '刷新失败不该把已经显示出来的任务网格清空');
+      expect(find.textContaining('任务列表读取失败'), findsOneWidget);
+    });
+  });
+
   group('损坏任务文件的可见提示', () {
     testWidgets('跳过无法读取的任务文件时列表页顶部给出提示', (tester) async {
       final repo = _SkippingRepository(skipped: 2);
@@ -376,6 +429,68 @@ void main() {
 
       expect(find.byType(WorkbenchPage), findsNothing);
       expect(find.textContaining('源文件已不存在'), findsOneWidget);
+    });
+
+    testWidgets('缓存说「在」但文件已被删掉：点击时实时校验必须拦住入口（Important 4）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = true;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsNothing);
+
+      // 用户在 Finder 里删掉了源视频；没有导入/删除/重命名/分析完成，
+      // 缓存不会重算，这条仍被当作「存在」
+      exists = false;
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing,
+          reason: '进去只会是播放器黑屏 + 两条辅助轨报失败');
+      expect(find.textContaining('源文件已不存在'), findsOneWidget);
+      expect(find.text('源文件缺失'), findsOneWidget,
+          reason: '实时校验的结果要回灌缓存，列表上的红标跟着更新');
+    });
+
+    testWidgets('文件放回原位后不必重启应用：点击时实时校验放行（Important 4）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = false;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsOneWidget);
+
+      exists = true;
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsOneWidget,
+          reason: '文件已经放回来了，入口不该继续被挡');
+    });
+
+    testWidgets('应用重新激活时重算缓存（在 Finder 里改动文件后回到应用即可见）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = true;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsNothing);
+
+      exists = false;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(find.text('源文件缺失'), findsOneWidget);
     });
 
     testWidgets('源文件存在性只在列表变化时探测一次，不随每帧重复（否则又是逐帧同步 IO）',
