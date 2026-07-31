@@ -45,6 +45,9 @@ class TimelineView extends StatefulWidget {
   /// 播放位置。用 [ValueListenable] 而不是普通 int：播放时它每秒变化 30 次，
   /// 只让包住 [CustomPaint] 的那一层重建，外层三栏面板完全不动。
   final ValueListenable<int> playhead;
+
+  /// 抽帧/波形就绪状态，未就绪时时间线画占位而不是留白
+  final TimelineMediaStatus mediaStatus;
   final ValueChanged<int> onSeek;
   final ValueChanged<TimelineGeometry> onGeometryChanged;
 
@@ -59,6 +62,7 @@ class TimelineView extends StatefulWidget {
     required this.geometry,
     this.media,
     required this.playhead,
+    this.mediaStatus = TimelineMediaStatus.ready,
     required this.onSeek,
     required this.onGeometryChanged,
     this.readOnly = false,
@@ -282,6 +286,7 @@ class _TimelineViewState extends State<TimelineView> {
                     thumbImages: _thumbImages,
                     waveEnvelope: widget.media?.waveEnvelope,
                     playheadMs: playheadMs,
+                    mediaStatus: widget.mediaStatus,
                   ),
                 ),
               ),

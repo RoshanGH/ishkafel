@@ -17,6 +17,7 @@ import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import '../tasks/task_list_controller.dart';
+import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
 import 'workbench_chrome.dart';
@@ -64,6 +65,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   PlaybackController? _playback;
   Widget? _videoWidget;
   TimelineMedia? _media;
+
+  /// 抽帧/波形是否构建失败。与 `_media == null` 一起决定时间线两条辅助轨
+  /// 显示「生成中…」还是「生成失败」——此前失败只写日志，界面上是一片
+  /// 空白，用户无从判断是在算还是坏了。
+  bool _mediaFailed = false;
   StreamSubscription<int>? _positionSub;
 
   /// 播放位置。用 [ValueNotifier] 而不是 State 字段：播放时这个值每秒变化
@@ -163,6 +169,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     super.dispose();
   }
 
+  /// 时间线辅助素材的就绪状态
+  TimelineMediaStatus get _mediaStatus {
+    if (_media != null) return TimelineMediaStatus.ready;
+    return _mediaFailed
+        ? TimelineMediaStatus.failed
+        : TimelineMediaStatus.loading;
+  }
+
   /// 编辑器变化时**只在 dirty 真正翻转时**重建页面。
   ///
   /// 页面本身唯一依赖编辑器状态的地方是 [PopScope.canPop]（决定返回时是否
@@ -210,6 +224,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       setState(() => _media = media);
     } catch (e) {
       AppLog.warn('时间线媒体加载失败（taskId=${widget.task.id}）：$e');
+      if (!mounted) return;
+      setState(() => _mediaFailed = true);
     }
   }
 
@@ -294,6 +310,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,
+                mediaStatus: _mediaStatus,
                 playhead: _playhead,
                 readOnly: !_isEditable,
               ),

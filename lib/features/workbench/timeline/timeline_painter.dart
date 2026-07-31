@@ -10,6 +10,13 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 
+/// 时间线辅助素材（抽帧胶片条 / 音频波形）的就绪状态。
+///
+/// 抽帧要跑十几次 ffmpeg 子进程、波形要提取整段 PCM，真机实测进页面后约
+/// 2 秒才有内容。此前两条轨在这段时间里是纯空白、失败时也是纯空白——
+/// 用户无从判断是在算还是坏了。
+enum TimelineMediaStatus { loading, ready, failed }
+
 /// 时间线绘制器（无状态纯绘制）
 ///
 /// 绘制刻度尺、单元色块轨、镜头子块轨、缩略图轨、波形轨、播放头，共 6 层，
@@ -24,6 +31,9 @@ class TimelinePainter extends CustomPainter {
   final List<ui.Image>? thumbImages;
   final List<double>? waveEnvelope;
   final int playheadMs;
+
+  /// 抽帧/波形的就绪状态，决定未就绪时画什么占位
+  final TimelineMediaStatus mediaStatus;
 
   /// 单元色块内标签文字的左右内边距（左右各一份）
   static const _unitLabelPadding = 6.0;
@@ -52,6 +62,7 @@ class TimelinePainter extends CustomPainter {
     this.thumbImages,
     this.waveEnvelope,
     required this.playheadMs,
+    this.mediaStatus = TimelineMediaStatus.ready,
   });
 
   @override
@@ -230,7 +241,11 @@ class TimelinePainter extends CustomPainter {
 
   void _paintThumbsTrack(Canvas canvas, Size size) {
     final images = thumbImages;
-    if (images == null || images.isEmpty) return;
+    if (images == null || images.isEmpty) {
+      _paintTrackPlaceholder(canvas, size, TimelineTracks.thumbsTop,
+          TimelineTracks.thumbsBottom, '画面缩略图');
+      return;
+    }
 
     final trackRect = Rect.fromLTRB(
         0, TimelineTracks.thumbsTop, size.width, TimelineTracks.thumbsBottom);
@@ -246,18 +261,66 @@ class TimelinePainter extends CustomPainter {
       if (right < 0 || left > size.width) continue;
 
       final image = images[i];
-      final src =
-          Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
       final dst = Rect.fromLTRB(
           left, TimelineTracks.thumbsTop, right, TimelineTracks.thumbsBottom);
-      canvas.drawImageRect(image, src, dst, imagePaint);
+      canvas.drawImageRect(image, _coverSrcRect(image, dst), dst, imagePaint);
     }
     canvas.restore();
   }
 
+  /// 按 cover 规则算出源图裁剪区：等比填满目标格，多出的部分居中裁掉。
+  ///
+  /// 本项目的工作对象是 9:16 竖屏成片，而胶片条格子是宽扁的（约 100×52），
+  /// 直接把整张源图拉进目标矩形会横向拉伸约 3.4 倍，人脸全变形——这与
+  /// CLAUDE.md「竖屏素材为主要工作对象」的定位直接冲突。
+  Rect _coverSrcRect(ui.Image image, Rect dst) {
+    final srcW = image.width.toDouble();
+    final srcH = image.height.toDouble();
+    if (dst.width <= 0 || dst.height <= 0) {
+      return Rect.fromLTWH(0, 0, srcW, srcH);
+    }
+    final dstAspect = dst.width / dst.height;
+    final srcAspect = srcW / srcH;
+    if (srcAspect > dstAspect) {
+      // 源图更宽：保留全高，横向居中裁剪
+      final keepW = srcH * dstAspect;
+      return Rect.fromLTWH((srcW - keepW) / 2, 0, keepW, srcH);
+    }
+    // 源图更高（竖屏素材的常态）：保留全宽，纵向居中裁剪
+    final keepH = srcW / dstAspect;
+    return Rect.fromLTWH(0, (srcH - keepH) / 2, srcW, keepH);
+  }
+
+  /// 媒体未就绪时的轨道占位：避免整条轨一片空白被误认为"这栏坏了"。
+  /// 加载中与失败给不同的措辞与颜色，让用户能区分「在算」与「算失败了」。
+  void _paintTrackPlaceholder(
+      Canvas canvas, Size size, double top, double bottom, String what) {
+    if (mediaStatus == TimelineMediaStatus.ready) return;
+    final rect = Rect.fromLTRB(0, top, size.width, bottom);
+    final failed = mediaStatus == TimelineMediaStatus.failed;
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..color = (failed ? AppColors.red : AppColors.textTertiary)
+            .withValues(alpha: 0.10),
+    );
+    _drawText(
+      canvas,
+      failed ? '$what生成失败' : '$what生成中…',
+      Offset(AppSpacing.sm, top + (bottom - top) / 2 - 7),
+      failed ? AppColors.red : AppColors.textSecondary,
+      fontSize: AppFontSize.caption,
+      maxWidth: size.width - AppSpacing.sm * 2,
+    );
+  }
+
   void _paintWaveTrack(Canvas canvas, Size size) {
     final envelope = waveEnvelope;
-    if (envelope == null || envelope.isEmpty) return;
+    if (envelope == null || envelope.isEmpty) {
+      _paintTrackPlaceholder(canvas, size, TimelineTracks.waveTop,
+          TimelineTracks.waveBottom, '音频波形');
+      return;
+    }
 
     final midY = TimelineTracks.waveTop + TimelineTracks.waveH / 2;
     final barPaint = Paint()..color = AppColors.accentBlue.withValues(alpha: 0.55);
@@ -323,6 +386,7 @@ class TimelinePainter extends CustomPainter {
     return oldDelegate.units != units ||
         oldDelegate.selection != selection ||
         oldDelegate.geometry != geometry ||
+        oldDelegate.mediaStatus != mediaStatus ||
         oldDelegate.thumbImages != thumbImages ||
         oldDelegate.waveEnvelope != waveEnvelope ||
         oldDelegate.playheadMs != playheadMs;

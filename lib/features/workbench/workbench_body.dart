@@ -7,6 +7,7 @@ import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
 import 'timeline/timeline_geometry.dart';
+import 'timeline/timeline_painter.dart';
 import 'timeline/timeline_view.dart';
 import 'timeline_media_builder.dart';
 import 'unit_list_panel.dart';
@@ -32,6 +33,9 @@ class WorkbenchBody extends StatefulWidget {
   /// 播放位置（只驱动时间线播放头，不参与页面重建，见 workbench_page.dart）
   final ValueListenable<int> playhead;
 
+  /// 抽帧/波形就绪状态，透传给时间线画占位
+  final TimelineMediaStatus mediaStatus;
+
   /// 只读回看模式（评审 Important 1）：picking/exported 状态下已确认的
   /// 切分结构不允许再被静默改写，下发到 [TimelineView]/[InspectorPanel]。
   final bool readOnly;
@@ -43,6 +47,7 @@ class WorkbenchBody extends StatefulWidget {
     this.videoWidget,
     this.media,
     required this.playhead,
+    this.mediaStatus = TimelineMediaStatus.ready,
     this.readOnly = false,
   });
 
@@ -183,6 +188,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   geometry: _geometry!,
                   media: widget.media,
                   playhead: widget.playhead,
+                  mediaStatus: widget.mediaStatus,
                   onSeek: (ms) => playback.seekMs(ms),
                   onGeometryChanged: (g) => setState(() => _geometry = g),
                   readOnly: widget.readOnly,
