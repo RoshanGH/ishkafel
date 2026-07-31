@@ -11,6 +11,7 @@ import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
+import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
@@ -105,6 +106,19 @@ class _SaveFailingRepository extends InMemoryTaskRepository {
   Future<void> save(RenewTask task) async {
     if (failSave) throw const FileSystemException('磁盘写入失败（模拟）');
     return super.save(task);
+  }
+}
+
+/// findAll 可被开关成「必定抛 I/O 异常」的假仓库：模拟数据目录整体读不出来
+class _FindAllFailingRepository extends InMemoryTaskRepository {
+  bool failFindAll = false;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    if (failFindAll) {
+      throw const PathNotFoundException('/tasks', OSError('No such file', 2));
+    }
+    return super.findAll();
   }
 }
 
@@ -529,6 +543,66 @@ void main() {
           );
 
       expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
+  group('装载整体失败不清空任务网格（Important 7）', () {
+    RenewTask makeStored(String id) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    test('reload 失败时保留上一次装载到的列表，并把失败标成可重试', () async {
+      final failing = _FindAllFailingRepository();
+      await failing.save(makeStored('keep'));
+      final failContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(failContainer.dispose);
+      await failContainer.read(taskListProvider.future);
+
+      final captured = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = captured.add;
+      addTearDown(() => AppLog.sink = original);
+
+      failing.failFindAll = true;
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      final state = failContainer.read(taskListProvider);
+      expect(state.valueOrNull?.map((t) => t.id), ['keep'],
+          reason: '一次性 I/O 抖动不该让整个任务网格清空');
+      expect(state.hasError, isTrue, reason: 'UI 需要据此给出可重试的提示');
+      expect(captured.where((l) => l.contains('PathNotFoundException')),
+          isNotEmpty,
+          reason: '原始异常不能被静默吞进 state，排查时要能在日志里找到');
+    });
+
+    test('恢复正常后再次 reload 能自愈', () async {
+      final failing = _FindAllFailingRepository();
+      await failing.save(makeStored('keep'));
+      final failContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(failContainer.dispose);
+      await failContainer.read(taskListProvider.future);
+      failing.failFindAll = true;
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      failing.failFindAll = false;
+      await failing.save(makeStored('added'));
+      await failContainer.read(taskListProvider.notifier).reload();
+
+      final state = failContainer.read(taskListProvider);
+      expect(state.hasError, isFalse);
+      expect(state.value!.map((t) => t.id).toSet(), {'keep', 'added'});
     });
   });
 

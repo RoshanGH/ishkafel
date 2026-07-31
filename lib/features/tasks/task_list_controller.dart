@@ -63,6 +63,13 @@ enum RenameOutcome {
 /// 记录已被删除时给用户的说明（对话框/SnackBar 可能比任务活得更久）
 const taskMissingMessage = '该任务已被删除，本次操作未生效。';
 
+/// 任务列表整体装载失败时给用户的说明。
+///
+/// 不能把 `PathNotFoundException: Cannot open file, path = '...'
+/// (OS Error: ..., errno = 2)` 这类原文摊给用户——它既不解释发生了什么，
+/// 也不告诉用户能做什么。原始异常只进日志。
+const taskLoadFailedMessage = '任务列表读取失败，可能是数据目录暂时无法访问。请点「重试」重新加载。';
+
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 正在分析中的任务 id 集合：并发守卫。同一任务 id 若已在集合中，
   /// 新的分析触发（自动分析 or 手动重试）一律忽略，避免用户快速连点
@@ -205,7 +212,14 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 只是 `isRefreshing`，页面继续显示旧列表直到新数据就绪。
   Future<void> reload() async {
     state = const AsyncLoading<List<RenewTask>>().copyWithPrevious(state);
-    state = await AsyncValue.guard(_findAll);
+    try {
+      state = AsyncData(List.unmodifiable(await _findAll()));
+    } catch (e, stackTrace) {
+      // 原始异常（PathNotFoundException + errno 之类）只进日志：
+      // AsyncValue.guard 会把它静默塞进 state，页面再原样摊给用户
+      AppLog.warn('任务列表装载失败：$e');
+      state = AsyncError(e, stackTrace);
+    }
   }
 
   /// 保存单条任务后刷新列表：优先局部更新，只有在列表尚未装载出来（还在

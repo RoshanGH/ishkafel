@@ -166,6 +166,25 @@ void main() {
     expect(parsed!.status, RenewTaskStatus.picking);
   });
 
+  group('单个文件的 I/O 异常只跳过那一个文件（Important 7）', () {
+    test('读不出来的任务文件被跳过并计数，其余任务照常返回', () async {
+      await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+      final locked = File('${tempDir.path}/tasks/locked.json');
+      await locked.writeAsString('{}');
+      // 模拟「权限不足 / 文件刚好被删 / 外接卷掉线」这类 FileSystemException：
+      // readAsString 会抛 PathNotFoundException 等 FileSystemException 子类，
+      // 它们不是 FormatException/TypeError/ArgumentError，会穿透整批装载
+      await Process.run('chmod', ['000', locked.path]);
+      addTearDown(() => Process.run('chmod', ['644', locked.path]));
+
+      final all = await repo.findAll();
+
+      expect(all.map((t) => t.id).toList(), ['good'],
+          reason: '一个读不出来的文件不能让整个任务列表消失');
+      expect(repo.skippedTaskFileCount, 1);
+    });
+  });
+
   group('跳过的损坏任务文件要上报，不能只写日志', () {
     test('findAll 记录本次跳过的文件数', () async {
       await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));

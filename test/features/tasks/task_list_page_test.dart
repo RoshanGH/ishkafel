@@ -51,6 +51,20 @@ class _BlockingRepository extends InMemoryTaskRepository {
   }
 }
 
+/// findAll 可被开关成「必定抛 I/O 异常」的假仓库
+class _FailingRepository extends InMemoryTaskRepository {
+  bool failFindAll = false;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    if (failFindAll) {
+      throw const PathNotFoundException(
+          '/tasks/x.json', OSError('No such file or directory', 2));
+    }
+    return super.findAll();
+  }
+}
+
 /// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
 class _SkippingRepository extends InMemoryTaskRepository
     implements TaskLoadDiagnostics {
@@ -301,6 +315,45 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('AI 服务未配置'), findsWidgets);
+    });
+  });
+
+  group('装载失败要说人话且能重试（Important 7）', () {
+    testWidgets('首次装载失败：不摊原始异常，给中文说明与「重试」按钮', (tester) async {
+      final repo = _FailingRepository()..failFindAll = true;
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('PathNotFoundException'), findsNothing,
+          reason: '异常类名与 errno 只该进日志');
+      expect(find.textContaining('加载失败：'), findsNothing);
+      expect(find.textContaining('任务列表读取失败'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '重试'), findsOneWidget);
+
+      // 点「重试」应真的重新装载，恢复正常后列表出得来
+      repo.failFindAll = false;
+      await repo.save(makeTask('ok', '恢复的任务', RenewTaskStatus.awaitingCut));
+      await tester.tap(find.widgetWithText(FilledButton, '重试'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('恢复的任务'), findsOneWidget);
+    });
+
+    testWidgets('已有列表时刷新失败：列表继续显示，顶部横幅给可重试的提示', (tester) async {
+      final repo = _FailingRepository();
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+          tester.element(find.byType(TaskListPage)));
+      repo.failFindAll = true;
+      await container.read(taskListProvider.notifier).reload();
+      await tester.pumpAndSettle();
+
+      expect(find.text('已有任务'), findsOneWidget,
+          reason: '刷新失败不该把已经显示出来的任务网格清空');
+      expect(find.textContaining('任务列表读取失败'), findsOneWidget);
     });
   });
 

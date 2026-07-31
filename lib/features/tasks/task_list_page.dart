@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../import_flow/import_exception.dart';
@@ -174,46 +176,93 @@ class TaskListPage extends ConsumerWidget {
       body: Column(
         children: [
           const EnvironmentBanners(),
-          Expanded(
-            child: tasks.when(
-              // 重新加载（保存草稿/确认切分等）时继续显示旧列表，只有首次装载
-              // 才展示 spinner——否则整页会白屏闪一下
-              skipLoadingOnReload: true,
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(
-                  child: Text('加载失败：$e',
-                      style: const TextStyle(color: AppColors.textSecondary))),
-              data: (list) => list.isEmpty
-                  ? const Center(
-                      child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
-                          style: TextStyle(color: AppColors.textSecondary)))
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(16),
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 260,
-                        childAspectRatio: 0.72,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 14,
-                      ),
-                      itemCount: list.length,
-                      itemBuilder: (_, i) => GestureDetector(
-                        onTap: () => _openTask(context, ref, list[i]),
-                        // macOS 习惯：右键唤出上下文菜单；同时保留卡内「更多」按钮
-                        onSecondaryTapUp: (details) => _openCardMenu(
-                            context, ref, list[i], details.globalPosition),
-                        child: TaskCard(
-                          task: list[i],
-                          sourceMissing: missingSources.contains(list[i].id),
-                          onMenu: (position) =>
-                              _openCardMenu(context, ref, list[i], position),
-                        ),
-                      ),
-                    ),
+          // 刷新失败但旧列表还在：不清空网格，只在顶部挂一条可重试的提示
+          if (tasks.hasError && tasks.valueOrNull != null)
+            NoticeBanner(
+              icon: Icons.sync_problem,
+              color: AppColors.orange,
+              message: taskLoadFailedMessage,
+              actionLabel: '重试',
+              onAction: () => _reload(ref),
             ),
-          ),
+          Expanded(child: _buildTasksArea(context, ref, tasks, missingSources)),
         ],
       ),
     );
   }
+
+  /// 三态：有数据就渲染网格（哪怕本次刷新失败）；无数据且出错给可重试的
+  /// 中文提示；否则只有首次装载会看到 spinner
+  Widget _buildTasksArea(BuildContext context, WidgetRef ref,
+      AsyncValue<List<RenewTask>> tasks, Set<String> missingSources) {
+    final list = tasks.valueOrNull;
+    if (list == null) {
+      return tasks.hasError
+          ? _LoadErrorView(onRetry: () => _reload(ref))
+          : const Center(child: CircularProgressIndicator());
+    }
+    if (list.isEmpty) {
+      return const Center(
+          child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
+              style: TextStyle(color: AppColors.textSecondary)));
+    }
+    return GridView.builder(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 260,
+        childAspectRatio: 0.72,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+      ),
+      itemCount: list.length,
+      itemBuilder: (_, i) => GestureDetector(
+        onTap: () => _openTask(context, ref, list[i]),
+        // macOS 习惯：右键唤出上下文菜单；同时保留卡内「更多」按钮
+        onSecondaryTapUp: (details) =>
+            _openCardMenu(context, ref, list[i], details.globalPosition),
+        child: TaskCard(
+          task: list[i],
+          sourceMissing: missingSources.contains(list[i].id),
+          onMenu: (position) => _openCardMenu(context, ref, list[i], position),
+        ),
+      ),
+    );
+  }
+
+  /// 重新装载：失败会再次落进 state，由上面的提示继续兜住（不能丢弃 Future）
+  void _reload(WidgetRef ref) =>
+      unawaited(ref.read(taskListProvider.notifier).reload());
+}
+
+/// 首次装载失败的整页态：一句中文说明 + 一个真的能再试一次的按钮。
+///
+/// 原来这里是 `Text('加载失败：$e')`——把异常类名与 errno 摊给用户，
+/// 而且没有任何重试入口，用户只能重启应用。
+class _LoadErrorView extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _LoadErrorView({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.folder_off_outlined,
+                size: AppSpacing.xxl, color: AppColors.textSecondary),
+            const SizedBox(height: AppSpacing.md),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+              child: Text(taskLoadFailedMessage,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      height: 1.5,
+                      color: AppColors.textSecondary)),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            FilledButton(onPressed: onRetry, child: const Text('重试')),
+          ],
+        ),
+      );
 }
