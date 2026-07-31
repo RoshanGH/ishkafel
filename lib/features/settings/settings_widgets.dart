@@ -14,7 +14,17 @@ class SettingsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final heading = title;
-    return Container(
+    // 外面必须包一层 Align：ListView 给的是**紧**的横向约束，
+    // Container 自己的 maxWidth 会被 enforce 掉，卡片照样铺满整屏。
+    // Align 把约束放松成 loose，maxWidth 才真正生效。
+    return Align(
+      alignment: Alignment.topLeft,
+      child: _card(heading),
+    );
+  }
+
+  Widget _card(String? heading) => Container(
+      width: double.infinity,
       constraints: const BoxConstraints(maxWidth: 640),
       margin: const EdgeInsets.only(bottom: AppSpacing.md),
       padding: const EdgeInsets.symmetric(
@@ -36,9 +46,7 @@ class SettingsCard extends StatelessWidget {
           ],
           ...children,
         ],
-      ),
-    );
-  }
+      ));
 }
 
 /// 「键 —— 值 + 操作」一行（设计稿的 `.setrow`）

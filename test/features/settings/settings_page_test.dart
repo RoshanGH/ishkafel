@@ -12,6 +12,7 @@ import 'package:ishkafel/core/storage/cache_usage.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/settings/settings_page.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
+import 'package:ishkafel/features/settings/settings_widgets.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 class _Repo implements TaskRepository {
@@ -95,6 +96,26 @@ void main() {
       expect(find.text('导出默认'), findsNothing,
           reason: '矩阵导出还没做，给它开一个设置分区等于摆一个点进去什么都改不了'
               '的死入口——本项目刚清理过一个');
+    });
+  });
+
+  group('版面', () {
+    testWidgets('宽窗口下卡片不会拉满整屏', (tester) async {
+      tester.view.physicalSize = const Size(2400, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await _pump(tester);
+
+      // 量的是真正画出背景的那层，不是 SettingsCard 这个外壳——外壳被
+      // ListView 拉满是正常的，卡片本体有没有收住才是问题
+      final body = tester.getSize(find
+          .descendant(
+              of: find.byType(SettingsCard).first, matching: find.byType(Container))
+          .first);
+      expect(body.width, lessThanOrEqualTo(640),
+          reason: '设置项是「键 —— 值」的短行，铺满 2000px 会让键和值隔着大半个'
+              '屏幕，眼睛要横扫过去才能配对；设计稿给的上限是 640');
     });
   });
 
