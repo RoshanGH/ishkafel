@@ -13,6 +13,9 @@ import '../../core/models/renew_task.dart';
     };
 
 class TaskCard extends StatelessWidget {
+  /// 封面缺失/加载失败时的黑底占位（供测试定位）
+  static const coverPlaceholderKey = ValueKey('task-card-cover-placeholder');
+
   final RenewTask task;
 
   /// 「更多」按钮回调，参数为按钮中心的屏幕坐标（用于定位弹出菜单）
@@ -40,10 +43,7 @@ class TaskCard extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (task.coverPath != null && File(task.coverPath!).existsSync())
-                  Image.file(File(task.coverPath!), fit: BoxFit.cover)
-                else
-                  const ColoredBox(color: Colors.black),
+                _Cover(coverPath: task.coverPath),
                 Positioned(
                   right: 8,
                   bottom: 8,
@@ -85,6 +85,41 @@ class TaskCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 任务卡封面。
+///
+/// 不预先探测文件是否存在：`GridView.builder` 滚动时每帧都会重建可见卡片，
+/// 同步 `existsSync()` 相当于每秒对每张可见卡片做一次主线程 stat（约 12 张
+/// × 60fps = 3600 次/秒），纯浪费。封面确实可能不存在（源视频被删、抽帧
+/// 失败），交给 `Image.file` 的 errorBuilder 兜底即可——回落到与原来完全
+/// 一致的黑底占位。
+class _Cover extends StatelessWidget {
+  final String? coverPath;
+
+  const _Cover({required this.coverPath});
+
+  @override
+  Widget build(BuildContext context) {
+    final path = coverPath;
+    if (path == null) return const _CoverPlaceholder();
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => const _CoverPlaceholder(),
+    );
+  }
+}
+
+/// 封面缺失/加载失败时的兜底：纯黑舞台底色，与播放器画面区一致
+class _CoverPlaceholder extends StatelessWidget {
+  const _CoverPlaceholder();
+
+  @override
+  Widget build(BuildContext context) => const ColoredBox(
+        key: TaskCard.coverPlaceholderKey,
+        color: AppColors.stageBackground,
+      );
 }
 
 /// 「更多」按钮：把自身中心的屏幕坐标回传，供菜单贴着按钮弹出
