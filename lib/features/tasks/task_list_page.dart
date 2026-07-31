@@ -192,7 +192,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       appBar: AppBar(
         backgroundColor: AppColors.surface,
         title: const Text('ishkafel',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+            style: TextStyle(
+                fontSize: AppFontSize.title, fontWeight: FontWeight.w700)),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16),

@@ -428,7 +428,7 @@ class TimelinePainter extends CustomPainter {
     String text,
     Offset offset,
     Color color, {
-    double fontSize = 12,
+    double fontSize = AppFontSize.body,
     double? maxWidth,
   }) {
     textCache
