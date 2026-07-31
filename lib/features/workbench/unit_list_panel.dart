@@ -161,7 +161,7 @@ class _UnitRow extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                    color: AppColors.textPrimary, fontSize: 12),
+                    color: AppColors.textPrimary, fontSize: AppFontSize.body),
               ),
               if (unit.tags.isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -219,7 +219,7 @@ class _Chip extends StatelessWidget {
       ),
       child: Text(text,
           style:
-              const TextStyle(color: AppColors.accentBlueLight, fontSize: 10)),
+              const TextStyle(color: AppColors.accentBlueLight, fontSize: AppFontSize.micro)),
     );
   }
 }

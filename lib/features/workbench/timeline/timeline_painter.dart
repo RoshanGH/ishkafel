@@ -120,7 +120,7 @@ class TimelinePainter extends CustomPainter {
       );
       _drawText(canvas, _formatMs(ms), Offset(x + 2, TimelineTracks.rulerTop),
           AppColors.textSecondary,
-          fontSize: 10);
+          fontSize: AppFontSize.micro);
     }
   }
 
@@ -256,7 +256,7 @@ class TimelinePainter extends CustomPainter {
           'S${s + 1}',
           Offset(rect.left + _shotLabelPadding, rect.top + 6),
           selected ? AppColors.textPrimary : AppColors.textSecondary,
-          fontSize: 10,
+          fontSize: AppFontSize.micro,
           maxWidth: labelMaxWidth,
         );
         canvas.restore();

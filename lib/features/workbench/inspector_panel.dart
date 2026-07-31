@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
 import 'inspector_widgets.dart';
@@ -151,7 +152,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Text(
         '未选中任何单元或镜头\n点击左侧列表或时间线查看详情',
         textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.textTertiary, fontSize: 12),
+        style: TextStyle(color: AppColors.textTertiary, fontSize: AppFontSize.body),
       ),
     );
   }
@@ -307,7 +308,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       enabled: !widget.readOnly,
       maxLines: null,
       minLines: 2,
-      style: const TextStyle(color: AppColors.textPrimary, fontSize: 12),
+      style: const TextStyle(color: AppColors.textPrimary, fontSize: AppFontSize.body),
       decoration: const InputDecoration(
         isDense: true,
         border: InputBorder.none,

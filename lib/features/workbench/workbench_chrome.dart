@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
 
 /// 「返回」时若有未确认的修改，弹窗让用户选择的三种处理方式
@@ -59,7 +60,7 @@ class PlaybackDegradedBanner extends StatelessWidget {
             child: Text('播放器不可用，当前仅可编辑切分',
                 style: TextStyle(
                     color: AppColors.orange,
-                    fontSize: 12,
+                    fontSize: AppFontSize.body,
                     fontWeight: FontWeight.w600)),
           ),
         ],
@@ -109,7 +110,7 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontSize: 13,
+                  fontSize: AppFontSize.emphasis,
                   fontWeight: FontWeight.w600),
             ),
           ),
@@ -158,7 +159,7 @@ class _StepChip extends StatelessWidget {
       child: Text(
         label,
         style: TextStyle(
-          fontSize: 11,
+          fontSize: AppFontSize.caption,
           fontWeight: active ? FontWeight.w700 : FontWeight.w500,
           color: active ? AppColors.accentBlueLight : AppColors.textTertiary,
         ),
@@ -194,7 +195,7 @@ class WorkbenchBottomBar extends StatelessWidget {
           Expanded(
             child: Text(
               summaryText,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: AppFontSize.body),
             ),
           ),
           // 该能力尚未接通（重新分析会丢弃当前所有人工调整，需先设计二次确认

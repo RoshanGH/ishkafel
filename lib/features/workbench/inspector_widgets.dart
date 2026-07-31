@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_typography.dart';
 
 /// InspectorPanel 的纯展示型辅助组件：不持有状态、不依赖 controller，
 /// 只接收已经算好的文案/回调，从 inspector_panel.dart 中拆出以控制单文件行数。
@@ -9,7 +10,7 @@ Widget inspectorTitle(String text) => Text(
       text,
       style: const TextStyle(
         color: AppColors.textSecondary,
-        fontSize: 12,
+        fontSize: AppFontSize.body,
         fontWeight: FontWeight.w600,
         letterSpacing: 0.3,
       ),
@@ -17,7 +18,7 @@ Widget inspectorTitle(String text) => Text(
 
 Widget inspectorLabel(String text) => Text(
       text,
-      style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+      style: const TextStyle(color: AppColors.textSecondary, fontSize: AppFontSize.body),
     );
 
 Widget inspectorCard(List<Widget> children) => Container(
@@ -42,7 +43,7 @@ Widget inspectorInfoRow(String label, String value) => Row(
         Text(value,
             style: const TextStyle(
                 color: AppColors.textPrimary,
-                fontSize: 12,
+                fontSize: AppFontSize.body,
                 fontFeatures: [FontFeature.tabularFigures()])),
       ],
     );
@@ -79,7 +80,7 @@ Widget inspectorTimeRow({
               valueText,
               style: const TextStyle(
                   color: AppColors.textPrimary,
-                  fontSize: 11.5,
+                  fontSize: AppFontSize.caption,
                   fontFeatures: [FontFeature.tabularFigures()]),
             ),
             const SizedBox(width: 6),
@@ -104,7 +105,7 @@ Widget _stepButton(Key key, String glyph, VoidCallback? onTap) {
               color: enabled
                   ? AppColors.textTertiary
                   : AppColors.textTertiary.withValues(alpha: 0.35),
-              fontSize: 13)),
+              fontSize: AppFontSize.emphasis)),
     ),
   );
 }
@@ -112,7 +113,7 @@ Widget _stepButton(Key key, String glyph, VoidCallback? onTap) {
 Widget inspectorTagChips(List<String> tags) {
   if (tags.isEmpty) {
     return const Text('无标签',
-        style: TextStyle(color: AppColors.textTertiary, fontSize: 11));
+        style: TextStyle(color: AppColors.textTertiary, fontSize: AppFontSize.caption));
   }
   return Wrap(
     spacing: 6,
@@ -126,7 +127,7 @@ Widget inspectorTagChips(List<String> tags) {
               ),
               child: Text(t,
                   style: const TextStyle(
-                      color: AppColors.accentBlueLight, fontSize: 10.5)),
+                      color: AppColors.accentBlueLight, fontSize: AppFontSize.micro)),
             ))
         .toList(growable: false),
   );
@@ -183,7 +184,7 @@ Widget _actionButton({
               color: enabled
                   ? AppColors.textPrimary
                   : AppColors.textPrimary.withValues(alpha: 0.35),
-              fontSize: 12)),
+              fontSize: AppFontSize.body)),
     ),
   );
 }
