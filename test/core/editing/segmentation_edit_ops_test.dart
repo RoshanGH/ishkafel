@@ -449,6 +449,95 @@ void main() {
     });
   });
 
+  group('一帧的真实最小跨度（Critical 3：帧率非 30 时误判合法片段为非法）', () {
+    // frameMs(fps)=round(1000/fps) 只是"标称帧时长"，与帧点在毫秒轴上的真实
+    // 相邻间距未必相等：
+    // - 30fps：round=33，帧点 0,33,67,100…，最小间距也是 33 → 恰好安全
+    // - 24fps：round=42，帧点 0,42,83,125…，最小间距 41 → 差 1ms
+    // - 60fps：round=17，帧点 …,967,983,1000…，最小间距 16 → 差 1ms
+    // 于是 24/60fps 素材下，恰好跨一帧的合法片段会被 holdsInvariants 判为
+    // 非法，clamp 也被迫多留一帧。
+
+    test('minFrameSpanMs 给出相邻帧点的真实最小间距（覆盖常见帧率）', () {
+      const expected = <(double, int)>[
+        (23.976, 41),
+        (24.0, 41),
+        (25.0, 40),
+        (29.97, 33),
+        (30.0, 33),
+        (50.0, 20),
+        (59.94, 16),
+        (60.0, 16),
+      ];
+      for (final (rate, span) in expected) {
+        expect(SegmentationEditOps.minFrameSpanMs(rate), span, reason: 'fps=$rate');
+      }
+    });
+
+    test('30fps 行为完全不变：真实最小间距恰等于标称帧时长 33ms', () {
+      expect(SegmentationEditOps.minFrameSpanMs(30), 33);
+      expect(SegmentationEditOps.minFrameSpanMs(30), SegmentationEditOps.frameMs(30));
+    });
+
+    test('60fps：跨一帧的片段（967→983，16ms）是合法结构', () {
+      // 60fps 帧点：58→967、59→983、60→1000、120→2000
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 967, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 967),
+        ]),
+        const SemanticUnit(index: 1, startMs: 967, endMs: 983, transcript: 'B', shots: [
+          Shot(startMs: 967, endMs: 983),
+        ]),
+        const SemanticUnit(index: 2, startMs: 983, endMs: 2000, transcript: 'C', shots: [
+          Shot(startMs: 983, endMs: 2000),
+        ]),
+      ];
+      expect(SegmentationEditOps.holdsInvariants(units, 2000, 60), true);
+    });
+
+    test('24fps：跨一帧的片段（42→83，41ms）是合法结构', () {
+      // 24fps 帧点：1→42、2→83、24→1000
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 42, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 42),
+        ]),
+        const SemanticUnit(index: 1, startMs: 42, endMs: 83, transcript: 'B', shots: [
+          Shot(startMs: 42, endMs: 83),
+        ]),
+        const SemanticUnit(index: 2, startMs: 83, endMs: 1000, transcript: 'C', shots: [
+          Shot(startMs: 83, endMs: 1000),
+        ]),
+      ];
+      expect(SegmentationEditOps.holdsInvariants(units, 1000, 24), true);
+    });
+
+    test('60fps：镜头边界推到极右可达 967（退让真实一帧 16ms），不再被迫多退一帧到 950', () {
+      // 末镜头 endMs=983（帧点 59）：真实上界是 967（983-967=16=一帧），
+      // 旧实现按 17ms 计算退让幅度，只能停在 950（多退了一整帧）
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 983, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 500),
+          Shot(startMs: 500, endMs: 983),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 0, 0, 999999, fps: 60)!;
+      expect(out[0].shots[0].endMs, 967);
+      expect(SegmentationEditOps.holdsInvariants(out, 983, 60), true);
+    });
+
+    test('60fps：拆分点可落在距镜头末端一帧处（967），不再被拒', () {
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 983, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 983),
+        ]),
+      ];
+      final out = SegmentationEditOps.splitShotAt(units, 0, 967, fps: 60, shotIndex: 0)!;
+      expect(out[0].shots.length, 2);
+      expect(out[0].shots[1].startMs, 967);
+      expect(SegmentationEditOps.holdsInvariants(out, 983, 60), true);
+    });
+  });
+
   group('边界情形：无合法移动/拆分位置时不产出非法结构（Critical 1 修法自检）', () {
     // 每个单元都恰好卡在"1 帧最小时长"上：unit0=[0,33]（帧点终点），
     // unit1=[33,73]（末单元，非帧点终点，尾段刚好 40ms，仍 >= 1 帧）——
