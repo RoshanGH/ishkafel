@@ -286,6 +286,45 @@ void main() {
     expect(decoded.analysisError, result);
   });
 
+  group('AI 未配置：导入后不能静默卡死在「分析中」', () {
+    test('管线不可用时导入立即落成失败态并带人话原因', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      final task = container
+          .read(taskListProvider)
+          .value!
+          .firstWhere((t) => t.id == 'new-id');
+      expect(task.analysisError, isNotNull);
+      expect(task.analysisError, contains('AI'));
+      expect((await repo.findById('new-id'))!.analysisError, isNotNull,
+          reason: '必须落库，重启后仍能看到原因并重试');
+    });
+
+    test('并发守卫命中时 retryAnalysis 返回 alreadyRunning', () async {
+      final task = makeExternalTask('busy', '进行中', DateTime.utc(2026, 7, 29));
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      final first = notifier.retryAnalysis(task);
+      final second = notifier.retryAnalysis(task);
+      final outcomes = await Future.wait([first, second]);
+      await pumpEventQueue();
+
+      expect(outcomes, [RetryOutcome.started, RetryOutcome.alreadyRunning]);
+    });
+  });
+
   group('启动装载：僵死的「分析中」任务恢复', () {
     RenewTask makeAnalyzing(String id, {String? analysisError}) => RenewTask(
           id: id,
@@ -456,16 +495,38 @@ void main() {
       expect(updated.analysisError, isNull);
     });
 
-    test('retryAnalysis 在 pipeline 未配置时直接返回，不修改任务', () async {
+    test('pipeline 未配置时 retryAnalysis 返回 pipelineUnavailable 并写入人话原因', () async {
       final task = makeFailedTask();
       await repo.save(task);
       await container.read(taskListProvider.future);
 
-      await container.read(taskListProvider.notifier).retryAnalysis(task);
+      final outcome =
+          await container.read(taskListProvider.notifier).retryAnalysis(task);
 
+      expect(outcome, RetryOutcome.pipelineUnavailable);
       final persisted = await repo.findById('fail-1');
-      expect(persisted!.analysisError, '分析失败（模拟）');
+      expect(persisted!.analysisError, contains('AI'));
+      expect(persisted.analysisError, isNot(contains('Exception')));
       expect(persisted.status, RenewTaskStatus.analyzing);
+    });
+
+    test('pipeline 可用时 retryAnalysis 返回 started', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+
+      final outcome = await pipelineContainer
+          .read(taskListProvider.notifier)
+          .retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.started);
     });
 
     test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {

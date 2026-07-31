@@ -204,6 +204,31 @@ void main() {
     });
   });
 
+  group('AI 未配置的常驻提示', () {
+    testWidgets('分析管线未配置时列表页常驻横幅说明后果', (tester) async {
+      await tester.pumpWidget(wrap(InMemoryTaskRepository()));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('尚未配置'), findsOneWidget);
+    });
+
+    testWidgets('点「重试」时给出「AI 服务未配置」的即时反馈', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo
+          .save(makeTask('f2', '失败任务', RenewTaskStatus.analyzing)
+              .copyWith(analysisError: '上次分析被中断'));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('失败任务'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('重试'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('AI 服务未配置'), findsWidgets);
+    });
+  });
+
   group('损坏任务文件的可见提示', () {
     testWidgets('跳过无法读取的任务文件时列表页顶部给出提示', (tester) async {
       final repo = _SkippingRepository(skipped: 2);

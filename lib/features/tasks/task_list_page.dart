@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -78,7 +80,7 @@ class TaskListPage extends ConsumerWidget {
         final name = await promptRenameTask(context, task);
         if (name != null) await controller.renameTask(task, name);
       case TaskCardAction.reanalyze:
-        await controller.retryAnalysis(task);
+        await _retryAnalysis(context, ref, task);
       case TaskCardAction.delete:
         if (await confirmDeleteTask(context, task)) {
           await controller.deleteTask(task);
@@ -93,11 +95,32 @@ class TaskListPage extends ConsumerWidget {
         content: Text('分析失败：${task.analysisError}'),
         action: SnackBarAction(
           label: '重试',
-          onPressed: () =>
-              ref.read(taskListProvider.notifier).retryAnalysis(task),
+          // 不能丢弃 Future：异常无人接收，用户也看不到任何反馈
+          onPressed: () => unawaited(_retryAnalysis(context, ref, task)),
         ),
       ),
     );
+  }
+
+  /// 触发重试并把结果翻译成用户看得懂的一句话（静默 return 会让用户以为点击无效）
+  Future<void> _retryAnalysis(
+      BuildContext context, WidgetRef ref, RenewTask task) async {
+    try {
+      final outcome =
+          await ref.read(taskListProvider.notifier).retryAnalysis(task);
+      if (!context.mounted) return;
+      switch (outcome) {
+        case RetryOutcome.started:
+          _showSnackBar(context, '已开始重新分析「${task.name}」');
+        case RetryOutcome.alreadyRunning:
+          _showSnackBar(context, '该任务正在分析中，请稍候');
+        case RetryOutcome.pipelineUnavailable:
+          _showSnackBar(context, pipelineUnavailableMessage);
+      }
+    } catch (e) {
+      AppLog.warn('任务 ${task.id} 重试分析失败：$e');
+      if (context.mounted) _showSnackBar(context, '重新分析未能启动，请稍后再试。');
+    }
   }
 
   @override

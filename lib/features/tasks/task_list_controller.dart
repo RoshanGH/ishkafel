@@ -29,6 +29,21 @@ const _maxAnalysisErrorLength = 300;
 /// 使其能走已有的失败重试路径（不新增状态枚举值——新增会让旧版本读不出）
 const stalledAnalysisMessage = '上次分析被中断（应用退出或异常关闭），请重新分析';
 
+/// 分析管线不可用（AI 凭据缺失）时写入任务的原因，面向用户不含技术黑话
+const pipelineUnavailableMessage = 'AI 服务未配置，无法自动分析。请补齐凭据后重启应用再重试。';
+
+/// 触发分析的结果，供 UI 给出对应反馈（不能静默 return，否则用户点了没反应）
+enum RetryOutcome {
+  /// 已开始分析
+  started,
+
+  /// 该任务已有分析在进行中，忽略本次触发
+  alreadyRunning,
+
+  /// 分析管线不可用（AI 未配置）
+  pipelineUnavailable,
+}
+
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 正在分析中的任务 id 集合：并发守卫。同一任务 id 若已在集合中，
   /// 新的分析触发（自动分析 or 手动重试）一律忽略，避免用户快速连点
@@ -124,7 +139,13 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await reload();
 
     final pipeline = ref.read(analysisPipelineProvider);
-    if (pipeline == null) return;
+    if (pipeline == null) {
+      // 不能静默返回：任务会永远停在「分析中」，且因 analysisError 为空
+      // 连重试入口都够不到
+      AppLog.warn('任务 ${task.id} 未自动分析：分析管线未配置');
+      await _markAnalysisFailed(task, pipelineUnavailableMessage);
+      return;
+    }
     if (!_analyzingTaskIds.add(task.id)) {
       AppLog.info('任务 ${task.id} 分析已在进行中，忽略重复触发（并发守卫）');
       return;
@@ -176,15 +197,16 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 随后重新触发分析管线；管线未配置（凭据缺失）时记录告警并直接返回；
   /// 若该任务已在分析中（并发守卫命中，例如用户快速连点或自动分析尚未
   /// 完成）则忽略本次触发，不重复跑 ffmpeg/ASR。
-  Future<void> retryAnalysis(RenewTask task) async {
+  Future<RetryOutcome> retryAnalysis(RenewTask task) async {
     final pipeline = ref.read(analysisPipelineProvider);
     if (pipeline == null) {
       AppLog.warn('任务 ${task.id} 重试分析已跳过：分析管线未配置');
-      return;
+      await _markAnalysisFailed(task, pipelineUnavailableMessage);
+      return RetryOutcome.pipelineUnavailable;
     }
     if (!_analyzingTaskIds.add(task.id)) {
       AppLog.info('任务 ${task.id} 分析已在进行中，忽略重复触发（并发守卫）');
-      return;
+      return RetryOutcome.alreadyRunning;
     }
 
     final repo = ref.read(taskRepositoryProvider);
@@ -197,6 +219,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await reload();
 
     unawaited(_runAnalyze(pipeline, resetTask));
+    return RetryOutcome.started;
   }
 
   /// 审片台「确认切分」：保存编辑后的 units 并流转到「选材中」状态，随后刷新列表

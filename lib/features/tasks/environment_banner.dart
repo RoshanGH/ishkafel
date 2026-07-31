@@ -70,6 +70,13 @@ class EnvironmentBanners extends ConsumerWidget {
           message: '未检测到视频处理组件（${mediaTools.missingTools.join('、')}），'
               '导入与分析都无法进行。请在终端执行 brew install ffmpeg 安装后重启本应用。',
         ),
+      if (ref.watch(analysisPipelineProvider) == null)
+        const NoticeBanner(
+          icon: Icons.info_outline,
+          color: AppColors.orange,
+          message: '尚未配置 AI 服务（语音识别与语义切分），导入的素材无法自动分析。'
+              '请补齐凭据后重启应用，再对任务点「重新分析」。',
+        ),
       if (skipped > 0)
         NoticeBanner(
           icon: Icons.warning_amber_rounded,
