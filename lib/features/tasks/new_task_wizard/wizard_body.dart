@@ -179,8 +179,14 @@ class WizardFooter extends StatelessWidget {
     required this.onStart,
   });
 
-  static const durationNote = '预计分析耗时 1~2 分钟（96 秒素材实测）· 消耗云端 API 额度\n'
-      '分析完成后进入「切分确认」';
+  /// 耗时说明。
+  ///
+  /// 不给单一数字：耗时几乎全部取决于**镜头数**（画面打标是最慢的一步，
+  /// 单个镜头约 18 秒、4 路并发），而镜头数在分析完成前无从知晓。原来写
+  /// 的「1~2 分钟（96 秒素材实测）」是并发改造前的旧口径，同样长度的素材
+  /// 实测要几分钟——界面上写一个做不到的数字，比不给预期更伤信任。
+  static const durationNote = '预计耗时数分钟，镜头越多越久（为每个视觉镜头打标签是最慢的一步）'
+      '· 消耗云端 API 额度\n分析过程中任务卡上会显示当前进行到哪一步；完成后进入「切分确认」';
 
   @override
   Widget build(BuildContext context) {

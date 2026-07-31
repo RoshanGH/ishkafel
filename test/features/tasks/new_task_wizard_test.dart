@@ -7,6 +7,7 @@ import 'package:ishkafel/core/ffmpeg/process_runner.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
+import 'package:ishkafel/features/tasks/new_task_wizard/wizard_body.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 
 const _groupsJson = '''
@@ -229,10 +230,20 @@ void main() {
       expect(lastResult, isNull);
     });
 
-    testWidgets('给出耗时预期（真机实测 96 秒素材约 1~2 分钟）', (tester) async {
+    testWidgets('给出耗时预期，并说明它取决于什么', (tester) async {
       await openWizard(tester, wrap());
 
       expect(find.textContaining('分钟'), findsOneWidget);
+      expect(find.textContaining('镜头'), findsWidgets,
+          reason: '耗时几乎全部取决于镜头数（画面打标是最慢的一步）。'
+              '只给一个固定数字，用户按它安排时间必然落空');
+    });
+
+    test('耗时预期不写一个已经不成立的实测值', () {
+      expect(WizardFooter.durationNote, isNot(contains('1~2 分钟')),
+          reason: '「1~2 分钟（96 秒素材实测）」是并发打标改造前的旧口径，'
+              '实测同样长度要几分钟；界面上写一个做不到的数字，'
+              '比不给预期更伤信任');
     });
   });
 }
