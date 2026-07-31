@@ -56,10 +56,13 @@ class SemanticUnit {
         startMs: json['startMs'] as int,
         endMs: json['endMs'] as int,
         transcript: json['transcript'] as String,
-        tags: (json['tags'] as List<dynamic>).cast<String>(),
-        shots: (json['shots'] as List<dynamic>)
-            .map((e) => Shot.fromJson(e as Map<String, dynamic>))
-            .toList(),
+        // 缺失/为 null 时兜底为空列表（与 Shot.tags 同款兼容）：
+        // 硬转换会让整条任务在 findAll 里被跳过，用户看到的是「任务不见了」
+        tags: (json['tags'] as List<dynamic>?)?.cast<String>() ?? const [],
+        shots: (json['shots'] as List<dynamic>?)
+                ?.map((e) => Shot.fromJson(e as Map<String, dynamic>))
+                .toList() ??
+            const [],
       );
 
   static const _listEq = ListEquality<Object>();

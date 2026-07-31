@@ -45,6 +45,20 @@ void main() {
     expect(RenewTaskStatus.exported.name, 'exported');
   });
 
+  test('未知 status（新版本写入的状态）回退到安全值而不是让整条任务消失', () {
+    final json = task.toJson()..['status'] = 'exporting';
+    final parsed = RenewTask.fromJson(json);
+    expect(parsed.status, RenewTaskStatus.picking);
+    expect(parsed.id, task.id);
+  });
+
+  test('status 字段缺失或类型不对时同样回退，不抛异常', () {
+    final missing = task.toJson()..remove('status');
+    expect(RenewTask.fromJson(missing).status, RenewTaskStatus.picking);
+    final wrongType = task.toJson()..['status'] = 42;
+    expect(RenewTask.fromJson(wrongType).status, RenewTaskStatus.picking);
+  });
+
   test('旧 JSON（无 units 键）解析为 units == null（向后兼容）', () {
     final json = task.toJson()..remove('units');
     final parsed = RenewTask.fromJson(json);

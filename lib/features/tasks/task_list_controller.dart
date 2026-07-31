@@ -5,6 +5,7 @@ import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
 import 'task_artifact_cleaner.dart';
@@ -35,10 +36,26 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 重复跑 ffmpeg/ASR。
   final Set<String> _analyzingTaskIds = {};
 
+  /// 最近一次装载中被跳过的损坏任务文件数（供列表页常驻提示；只写日志的话
+  /// 用户看到的只是「我的任务不见了」）
+  int _skippedTaskFileCount = 0;
+  int get skippedTaskFileCount => _skippedTaskFileCount;
+
   @override
   Future<List<RenewTask>> build() async {
-    final tasks = await ref.read(taskRepositoryProvider).findAll();
+    final tasks = await _findAll();
     return _recoverStalledTasks(tasks);
+  }
+
+  Future<List<RenewTask>> _findAll() async {
+    final repo = ref.read(taskRepositoryProvider);
+    final tasks = await repo.findAll();
+    // TaskLoadDiagnostics 与 TaskRepository 无继承关系，用模式匹配取诊断信息
+    _skippedTaskFileCount = switch (repo) {
+      TaskLoadDiagnostics(:final skippedTaskFileCount) => skippedTaskFileCount,
+      _ => 0,
+    };
+    return tasks;
   }
 
   /// 启动装载：把「状态仍是分析中、又没有任何进行中分析」的任务标记为已中断。
@@ -99,8 +116,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
   Future<void> reload() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-        () => ref.read(taskRepositoryProvider).findAll());
+    state = await AsyncValue.guard(_findAll);
   }
 
   Future<void> importFile(String path) async {

@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import '../analysis/providers.dart';
+import '../log/app_log.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
 
@@ -99,7 +100,7 @@ class RenewTask {
             ? null
             : VideoInfo.fromJson(json['videoInfo'] as Map<String, dynamic>),
         coverPath: json['coverPath'] as String?,
-        status: RenewTaskStatus.values.byName(json['status'] as String),
+        status: parseStatus(json['status']),
         createdAt: DateTime.parse(json['createdAt'] as String),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
         units: (json['units'] as List<dynamic>?)
@@ -110,6 +111,23 @@ class RenewTask {
             .toList(),
         analysisError: json['analysisError'] as String?,
       );
+
+  /// 未知/缺失状态一律回退到 [fallbackStatus]，绝不抛异常。
+  ///
+  /// 抛异常的后果是整条任务在 findAll 里被跳过——用户看到的是「我的任务不见
+  /// 了」。未知值通常来自更新版本写入的后续状态（如导出中），回退到只读回看
+  /// 的「选材中」最保守：既能看到任务、又不会误导用户去改已流转的数据。
+  static RenewTaskStatus parseStatus(Object? raw) {
+    final name = raw is String ? raw : null;
+    if (name == null) return fallbackStatus;
+    final matched =
+        RenewTaskStatus.values.firstWhereOrNull((s) => s.name == name);
+    if (matched != null) return matched;
+    AppLog.warn('任务状态「$name」无法识别，按 ${fallbackStatus.name} 处理');
+    return fallbackStatus;
+  }
+
+  static const fallbackStatus = RenewTaskStatus.picking;
 
   @override
   bool operator ==(Object other) =>

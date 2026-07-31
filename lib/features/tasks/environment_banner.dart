@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/ffmpeg/media_tools_locator.dart';
+import 'task_list_controller.dart';
 
 /// 运行环境探测结果：null 表示尚未探测（测试或未接线场景），不展示横幅；
 /// main.dart 启动时用真实 preflight 结果 override。
@@ -56,6 +57,11 @@ class EnvironmentBanners extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final mediaTools = ref.watch(mediaToolsStatusProvider);
+    // 依赖列表状态刷新（装载完成后才知道跳过了几个文件）
+    final loaded = ref.watch(taskListProvider).hasValue;
+    final skipped = loaded
+        ? ref.read(taskListProvider.notifier).skippedTaskFileCount
+        : 0;
     final banners = <Widget>[
       if (mediaTools != null && !mediaTools.isReady)
         NoticeBanner(
@@ -63,6 +69,13 @@ class EnvironmentBanners extends ConsumerWidget {
           color: AppColors.red,
           message: '未检测到视频处理组件（${mediaTools.missingTools.join('、')}），'
               '导入与分析都无法进行。请在终端执行 brew install ffmpeg 安装后重启本应用。',
+        ),
+      if (skipped > 0)
+        NoticeBanner(
+          icon: Icons.warning_amber_rounded,
+          color: AppColors.orange,
+          message: '有 $skipped 个任务文件无法读取，已跳过（它们不会显示在下方列表里）。'
+              '如果发现任务缺失，请联系维护者检查数据目录。',
         ),
     ];
     if (banners.isEmpty) return const SizedBox.shrink();

@@ -6,6 +6,7 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/storage/file_task_repository.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/environment_banner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
@@ -28,6 +29,14 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> save(RenewTask task) async => _store[task.id] = task;
   @override
   Future<void> delete(String id) async => _store.remove(id);
+}
+
+/// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
+class _SkippingRepository extends InMemoryTaskRepository
+    implements TaskLoadDiagnostics {
+  @override
+  final int skippedTaskFileCount;
+  _SkippingRepository({required int skipped}) : skippedTaskFileCount = skipped;
 }
 
 RenewTask makeTask(String id, String name, RenewTaskStatus status) => RenewTask(
@@ -192,6 +201,27 @@ void main() {
       expect(find.byType(WorkbenchPage), findsNothing);
       expect(find.textContaining('中断'), findsOneWidget);
       expect(find.text('重试'), findsOneWidget);
+    });
+  });
+
+  group('损坏任务文件的可见提示', () {
+    testWidgets('跳过无法读取的任务文件时列表页顶部给出提示', (tester) async {
+      final repo = _SkippingRepository(skipped: 2);
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('2 个'), findsOneWidget);
+      expect(find.textContaining('无法读取'), findsOneWidget);
+    });
+
+    testWidgets('没有跳过时不显示提示', (tester) async {
+      final repo = _SkippingRepository(skipped: 0);
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('无法读取'), findsNothing);
     });
   });
 
