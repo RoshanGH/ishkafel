@@ -1,3 +1,7 @@
+import 'package:collection/collection.dart';
+
+import '../log/app_log.dart';
+
 /// 单个台词语义单元的替换模式（三态互斥）
 ///
 /// 产品已定：整体替换与镜头级替换二选一，进入一方另一方锁定。
@@ -88,6 +92,87 @@ class UnitReplacement {
 
   /// 是否真的会产生替换（用于「一条都没选就导出」的提示）
   bool get producesReplacement => factor > 1;
+
+  /// 落盘形态。镜头下标用字符串键——JSON 对象的键只能是字符串，
+  /// 直接塞 int 键的 Map 在 `jsonEncode` 时会抛。
+  Map<String, dynamic> toJson() => {
+        'mode': mode.name,
+        'wholeCandidateIds': wholeCandidateIds,
+        'shotCandidateIds': {
+          for (final e in shotCandidateIds.entries) '${e.key}': e.value,
+        },
+      };
+
+  /// 宽松解析：任务 JSON 是历史数据，**任何畸形都不许抛异常**。
+  ///
+  /// 本项目出过「任务 JSON 少一个字段就整条从列表静默消失」的事故：
+  /// [RenewTask.fromJson] 一旦抛出，findAll 会跳过整个文件，用户看到的是
+  /// 「我的任务不见了」。因此这里逐级降级——结构不是对象返回 null（由调用方
+  /// 决定补位），mode 无法识别退回保留原片，单个候选 id / 镜头键畸形只跳过
+  /// 它自己。
+  static UnitReplacement? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final mode = _parseMode(raw['mode']);
+    switch (mode) {
+      case ReplacementMode.keepOriginal:
+        return UnitReplacement.keepOriginal();
+      case ReplacementMode.whole:
+        return UnitReplacement.whole(_intList(raw['wholeCandidateIds']));
+      case ReplacementMode.perShot:
+        return UnitReplacement.perShot(_shotMap(raw['shotCandidateIds']));
+    }
+  }
+
+  static ReplacementMode _parseMode(Object? raw) {
+    final name = raw is String ? raw : null;
+    final matched =
+        ReplacementMode.values.firstWhereOrNull((m) => m.name == name);
+    if (matched != null) return matched;
+    if (name != null) {
+      AppLog.warn('替换模式「$name」无法识别，按保留原片处理');
+    }
+    return ReplacementMode.keepOriginal;
+  }
+
+  static List<int> _intList(Object? raw) => raw is! List
+      ? const []
+      : [
+          for (final v in raw)
+            if (v is int) v,
+        ];
+
+  static Map<int, List<int>> _shotMap(Object? raw) {
+    if (raw is! Map) return const {};
+    final parsed = <int, List<int>>{};
+    for (final entry in raw.entries) {
+      final key = entry.key;
+      final index = key is int ? key : int.tryParse('$key');
+      if (index == null || index < 0) {
+        AppLog.warn('替换方案里的镜头下标「$key」无法识别，已跳过该镜头');
+        continue;
+      }
+      parsed[index] = _intList(entry.value);
+    }
+    return parsed;
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is UnitReplacement &&
+      other.mode == mode &&
+      const ListEquality<int>().equals(other.wholeCandidateIds, wholeCandidateIds) &&
+      const MapEquality<int, List<int>>(values: ListEquality<int>())
+          .equals(other.shotCandidateIds, shotCandidateIds);
+
+  @override
+  int get hashCode => Object.hash(
+        mode,
+        Object.hashAll(wholeCandidateIds),
+        Object.hashAllUnordered(
+          shotCandidateIds.entries
+              .map((e) => Object.hash(e.key, Object.hashAll(e.value))),
+        ),
+      );
 }
 
 /// 整片的替换方案与矩阵导出规模

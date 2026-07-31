@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
@@ -157,6 +160,63 @@ void main() {
       final renamed = tagged.copyWith(name: '改名');
       expect(renamed.unitTagGroup, const TagGroupRef(id: 1, name: 'g'));
       expect(task.unitTagGroup, isNull, reason: '原对象不得被就地修改');
+    });
+  });
+
+  group('阶段②替换方案（replacements）', () {
+    test('序列化往返一致且深度相等', () {
+      final picked = task.copyWith(replacements: [
+        UnitReplacement.whole([11, 22]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.perShot({
+          1: [33]
+        }),
+      ]);
+      final parsed =
+          RenewTask.fromJson(jsonDecode(jsonEncode(picked.toJson())));
+      expect(parsed, picked);
+      expect(parsed.replacements!.first.wholeCandidateIds, [11, 22]);
+      expect(parsed.replacements!.last.shotCandidateIds[1], [33]);
+    });
+
+    test('旧 JSON（无 replacements 键）照常读出，不让整条任务从列表消失', () {
+      final json = task.toJson()..remove('replacements');
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.replacements, isNull);
+      expect(parsed.id, task.id, reason: '其余字段必须完好');
+    });
+
+    test('replacements 类型不对（脏数据）时回退为 null，不抛异常', () {
+      final json = task.toJson()..['replacements'] = '整体替换';
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.replacements, isNull);
+      expect(parsed.name, task.name);
+    });
+
+    test('单条替换方案畸形时只跳过那一条，其余保持位置对齐', () {
+      final json = task.toJson()
+        ..['replacements'] = [
+          {'mode': 'whole', 'wholeCandidateIds': [1]},
+          'not-a-map',
+        ];
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.replacements, hasLength(2));
+      expect(parsed.replacements![0].wholeCandidateIds, [1]);
+      expect(parsed.replacements![1].mode, ReplacementMode.keepOriginal,
+          reason: '按下标对齐单元列表，坏的那条只能降级为保留原片，不能整体错位');
+    });
+
+    test('copyWith 不传 replacements 时沿用原值（不可变，返回新对象）', () {
+      final picked = task.copyWith(replacements: [UnitReplacement.whole([1])]);
+      final renamed = picked.copyWith(name: '改名');
+      expect(renamed.replacements, picked.replacements);
+      expect(task.replacements, isNull, reason: '原对象不得被就地修改');
+    });
+
+    test('replacements 对外只读', () {
+      final picked = task.copyWith(replacements: [UnitReplacement.keepOriginal()]);
+      expect(() => picked.replacements!.add(UnitReplacement.keepOriginal()),
+          throwsUnsupportedError);
     });
   });
 

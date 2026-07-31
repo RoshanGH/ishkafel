@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
+import '../replacement/replacement_plan.dart';
 import 'tag_group_ref.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
@@ -32,7 +33,15 @@ class RenewTask {
   /// 最近一次分析失败的原因摘要（已按长度截断）；为 null 表示未失败或已重试清除
   final String? analysisError;
 
-  const RenewTask({
+  /// 阶段②「替换选材」的方案，按 [units] 的下标一一对齐；
+  /// null 表示这条任务还没进过阶段②（旧任务读出来就是 null）。
+  ///
+  /// 长度未必与 [units] 相等：切分被改动后单元数会变，读取方（阶段②页面）
+  /// 负责按当前单元数补位/截断，模型层不擅自纠正——擅自补位会把「用户到底
+  /// 选过没有」这个事实抹掉。
+  final List<UnitReplacement>? replacements;
+
+  RenewTask({
     required this.id,
     required this.name,
     required this.sourcePath,
@@ -47,7 +56,9 @@ class RenewTask {
     this.unitTagGroup,
     this.shotTagGroup,
     this.analysisError,
-  });
+    List<UnitReplacement>? replacements,
+  }) : replacements =
+            replacements == null ? null : List.unmodifiable(replacements);
 
   /// [clearAnalysisError] 为 true 时显式清空 analysisError（重试分析时使用）；
   /// 其余可空字段沿用 units/asrSentences 的简单覆盖模式（不支持单独清空）。
@@ -71,6 +82,7 @@ class RenewTask {
     TagGroupRef? shotTagGroup,
     String? analysisError,
     bool clearAnalysisError = false,
+    List<UnitReplacement>? replacements,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -88,6 +100,7 @@ class RenewTask {
         shotTagGroup: shotTagGroup ?? this.shotTagGroup,
         analysisError:
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
+        replacements: replacements ?? this.replacements,
       );
 
   Map<String, dynamic> toJson() => {
@@ -105,6 +118,7 @@ class RenewTask {
         'unitTagGroup': unitTagGroup?.toJson(),
         'shotTagGroup': shotTagGroup?.toJson(),
         'analysisError': analysisError,
+        'replacements': replacements?.map((r) => r.toJson()).toList(),
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -128,7 +142,23 @@ class RenewTask {
         unitTagGroup: TagGroupRef.tryFromJson(json['unitTagGroup']),
         shotTagGroup: TagGroupRef.tryFromJson(json['shotTagGroup']),
         analysisError: json['analysisError'] as String?,
+        replacements: parseReplacements(json['replacements']),
       );
+
+  /// 替换方案的宽松解析：整体畸形按「没进过阶段②」（null）处理，
+  /// 单条畸形降级为保留原片但**保留位置**——列表下标就是台词语义单元下标，
+  /// 少一条会让后面所有单元的方案整体错位到别的单元上。
+  static List<UnitReplacement>? parseReplacements(Object? raw) {
+    if (raw == null) return null;
+    if (raw is! List) {
+      AppLog.warn('任务替换方案字段不是数组（${raw.runtimeType}），按未选材处理');
+      return null;
+    }
+    return List.unmodifiable([
+      for (final entry in raw)
+        UnitReplacement.tryFromJson(entry) ?? UnitReplacement.keepOriginal(),
+    ]);
+  }
 
   /// 未知/缺失状态一律回退到 [fallbackStatus]，绝不抛异常。
   ///
@@ -163,7 +193,8 @@ class RenewTask {
       other.shotTagGroup == shotTagGroup &&
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
-      const DeepCollectionEquality().equals(other.asrSentences, asrSentences);
+      const DeepCollectionEquality().equals(other.asrSentences, asrSentences) &&
+      const DeepCollectionEquality().equals(other.replacements, replacements);
 
   @override
   int get hashCode => Object.hash(
@@ -180,5 +211,6 @@ class RenewTask {
       shotTagGroup,
       analysisError,
       units == null ? null : Object.hashAll(units!),
-      asrSentences == null ? null : Object.hashAll(asrSentences!));
+      asrSentences == null ? null : Object.hashAll(asrSentences!),
+      replacements == null ? null : Object.hashAll(replacements!));
 }
