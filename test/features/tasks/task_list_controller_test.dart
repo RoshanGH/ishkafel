@@ -97,6 +97,17 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> delete(String id) async => _store.remove(id);
 }
 
+/// save 可被开关成「必定抛 I/O 异常」的假仓库：模拟磁盘写满 / 数据目录只读
+class _SaveFailingRepository extends InMemoryTaskRepository {
+  bool failSave = false;
+
+  @override
+  Future<void> save(RenewTask task) async {
+    if (failSave) throw const FileSystemException('磁盘写入失败（模拟）');
+    return super.save(task);
+  }
+}
+
 /// 记录 findAll 调用次数的假仓库：用于证明「保存一条任务不再全量重读」
 class _CountingRepository extends InMemoryTaskRepository {
   int findAllCallCount = 0;
@@ -584,6 +595,36 @@ void main() {
       final updated = pipelineContainer.read(taskListProvider).value!
           .firstWhere((t) => t.id == 'fail-1');
       expect(updated.status, RenewTaskStatus.awaitingCut);
+    });
+
+    test('落库失败时并发守卫必须释放，否则该任务本次会话再也无法重试（Critical 2）',
+        () async {
+      final task = makeFailedTask();
+      final failing = _SaveFailingRepository();
+      await failing.save(task);
+      final pipeline = _FakePipeline(repo: failing);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(failing),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(pipeline),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      // 第一次：磁盘写入失败，异常应冒泡给 UI（UI 提示「请稍后再试」）
+      failing.failSave = true;
+      await expectLater(
+          notifier.retryAnalysis(task), throwsA(isA<FileSystemException>()));
+
+      // 用户照提示再点一次：磁盘恢复后必须能真的重新开始分析
+      failing.failSave = false;
+      final outcome = await notifier.retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.started,
+          reason: '写盘失败没有跑过 _runAnalyze，守卫不能留在集合里假装「正在分析中」');
+      expect(pipeline.analyzeCallCount, 1);
     });
   });
 

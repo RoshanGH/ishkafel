@@ -267,14 +267,24 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       return RetryOutcome.alreadyRunning;
     }
 
-    final repo = ref.read(taskRepositoryProvider);
-    final resetTask = task.copyWith(
-      clearAnalysisError: true,
-      status: RenewTaskStatus.analyzing,
-      updatedAt: DateTime.now(),
-    );
-    await repo.save(resetTask);
-    await reload();
+    // 守卫占位后到 _runAnalyze 真正接管之间的任何异常（磁盘写满、数据目录
+    // 只读）都必须先释放占位再冒泡：否则 _runAnalyze 的 finally 根本没机会
+    // 执行，该 id 会永远留在集合里，用户后续每次重试都被告知「正在分析中」，
+    // 而实际上没有任何分析在跑，整个进程生命周期内该任务的分析入口失效。
+    final RenewTask resetTask;
+    try {
+      final repo = ref.read(taskRepositoryProvider);
+      resetTask = task.copyWith(
+        clearAnalysisError: true,
+        status: RenewTaskStatus.analyzing,
+        updatedAt: DateTime.now(),
+      );
+      await repo.save(resetTask);
+      await reload();
+    } catch (e) {
+      _analyzingTaskIds.remove(task.id);
+      rethrow;
+    }
 
     unawaited(_runAnalyze(pipeline, resetTask));
     return RetryOutcome.started;
