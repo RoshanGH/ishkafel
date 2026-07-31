@@ -18,6 +18,8 @@ import 'environment_banner.dart';
 import 'source_availability.dart';
 import 'task_card.dart';
 import 'task_card_menu.dart';
+import 'task_filter.dart';
+import 'task_list_toolbar.dart';
 import 'task_list_controller.dart';
 
 class TaskListPage extends ConsumerStatefulWidget {
@@ -28,6 +30,11 @@ class TaskListPage extends ConsumerStatefulWidget {
 }
 
 class _TaskListPageState extends ConsumerState<TaskListPage> {
+  /// 搜索关键词与状态筛选。放在页面本地状态里：它们只影响这一页的呈现，
+  /// 不该被写进任何持久化数据，也不必跨页面存活。
+  String _query = '';
+  TaskFilter _filter = TaskFilter.all;
+
   /// 应用重新激活时重算源文件存在性缓存。
   ///
   /// 用户常常是「切到 Finder 整理素材 → 切回本应用」，回来时列表上的红标
@@ -263,6 +270,38 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         onOpenSettings: () => _openSettings(context),
       );
     }
+    final visible =
+        applyTaskFilter(list, query: _query, filter: _filter);
+    return Column(
+      children: [
+        TaskListToolbar(
+          query: _query,
+          filter: _filter,
+          counts: {
+            for (final f in TaskFilter.values)
+              f: list.where(f.matches).length,
+          },
+          onQueryChanged: (q) => setState(() => _query = q),
+          onFilterChanged: (f) => setState(() => _filter = f),
+        ),
+        Expanded(
+          child: visible.isEmpty
+              ? NoMatchView(
+                  query: _query,
+                  filter: _filter,
+                  onReset: () => setState(() {
+                    _query = '';
+                    _filter = TaskFilter.all;
+                  }),
+                )
+              : _grid(context, ref, visible, missingSources),
+        ),
+      ],
+    );
+  }
+
+  Widget _grid(BuildContext context, WidgetRef ref, List<RenewTask> list,
+      Set<String> missingSources) {
     return GridView.builder(
       padding: const EdgeInsets.all(AppSpacing.lg),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(

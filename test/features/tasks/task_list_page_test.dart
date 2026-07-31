@@ -609,7 +609,12 @@ void main() {
       await tester.tap(find.text('重命名'));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextField), '新名字');
+      // 列表页现在也有一个搜索框，byType(TextField) 会同时命中两个；
+      // 这里要输入的是重命名对话框里的那个
+      await tester.enterText(
+          find.descendant(
+              of: find.byType(AlertDialog), matching: find.byType(TextField)),
+          '新名字');
       await tester.tap(find.widgetWithText(TextButton, '保存'));
       await tester.pumpAndSettle();
 
