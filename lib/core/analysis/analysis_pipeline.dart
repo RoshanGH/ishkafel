@@ -13,6 +13,14 @@ import 'scene_detector.dart';
 import 'segmentation_builder.dart';
 import 'silence_detector.dart';
 
+/// 任务音频 PCM 的中间产物路径（分析管线与时间线波形共用同一份）。
+///
+/// 两处提取参数完全相同（16kHz 单声道 s16le），分开存会让同一份音频被写两
+/// 遍：一条 5 分钟素材约 20MB，白白翻倍。共用后时间线可直接命中管线的产物，
+/// 连第二次 ffmpeg 都省掉。
+String analysisPcmPath(Directory workDir, String taskId) =>
+    p.join(workDir.path, '$taskId.pcm');
+
 /// 分析管线编排：PCM 提取 → 静音谷 → 场景检测 → ASR → 语义切分 → 吸附构树 → 打标 → 落库
 class AnalysisPipeline {
   final AudioExtractor audio;
@@ -55,7 +63,9 @@ class AnalysisPipeline {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
     }
     await workDir.create(recursive: true);
-    final pcmPath = p.join(workDir.path, '${task.id}.pcm');
+    // 管线始终重新提取（-y 覆盖写）：它是这份 PCM 的权威产出方，
+    // 复用可能残留的半截文件会让 ASR 拿到不完整音频
+    final pcmPath = analysisPcmPath(workDir, task.id);
 
     final samples = await audio.extractSamples(
         videoPath: task.sourcePath,

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
@@ -243,9 +244,52 @@ void main() {
       ]);
     });
 
+    test('PCM 与分析管线共用同一路径 <taskId>.pcm，不再另写一份 _tl.pcm', () async {
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      await builder.build(
+        videoPath: '/v/a.mp4',
+        taskId: 't8',
+        durationMs: 6000,
+        workDir: workDir,
+        thumbCount: 1,
+        waveBuckets: 4,
+      );
+
+      expect(audio.calls.single.last, analysisPcmPath(workDir, 't8'));
+      expect(await File('${workDir.path}/t8.pcm').exists(), isTrue);
+      expect(await File('${workDir.path}/t8_tl.pcm').exists(), isFalse,
+          reason: '同参数音频不应被存两遍');
+    });
+
+    test('分析管线已产出的 PCM 被直接复用，不再重复提取', () async {
+      // 模拟分析管线先跑完留下的 PCM
+      await File(analysisPcmPath(workDir, 't9'))
+          .writeAsBytes(_pcm16Bytes(const [500, -500, 500, -500]));
+
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      await builder.build(
+        videoPath: '/v/a.mp4',
+        taskId: 't9',
+        durationMs: 6000,
+        workDir: workDir,
+        thumbCount: 1,
+        waveBuckets: 4,
+      );
+
+      expect(audio.calls, isEmpty);
+    });
+
     test('PCM 缓存文件为 0 字节（损坏）时应重新提取音频，不复用坏文件', () async {
       // 预置一个 0 字节的坏 PCM 缓存（模拟上次运行中途失败留下的产物）
-      final badPcmPath = '${workDir.path}/t7_tl.pcm';
+      final badPcmPath = analysisPcmPath(workDir, 't7');
       await File(badPcmPath).writeAsBytes(const []);
 
       final thumbs = fakeThumbnails();

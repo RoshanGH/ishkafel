@@ -103,6 +103,18 @@ void main() {
     expect(persisted, result);
   });
 
+  test('PCM 落到共享路径 <workDir>/<taskId>.pcm（时间线复用同一份）', () async {
+    final repo = FileTaskRepository(tempDir);
+    final task = makeTask();
+    await repo.save(task);
+    final workDir = Directory('${tempDir.path}/work');
+
+    await makePipeline(repo).analyze(task);
+
+    expect(analysisPcmPath(workDir, 't1'), '${workDir.path}/t1.pcm');
+    expect(await File(analysisPcmPath(workDir, 't1')).exists(), isTrue);
+  });
+
   test('videoInfo 缺失抛 StateError 且不落库变更', () async {
     final repo = FileTaskRepository(tempDir);
     final noInfo = RenewTask(
