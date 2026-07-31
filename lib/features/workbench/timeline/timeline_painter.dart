@@ -134,41 +134,68 @@ class TimelinePainter extends CustomPainter {
     }
   }
 
-  void _paintShotsTrack(Canvas canvas, Size size) {
-    final dividerPaint = Paint()
-      ..color = AppColors.border
-      ..strokeWidth = 1;
-    final selectedBorder = Paint()
-      ..color = AppColors.purple
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
+  /// 相邻镜头块体之间的视觉间隙（左右各内缩一半）
+  static const _shotGap = 2.0;
 
+  /// 镜头编号标签的左内边距
+  static const _shotLabelPadding = 4.0;
+
+  /// 画视觉镜头轨：每个镜头一个独立块体。
+  ///
+  /// 块体填充沿用**所属台词语义单元的颜色**（低透明度），让"视觉镜头严格
+  /// 嵌套在语义单元内"这条核心约束在视觉上一眼可见；选中态改用紫色实心
+  /// 高亮，与单元轨的选中态（单元自身色描边加粗）区分开。
+  void _paintShotsTrack(Canvas canvas, Size size) {
     for (final unit in units) {
+      final unitColor = _unitColors[unit.index % _unitColors.length];
       for (var s = 0; s < unit.shots.length; s++) {
         final shot = unit.shots[s];
         final left = geometry.msToPx(shot.startMs);
         final right = geometry.msToPx(shot.endMs);
         if (right < 0 || left > size.width) continue;
 
-        // 内部镜头分隔线（首镜头起点与单元起点重合，已由单元轨绘制，跳过）
-        if (s > 0) {
-          canvas.drawLine(
-            Offset(left, TimelineTracks.shotsTop),
-            Offset(left, TimelineTracks.shotsBottom),
-            dividerPaint,
-          );
-        }
+        // 内缩出相邻块体之间的间隙；块体本身比间隙还窄时不再内缩，
+        // 否则会得到零宽甚至负宽的矩形
+        final inset = (right - left) > _shotGap * 2 ? _shotGap / 2 : 0.0;
+        final rect = Rect.fromLTRB(left + inset, TimelineTracks.shotsTop,
+            right - inset, TimelineTracks.shotsBottom);
 
         final selected = selection != null &&
             selection!.shotIndex == s &&
             selection!.unitIndex == unit.index;
-        if (selected) {
-          canvas.drawRect(
-            Rect.fromLTRB(left, TimelineTracks.shotsTop, right,
-                TimelineTracks.shotsBottom),
-            selectedBorder,
-          );
-        }
+
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..color = selected
+                ? AppColors.purple.withValues(alpha: 0.42)
+                : unitColor.withValues(alpha: 0.16),
+        );
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..color = selected
+                ? AppColors.purple
+                : unitColor.withValues(alpha: 0.5)
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = selected ? 2 : 1,
+        );
+
+        // 放不下编号就只留块体（负数 maxWidth 会让整帧绘制中断，见 [_drawText]）
+        final labelMaxWidth = rect.width - _shotLabelPadding * 2;
+        if (labelMaxWidth <= 0) continue;
+
+        canvas.save();
+        canvas.clipRect(rect);
+        _drawText(
+          canvas,
+          'S${s + 1}',
+          Offset(rect.left + _shotLabelPadding, rect.top + 6),
+          selected ? AppColors.textPrimary : AppColors.textSecondary,
+          fontSize: 10,
+          maxWidth: labelMaxWidth,
+        );
+        canvas.restore();
       }
     }
   }
