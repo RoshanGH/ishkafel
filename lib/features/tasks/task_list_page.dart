@@ -97,7 +97,12 @@ class TaskListPage extends ConsumerWidget {
     switch (action) {
       case TaskCardAction.rename:
         final name = await promptRenameTask(context, task);
-        if (name != null) await controller.renameTask(task, name);
+        if (name == null) return;
+        final outcome = await controller.renameTask(task, name);
+        // 对话框可能停留很久，期间任务被删除时必须给一句反馈而不是静默无事发生
+        if (outcome == RenameOutcome.taskMissing && context.mounted) {
+          _showSnackBar(context, taskMissingMessage);
+        }
       case TaskCardAction.reanalyze:
         await _retryAnalysis(context, ref, task);
       case TaskCardAction.delete:
@@ -135,6 +140,8 @@ class TaskListPage extends ConsumerWidget {
           _showSnackBar(context, '该任务正在分析中，请稍候');
         case RetryOutcome.pipelineUnavailable:
           _showSnackBar(context, pipelineUnavailableMessage);
+        case RetryOutcome.taskMissing:
+          _showSnackBar(context, taskMissingMessage);
       }
     } catch (e) {
       AppLog.warn('任务 ${task.id} 重试分析失败：$e');

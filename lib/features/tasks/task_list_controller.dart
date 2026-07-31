@@ -43,7 +43,25 @@ enum RetryOutcome {
 
   /// 分析管线不可用（AI 未配置）
   pipelineUnavailable,
+
+  /// 该任务的记录已不在磁盘上（触发入口还停留在屏幕上时任务被删除了）
+  taskMissing,
 }
+
+/// 重命名结果，供 UI 给出对应反馈
+enum RenameOutcome {
+  /// 已重命名
+  renamed,
+
+  /// 名称为空白，视为无效输入
+  invalidName,
+
+  /// 该任务的记录已不在磁盘上（对话框还开着时任务被删除了）
+  taskMissing,
+}
+
+/// 记录已被删除时给用户的说明（对话框/SnackBar 可能比任务活得更久）
+const taskMissingMessage = '该任务已被删除，本次操作未生效。';
 
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 正在分析中的任务 id 集合：并发守卫。同一任务 id 若已在集合中，
@@ -107,27 +125,76 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       task.analysisError == null &&
       !_analyzingTaskIds.contains(task.id);
 
+  /// 本次运行中已被删除的任务 id（墓碑）。
+  ///
+  /// id 由导入时刻的微秒时间戳生成，单调递增、不会被复用，因此墓碑不会误伤
+  /// 后续新建的任务；每条只占一个短字符串，一次会话内的删除量级可忽略。
+  final Set<String> _deletedTaskIds = {};
+
   /// 删除任务：先清理中间产物（失败不阻断），再删记录并从列表中移除那一条
   Future<void> deleteTask(RenewTask task) async {
+    // 墓碑要在任何 await 之前立起来：清理与删记录都是异步的，期间到达的
+    // 「重试/重命名/分析失败落库」必须立刻被拒绝，否则会把它重新写回磁盘
+    _deletedTaskIds.add(task.id);
     try {
       await ref.read(taskArtifactCleanerProvider)?.cleanup(task.id);
     } catch (e) {
       AppLog.warn('任务 ${task.id} 中间产物清理失败（不影响删除）：$e');
     }
-    await ref.read(taskRepositoryProvider).delete(task.id);
+    try {
+      await ref.read(taskRepositoryProvider).delete(task.id);
+    } catch (e) {
+      // 没删成功，任务还在磁盘上，墓碑必须撤掉，否则这条任务本次会话
+      // 再也无法重命名/重试（等于把 Critical 2 那类死锁换个地方复现）
+      _deletedTaskIds.remove(task.id);
+      rethrow;
+    }
     if (!_removeLocally(task.id)) await reload();
   }
 
-  /// 重命名：空白名称视为无效输入，直接忽略（调用方在 UI 层已给出提示）
-  Future<void> renameTask(RenewTask task, String newName) async {
+  /// 重命名：空白名称视为无效输入，直接忽略（调用方在 UI 层已给出提示）。
+  ///
+  /// 以磁盘上的当前记录为基线，而不是调用方传进来的 [task]：重命名对话框
+  /// 可以长时间停留，期间后台分析可能已经写入了 units/新状态，拿旧快照
+  /// copyWith 会把这些成果一并抹掉。记录已不存在时不落库（见 [_currentRecord]）。
+  Future<RenameOutcome> renameTask(RenewTask task, String newName) async {
     final trimmed = newName.trim();
     if (trimmed.isEmpty) {
       AppLog.warn('任务 ${task.id} 重命名已忽略：名称为空');
-      return;
+      return RenameOutcome.invalidName;
     }
-    final renamed = task.copyWith(name: trimmed, updatedAt: DateTime.now());
+    final current = await _currentRecord(task, action: '重命名');
+    if (current == null) return RenameOutcome.taskMissing;
+    final renamed = current.copyWith(name: trimmed, updatedAt: DateTime.now());
     await ref.read(taskRepositoryProvider).save(renamed);
     await _refreshAfterSave(renamed);
+    return RenameOutcome.renamed;
+  }
+
+  /// 读取磁盘上仍然存在的那条记录；已被删除时返回 null 并落日志。
+  ///
+  /// `save` 是「有则覆盖、无则创建」，对已删除的 id 等于重新创建一条——而
+  /// 它的封面、PCM、抽帧在删除时已被清理器删掉，复活出来的任务不会自愈。
+  /// 触发入口（带「重试」的 SnackBar、重命名对话框）都可能比任务本身活得
+  /// 更久，因此每次「更新已有任务」前都要先确认记录还在。
+  ///
+  /// 两道判定缺一不可：
+  /// - 查磁盘：覆盖「上次运行删掉、本次运行还拿着旧对象」这类跨进程情形，
+  ///   同时顺带取回最新记录，避免用陈旧快照覆盖磁盘上的新数据；
+  /// - 查 [_deletedTaskIds]：查存在性本身是 check-then-act，删除若发生在
+  ///   「查完」与「写入」之间仍会复活（后台分析失败落库尤其容易撞上）。
+  ///
+  /// 导入新任务不经过这里（它本来就该创建记录），因此不会被误伤。
+  Future<RenewTask?> _currentRecord(RenewTask task,
+      {required String action}) async {
+    final current = _deletedTaskIds.contains(task.id)
+        ? null
+        : await ref.read(taskRepositoryProvider).findById(task.id);
+    if (current == null || _deletedTaskIds.contains(task.id)) {
+      AppLog.warn('任务 ${task.id} $action已跳过：记录已被删除，不再写回磁盘');
+      return null;
+    }
+    return current;
   }
 
   /// 全量重新装载。
@@ -215,7 +282,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 供任务列表展示红色失败徽标并支持用户手动重试
   Future<void> _markAnalysisFailed(RenewTask task, Object error) async {
     final repo = ref.read(taskRepositoryProvider);
-    final current = await repo.findById(task.id) ?? task;
+    // 分析期间任务可能已被删除：失败落库不能把它复活
+    final current = await _currentRecord(task, action: '分析失败落库');
+    if (current == null) return;
     final failed = current.copyWith(
       analysisError: _truncateAnalysisError(error),
       updatedAt: DateTime.now(),
@@ -273,13 +342,18 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     // 而实际上没有任何分析在跑，整个进程生命周期内该任务的分析入口失效。
     final RenewTask resetTask;
     try {
-      final repo = ref.read(taskRepositoryProvider);
-      resetTask = task.copyWith(
+      // 记录已被删除时不重建：SnackBar 上的「重试」可能比任务活得更久
+      final current = await _currentRecord(task, action: '重试分析');
+      if (current == null) {
+        _analyzingTaskIds.remove(task.id);
+        return RetryOutcome.taskMissing;
+      }
+      resetTask = current.copyWith(
         clearAnalysisError: true,
         status: RenewTaskStatus.analyzing,
         updatedAt: DateTime.now(),
       );
-      await repo.save(resetTask);
+      await ref.read(taskRepositoryProvider).save(resetTask);
       await reload();
     } catch (e) {
       _analyzingTaskIds.remove(task.id);

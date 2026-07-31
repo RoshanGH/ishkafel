@@ -490,6 +490,35 @@ void main() {
       expect(container.read(taskListProvider).value!.single.name, '滴露_植源喷雾');
     });
 
+    test('renameTask 以磁盘上的当前记录为基线，不把对话框打开时的旧快照写回去', () async {
+      await repo.save(makeTask('r3'));
+      await container.read(taskListProvider.future);
+      // 重命名对话框停留期间后台分析完成，磁盘上多了 units 与新状态
+      final analyzed = makeTask('r3').copyWith(
+        status: RenewTaskStatus.picking,
+        units: [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '分析产出的台词',
+            shots: const [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ],
+      );
+      await repo.save(analyzed);
+
+      // 传入的是对话框打开时捕获的旧对象（units 为空、状态是 awaitingCut）
+      await container
+          .read(taskListProvider.notifier)
+          .renameTask(makeTask('r3'), '新名字');
+
+      final saved = await repo.findById('r3');
+      expect(saved!.name, '新名字');
+      expect(saved.units, hasLength(1), reason: '重命名不该抹掉后台分析的成果');
+      expect(saved.status, RenewTaskStatus.picking);
+    });
+
     test('renameTask 空名称被拒绝，原名保留', () async {
       await repo.save(makeTask('r2'));
       await container.read(taskListProvider.future);
@@ -500,6 +529,87 @@ void main() {
           );
 
       expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
+  group('已删除的任务不能被「复活」回磁盘（Critical 3）', () {
+    RenewTask makeDeletableTask() => RenewTask(
+          id: 'gone',
+          name: '已删除的任务',
+          sourcePath: '/v/gone.mp4',
+          status: RenewTaskStatus.analyzing,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          analysisError: '分析失败（模拟）',
+        );
+
+    test('SnackBar 上残留的「重试」点下去，不会把已删除的任务写回磁盘', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      final pipeline = _FakePipeline(repo: repo);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(pipeline),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      // 用户在 SnackBar 停留期间删掉了这条任务（封面/PCM/抽帧已被清理）
+      await notifier.deleteTask(task);
+      // 闭包里捕获的仍是删除前的 task 对象
+      final outcome = await notifier.retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.taskMissing);
+      expect(await repo.findById('gone'), isNull,
+          reason: '中间产物已被清理，复活出来的任务不会自愈');
+      expect(pipelineContainer.read(taskListProvider).value, isEmpty);
+      expect(pipeline.analyzeCallCount, 0);
+    });
+
+    test('重命名对话框上残留的「保存」点下去，不会把已删除的任务写回磁盘', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+      final notifier = container.read(taskListProvider.notifier);
+
+      await notifier.deleteTask(task);
+      await notifier.renameTask(task, '新名字');
+
+      expect(await repo.findById('gone'), isNull);
+      expect(container.read(taskListProvider).value, isEmpty);
+    });
+
+    test('分析进行中任务被删除：失败落库不能把它复活', () async {
+      final task = makeDeletableTask();
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider
+            .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      await notifier.retryAnalysis(task);
+      await notifier.deleteTask(task);
+      await pumpEventQueue();
+
+      expect(await repo.findById('gone'), isNull);
+    });
+
+    test('导入新任务不受影响（同样走 save，但记录本来就该被创建）', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      expect(await repo.findById('new-id'), isNotNull);
     });
   });
 
