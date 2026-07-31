@@ -277,7 +277,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   onScrubStart: _onScrubStart,
                   onScrubEnd: _onScrubEnd,
                   onPlaySegment: (start, end) =>
-                      unawaited(_segment.play(start, end)),
+                      unawaited(_segment.play(start, end, editor.fps)),
                   readOnly: widget.readOnly,
                 );
               },
