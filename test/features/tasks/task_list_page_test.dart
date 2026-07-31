@@ -11,6 +11,7 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/environment_banner.dart';
+import 'package:ishkafel/features/tasks/source_availability.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -63,6 +64,8 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
     ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 默认假定源文件都在：测试不该依赖真实文件系统
+        fileExistsProbeProvider.overrideWithValue((_) async => true),
         ...overrides,
       ],
       child: const MaterialApp(home: TaskListPage()),
@@ -300,6 +303,82 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('无法读取'), findsNothing);
+    });
+  });
+
+  group('源文件已不存在时，列表与卡片要说人话', () {
+    RenewTask makeOpenableTask() => RenewTask(
+          id: 's1',
+          name: '素材已被删除的任务',
+          sourcePath: '/v/已删除.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: [
+            SemanticUnit(
+              index: 0,
+              startMs: 0,
+              endMs: 1000,
+              transcript: 't',
+              shots: const [Shot(startMs: 0, endMs: 1000)],
+            ),
+          ],
+          videoInfo: const VideoInfo(
+            width: 1080,
+            height: 1920,
+            duration: Duration(milliseconds: 1000),
+            fps: 30,
+            fileSizeBytes: 10,
+          ),
+        );
+
+    Override missingSourceOverride() =>
+        fileExistsProbeProvider.overrideWithValue((_) async => false);
+
+    testWidgets('探测到源文件缺失时卡片给出可见标记', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      await tester.pumpWidget(
+          wrap(repo, overrides: [missingSourceOverride()]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('源文件缺失'), findsOneWidget);
+    });
+
+    testWidgets('点击源文件缺失的任务不进入审片台，给出可操作的中文说明', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      await tester.pumpWidget(
+          wrap(repo, overrides: [missingSourceOverride()]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('源文件已不存在'), findsOneWidget);
+    });
+
+    testWidgets('源文件存在性只在列表变化时探测一次，不随每帧重复（否则又是逐帧同步 IO）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var probeCount = 0;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async {
+          probeCount++;
+          return true;
+        }),
+      ]));
+      await tester.pumpAndSettle();
+      final afterLoad = probeCount;
+
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+
+      expect(afterLoad, 1, reason: '一条任务只该探一次');
+      expect(probeCount, afterLoad, reason: '重绘不应重新探测文件系统');
     });
   });
 

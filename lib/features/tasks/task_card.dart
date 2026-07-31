@@ -1,7 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
+import 'source_availability.dart';
 
 /// 状态徽标文案与配色
 ({String label, Color color}) statusBadge(RenewTaskStatus status) =>
@@ -18,10 +21,19 @@ class TaskCard extends StatelessWidget {
 
   final RenewTask task;
 
+  /// 源视频文件是否已不存在（由 [missingSourceTaskIdsProvider] 异步探测得出，
+  /// 卡片自身不碰文件系统——build 每帧都会跑）
+  final bool sourceMissing;
+
   /// 「更多」按钮回调，参数为按钮中心的屏幕坐标（用于定位弹出菜单）
   final void Function(Offset globalPosition)? onMenu;
 
-  const TaskCard({super.key, required this.task, this.onMenu});
+  const TaskCard({
+    super.key,
+    required this.task,
+    this.sourceMissing = false,
+    this.onMenu,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -44,6 +56,7 @@ class TaskCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 _Cover(coverPath: task.coverPath),
+                if (sourceMissing) const _MissingSourceOverlay(),
                 Positioned(
                   right: 8,
                   bottom: 8,
@@ -85,6 +98,60 @@ class TaskCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 源文件缺失的可见标记：压暗封面 + 左上角红色徽标 + 一句人话说明。
+///
+/// 只写日志或什么都不显示的后果是：封面变黑块、进审片台播放器黑屏、时间线
+/// 空白，用户全程不知道发生了什么。
+class _MissingSourceOverlay extends StatelessWidget {
+  const _MissingSourceOverlay();
+
+  @override
+  Widget build(BuildContext context) => Stack(
+        fit: StackFit.expand,
+        children: [
+          // 压暗封面，让上层文字有足够对比度（封面本身可能是亮画面）
+          ColoredBox(
+              color: AppColors.stageBackground.withValues(alpha: 0.62)),
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.link_off,
+                      size: AppSpacing.xl, color: AppColors.red),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text('文件已被移动或删除',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.caption,
+                          height: 1.4,
+                          color: AppColors.textPrimary)),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            left: AppSpacing.sm,
+            top: AppSpacing.sm,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs / 2),
+              decoration: BoxDecoration(
+                color: AppColors.red,
+                borderRadius: BorderRadius.circular(AppRadius.xs),
+              ),
+              child: const Text('源文件缺失',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+            ),
+          ),
+        ],
+      );
 }
 
 /// 任务卡封面。

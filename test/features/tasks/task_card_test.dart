@@ -15,12 +15,12 @@ RenewTask makeTask({String? coverPath}) => RenewTask(
       updatedAt: DateTime.utc(2026, 7, 29),
     );
 
-Widget wrapCard(RenewTask task) => MaterialApp(
+Widget wrapCard(RenewTask task, {bool sourceMissing = false}) => MaterialApp(
       home: Scaffold(
         body: SizedBox(
           width: 240,
           height: 320,
-          child: TaskCard(task: task),
+          child: TaskCard(task: task, sourceMissing: sourceMissing),
         ),
       ),
     );
@@ -61,6 +61,24 @@ void main() {
 
       expect(find.byType(Image), findsNothing);
       expect(find.byKey(TaskCard.coverPlaceholderKey), findsOneWidget);
+    });
+  });
+
+  group('源文件缺失时卡片要说人话', () {
+    testWidgets('缺失时给出红色标记与说明文案', (tester) async {
+      await tester.pumpWidget(wrapCard(makeTask(), sourceMissing: true));
+      await tester.pump();
+
+      expect(find.text('源文件缺失'), findsOneWidget);
+      expect(find.textContaining('文件已被移动或删除'), findsOneWidget);
+    });
+
+    testWidgets('源文件正常时不出现任何缺失标记', (tester) async {
+      await tester.pumpWidget(wrapCard(makeTask()));
+      await tester.pump();
+
+      expect(find.text('源文件缺失'), findsNothing);
+      expect(find.textContaining('文件已被移动或删除'), findsNothing);
     });
   });
 }

@@ -9,6 +9,7 @@ import '../../core/models/renew_task.dart';
 import '../import_flow/import_exception.dart';
 import '../workbench/workbench_page.dart';
 import 'environment_banner.dart';
+import 'source_availability.dart';
 import 'task_card.dart';
 import 'task_card_menu.dart';
 import 'task_list_controller.dart';
@@ -35,6 +36,10 @@ class TaskListPage extends ConsumerWidget {
   void _showSnackBar(BuildContext context, String message) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
+  /// 源文件缺失的任务 id：探测尚未完成时按「都在」处理，宁可漏报也不误挡入口
+  Set<String> _missingSourceTaskIds(WidgetRef ref) =>
+      ref.read(missingSourceTaskIdsProvider).valueOrNull ?? const {};
+
   /// 任务卡点击路由：analysisError 非空（分析失败）优先级最高——不进入审片台，
   /// 只弹出失败原因与「重试」action；其次 `analyzing` 状态或缺少 units（尚未
   /// 完成分析）不响应，只提示「分析中」；`exported`（已导出）已流转到下一
@@ -44,6 +49,13 @@ class TaskListPage extends ConsumerWidget {
   /// `readOnly` 下发到时间线与检查器，禁用一切会改数据的交互，并禁用
   /// 「确认切分」主按钮）。
   void _openTask(BuildContext context, WidgetRef ref, RenewTask task) {
+    // 源文件缺失优先于一切：没有源视频，审片台的播放器、抽帧轨、波形轨全是
+    // 空的，重新分析也必定失败——先把原因和补救办法说清楚
+    if (_missingSourceTaskIds(ref).contains(task.id)) {
+      _showSnackBar(context,
+          '「${task.name}」的源文件已不存在，无法预览或重新分析。请把视频文件放回原位后重启应用，或删除该任务重新导入。');
+      return;
+    }
     if (task.analysisError != null) {
       _showAnalysisFailedSnackBar(context, ref, task);
       return;
@@ -126,6 +138,9 @@ class TaskListPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tasks = ref.watch(taskListProvider);
+    // 异步探测的结果；探测中沿用上一轮结果，标记不会闪烁
+    final missingSources =
+        ref.watch(missingSourceTaskIdsProvider).valueOrNull ?? const <String>{};
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.surface,
@@ -175,6 +190,7 @@ class TaskListPage extends ConsumerWidget {
                             context, ref, list[i], details.globalPosition),
                         child: TaskCard(
                           task: list[i],
+                          sourceMissing: missingSources.contains(list[i].id),
                           onMenu: (position) =>
                               _openCardMenu(context, ref, list[i], position),
                         ),
