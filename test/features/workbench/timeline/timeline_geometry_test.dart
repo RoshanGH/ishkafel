@@ -45,4 +45,84 @@ void main() {
     const zoomedOut = TimelineGeometry(durationMs: 600000, msPerPx: 200); // 1s=5px
     expect(zoomedOut.rulerStepMs(), 30000); // 30s=150px ≥80
   });
+
+  _resizeRegressions();
+}
+
+void _resizeRegressions() {
+  group('窗口尺寸变化时时间线跟着变（真机反馈）', () {
+    test('适应窗口状态下变宽：重新铺满，不在右边留一片空白', () {
+      const durationMs = 92300;
+      final fitted =
+          TimelineGeometry.fit(durationMs: durationMs, viewportWidthPx: 1455);
+
+      final resized =
+          fitted.resizedTo(oldViewportWidthPx: 1455, newViewportWidthPx: 2000);
+
+      expect(resized.totalWidthPx, closeTo(2000, 0.5),
+          reason: '之前只 clamp 了滚动、没重算 msPerPx，'
+              '窗口拉宽后时间线还是原来那么长，右边空一大块');
+      expect(resized.zoomLevel(viewportWidthPx: 2000), closeTo(1, 0.001));
+    });
+
+    test('适应窗口状态下变窄：同样跟着收，不产生横向滚动', () {
+      const durationMs = 92300;
+      final fitted =
+          TimelineGeometry.fit(durationMs: durationMs, viewportWidthPx: 2000);
+
+      final resized =
+          fitted.resizedTo(oldViewportWidthPx: 2000, newViewportWidthPx: 1200);
+
+      expect(resized.totalWidthPx, closeTo(1200, 0.5));
+      expect(resized.scrollPx, 0);
+    });
+
+    test('用户已经放大过：保持缩放倍数，不把他的视野重置掉', () {
+      const durationMs = 92300;
+      final zoomed = TimelineGeometry.fit(
+              durationMs: durationMs, viewportWidthPx: 1455)
+          .zoomAt(700, 4, viewportWidthPx: 1455);
+      final beforeMsPerPx = zoomed.msPerPx;
+
+      final resized =
+          zoomed.resizedTo(oldViewportWidthPx: 1455, newViewportWidthPx: 2000);
+
+      expect(resized.msPerPx, beforeMsPerPx,
+          reason: '正放大着看某一段，拉一下窗口就被拉回全片视野，'
+              '等于把用户的工作状态清掉了');
+    });
+
+    test('放大状态下变窄：滚动位置被夹回合法范围，不露空白', () {
+      const durationMs = 92300;
+      final zoomed = TimelineGeometry.fit(
+              durationMs: durationMs, viewportWidthPx: 2000)
+          .zoomAt(1000, 4, viewportWidthPx: 2000);
+      final scrolledToEnd =
+          zoomed.scrolledBy(999999, viewportWidthPx: 2000);
+
+      final resized = scrolledToEnd.resizedTo(
+          oldViewportWidthPx: 2000, newViewportWidthPx: 800);
+
+      expect(resized.scrollPx,
+          lessThanOrEqualTo(resized.totalWidthPx - 800 + 0.5));
+    });
+
+    test('首次布局（旧宽度为 0）按适应窗口处理', () {
+      final any = TimelineGeometry.fit(
+          durationMs: 92300, viewportWidthPx: 100);
+
+      final resized =
+          any.resizedTo(oldViewportWidthPx: 0, newViewportWidthPx: 1455);
+
+      expect(resized.totalWidthPx, closeTo(1455, 0.5));
+    });
+
+    test('新宽度非法时原样返回，不产生 Infinity/NaN', () {
+      final fitted =
+          TimelineGeometry.fit(durationMs: 92300, viewportWidthPx: 1455);
+
+      expect(fitted.resizedTo(oldViewportWidthPx: 1455, newViewportWidthPx: 0),
+          same(fitted));
+    });
+  });
 }

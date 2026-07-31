@@ -253,14 +253,16 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
                 if (width != _timelineViewportWidth) {
-                  _timelineViewportWidth = width;
                   final geometry = _geometry;
-                  // 窗口 resize：视口宽度变化时至少重新 clamp scrollPx，
-                  // 避免旧滚动值在新（更窄）视口下越界露出空白
+                  // 窗口 resize：适应窗口状态下跟着重新铺满，放大状态下保持
+                  // 缩放并把滚动夹回合法范围（判定要用**变化前**的宽度）
                   _geometry = geometry == null
                       ? TimelineGeometry.fit(
                           durationMs: editor.durationMs, viewportWidthPx: width)
-                      : geometry.scrolledBy(0, viewportWidthPx: width);
+                      : geometry.resizedTo(
+                          oldViewportWidthPx: _timelineViewportWidth,
+                          newViewportWidthPx: width);
+                  _timelineViewportWidth = width;
                 }
                 return TimelineView(
                   controller: editor,

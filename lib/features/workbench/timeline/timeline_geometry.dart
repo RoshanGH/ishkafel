@@ -83,6 +83,28 @@ class TimelineGeometry {
   }
 
   /// 适配整个时长到给定视口宽（初始状态）
+  /// 视口宽度变化后的新几何。
+  ///
+  /// 分两种情形，因为用户的意图完全不同：
+  /// - **适应窗口（缩放 = 1）**：他要的就是「一屏看全片」，窗口变大变小都
+  ///   该继续铺满。之前这里只 clamp 了滚动、没重算 msPerPx，窗口一拉宽，
+  ///   时间线还是原来那么长，右边空一大块。
+  /// - **已经放大过**：他正盯着某一段看，保持缩放倍数，只把滚动夹回合法
+  ///   范围。跟着重新 fit 会把他的视野一把拉回全片，等于清掉工作状态。
+  TimelineGeometry resizedTo({
+    required double oldViewportWidthPx,
+    required double newViewportWidthPx,
+  }) {
+    if (newViewportWidthPx <= 0) return this;
+    // 首次布局（旧宽度为 0）没有可比较的基准，按适应窗口处理
+    final wasFit = oldViewportWidthPx <= 0 ||
+        zoomLevel(viewportWidthPx: oldViewportWidthPx) <= 1.0001;
+    return wasFit
+        ? TimelineGeometry.fit(
+            durationMs: durationMs, viewportWidthPx: newViewportWidthPx)
+        : scrolledBy(0, viewportWidthPx: newViewportWidthPx);
+  }
+
   static TimelineGeometry fit({required int durationMs, required double viewportWidthPx}) {
     final msPerPx = durationMs / viewportWidthPx;
     return TimelineGeometry(
