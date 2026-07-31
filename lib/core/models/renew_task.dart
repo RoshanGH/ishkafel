@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
+import 'tag_group_ref.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
 
@@ -21,6 +22,13 @@ class RenewTask {
   final List<SemanticUnit>? units;
   final List<AsrSentence>? asrSentences;
 
+  /// 台词语义单元打标所用的 miaoa 标签组（受控词表的来源）；
+  /// null 表示新建任务时未选择，该层不打标
+  final TagGroupRef? unitTagGroup;
+
+  /// 视觉镜头打标所用的 miaoa 标签组；null 表示未选择，该层不打标
+  final TagGroupRef? shotTagGroup;
+
   /// 最近一次分析失败的原因摘要（已按长度截断）；为 null 表示未失败或已重试清除
   final String? analysisError;
 
@@ -36,6 +44,8 @@ class RenewTask {
     required this.updatedAt,
     this.units,
     this.asrSentences,
+    this.unitTagGroup,
+    this.shotTagGroup,
     this.analysisError,
   });
 
@@ -57,6 +67,8 @@ class RenewTask {
     DateTime? updatedAt,
     List<SemanticUnit>? units,
     List<AsrSentence>? asrSentences,
+    TagGroupRef? unitTagGroup,
+    TagGroupRef? shotTagGroup,
     String? analysisError,
     bool clearAnalysisError = false,
   }) =>
@@ -72,6 +84,8 @@ class RenewTask {
         updatedAt: updatedAt ?? this.updatedAt,
         units: units ?? this.units,
         asrSentences: asrSentences ?? this.asrSentences,
+        unitTagGroup: unitTagGroup ?? this.unitTagGroup,
+        shotTagGroup: shotTagGroup ?? this.shotTagGroup,
         analysisError:
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
       );
@@ -88,6 +102,8 @@ class RenewTask {
         'updatedAt': updatedAt.toIso8601String(),
         'units': units?.map((u) => u.toJson()).toList(),
         'asrSentences': asrSentences?.map((s) => s.toJson()).toList(),
+        'unitTagGroup': unitTagGroup?.toJson(),
+        'shotTagGroup': shotTagGroup?.toJson(),
         'analysisError': analysisError,
       };
 
@@ -109,6 +125,8 @@ class RenewTask {
         asrSentences: (json['asrSentences'] as List<dynamic>?)
             ?.map((e) => AsrSentence.fromJson(e as Map<String, dynamic>))
             .toList(),
+        unitTagGroup: TagGroupRef.tryFromJson(json['unitTagGroup']),
+        shotTagGroup: TagGroupRef.tryFromJson(json['shotTagGroup']),
         analysisError: json['analysisError'] as String?,
       );
 
@@ -141,6 +159,8 @@ class RenewTask {
       other.status == status &&
       other.createdAt == createdAt &&
       other.updatedAt == updatedAt &&
+      other.unitTagGroup == unitTagGroup &&
+      other.shotTagGroup == shotTagGroup &&
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences);
@@ -156,6 +176,8 @@ class RenewTask {
       status,
       createdAt,
       updatedAt,
+      unitTagGroup,
+      shotTagGroup,
       analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!));
