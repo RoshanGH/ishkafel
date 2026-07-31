@@ -37,6 +37,7 @@ void main() {
         videoPath: '/tmp/x.mp4',
         taskId: 'concurrency',
         durationMs: 96000,
+        thumbCount: 14,
         workDir: workDir,
       );
 
@@ -68,6 +69,7 @@ void main() {
         videoPath: '/tmp/x.mp4',
         taskId: 'cap',
         durationMs: 96000,
+        thumbCount: 14,
         workDir: workDir,
       );
 
@@ -95,6 +97,7 @@ void main() {
         videoPath: '/tmp/x.mp4',
         taskId: 'order',
         durationMs: 96000,
+        thumbCount: 14,
         workDir: workDir,
       );
 
@@ -102,6 +105,21 @@ void main() {
         expect(media.thumbPaths[i], endsWith('_tl_$i.jpg'),
             reason: '胶片条按时间顺序平铺，顺序错乱会让用户看到与时间对不上的画面');
       }
+    });
+  });
+
+  group('抽帧密度随片长增长（固定张数会让胶片条退化成彩色噪声）', () {
+    test('每 3 秒一张', () {
+      expect(TimelineMediaBuilder.thumbCountFor(96000), 32,
+          reason: '96 秒按每 3 秒一张是 32 张，正好落在上限');
+      expect(TimelineMediaBuilder.thumbCountFor(60000), 20);
+    });
+
+    test('极短素材有下限，长素材有上限（控制首次加载耗时）', () {
+      expect(TimelineMediaBuilder.thumbCountFor(5000), 14);
+      expect(TimelineMediaBuilder.thumbCountFor(300000), 32,
+          reason: '5 分钟素材封顶 32 张；再多会让进页面等待明显变长，'
+              '真正的解法是随缩放动态补帧（已记入待办）');
     });
   });
 

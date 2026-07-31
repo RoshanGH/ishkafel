@@ -36,6 +36,21 @@ class TimelineMediaBuilder {
   /// 留下的半截文件，凑不出一个完整采样）
   static const int _minValidPcmBytes = 1;
 
+  /// 胶片条抽帧密度：每多少毫秒一张
+  ///
+  /// 固定 14 张时，96 秒素材每张代表 6.9 秒、5 分钟素材每张代表 21.4 秒，
+  /// 胶片条退化成十几块彩色噪声，起不到"按画面定位"的作用。按每 3 秒一张
+  /// 取，并设上限控制首次加载耗时（4 路并发下 32 张约 1.2 秒）。
+  static const int _msPerThumb = 3000;
+
+  /// 抽帧张数下限/上限
+  static const int _minThumbCount = 14;
+  static const int _maxThumbCount = 32;
+
+  /// 按片长推导抽帧张数
+  static int thumbCountFor(int durationMs) =>
+      (durationMs / _msPerThumb).round().clamp(_minThumbCount, _maxThumbCount);
+
   /// 包络采样密度（每秒样本数）。
   ///
   /// 波形的用途是让用户看清语句之间的停顿来定切点，因此它的分辨率必须跟得上
@@ -67,7 +82,7 @@ class TimelineMediaBuilder {
     required String taskId,
     required int durationMs,
     required Directory workDir,
-    int thumbCount = 14,
+    int? thumbCount,
     int? waveBuckets,
   }) async {
     // 抽帧与波形互不依赖，并行推进：此前波形要等 14 张图全抽完才开始，
@@ -78,7 +93,7 @@ class TimelineMediaBuilder {
         taskId: taskId,
         durationMs: durationMs,
         workDir: workDir,
-        thumbCount: thumbCount,
+        thumbCount: thumbCount ?? thumbCountFor(durationMs),
       ),
       _buildEnvelope(
         videoPath: videoPath,
