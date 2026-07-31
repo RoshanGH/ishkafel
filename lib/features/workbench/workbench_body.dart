@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
@@ -20,7 +21,7 @@ import 'workbench_shortcuts.dart';
 /// 完全不需要读取它们——把它们留在页面级 State 里只是历史遗留的"放在一起"，
 /// 搬到这里后各自的状态归属更清楚：本 Widget 自己的 State 持有时间线专属
 /// 的展示状态；`WorkbenchPage` 只需要转发 [editor]/[playback]/[videoWidget]/
-/// [media]/[playheadMs] 这几个"跨区域共享"的值。同理，页面级播放快捷键
+/// [media]/[playhead] 这几个"跨区域共享"的值。同理，页面级播放快捷键
 /// （空格/←/→）转发到 [PlayerPanel] 的 [GlobalKey] 只在本组件内部使用，
 /// 也一并搬入，`WorkbenchPage` 不再需要关心它。
 class WorkbenchBody extends StatefulWidget {
@@ -28,7 +29,8 @@ class WorkbenchBody extends StatefulWidget {
   final PlaybackController playback;
   final Widget? videoWidget;
   final TimelineMedia? media;
-  final int playheadMs;
+  /// 播放位置（只驱动时间线播放头，不参与页面重建，见 workbench_page.dart）
+  final ValueListenable<int> playhead;
 
   /// 只读回看模式（评审 Important 1）：picking/exported 状态下已确认的
   /// 切分结构不允许再被静默改写，下发到 [TimelineView]/[InspectorPanel]。
@@ -40,7 +42,7 @@ class WorkbenchBody extends StatefulWidget {
     required this.playback,
     this.videoWidget,
     this.media,
-    required this.playheadMs,
+    required this.playhead,
     this.readOnly = false,
   });
 
@@ -180,7 +182,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   controller: editor,
                   geometry: _geometry!,
                   media: widget.media,
-                  playheadMs: widget.playheadMs,
+                  playhead: widget.playhead,
                   onSeek: (ms) => playback.seekMs(ms),
                   onGeometryChanged: (g) => setState(() => _geometry = g),
                   readOnly: widget.readOnly,

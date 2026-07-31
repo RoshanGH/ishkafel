@@ -56,7 +56,7 @@ Widget _wrap({
           child: TimelineView(
             controller: controller,
             geometry: geometry,
-            playheadMs: 0,
+            playhead: ValueNotifier<int>(0),
             onSeek: onSeek,
             onGeometryChanged: onGeometryChanged,
             readOnly: readOnly,

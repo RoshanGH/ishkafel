@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
@@ -41,7 +42,9 @@ class TimelineView extends StatefulWidget {
   final SegmentationEditorController controller;
   final TimelineGeometry geometry;
   final TimelineMedia? media;
-  final int playheadMs;
+  /// 播放位置。用 [ValueListenable] 而不是普通 int：播放时它每秒变化 30 次，
+  /// 只让包住 [CustomPaint] 的那一层重建，外层三栏面板完全不动。
+  final ValueListenable<int> playhead;
   final ValueChanged<int> onSeek;
   final ValueChanged<TimelineGeometry> onGeometryChanged;
 
@@ -55,7 +58,7 @@ class TimelineView extends StatefulWidget {
     required this.controller,
     required this.geometry,
     this.media,
-    required this.playheadMs,
+    required this.playhead,
     required this.onSeek,
     required this.onGeometryChanged,
     this.readOnly = false,
@@ -263,17 +266,24 @@ class _TimelineViewState extends State<TimelineView> {
           onHorizontalDragUpdate: _handleDragUpdate,
           onHorizontalDragEnd: _handleDragEnd,
           onHorizontalDragCancel: _handleDragCancel,
-          child: AnimatedBuilder(
-            animation: widget.controller,
-            builder: (context, _) => CustomPaint(
-              size: Size(constraints.maxWidth, constraints.maxHeight),
-              painter: TimelinePainter(
-                units: widget.controller.units,
-                selection: widget.controller.selection,
-                geometry: widget.geometry,
-                thumbImages: _thumbImages,
-                waveEnvelope: widget.media?.waveEnvelope,
-                playheadMs: widget.playheadMs,
+          // RepaintBoundary 是必需的：没有它时 RenderCustomPaint.markNeedsPaint
+          // 会一路上溯到 RenderView，播放头每次移动都要把整页的绘制指令重录一遍。
+          child: RepaintBoundary(
+            child: AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, _) => ValueListenableBuilder<int>(
+                valueListenable: widget.playhead,
+                builder: (context, playheadMs, _) => CustomPaint(
+                  size: Size(constraints.maxWidth, constraints.maxHeight),
+                  painter: TimelinePainter(
+                    units: widget.controller.units,
+                    selection: widget.controller.selection,
+                    geometry: widget.geometry,
+                    thumbImages: _thumbImages,
+                    waveEnvelope: widget.media?.waveEnvelope,
+                    playheadMs: playheadMs,
+                  ),
+                ),
               ),
             ),
           ),

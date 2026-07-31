@@ -66,7 +66,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   TimelineMedia? _media;
   StreamSubscription<int>? _positionSub;
 
-  int _playheadMs = 0;
+  /// 播放位置。用 [ValueNotifier] 而不是 State 字段：播放时这个值每秒变化
+  /// 30 次，而它唯一的消费者是时间线上那条 2px 的播放头线。若走 `setState`，
+  /// 每次 tick 都会连带重建左栏单元列表、播放器、右栏检查器与底部栏——
+  /// 实测每 tick 净开销 10~12ms，占满 60fps 预算的七成，播放与拖拽因此发顿。
+  final ValueNotifier<int> _playhead = ValueNotifier<int>(0);
+
+  /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
+  /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
+  bool _lastDirty = false;
 
   /// 本次会话是否已通过「确认切分」成功保存；true 时返回不再弹草稿确认框
   bool _confirmed = false;
@@ -107,9 +115,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (playback is MediaKitPlaybackController) {
       _videoWidget = playback.buildVideoWidget();
     }
+    // 只更新 notifier，不触发页面重建；重复值直接丢弃（mpv 会重复上报同一毫秒）
     _positionSub = playback.positionMsStream.listen((ms) {
-      if (!mounted) return;
-      setState(() => _playheadMs = ms);
+      if (!mounted || _playhead.value == ms) return;
+      _playhead.value = ms;
     });
     unawaited(playback.open(task.sourcePath));
     unawaited(_loadMedia());
@@ -149,11 +158,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
     _editor?.dispose();
+    _playhead.dispose();
     unawaited(_playback?.dispose());
     super.dispose();
   }
 
-  void _onEditorChanged() => setState(() {});
+  /// 编辑器变化时**只在 dirty 真正翻转时**重建页面。
+  ///
+  /// 页面本身唯一依赖编辑器状态的地方是 [PopScope.canPop]（决定返回时是否
+  /// 弹「保存草稿」确认框）；三栏面板与底部栏各自监听同一个 controller，
+  /// 不需要页面代劳。改造前这里无条件 `setState`，于是拖拽边界时每个
+  /// DragUpdate（macOS 触控板约 90~125Hz）都重建整页。
+  void _onEditorChanged() {
+    final dirty = _editor?.dirty ?? false;
+    if (dirty == _lastDirty) return;
+    setState(() => _lastDirty = dirty);
+  }
 
   /// 解析媒体构建器与其工作目录：注入假 builder（测试）时用一次性临时目录，
   /// 缺省（生产）时用真实 builder + 与分析管线一致的持久化目录（便于复用缓存）
@@ -274,16 +294,20 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,
-                playheadMs: _playheadMs,
+                playhead: _playhead,
                 readOnly: !_isEditable,
               ),
             ),
           ],
         ),
-        bottomNavigationBar: WorkbenchBottomBar(
-          summaryText: _summaryText(editor),
-          confirmed: !_isEditable,
-          onConfirm: _onConfirm,
+        // 摘要含单元数/镜头数/dirty 标记，只随编辑器变化重建，不随播放位置重建
+        bottomNavigationBar: AnimatedBuilder(
+          animation: editor,
+          builder: (context, _) => WorkbenchBottomBar(
+            summaryText: _summaryText(editor),
+            confirmed: !_isEditable,
+            onConfirm: _onConfirm,
+          ),
         ),
       ),
     );
