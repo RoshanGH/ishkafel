@@ -294,10 +294,25 @@ class _TimelineViewState extends State<TimelineView> {
         _viewportWidth = constraints.maxWidth;
         return Listener(
           onPointerSignal: _handlePointerSignal,
-          onPointerPanZoomStart: (_) => _panZoomScale = 1.0,
+          onPointerPanZoomStart: (_) {
+            _panZoomScale = 1.0;
+            _panZoomPan = Offset.zero;
+          },
           onPointerPanZoomUpdate: _handlePanZoomUpdate,
           child: GestureDetector(
           behavior: HitTestBehavior.opaque,
+          // 触控板的双指手势交给 Listener 的 PanZoom 回调统一处理。
+          // 若同时让手势识别器把它当成拖拽，两条路径会各自基于**同一份未更新
+          // 的 geometry** 调用 onGeometryChanged，后到的那次把先到的结果整个
+          // 覆盖掉——表现为捏合缩放看起来完全没生效。
+          // 注意：在触控板上按下拖动产生的是 mouse 类指针，不受这里影响。
+          supportedDevices: const {
+            PointerDeviceKind.mouse,
+            PointerDeviceKind.touch,
+            PointerDeviceKind.stylus,
+            PointerDeviceKind.invertedStylus,
+            PointerDeviceKind.unknown,
+          },
           // 让 onHorizontalDragStart 报告指针刚按下时的原始坐标（而非默认的
           // "越过触摸容差后手势识别器胜出时"的坐标），边界手柄 ±6px 的命中
           // 判定才不会被拖拽启动阈值带偏
@@ -341,24 +356,36 @@ class _TimelineViewState extends State<TimelineView> {
   ///
   /// 纵向滚动也映射为平移：时间线本身没有纵向可滚内容，不映射就是一个
   /// 落空的手势；而触控板上纯粹的水平滑动很难做到，用户实际会带纵向分量。
-  /// 触控板双指捏合时上一次的累计缩放比例（用来算增量倍数）
+  /// 触控板双指手势上一次的累计缩放比例与累计平移（事件给的是自手势开始
+  /// 以来的累计值，需要自己算增量）
   double _panZoomScale = 1.0;
+  Offset _panZoomPan = Offset.zero;
 
-  /// 触控板捏合缩放。
+  /// 触控板双指手势：平移 + 捏合缩放，一处统一处理。
   ///
-  /// 只处理 scale 分量：pan 分量已经由既有的水平拖拽手势消费（Flutter 会把
-  /// 触控板的平移转成 drag），在这里再处理一次会让平移量翻倍。
+  /// 两件事必须在同一处做：它们来自同一个事件流，若分散在两条路径里，各自
+  /// 基于同一份未更新的 geometry 计算并回调，后者会把前者的结果覆盖掉。
   void _handlePanZoomUpdate(PointerPanZoomUpdateEvent event) {
     if (_viewportWidth <= 0) return;
-    final scale = event.scale;
-    if (scale <= 0) return;
+
+    final scale = event.scale <= 0 ? _panZoomScale : event.scale;
     final factor = scale / _panZoomScale;
+    final panDelta = event.pan - _panZoomPan;
     _panZoomScale = scale;
+    _panZoomPan = event.pan;
+
+    var next = widget.geometry;
     // 极小的抖动不触发重算，避免手指静止时的噪声让画面持续微动
-    if ((factor - 1).abs() < 0.005) return;
-    widget.onGeometryChanged(widget.geometry.zoomAt(
-        event.localPosition.dx, factor,
-        viewportWidthPx: _viewportWidth));
+    if ((factor - 1).abs() >= 0.005) {
+      next = next.zoomAt(event.localPosition.dx, factor,
+          viewportWidthPx: _viewportWidth);
+    }
+    if (panDelta.dx.abs() >= 0.5) {
+      // 内容跟着手指走：手指左滑（dx 为负）时时间线向右滚
+      next = next.scrolledBy(-panDelta.dx, viewportWidthPx: _viewportWidth);
+    }
+    if (identical(next, widget.geometry)) return;
+    widget.onGeometryChanged(next);
   }
 
   void _handlePointerSignal(PointerSignalEvent event) {
