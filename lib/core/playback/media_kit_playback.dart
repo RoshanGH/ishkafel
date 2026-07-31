@@ -1,11 +1,10 @@
-import 'dart:math' as math;
-
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../log/app_log.dart';
 import '../editing/frame_time.dart';
+import 'frame_stepper.dart';
 import 'playback_controller.dart';
 
 /// media_kit 实现（薄封装 [Player]）；`Video` 组件由 player_panel 使用。
@@ -19,6 +18,10 @@ class MediaKitPlaybackController implements PlaybackController {
   final Player player;
 
   late final VideoController _videoController;
+
+  /// 逐帧步进的锚点。按住方向键连发时不去读播放器位置（seek 是异步的，
+  /// 位置还停在上一次的值，反推出旧帧号就会原地踏步）。
+  final FrameStepper _stepper = FrameStepper();
 
   @override
   Future<void> open(String path) async {
@@ -98,6 +101,7 @@ class MediaKitPlaybackController implements PlaybackController {
       await _setMpv('end', 'none');
       await player.seek(Duration(milliseconds: resumeAt));
     }
+    _stepper.reset();
     await player.play();
   }
 
@@ -105,13 +109,21 @@ class MediaKitPlaybackController implements PlaybackController {
   Future<void> pause() => player.pause();
 
   @override
-  Future<void> seekMs(int ms) => player.seek(Duration(milliseconds: ms));
+  Future<void> seekMs(int ms) {
+    // 不是逐帧步进的定位：锚点作废，下一次步进重新以实际位置为准
+    _stepper.reset();
+    return player.seek(Duration(milliseconds: ms));
+  }
 
   @override
   Future<void> stepFrames(int frames, double fps) async {
     await player.pause();
-    final deltaMs = (1000 / fps).round() * frames;
-    final targetMs = math.max(0, positionMs + deltaMs);
+    final targetMs = _stepper.nextMs(
+      positionMs: positionMs,
+      frames: frames,
+      fps: fps,
+      durationMs: player.state.duration.inMilliseconds,
+    );
     await player.seek(Duration(milliseconds: targetMs));
   }
 
