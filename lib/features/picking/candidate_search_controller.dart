@@ -1,0 +1,190 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
+
+import '../../core/miaoa/candidate_probe.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
+import 'picking_messages.dart';
+
+/// 候选面板的装载状态
+enum CandidateSearchStatus {
+  /// 还没检索过（刚进页面 / 刚切到一个新作用域）
+  idle,
+
+  /// 检索中
+  loading,
+
+  /// 检索完成（**含 0 条**——0 条不是失败，引导语由页面按检索方式给）
+  ready,
+
+  /// 检索失败，[CandidateSearchController.failureMessage] 是可直接展示的中文
+  failed,
+}
+
+/// 一条候选素材在候选面板上的展示状态：素材本体 + 规格探测进度。
+///
+/// [spec] 为 null 有两种含义，靠 [probing] 区分：探测中（显示「探测中」占位）
+/// 与探测失败（**不显示**时长差徽标，而不是显示一个 0 冒充出来的假数据）。
+@immutable
+class CandidateEntry {
+  final CandidateMaterial material;
+  final CandidateSpec? spec;
+  final bool probing;
+
+  const CandidateEntry({
+    required this.material,
+    this.spec,
+    required this.probing,
+  });
+
+  CandidateEntry settled(CandidateSpec? spec) =>
+      CandidateEntry(material: material, spec: spec, probing: false);
+}
+
+/// 候选素材检索 + 规格探测的编排。
+///
+/// 两条性能约束（本项目踩过的坑）：
+/// - 规格探测约 3 秒/条，二十条串行要一分钟。这里用工作池并发，且**边探边填**
+///   （每完成一条就通知一次），让用户先看到卡片再看到时长；
+/// - 一次性把二十条 ffprobe 全打出去会挤占网络与进程数，因此并发有上限。
+///
+/// 竞态：用户可以在结果回来之前切检索方式/切镜头，慢到的旧结果绝不能覆盖新的
+/// （界面会「闪回」上一次的候选），因此每次检索领一个代次号，回写前先核对。
+class CandidateSearchController extends ChangeNotifier {
+  final MiaoaContentService service;
+  final CandidateProbe probe;
+
+  /// 同时在跑的 ffprobe 数上限
+  final int probeConcurrency;
+
+  CandidateSearchController({
+    required this.service,
+    required this.probe,
+    this.probeConcurrency = 4,
+  });
+
+  CandidateSearchStatus _status = CandidateSearchStatus.idle;
+  String? _failureMessage;
+  List<CandidateEntry> _entries = const [];
+  int _total = 0;
+  int _skipped = 0;
+
+  /// 检索代次：每发起一次检索自增，回写前核对，过期结果直接丢弃
+  int _generation = 0;
+  bool _disposed = false;
+
+  CandidateSearchStatus get status => _status;
+
+  /// 失败原因（已是可直接展示的中文；成功时为 null）
+  String? get failureMessage => _failureMessage;
+
+  List<CandidateEntry> get entries => _entries;
+
+  /// 命中总数（不只是当前这一页）
+  int get total => _total;
+
+  /// 因返回内容畸形而被跳过的条数（如实带出，不静默丢弃）
+  int get skipped => _skipped;
+
+  Future<void> searchByTags({
+    required List<int> tagIds,
+    String mode = 'or',
+  }) =>
+      _run(() => service.searchByTags(tagIds: tagIds, mode: mode));
+
+  Future<void> searchByDescription(String keyword) =>
+      _run(() => service.searchByDescription(keyword: keyword));
+
+  Future<void> searchByImage(String fileKey) =>
+      _run(() => service.searchByImage(fileKey: fileKey));
+
+  /// 清空候选（切到没有可检索键的作用域时用），回到 idle
+  void clear() {
+    _generation++;
+    _entries = const [];
+    _total = 0;
+    _skipped = 0;
+    _failureMessage = null;
+    _status = CandidateSearchStatus.idle;
+    _notify();
+  }
+
+  Future<void> _run(Future<CandidatePage> Function() search) async {
+    final generation = ++_generation;
+    _status = CandidateSearchStatus.loading;
+    _failureMessage = null;
+    _entries = const [];
+    _notify();
+
+    final CandidatePage page;
+    try {
+      page = await search();
+    } catch (e) {
+      if (generation != _generation) return; // 过期的失败同样不该覆盖新结果
+      _status = CandidateSearchStatus.failed;
+      // 服务层已经把 401/403/未安装/超时翻译成可照做的中文，原样透出
+      _failureMessage = describeSearchFailure(e);
+      _entries = const [];
+      _notify();
+      return;
+    }
+    if (generation != _generation) return;
+
+    _status = CandidateSearchStatus.ready;
+    _total = page.total;
+    _skipped = page.skipped;
+    // 先把卡片铺出来（规格标为探测中），不等 ffprobe——等的话用户要盯一分钟空白
+    _entries = List.unmodifiable([
+      for (final m in page.items) CandidateEntry(material: m, probing: true),
+    ]);
+    _notify();
+
+    await _probeAll(generation);
+  }
+
+  /// 工作池并发探测：结果按素材 id 回填，每填一条通知一次（渐进填充）
+  Future<void> _probeAll(int generation) async {
+    final materials = _entries.map((e) => e.material).toList(growable: false);
+    var next = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        if (generation != _generation) return;
+        final i = next++;
+        if (i >= materials.length) return;
+        final material = materials[i];
+        final spec = await probe.probe(
+          materialId: material.id,
+          previewUrl: material.previewUrl,
+        );
+        if (generation != _generation) return;
+        _settle(material.id, spec);
+      }
+    }
+
+    await Future.wait(List.generate(
+        math.min(probeConcurrency, materials.length), (_) => worker()));
+  }
+
+  /// 按素材 id 回填（不按下标）：翻页/重排之后下标会错位，id 不会
+  void _settle(int materialId, CandidateSpec? spec) {
+    _entries = List.unmodifiable([
+      for (final e in _entries)
+        e.material.id == materialId ? e.settled(spec) : e,
+    ]);
+    _notify();
+  }
+
+  void _notify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    // 代次自增让在飞的检索/探测在回写前就退出，不再触碰已销毁的对象
+    _generation++;
+    super.dispose();
+  }
+}
