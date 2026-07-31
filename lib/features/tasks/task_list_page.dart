@@ -8,6 +8,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../import_flow/import_exception.dart';
+import '../settings/settings_page.dart';
 import '../workbench/workbench_page.dart';
 import 'new_task_wizard/new_task_wizard.dart';
 import 'environment_banner.dart';
@@ -195,6 +196,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             style: TextStyle(
                 fontSize: AppFontSize.title, fontWeight: FontWeight.w700)),
         actions: [
+          IconButton(
+            key: const Key('task-list-settings'),
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_outlined, size: 18),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: FilledButton.icon(

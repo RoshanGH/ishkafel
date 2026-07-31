@@ -112,6 +112,20 @@ void main() {
     expect(find.text('已导出'), findsOneWidget);
   });
 
+  testWidgets('顶栏有设置入口，点进去能到设置页', (tester) async {
+    await tester.pumpWidget(wrap(InMemoryTaskRepository()));
+    await tester.pumpAndSettle();
+
+    final gear = find.byKey(const Key('task-list-settings'));
+    expect(gear, findsOneWidget,
+        reason: '设置页做出来但没有入口，等于没做——账号状态、环境体检、'
+            '缓存清理全都进不去');
+
+    await tester.tap(gear);
+    await tester.pumpAndSettle();
+    expect(find.text('缓存管理'), findsOneWidget);
+  });
+
   testWidgets('点「新建任务」弹出新建任务向导（不再是裸文件选择框）', (tester) async {
     await tester.pumpWidget(wrap(InMemoryTaskRepository()));
     await tester.pumpAndSettle();

@@ -21,10 +21,14 @@ import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'core/log/app_log.dart';
+import 'core/miaoa/miaoa_account_service.dart';
 import 'core/miaoa/miaoa_locator.dart';
 import 'core/miaoa/miaoa_tag_service.dart';
+import 'core/diagnostics/environment_report.dart';
+import 'core/storage/cache_usage.dart';
 import 'core/storage/file_task_repository.dart';
 import 'features/import_flow/import_service.dart';
+import 'features/settings/settings_providers.dart';
 import 'features/tasks/environment_banner.dart';
 import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
@@ -37,15 +41,15 @@ Future<void> main() async {
   final supportDir = await getApplicationSupportDirectory();
   final dataDir = Directory(p.join(supportDir.path, 'ishkafel_data'));
   final repository = FileTaskRepository(dataDir);
-  final artifactCleaner = FileTaskArtifactCleaner(
-    coversDir: Directory(p.join(dataDir.path, 'covers')),
-    workDir: Directory(p.join(dataDir.path, 'analysis_work')),
-  );
+  final coversDir = Directory(p.join(dataDir.path, 'covers'));
+  final workDir = Directory(p.join(dataDir.path, 'analysis_work'));
+  final artifactCleaner =
+      FileTaskArtifactCleaner(coversDir: coversDir, workDir: workDir);
   final importService = ImportService(
     repository: repository,
     ffprobe: FfprobeService(),
     thumbnails: ThumbnailService(),
-    coversDir: Directory(p.join(dataDir.path, 'covers')),
+    coversDir: coversDir,
   );
 
   final credentials = CredentialsLoader.load(
@@ -63,6 +67,13 @@ Future<void> main() async {
       analysisPipelineProvider.overrideWithValue(analysisPipeline),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
+      // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里
+      cacheScannerProvider.overrideWithValue(
+          CacheScanner(coversDir: coversDir, workDir: workDir)),
+      environmentProbeProvider.overrideWithValue(defaultEnvironmentProbe(
+          mediaTools: mediaTools, credentials: credentials)),
+      miaoaAccountServiceProvider.overrideWithValue(MiaoaAccountService()),
+      dataDirProvider.overrideWithValue(dataDir),
     ],
     child: const IshkafelApp(),
   ));
