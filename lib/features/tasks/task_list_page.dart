@@ -2,7 +2,9 @@ import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../import_flow/import_exception.dart';
 import '../workbench/workbench_page.dart';
 import 'environment_banner.dart';
 import 'task_card.dart';
@@ -17,13 +19,18 @@ class TaskListPage extends ConsumerWidget {
     if (file == null) return;
     try {
       await ref.read(taskListProvider.notifier).importFile(file.path);
+    } on ImportException catch (e) {
+      // message 已是面向用户的中文提示，直接展示；原始异常只进日志
+      AppLog.warn('导入失败 ${file.path}：${e.cause ?? e.message}');
+      if (context.mounted) _showSnackBar(context, e.message);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('导入失败：$e')));
-      }
+      AppLog.warn('导入失败 ${file.path}：$e');
+      if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
     }
   }
+
+  void _showSnackBar(BuildContext context, String message) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
   /// 任务卡点击路由：analysisError 非空（分析失败）优先级最高——不进入审片台，
   /// 只弹出失败原因与「重试」action；其次 `analyzing` 状态或缺少 units（尚未
@@ -44,8 +51,14 @@ class TaskListPage extends ConsumerWidget {
       return;
     }
     if (task.status == RenewTaskStatus.exported) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已导出的任务不再支持进入审片台')));
+      _showSnackBar(context, '已导出的任务不再支持进入审片台');
+      return;
+    }
+    // 历史遗留数据兜底：帧率非法（旧版本把 ffprobe 的 0/0 解析成 0 后落了库）
+    // 时审片台按帧计算会得到 Infinity/整除零而红屏，这里拦在入口
+    final fps = task.videoInfo?.fps ?? 0;
+    if (fps <= 0 || !fps.isFinite) {
+      _showSnackBar(context, '这条素材缺少可用的帧率信息，无法按帧切分，请重新导入转码后的文件。');
       return;
     }
     Navigator.of(context).push(

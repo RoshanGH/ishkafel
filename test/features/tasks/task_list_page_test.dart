@@ -157,6 +157,28 @@ void main() {
       expect(find.textContaining('已导出的任务'), findsOneWidget);
     });
 
+    testWidgets('历史遗留的非法帧率任务点击不进入审片台（否则按帧计算会红屏）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeCuttableTask(RenewTaskStatus.awaitingCut).copyWith(
+        videoInfo: const VideoInfo(
+          width: 1080,
+          height: 1920,
+          duration: Duration(milliseconds: 1000),
+          fps: 0,
+          fileSizeBytes: 10,
+        ),
+      ));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('可进入审片台的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('帧率'), findsOneWidget);
+    });
+
     testWidgets('analyzing 状态点击不进入审片台，提示分析中', (tester) async {
       final repo = InMemoryTaskRepository();
       await repo.save(makeTask('a2', '分析中的任务', RenewTaskStatus.analyzing));

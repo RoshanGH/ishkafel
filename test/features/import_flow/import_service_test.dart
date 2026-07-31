@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
+import 'package:ishkafel/core/ffmpeg/process_runner.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
+import 'package:ishkafel/features/import_flow/import_exception.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'dart:convert';
 
@@ -51,6 +53,76 @@ void main() {
     expect(ffmpegCalls.single, contains('/videos/滴露_测试片.mp4'));
     // 已落库
     expect(await repo.findById('fixed-id'), task);
+  });
+
+  group('非法帧率素材在导入边界被拦下（审片台 frameMs(0) 会崩）', () {
+    const badFpsJson = {
+      'streams': [
+        {
+          'codec_type': 'video',
+          'width': 1080,
+          'height': 1920,
+          'r_frame_rate': '0/0',
+          'avg_frame_rate': '0/0',
+        },
+      ],
+      'format': {'duration': '10.0', 'size': '100'},
+    };
+
+    test('帧率非法时拒绝导入：中文提示、不抽封面、不落库', () async {
+      final coverCalls = <List<String>>[];
+      final service2 = ImportService(
+        repository: repo,
+        ffprobe: FfprobeService(
+            run: (_, _) async => ProcessResult(1, 0, jsonEncode(badFpsJson), '')),
+        thumbnails: ThumbnailService(run: (_, args) async {
+          coverCalls.add(args);
+          return ProcessResult(1, 0, '', '');
+        }),
+        coversDir: Directory('${tempDir.path}/covers'),
+        idGenerator: () => 'bad-fps',
+      );
+
+      await expectLater(
+        service2.importLocalFile('/videos/坏帧率.mp4'),
+        throwsA(isA<ImportException>()
+            .having((e) => e.message, 'message', contains('帧率'))
+            // 面向用户的提示不应出现原始异常文本
+            .having((e) => e.message, 'message', isNot(contains('Exception')))),
+      );
+      expect(coverCalls, isEmpty);
+      expect(await repo.findAll(), isEmpty);
+    });
+
+    test('ffprobe 执行失败时也给中文提示而非原始异常文本', () async {
+      final failing = ImportService(
+        repository: repo,
+        ffprobe:
+            FfprobeService(run: (_, _) async => ProcessResult(1, 1, '', 'bad file')),
+        thumbnails: ThumbnailService(run: (_, _) async => ProcessResult(1, 0, '', '')),
+        coversDir: Directory('${tempDir.path}/covers'),
+      );
+      await expectLater(
+        failing.importLocalFile('/v/x.mp4'),
+        throwsA(isA<ImportException>().having(
+            (e) => e.message, 'message', isNot(contains('exit=')))),
+      );
+    });
+
+    test('视频处理组件缺失时把安装引导原样透传给用户', () async {
+      final missing = ImportService(
+        repository: repo,
+        ffprobe: FfprobeService(
+            run: (_, _) async => throw const MediaToolMissingException('ffprobe')),
+        thumbnails: ThumbnailService(run: (_, _) async => ProcessResult(1, 0, '', '')),
+        coversDir: Directory('${tempDir.path}/covers'),
+      );
+      await expectLater(
+        missing.importLocalFile('/v/x.mp4'),
+        throwsA(isA<ImportException>().having(
+            (e) => e.message, 'message', contains('brew install ffmpeg'))),
+      );
+    });
   });
 
   test('ffprobe 失败时不落库并向上抛错', () async {

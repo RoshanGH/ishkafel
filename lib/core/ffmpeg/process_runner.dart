@@ -44,9 +44,23 @@ class ResolvingProcessRunner {
   String _resolve(String executable) {
     if (executable.startsWith('/')) return executable;
     final resolved = locator.resolve(executable);
-    if (resolved == null) throw FfmpegException(missingToolMessage(executable));
+    if (resolved == null) throw MediaToolMissingException(executable);
     return resolved;
   }
+}
+
+/// 视频处理组件缺失：与其他 ffmpeg 失败区分开，因为它的 [message] 已经是
+/// 可直接展示给用户的安装引导，上层无需再翻译。
+class MediaToolMissingException implements FfmpegException {
+  final String executable;
+
+  const MediaToolMissingException(this.executable);
+
+  @override
+  String get message => missingToolMessage(executable);
+
+  @override
+  String toString() => 'MediaToolMissingException: $message';
 }
 
 /// 工具缺失时给用户的中文引导（面向用户，不含技术堆栈）
