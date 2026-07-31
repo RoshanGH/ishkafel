@@ -30,6 +30,19 @@ class PageRedoIntent extends Intent {
   const PageRedoIntent();
 }
 
+/// 走带意图：JKL 是所有视频工具通行的键位（J 反向 / K 停 / L 正向），
+/// 用户会下意识去按。[direction] 为 -1/0/1。
+class PageShuttleIntent extends Intent {
+  final int direction;
+  const PageShuttleIntent(this.direction);
+}
+
+/// 跳到片头/片尾
+class PageSeekEdgeIntent extends Intent {
+  final bool toStart;
+  const PageSeekEdgeIntent({required this.toStart});
+}
+
 /// 判断当前键盘焦点是否落在可编辑文本控件（如台词输入框）内。
 ///
 /// 页面级快捷键必须在这种情况下"放行"——不拦截空格/方向键，让它们正常
@@ -93,6 +106,33 @@ class PageRedoAction extends Action<PageRedoIntent> {
   void invoke(PageRedoIntent intent) => _callback();
 }
 
+/// 走带 Action，同样在文本框聚焦时让路（否则打字打不出 j/k/l）
+class PageShuttleAction extends Action<PageShuttleIntent> {
+  PageShuttleAction(this._callback);
+  final ValueChanged<int> _callback;
+
+  @override
+  bool isEnabled(PageShuttleIntent intent) => !isEditableTextFocused();
+
+  @override
+  void invoke(PageShuttleIntent intent) => _callback(intent.direction);
+}
+
+/// 跳到片头/片尾 Action
+class PageSeekEdgeAction extends Action<PageSeekEdgeIntent> {
+  PageSeekEdgeAction(this._callback);
+  final ValueChanged<bool> _callback;
+
+  @override
+  bool isEnabled(PageSeekEdgeIntent intent) => !isEditableTextFocused();
+
+  @override
+  void invoke(PageSeekEdgeIntent intent) => _callback(intent.toStart);
+}
+
+/// ⇧+方向键的粗调步长（帧）
+const int _coarseStepFrames = 10;
+
 /// 快捷键激活表：空格→切换播放，←/→→逐帧步进 ±1 帧，
 /// ⌘Z/Ctrl+Z→撤销，⇧⌘Z/Ctrl+⇧Z→重做（macOS 用 ⌘，同时绑 Ctrl 供
 /// Windows/Linux 使用，本项目跨平台）
@@ -101,6 +141,17 @@ const Map<ShortcutActivator, Intent> workbenchPlaybackShortcuts =
   SingleActivator(LogicalKeyboardKey.space): PageTogglePlayIntent(),
   SingleActivator(LogicalKeyboardKey.arrowLeft): PageStepFrameIntent(-1),
   SingleActivator(LogicalKeyboardKey.arrowRight): PageStepFrameIntent(1),
+  // ⇧+方向键粗调：只有 ±1 帧时跨过一秒要按 30 次
+  SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
+      PageStepFrameIntent(-_coarseStepFrames),
+  SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+      PageStepFrameIntent(_coarseStepFrames),
+  // JKL 走带
+  SingleActivator(LogicalKeyboardKey.keyJ): PageShuttleIntent(-1),
+  SingleActivator(LogicalKeyboardKey.keyK): PageShuttleIntent(0),
+  SingleActivator(LogicalKeyboardKey.keyL): PageShuttleIntent(1),
+  SingleActivator(LogicalKeyboardKey.home): PageSeekEdgeIntent(toStart: true),
+  SingleActivator(LogicalKeyboardKey.end): PageSeekEdgeIntent(toStart: false),
   SingleActivator(LogicalKeyboardKey.keyZ, meta: true): PageUndoIntent(),
   SingleActivator(LogicalKeyboardKey.keyZ, meta: true, shift: true):
       PageRedoIntent(),
@@ -116,10 +167,14 @@ Map<Type, Action<Intent>> workbenchPlaybackActions({
   required ValueChanged<int> onStepFrame,
   required VoidCallback onUndo,
   required VoidCallback onRedo,
+  required ValueChanged<int> onShuttle,
+  required ValueChanged<bool> onSeekEdge,
 }) =>
     <Type, Action<Intent>>{
       PageTogglePlayIntent: PageTogglePlayAction(onTogglePlay),
       PageStepFrameIntent: PageStepFrameAction(onStepFrame),
       PageUndoIntent: PageUndoAction(onUndo),
       PageRedoIntent: PageRedoAction(onRedo),
+      PageShuttleIntent: PageShuttleAction(onShuttle),
+      PageSeekEdgeIntent: PageSeekEdgeAction(onSeekEdge),
     };

@@ -100,6 +100,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           onStepFrame: _stepPlaybackFromShortcut,
           onUndo: editor.undo,
           onRedo: editor.redo,
+          onShuttle: _shuttle,
+          onSeekEdge: (toStart) => playback
+              .seekMs(toStart ? 0 : editor.durationMs),
         ),
         child: Column(
           children: [
@@ -147,6 +150,24 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
         ),
       ),
     );
+  }
+
+  /// JKL 走带：L 正向播放、K 停、J 反向。
+  ///
+  /// 真正的 JKL 是变速走带（连按 J/L 加速到 2×/4×），需要播放器暴露倍速
+  /// 控制；[PlaybackController] 目前没有这个能力，所以 J 退化为「暂停并
+  /// 逐帧倒退」——保证按下去有确定的、符合方向直觉的反馈，而不是无反应。
+  /// 变速走带已记入待办。
+  void _shuttle(int direction) {
+    final playback = widget.playback;
+    if (direction > 0) {
+      playback.play();
+      return;
+    }
+    playback.pause();
+    if (direction < 0) {
+      playback.stepFrames(-1, widget.editor.fps);
+    }
   }
 
   /// 「在游标处拆分」：播放头不落在所选单元/镜头范围内时 [SegmentationEditorController.
