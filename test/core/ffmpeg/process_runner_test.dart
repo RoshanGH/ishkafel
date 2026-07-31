@@ -1,10 +1,84 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ffmpeg/media_tools_locator.dart';
 import 'package:ishkafel/core/ffmpeg/process_runner.dart';
 
+/// 假子进程：不依赖真实二进制即可验证超时与收尾逻辑
+class _FakeProcess implements Process {
+  @override
+  final int pid = 4242;
+  final Completer<int> _exitCode = Completer<int>();
+  final String stdoutText;
+  final String stderrText;
+  int killCount = 0;
+
+  _FakeProcess({this.stdoutText = '', this.stderrText = ''});
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  Stream<List<int>> get stdout => Stream.value(utf8.encode(stdoutText));
+
+  @override
+  Stream<List<int>> get stderr => Stream.value(utf8.encode(stderrText));
+
+  @override
+  IOSink get stdin => throw UnimplementedError();
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killCount++;
+    if (!_exitCode.isCompleted) _exitCode.complete(-9);
+    return true;
+  }
+
+  void finish(int code) => _exitCode.complete(code);
+}
+
 void main() {
+  group('TimeoutProcessInvoker', () {
+    test('子进程正常结束时返回 exitCode 与 stdout/stderr', () async {
+      final process = _FakeProcess(stdoutText: '正常输出', stderrText: '警告');
+      final invoker = TimeoutProcessInvoker(
+        timeout: const Duration(seconds: 5),
+        starter: (_, _) async {
+          Future.microtask(() => process.finish(0));
+          return process;
+        },
+      );
+
+      final result = await invoker('ffmpeg', const ['-version']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, '正常输出');
+      expect(result.stderr, '警告');
+      expect(process.killCount, 0);
+    });
+
+    test('超时后杀掉子进程并抛出带中文说明的异常', () async {
+      final process = _FakeProcess();
+      final invoker = TimeoutProcessInvoker(
+        timeout: const Duration(milliseconds: 30),
+        starter: (_, _) async => process, // 永不结束
+      );
+
+      await expectLater(
+        invoker('ffmpeg', const ['-i', 'x.mp4']),
+        throwsA(isA<FfmpegException>().having((e) => e.message, 'message',
+            allOf(contains('超时'), contains('ffmpeg')))),
+      );
+      expect(process.killCount, 1, reason: '必须杀掉卡住的子进程，避免永久挂起');
+    });
+
+    test('默认超时时长为正且足够整片场景检测（不小于 5 分钟）', () {
+      expect(defaultProcessTimeout.inMinutes, greaterThanOrEqualTo(5));
+    });
+  });
+
   group('ResolvingProcessRunner', () {
     test('裸名 ffmpeg 先解析成绝对路径再启动子进程', () async {
       final invoked = <String>[];
