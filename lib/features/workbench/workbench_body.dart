@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
@@ -7,6 +9,7 @@ import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
+import 'segment_playback.dart';
 import 'timeline/timeline_geometry.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline/timeline_view.dart';
@@ -57,6 +60,32 @@ class WorkbenchBody extends StatefulWidget {
 }
 
 class _WorkbenchBodyState extends State<WorkbenchBody> {
+  /// 「只播这一段」（双击时间线上的单元/镜头）
+  late final SegmentPlayback _segment = SegmentPlayback(widget.playback);
+
+  /// 拖播放头之前是否正在播——松手后据此恢复，而不是一律停住
+  bool _resumeAfterScrub = false;
+
+  @override
+  void dispose() {
+    _segment.dispose();
+    super.dispose();
+  }
+
+  /// 拖动播放头期间必须暂停：画面还在自己往前走的话，用户根本对不准位置。
+  /// 同时作废「只播这一段」的约束——他已经自己接管定位了。
+  void _onScrubStart() {
+    _segment.cancel();
+    _resumeAfterScrub = widget.playback.isPlaying;
+    if (_resumeAfterScrub) unawaited(widget.playback.pause());
+  }
+
+  /// 松手后从新位置接着播（拖之前本来就停着的话就保持停着）
+  void _onScrubEnd() {
+    if (_resumeAfterScrub) unawaited(widget.playback.play());
+    _resumeAfterScrub = false;
+  }
+
   /// 转发页面级快捷键到 PlayerPanel 内部同一份播放状态（避免另起一份
   /// `_isPlaying` 导致图标显示不同步）
   final _playerPanelKey = GlobalKey<PlayerPanelState>();
@@ -239,8 +268,16 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   media: widget.media,
                   playhead: widget.playhead,
                   mediaStatus: widget.mediaStatus,
-                  onSeek: (ms) => playback.seekMs(ms),
+                  onSeek: (ms) {
+                    // 用户自己定位了，上一段的「播到这儿停」约束随即作废
+                    _segment.cancel();
+                    playback.seekMs(ms);
+                  },
                   onGeometryChanged: (g) => setState(() => _geometry = g),
+                  onScrubStart: _onScrubStart,
+                  onScrubEnd: _onScrubEnd,
+                  onPlaySegment: (start, end) =>
+                      unawaited(_segment.play(start, end)),
                   readOnly: widget.readOnly,
                 );
               },

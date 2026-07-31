@@ -54,6 +54,19 @@ class TimelineView extends StatefulWidget {
   final ValueChanged<int> onSeek;
   final ValueChanged<TimelineGeometry> onGeometryChanged;
 
+  /// 开始/结束拖动播放头。调用方据此暂停播放并在松手后恢复——
+  /// 拖动时画面若还在自己往前走，用户根本对不准位置。
+  final VoidCallback? onScrubStart;
+  final VoidCallback? onScrubEnd;
+
+  /// 双击某一块：从它的起点播到它的终点（含头不含尾，单位毫秒）。
+  /// 逐段试看是审片的主要动作，比「从这里一直播下去」有用得多。
+  final void Function(int startMs, int endMs)? onPlaySegment;
+
+  /// 判定双击窗口用的时钟。测试注入——`tester.pump(Duration)` 推进的是框架的
+  /// 假时钟，`DateTime.now()` 纹丝不动，不注入就没法验证「隔太久不算双击」。
+  final DateTime Function() clock;
+
   /// 只读回看模式（评审 Important 1）：true 时忽略会改数据的手势（边界
   /// 拖拽），但保留选中、滚动、缩放、点刻度 seek——回看仍要能浏览。
   /// 默认 false（编辑态，行为与此前一致）。
@@ -68,8 +81,12 @@ class TimelineView extends StatefulWidget {
     this.mediaStatus = TimelineMediaStatus.ready,
     required this.onSeek,
     required this.onGeometryChanged,
+    this.onScrubStart,
+    this.onScrubEnd,
+    this.onPlaySegment,
+    DateTime Function()? clock,
     this.readOnly = false,
-  });
+  }) : clock = clock ?? DateTime.now;
 
   @override
   State<TimelineView> createState() => _TimelineViewState();
@@ -78,14 +95,12 @@ class TimelineView extends StatefulWidget {
 class _TimelineViewState extends State<TimelineView> {
   List<ui.Image?>? _thumbImages;
   TimelineHit? _dragHit;
+
+  /// 本次拖拽是「拖播放头」而不是「拖时间线」
+  bool _scrubbing = false;
   double _viewportWidth = 0;
   DateTime? _lastTapTime;
   Offset? _lastTapPosition;
-
-  /// 单击镜头块后延迟到双击窗口超时才执行的"选中所在单元"任务；若窗口内
-  /// 来了第二击，则取消该任务、直接选中镜头层，避免选中态先跳单元再跳镜头
-  /// 的闪烁。
-  Timer? _pendingUnitSelectTimer;
 
   /// 缩略图解码请求的递增序号：连续两次 media 变更时，慢的那次解码结果到达
   /// 时已不是最新请求，需丢弃并 dispose，避免覆盖新结果（竞态）。
@@ -151,7 +166,6 @@ class _TimelineViewState extends State<TimelineView> {
   void dispose() {
     _textCache.clear();
     widget.playhead.removeListener(_followPlayhead);
-    _pendingUnitSelectTimer?.cancel();
     // 兜底：若卸载发生在拖拽会话进行中（Flutter 手势系统在卸载路径下不保证
     // onHorizontalDragEnd/onHorizontalDragCancel 一定会触发），必须显式结束
     // 会话，否则 controller._dragSessionSnapshot 永久非空，此后所有编辑都会
@@ -208,33 +222,36 @@ class _TimelineViewState extends State<TimelineView> {
   void _handleTapUp(TapUpDetails details) {
     final position = details.localPosition;
     final isDoubleTap = _isDoubleTap(position);
-    _lastTapTime = DateTime.now();
+    _lastTapTime = widget.clock();
     _lastTapPosition = position;
 
     final hit = TimelineHitTester.hitTest(
         position, widget.controller.units, widget.geometry);
+    final units = widget.controller.units;
     switch (hit) {
       case RulerHit(:final ms):
-        _cancelPendingUnitSelect();
         widget.onSeek(ms);
       case UnitBlockHit(:final unitIndex):
-        _cancelPendingUnitSelect();
+        // 单击点什么选什么，立即生效。原来单击镜头选的是「所在单元」，
+        // 而且要等 300ms 双击窗口超时才生效——点下去没反应，用户只会以为
+        // 没点上；想选单元点上面这一行就是了，那层粗粒度兜底是多余的。
         widget.controller.select(EditorSelection.unit(unitIndex));
+        if (isDoubleTap && unitIndex < units.length) {
+          final unit = units[unitIndex];
+          widget.onPlaySegment?.call(unit.startMs, unit.endMs);
+        }
       case ShotBlockHit(:final unitIndex, :final shotIndex):
-        if (isDoubleTap) {
-          // 双击：取消尚未触发的"选中单元"延迟任务，直接进入镜头层选中，
-          // 避免选中态先跳单元再跳镜头的闪烁
-          _cancelPendingUnitSelect();
-          widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
-        } else {
-          // 单击：不立即选中单元，先等一个双击窗口——如果双击窗口内没有
-          // 第二击，才真正选中所在单元（粗粒度）
-          _schedulePendingUnitSelect(unitIndex);
+        widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
+        if (isDoubleTap &&
+            unitIndex < units.length &&
+            shotIndex < units[unitIndex].shots.length) {
+          final shot = units[unitIndex].shots[shotIndex];
+          widget.onPlaySegment?.call(shot.startMs, shot.endMs);
         }
       case UnitBoundaryHit():
       case ShotBoundaryHit():
       case null:
-        _cancelPendingUnitSelect();
+        break;
     }
   }
 
@@ -244,28 +261,24 @@ class _TimelineViewState extends State<TimelineView> {
     final lastTime = _lastTapTime;
     final lastPosition = _lastTapPosition;
     if (lastTime == null || lastPosition == null) return false;
-    final withinTime = DateTime.now().difference(lastTime) <= kDoubleTapTimeout;
+    final withinTime = widget.clock().difference(lastTime) <= kDoubleTapTimeout;
     final withinSlop = (position - lastPosition).distance <= kDoubleTapSlop;
     return withinTime && withinSlop;
-  }
-
-  void _schedulePendingUnitSelect(int unitIndex) {
-    _cancelPendingUnitSelect();
-    _pendingUnitSelectTimer = Timer(kDoubleTapTimeout, () {
-      _pendingUnitSelectTimer = null;
-      widget.controller.select(EditorSelection.unit(unitIndex));
-    });
-  }
-
-  void _cancelPendingUnitSelect() {
-    _pendingUnitSelectTimer?.cancel();
-    _pendingUnitSelectTimer = null;
   }
 
   /// 命中边界手柄时开启拖拽会话（多次 update 合并为一条撤销记录）；
   /// [DragStartBehavior.down]（见 [build]）确保这里拿到的是指针刚按下时的
   /// 原始坐标，落在边界手柄 ±6px 的判定窗口内。
   void _handleDragStart(DragStartDetails details) {
+    // 拖播放头优先于一切：它只是定位、不改数据，因此只读回看下同样可用。
+    // 判定放在边界命中之前——刻度尺本来就不承载任何边界手柄，不会打架。
+    if (_isScrubStart(details.localPosition)) {
+      _scrubbing = true;
+      _dragHit = null;
+      widget.onScrubStart?.call();
+      _seekTo(details.localPosition.dx);
+      return;
+    }
     // 只读模式下不识别边界手柄命中（视为普通滚动手势），从而忽略会改数据
     // 的边界拖拽，同时仍保留滚动能力（见 _handleDragUpdate 的 else 分支）。
     final hit = widget.readOnly
@@ -278,7 +291,31 @@ class _TimelineViewState extends State<TimelineView> {
     }
   }
 
+  /// 播放头的抓取半径。比边界手柄（±6px）宽一些：红线是贯穿全高的醒目目标，
+  /// 用户会直接往上按，抓不住比抓错更让人恼火。
+  static const double _playheadGrabPx = 8;
+
+  /// 两处可以起拖播放头：刻度尺整条（专业剪辑软件的通行做法），
+  /// 以及红线本身左右各 [_playheadGrabPx]（用户看见什么就去拖什么）。
+  bool _isScrubStart(Offset position) {
+    if (position.dy >= TimelineTracks.rulerTop &&
+        position.dy < TimelineTracks.rulerBottom) {
+      return true;
+    }
+    final playheadX = widget.geometry.msToPx(widget.playhead.value);
+    return (position.dx - playheadX).abs() <= _playheadGrabPx;
+  }
+
+  /// 像素 → 毫秒（[TimelineGeometry.pxToMs] 已夹在 [0, durationMs]，
+  /// 拖出两端不会出现负数或超长）
+  void _seekTo(double dx) => widget.onSeek(widget.geometry.pxToMs(dx));
+
   void _handleDragUpdate(DragUpdateDetails details) {
+    if (_scrubbing) {
+      // 每次 update 都定位：只在松手时跳一次，等于让用户闭着眼睛拖
+      _seekTo(details.localPosition.dx);
+      return;
+    }
     final hit = _dragHit;
     if (hit is UnitBoundaryHit) {
       final ms = widget.geometry.pxToMs(details.localPosition.dx);
@@ -297,6 +334,11 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _endDrag() {
+    if (_scrubbing) {
+      _scrubbing = false;
+      // 少发一次 end，调用方那边的播放就永远恢复不回来
+      widget.onScrubEnd?.call();
+    }
     _dragHit = null;
     // 不在会话中时调用无副作用；在会话中则把本次拖拽合并为一条撤销记录
     widget.controller.endDragSession();
