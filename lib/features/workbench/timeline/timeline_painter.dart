@@ -28,7 +28,8 @@ class TimelinePainter extends CustomPainter {
   final List<SemanticUnit> units;
   final EditorSelection? selection;
   final TimelineGeometry geometry;
-  final List<ui.Image>? thumbImages;
+  /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
+  final List<ui.Image?>? thumbImages;
   final List<double>? waveEnvelope;
   final int playheadMs;
 
@@ -290,9 +291,18 @@ class TimelinePainter extends CustomPainter {
       final right = geometry.msToPx(segEndMs.round());
       if (right < 0 || left > size.width) continue;
 
-      final image = images[i];
       final dst = Rect.fromLTRB(
           left, TimelineTracks.thumbsTop, right, TimelineTracks.thumbsBottom);
+      final image = images[i];
+      if (image == null) {
+        // 这一格抽帧失败：画灰底而不是让后面的画面顶上来（顶上来等于整条
+        // 胶片条与时间轴错位，用户按画面定位切点会一直定错）
+        canvas.drawRect(
+          dst,
+          Paint()..color = AppColors.textTertiary.withValues(alpha: 0.12),
+        );
+        continue;
+      }
       canvas.drawImageRect(image, _coverSrcRect(image, dst), dst, imagePaint);
     }
     canvas.restore();

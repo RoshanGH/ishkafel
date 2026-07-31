@@ -62,8 +62,14 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   final _playerPanelKey = GlobalKey<PlayerPanelState>();
 
   TimelineGeometry? _geometry;
-  double _zoomLevel = 1.0;
   double _timelineViewportWidth = 0;
+
+  /// 缩放倍数一律从 geometry 反推，不维护独立字段——滚轮/触控板/跟随播放头
+  /// 都只更新 geometry，滑块若自己记历史值就会与实际缩放脱节，下一次拖动
+  /// 以错误基准算 factor，出现「往左拖想缩小、画面反而放大」。
+  double get _zoomLevel => _geometry?.zoomLevel(
+      viewportWidthPx: _timelineViewportWidth) ??
+      1.0;
 
   /// 页面级快捷键转发：与 PlayerPanel 内部按钮走同一份播放状态
   void _togglePlaybackFromShortcut() =>
@@ -75,9 +81,10 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   void _onZoomChanged(double value) {
     final geometry = _geometry;
     if (geometry == null || _timelineViewportWidth <= 0) return;
-    final factor = value / _zoomLevel;
+    final current = _zoomLevel;
+    if (current <= 0) return;
+    final factor = value / current;
     setState(() {
-      _zoomLevel = value;
       _geometry = geometry.zoomAt(_timelineViewportWidth / 2, factor,
           viewportWidthPx: _timelineViewportWidth);
     });
@@ -282,9 +289,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           Expanded(
             child: Slider(
               key: const Key('timeline-zoom-slider'),
-              value: _zoomLevel,
+              value: _zoomLevel.clamp(1.0, TimelineGeometry.maxZoom),
               min: 1,
-              max: 20,
+              max: TimelineGeometry.maxZoom,
               onChanged: _onZoomChanged,
             ),
           ),

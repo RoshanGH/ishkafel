@@ -180,7 +180,7 @@ void main() {
       expect(second.waveEnvelope, first.waveEnvelope);
     });
 
-    test('部分抽帧失败：跳过失败项，返回可用的部分 thumbPaths，不抛异常', () async {
+    test('部分抽帧失败：失败那格保留为空洞，其余各张仍停在自己的下标上', () async {
       final thumbs =
           fakeThumbnails(shouldFail: (outPath) => outPath.contains('_tl3_1.jpg'));
       final audio = fakeAudio();
@@ -196,8 +196,11 @@ void main() {
         waveBuckets: 8,
       );
 
+      // 这里原本断言的是「把失败项从列表里挤掉」——那正是缺陷本身：剩余
+      // 各张会被按新长度重新等分铺开，从失败点起每格显示的都是下一格的画面。
       expect(media.thumbPaths, [
         '${workDir.path}/t4_tl3_0.jpg',
+        null,
         '${workDir.path}/t4_tl3_2.jpg',
       ]);
     });

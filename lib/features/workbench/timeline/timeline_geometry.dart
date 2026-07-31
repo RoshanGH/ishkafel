@@ -30,11 +30,30 @@ class TimelineGeometry {
 
   /// 以锚点像素位置为中心缩放（zoomFactor>1 放大）
   /// scroll 同步补偿，并 clamp 到合法范围 [0, max(0, totalWidth - viewport)]
+  /// 最大放大倍数（相对 fit）。
+  ///
+  /// 不钳制时滚轮/捏合能一路放到几万倍，此时一帧横跨整个视口，任何操作都
+  /// 失去意义；缩小方向若能缩到 fit 以下，内容右侧会空出一大片，而波形轨
+  /// 用的 pxToMs 是带钳制的，那片空白会被画成一条等高实心带——看起来像
+  /// 「视频结束后还有声音」。
+  static const double maxZoom = 20;
+
+  /// 当前相对 fit 的缩放倍数。滑块必须从这里反推，而不是自己维护历史值：
+  /// 否则滚轮缩放后滑块仍停在旧值，下一次拖滑块会以错误基准算 factor，
+  /// 出现「往左拖想缩小、画面反而放大」。
+  double zoomLevel({required double viewportWidthPx}) {
+    if (viewportWidthPx <= 0 || msPerPx <= 0) return 1;
+    return (durationMs / viewportWidthPx) / msPerPx;
+  }
+
   TimelineGeometry zoomAt(double anchorPx, double zoomFactor, {required double viewportWidthPx}) {
     // 锚点对应的时间（毫秒）
     final anchorMs = pxToMs(anchorPx);
-    // 新的缩放系数
-    final newMsPerPx = msPerPx / zoomFactor;
+    // 新的缩放系数，钳制在 [fit, fit/maxZoom] 之间
+    final fitMsPerPx =
+        viewportWidthPx > 0 ? durationMs / viewportWidthPx : msPerPx;
+    final newMsPerPx =
+        (msPerPx / zoomFactor).clamp(fitMsPerPx / maxZoom, fitMsPerPx);
     // 计算新的 scrollPx 使得锚点时间在 anchorPx 处
     final newScrollPx = anchorMs / newMsPerPx - anchorPx;
     // 新的总宽度

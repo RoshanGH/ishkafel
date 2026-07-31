@@ -76,7 +76,7 @@ class TimelineView extends StatefulWidget {
 }
 
 class _TimelineViewState extends State<TimelineView> {
-  List<ui.Image>? _thumbImages;
+  List<ui.Image?>? _thumbImages;
   TimelineHit? _dragHit;
   double _viewportWidth = 0;
   DateTime? _lastTapTime;
@@ -153,10 +153,10 @@ class _TimelineViewState extends State<TimelineView> {
     super.dispose();
   }
 
-  void _disposeThumbImages(List<ui.Image>? images) {
+  void _disposeThumbImages(List<ui.Image?>? images) {
     if (images == null) return;
     for (final image in images) {
-      image.dispose();
+      image?.dispose();
     }
   }
 
@@ -166,18 +166,23 @@ class _TimelineViewState extends State<TimelineView> {
   /// 用递增的 [_decodeRequestId] 作为"取消令牌"：解码是异步 IO，若 media 连续
   /// 变更两次，先发出的慢请求可能比后发出的快请求更晚完成；写回前比对请求号，
   /// 不是最新请求就丢弃解码结果（并 dispose），不覆盖新结果。
+  /// 解码结果**按下标对齐**：某一张缺失或解码失败时保留 null 占位，绝不
+  /// 压缩列表——压缩会让剩余各张被按新长度重新等分铺开，整条胶片条与
+  /// 时间轴错位（见 [TimelineMedia.thumbPaths] 的说明）。
   Future<void> _decodeThumbs(TimelineMedia? media) async {
     final requestId = ++_decodeRequestId;
-    final paths = media?.thumbPaths ?? const <String>[];
-    final decoded = <ui.Image>[];
-    for (final path in paths) {
+    final paths = media?.thumbPaths ?? const <String?>[];
+    final decoded = List<ui.Image?>.filled(paths.length, null);
+    for (var i = 0; i < paths.length; i++) {
+      final path = paths[i];
+      if (path == null) continue;
       final file = File(path);
       if (!await file.exists()) continue;
       try {
         final bytes = await file.readAsBytes();
         final codec = await ui.instantiateImageCodec(bytes);
         final frame = await codec.getNextFrame();
-        decoded.add(frame.image);
+        decoded[i] = frame.image;
       } catch (e) {
         AppLog.warn('时间线缩略图解码失败：$path，$e');
       }

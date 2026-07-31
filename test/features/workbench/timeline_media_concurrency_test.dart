@@ -80,7 +80,13 @@ void main() {
     test('顺序与时间对应关系不能被并发打乱', () async {
       final thumbnails = ThumbnailService(run: (_, args) async {
         // 故意让靠后的任务先完成，放大乱序风险
-        final idx = int.parse(RegExp(r'_tl_(\d+)\.jpg').firstMatch(args.last)![1]!);
+        // 文件名形如 `<taskId>_tl<总张数>_<下标>.jpg`（总张数参与命名是为了
+        // 让张数变化时旧缓存失效）。这里必须跟着实现走，否则正则匹配不上就会
+        // 抛异常被上层 catch 吞掉，14 张全失败、断言循环执行 0 次——测试变成
+        // 空跑却依然是绿的。
+        final match = RegExp(r'_tl\d+_(\d+)\.jpg').firstMatch(args.last);
+        expect(match, isNotNull, reason: '抽帧输出文件名与测试预期不符：${args.last}');
+        final idx = int.parse(match![1]!);
         await Future<void>.delayed(Duration(milliseconds: (14 - idx) * 2));
         await File(args.last).writeAsBytes(List<int>.filled(600, 1));
         return ProcessResult(1, 0, '', '');
@@ -101,9 +107,52 @@ void main() {
         workDir: workDir,
       );
 
+      expect(media.thumbPaths, hasLength(14),
+          reason: '一张都不能少，否则下标与时间的对应关系就作废了');
       for (var i = 0; i < media.thumbPaths.length; i++) {
-        expect(media.thumbPaths[i], endsWith('_tl_$i.jpg'),
+        expect(media.thumbPaths[i], endsWith('_tl14_$i.jpg'),
             reason: '胶片条按时间顺序平铺，顺序错乱会让用户看到与时间对不上的画面');
+      }
+    });
+  });
+
+  group('抽帧失败时的空洞处理（压缩空洞会让整条胶片条与时间轴错位）', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('tl_hole_'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('中间某张失败时，其余各张仍停在自己的时间格上', () async {
+      final thumbnails = ThumbnailService(run: (_, args) async {
+        final idx = int.parse(
+            RegExp(r'_tl\d+_(\d+)\.jpg').firstMatch(args.last)![1]!);
+        // 第 2 张失败（真实成因：seek 点解码失败 / 子进程超时 / 磁盘写失败）
+        if (idx == 2) throw Exception('ffmpeg 抽帧失败');
+        await File(args.last).writeAsBytes(List<int>.filled(600, 1));
+        return ProcessResult(1, 0, '', '');
+      });
+      final audio = AudioExtractor(run: (_, args) async {
+        await File(args.last).writeAsBytes(List<int>.filled(64, 0));
+        return ProcessResult(1, 0, '', '');
+      });
+
+      final media = await TimelineMediaBuilder(
+        thumbnails: thumbnails,
+        audio: audio,
+      ).build(
+        videoPath: '/tmp/x.mp4',
+        taskId: 'hole',
+        durationMs: 40000,
+        thumbCount: 6,
+        workDir: dir,
+      );
+
+      expect(media.thumbPaths, hasLength(6),
+          reason: '把失败的那张从列表里挤掉，剩下 5 张会被按 5 等分重新铺开——'
+              '从第 2 格起每格显示的都是下一格的画面，且界面零提示');
+      expect(media.thumbPaths[2], isNull, reason: '失败的那格应为空洞');
+      for (final i in [0, 1, 3, 4, 5]) {
+        expect(media.thumbPaths[i], endsWith('_tl6_$i.jpg'),
+            reason: '其余各张必须仍停在自己的下标上');
       }
     });
   });

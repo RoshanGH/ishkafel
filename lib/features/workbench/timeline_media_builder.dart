@@ -8,11 +8,14 @@ import '../../core/log/app_log.dart';
 
 /// 时间线辅助素材：等间隔缩略帧序列 + 归一化波形包络
 class TimelineMedia {
-  final List<String> thumbPaths;
+  /// 抽帧路径，**下标即时间格**。失败的那一格保留为 null 而不是从列表里挤掉：
+  /// 挤掉之后剩余各张会被按新长度重新等分铺开，从失败点起每格显示的都是
+  /// 下一格的画面，用户按画面定位切点会一直定错，且界面零提示。
+  final List<String?> thumbPaths;
   final List<double> waveEnvelope;
 
   /// 用不可变列表包裹，避免调用方误改已构建好的产物
-  TimelineMedia({required List<String> thumbPaths, required List<double> waveEnvelope})
+  TimelineMedia({required List<String?> thumbPaths, required List<double> waveEnvelope})
       : thumbPaths = List.unmodifiable(thumbPaths),
         waveEnvelope = List.unmodifiable(waveEnvelope);
 }
@@ -103,12 +106,12 @@ class TimelineMediaBuilder {
       ),
     ]);
     return TimelineMedia(
-      thumbPaths: results[0] as List<String>,
+      thumbPaths: results[0] as List<String?>,
       waveEnvelope: results[1] as List<double>,
     );
   }
 
-  Future<List<String>> _buildThumbnails({
+  Future<List<String?>> _buildThumbnails({
     required String videoPath,
     required String taskId,
     required int durationMs,
@@ -146,7 +149,7 @@ class TimelineMediaBuilder {
 
     await Future.wait(
         List.generate(math.min(_thumbConcurrency, thumbCount), (_) => worker()));
-    return slots.whereType<String>().toList(growable: false);
+    return List.unmodifiable(slots);
   }
 
   Future<List<double>> _buildEnvelope({
