@@ -136,10 +136,24 @@ class MediaToolMissingException implements FfmpegException {
   String toString() => 'MediaToolMissingException: $message';
 }
 
-/// 工具缺失时给用户的中文引导（面向用户，不含技术堆栈）
-String missingToolMessage(String executable) =>
-    '未找到视频处理组件 $executable。请先在终端执行 brew install ffmpeg 完成安装，'
-    '然后重新启动本应用。';
+/// 工具缺失时给用户的中文引导（面向用户，不含技术堆栈）。
+///
+/// 必须按工具给出**这个工具自己**的安装办法：这套子进程封装同时被 ffmpeg/
+/// ffprobe 与 miaoa CLI 复用，一律写「请执行 brew install ffmpeg」的话，
+/// miaoa 缺失时用户照做也解决不了，只会以为软件坏了。
+String missingToolMessage(String executable) {
+  switch (executable) {
+    case 'ffmpeg':
+    case 'ffprobe':
+      return '未找到视频处理组件 $executable。请先在终端执行 brew install ffmpeg '
+          '完成安装，然后重新启动本应用。';
+    case 'miaoa':
+      return '未找到 miaoa 命令行工具。请先安装并执行 miaoa auth login 登录，'
+          '然后重新启动本应用。';
+    default:
+      return '未找到所需的命令行工具 $executable。请先完成安装，然后重新启动本应用。';
+  }
+}
 
 /// ffmpeg/ffprobe 执行失败
 class FfmpegException implements Exception {

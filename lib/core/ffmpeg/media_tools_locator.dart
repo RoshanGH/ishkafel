@@ -63,6 +63,13 @@ class MediaToolsLocator {
   String? resolve(String executableName) =>
       _cache.putIfAbsent(executableName, () => _resolveUncached(executableName));
 
+  /// 清掉「没找到」的缓存，让下一次解析重新探测。
+  ///
+  /// 缓存本身是必要的（否则每起一次子进程都做磁盘探测），但**未命中**的结果
+  /// 不能永久缓存：用户按横幅提示装好 ffmpeg 后，不清缓存就必须重启 app 才能
+  /// 恢复功能。已命中的结果保留——路径不会凭空变化，重探是白花开销。
+  void forgetMisses() => _cache.removeWhere((_, path) => path == null);
+
   String? _resolveUncached(String executableName) {
     for (final dir in searchDirs) {
       final candidate = '$dir/$executableName';

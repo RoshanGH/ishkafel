@@ -98,4 +98,46 @@ void main() {
       expect(status.missingTools, ['ffprobe']);
     });
   });
+
+  group('装好之后不必重启 app', () {
+    test('forgetMisses 后重新探测，能发现新装好的工具', () {
+      var installed = false;
+      final locator = MediaToolsLocator(
+        searchDirs: const ['/opt/homebrew/bin'],
+        probe: (path) => installed && path == '/opt/homebrew/bin/ffmpeg',
+        lookupOnPath: (_) => null,
+      );
+
+      expect(locator.resolve('ffmpeg'), isNull);
+
+      // 用户照着横幅的提示装好了
+      installed = true;
+      expect(locator.resolve('ffmpeg'), isNull,
+          reason: '前提：未命中结果是被缓存的，否则这条测试没有意义');
+
+      locator.forgetMisses();
+      expect(locator.resolve('ffmpeg'), '/opt/homebrew/bin/ffmpeg',
+          reason: '不清未命中缓存的话，用户装好后必须重启 app 才能恢复功能，'
+              '而横幅上并没有说要重启');
+    });
+
+    test('已命中的结果不被清掉（路径不会凭空变化，重探是白花开销）', () {
+      var probeCalls = 0;
+      final locator = MediaToolsLocator(
+        searchDirs: const ['/opt/homebrew/bin'],
+        probe: (path) {
+          probeCalls++;
+          return path == '/opt/homebrew/bin/ffmpeg';
+        },
+        lookupOnPath: (_) => null,
+      );
+
+      expect(locator.resolve('ffmpeg'), '/opt/homebrew/bin/ffmpeg');
+      final callsAfterFirst = probeCalls;
+
+      locator.forgetMisses();
+      expect(locator.resolve('ffmpeg'), '/opt/homebrew/bin/ffmpeg');
+      expect(probeCalls, callsAfterFirst);
+    });
+  });
 }
