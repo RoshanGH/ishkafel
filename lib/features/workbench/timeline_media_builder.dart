@@ -124,7 +124,9 @@ class TimelineMediaBuilder {
       while (true) {
         final i = next++;
         if (i >= thumbCount) return;
-        final outPath = '${workDir.path}/${taskId}_tl_$i.jpg';
+        // 文件名带上总张数：张数变化时旧缓存不再命中。否则把 14 张改成 32 张
+        // 后，前 14 个下标会沿用「14 张布局」算出的时间点，胶片条与时间对不上。
+        final outPath = '${workDir.path}/${taskId}_tl${thumbCount}_$i.jpg';
         if (await _isValidCacheFile(outPath, _minValidThumbBytes)) {
           slots[i] = outPath;
           continue;

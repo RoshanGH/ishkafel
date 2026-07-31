@@ -123,6 +123,54 @@ void main() {
     });
   });
 
+  group('抽帧缓存不能跨张数复用（时间点会对不上）', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('tl_cache_'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('张数变化后不复用旧缓存，重新按新时间点抽帧', () async {
+      final calls = <double>[];
+      ThumbnailService probe() => ThumbnailService(run: (_, args) async {
+            calls.add(double.parse(args[args.indexOf('-ss') + 1]));
+            await File(args.last).writeAsBytes(List<int>.filled(600, 1));
+            return ProcessResult(1, 0, '', '');
+          });
+      final audio = AudioExtractor(run: (_, args) async {
+        await File(args.last).writeAsBytes(List<int>.filled(64, 0));
+        return ProcessResult(1, 0, '', '');
+      });
+
+      // 先按 4 张抽一遍（模拟旧版本留下的缓存）
+      await TimelineMediaBuilder(thumbnails: probe(), audio: audio).build(
+        videoPath: '/tmp/x.mp4',
+        taskId: 'cache',
+        durationMs: 40000,
+        thumbCount: 4,
+        workDir: dir,
+      );
+
+      // 再按 8 张抽：若缓存按下标复用，前 4 张会沿用「4 张布局」的时间点，
+      // 胶片条就与时间对不上了
+      calls.clear();
+      final media = await TimelineMediaBuilder(thumbnails: probe(), audio: audio)
+          .build(
+        videoPath: '/tmp/x.mp4',
+        taskId: 'cache',
+        durationMs: 40000,
+        thumbCount: 8,
+        workDir: dir,
+      );
+
+      expect(media.thumbPaths, hasLength(8));
+      expect(calls, hasLength(8),
+          reason: '张数变了就必须整条重抽；复用旧下标的缓存会让前几张停留在'
+              '按旧张数算出的时间点上');
+      calls.sort();
+      expect(calls.first, closeTo(40000 * 0.5 / 8 / 1000, 0.001),
+          reason: '首张应落在「8 张布局」的第一格中点');
+    });
+  });
+
   group('包络采样密度随片长增长（固定桶数会让长素材的波形失去作用）', () {
     test('每秒约 100 个样本', () {
       expect(TimelineMediaBuilder.envelopeBucketsFor(96000), 9600);

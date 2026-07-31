@@ -107,9 +107,9 @@ void main() {
       );
 
       expect(media.thumbPaths, [
-        '${workDir.path}/t1_tl_0.jpg',
-        '${workDir.path}/t1_tl_1.jpg',
-        '${workDir.path}/t1_tl_2.jpg',
+        '${workDir.path}/t1_tl3_0.jpg',
+        '${workDir.path}/t1_tl3_1.jpg',
+        '${workDir.path}/t1_tl3_2.jpg',
       ]);
       // atSeconds = durationMs * (i+0.5) / thumbCount / 1000.0 → 1.5, 4.5, 7.5（等间隔 3s）
       // 抽帧是并发的，调用**顺序**不再固定；这里要守的是「取样时间点正确且
@@ -182,7 +182,7 @@ void main() {
 
     test('部分抽帧失败：跳过失败项，返回可用的部分 thumbPaths，不抛异常', () async {
       final thumbs =
-          fakeThumbnails(shouldFail: (outPath) => outPath.contains('_tl_1.jpg'));
+          fakeThumbnails(shouldFail: (outPath) => outPath.contains('_tl3_1.jpg'));
       final audio = fakeAudio();
       final builder =
           TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
@@ -197,8 +197,8 @@ void main() {
       );
 
       expect(media.thumbPaths, [
-        '${workDir.path}/t4_tl_0.jpg',
-        '${workDir.path}/t4_tl_2.jpg',
+        '${workDir.path}/t4_tl3_0.jpg',
+        '${workDir.path}/t4_tl3_2.jpg',
       ]);
     });
 
@@ -223,7 +223,7 @@ void main() {
 
     test('缩略图缓存文件为 0 字节（损坏）时应重新抽帧，不复用坏文件', () async {
       // 预置一个 0 字节的坏缓存文件（模拟上次运行中途失败留下的产物）
-      final badPath = '${workDir.path}/t6_tl_0.jpg';
+      final badPath = '${workDir.path}/t6_tl2_0.jpg';
       await File(badPath).writeAsBytes(const []);
 
       final thumbs = fakeThumbnails();
@@ -243,8 +243,8 @@ void main() {
       // 两张都应触发真实抽帧：坏缓存不能被当成命中
       expect(thumbs.calls.length, 2);
       expect(media.thumbPaths, [
-        '${workDir.path}/t6_tl_0.jpg',
-        '${workDir.path}/t6_tl_1.jpg',
+        '${workDir.path}/t6_tl2_0.jpg',
+        '${workDir.path}/t6_tl2_1.jpg',
       ]);
     });
 
