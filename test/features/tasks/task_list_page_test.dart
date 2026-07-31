@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ffmpeg/media_tools_locator.dart';
+import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
@@ -13,6 +15,8 @@ import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/environment_banner.dart';
 import 'package:ishkafel/features/tasks/source_availability.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
+import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
+import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
 
@@ -66,6 +70,10 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
         taskRepositoryProvider.overrideWithValue(repo),
         // 默认假定源文件都在：测试不该依赖真实文件系统
         fileExistsProbeProvider.overrideWithValue((_) async => true),
+        // 单测零真实依赖：绝不真的去调 miaoa CLI 或弹系统文件框
+        miaoaTagServiceProvider.overrideWithValue(MiaoaTagService(
+            run: (_, _) async => ProcessResult(1, 0, '[]', ''))),
+        videoFilePickerProvider.overrideWithValue(() async => null),
         ...overrides,
       ],
       child: const MaterialApp(home: TaskListPage()),
@@ -88,6 +96,17 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  testWidgets('点「新建任务」弹出新建任务向导（不再是裸文件选择框）', (tester) async {
+    await tester.pumpWidget(wrap(InMemoryTaskRepository()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('新建任务'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NewTaskWizard), findsOneWidget);
+    expect(find.text('新建翻新任务'), findsOneWidget);
   });
 
   group('重新加载不闪白（保存后整页 spinner）', () {
