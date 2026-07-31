@@ -16,6 +16,7 @@ import '../../core/models/renew_task.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
+import '../picking/picking_page.dart';
 import '../tasks/task_list_controller.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
@@ -254,7 +255,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
     _confirmed = true;
     if (!mounted) return;
-    Navigator.of(context).pop();
+    // 按钮上写的就是「进入替换选材」，那就真的把用户送进阶段②，而不是丢回
+    // 任务列表让他自己再点一次
+    _openPicking(widget.task.copyWith(
+        units: editor.units, status: RenewTaskStatus.picking));
+  }
+
+  /// 进入阶段②「替换选材」。任务对象取当前最新的一份（刚确认过切分时用刚
+  /// 落库的那份），避免阶段②拿到过期的 units。
+  void _openPicking(RenewTask task) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => PickingPage(task: task)),
+    );
   }
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
@@ -354,6 +366,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             summaryText: _summaryText(editor),
             confirmed: !_isEditable,
             onConfirm: _onConfirm,
+            // 已导出的任务不再回到选材（路由层同样不放行）
+            onEnterPicking: widget.task.status == RenewTaskStatus.picking
+                ? () => _openPicking(widget.task)
+                : null,
           ),
         ),
       ),

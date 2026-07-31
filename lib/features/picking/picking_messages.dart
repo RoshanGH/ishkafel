@@ -102,6 +102,34 @@ String? tagSearchDisabledReason({
   return null;
 }
 
+/// 候选面板上展示的「标签检索为什么不可用」完整说明；可用时返回 null。
+///
+/// 两种处境的下一步完全不同：任务层面没选标签组是新建时就定死的（只能换
+/// 检索方式），而单个镜头没打上标签是可以回切分阶段补的——所以后者复用
+/// [emptyResultGuidance] 那句更完整的引导。
+String? tagSearchUnavailableText({
+  required bool hasShotTagGroup,
+  required int queryTagCount,
+}) {
+  if (!hasShotTagGroup) {
+    return tagSearchDisabledReason(
+        hasShotTagGroup: false, queryTagCount: queryTagCount);
+  }
+  if (queryTagCount == 0) {
+    return emptyResultGuidance(
+        mode: CandidateSearchMode.tag, queryTagCount: 0);
+  }
+  return null;
+}
+
+/// 首帧搜图暂不可用的原因。
+///
+/// miaoa 的 `--like-image` 收的是**素材库里的 OSS key**，而原片这一帧只存在
+/// 于本地磁盘上；要用它检索必须先把帧上传到素材库，这条链路本期没有接通。
+/// 与其留一个点了没反应的按钮，不如把卡在哪一步说清楚。
+const String imageSearchUnavailableReason = '首帧搜图需要先把这一帧上传到素材库换取检索键，'
+    '该链路尚未接通。请先用「标签」或「画面描述」检索';
+
 /// 检索失败提示。
 ///
 /// [MiaoaContentService] 与子进程封装已经把 401/403/未安装/超时翻译成了可照做的

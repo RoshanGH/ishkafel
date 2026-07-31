@@ -12,6 +12,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/picking/picking_page.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/inspector_panel.dart';
 import 'package:ishkafel/features/workbench/player_panel.dart';
@@ -172,7 +173,7 @@ void main() {
     expect(find.text('确认切分，进入替换选材'), findsOneWidget);
   });
 
-  testWidgets('②点击确认：仓库任务 status=picking 且 units 为编辑后值，页面 pop', (tester) async {
+  testWidgets('②点击确认：仓库任务 status=picking 且 units 为编辑后值，页面进入阶段②', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
     await tester.tap(find.byKey(const Key('open-workbench')));
@@ -187,8 +188,10 @@ void main() {
     await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
     await tester.pumpAndSettle();
 
-    // 已 pop 回列表占位页
-    expect(find.text('列表页占位'), findsOneWidget);
+    // 按钮上写的是「确认切分，进入替换选材」，就必须真的进到阶段②，
+    // 而不是丢回任务列表让用户自己再点一次
+    expect(find.byType(PickingPage), findsOneWidget);
+    expect(find.text('列表页占位'), findsNothing);
 
     final saved = await repo.findById('wb-1');
     expect(saved!.status, RenewTaskStatus.picking);

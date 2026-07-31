@@ -112,6 +112,21 @@ void main() {
       expect(tagSearchDisabledReason(hasShotTagGroup: true, queryTagCount: 3),
           isNull);
     });
+
+    test('面板上展示的完整说明：没标签组说没标签组，没打标说没打标', () {
+      expect(
+          tagSearchUnavailableText(hasShotTagGroup: false, queryTagCount: 0),
+          contains('标签组'));
+      expect(tagSearchUnavailableText(hasShotTagGroup: true, queryTagCount: 0),
+          contains('还没有打上标签'));
+      expect(tagSearchUnavailableText(hasShotTagGroup: true, queryTagCount: 1),
+          isNull);
+    });
+
+    test('首帧搜图未接通：说清卡在哪一步，不留一个点不动又不解释的按钮', () {
+      expect(imageSearchUnavailableReason, contains('上传'));
+      expect(imageSearchUnavailableReason, contains('尚未'));
+    });
   });
 
   group('检索失败提示：服务层已经给了中文，不许再包一层前缀', () {
