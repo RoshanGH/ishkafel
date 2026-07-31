@@ -189,6 +189,143 @@ void main() {
       });
     });
 
+    group('窄块体的边界手柄不得互相遮挡（Critical 4）', () {
+      // fit 缩放下 96 秒片长里 1.2 秒的镜头只有约 1.2px 宽，很常见。固定 ±6px
+      // 容差会让相邻两条边界的容差区把整个块体盖住：块体本身永远命中不到，
+      // 用户既选不中这个镜头、也无从调它的右边界，只能靠放大缩放绕开。
+      const shotY = 85.0;
+      const unitY = 46.0;
+      const msPerPx = 100.0;
+
+      /// 三个等宽块体（每个 [widthPx] 像素）的几何 + ms 跨度
+      (TimelineGeometry, int) tripleOf(double widthPx) => (
+            const TimelineGeometry(
+                durationMs: 100000, msPerPx: msPerPx, scrollPx: 0),
+            (widthPx * msPerPx).round(),
+          );
+
+      for (final widthPx in [4.0, 8.0, 12.0, 40.0]) {
+        test('镜头轨块宽 ${widthPx}px：左边界 / 块体 / 右边界都能命中', () {
+          final (geo, span) = tripleOf(widthPx);
+          final units = [
+            SemanticUnit(
+              index: 0,
+              startMs: 0,
+              endMs: span * 3,
+              transcript: 'u0',
+              shots: [
+                Shot(startMs: 0, endMs: span),
+                Shot(startMs: span, endMs: span * 2),
+                Shot(startMs: span * 2, endMs: span * 3),
+              ],
+            ),
+          ];
+
+          // 块心必须命中块体本身（否则该镜头在时间线上根本选不中）
+          final centerHit =
+              TimelineHitTester.hitTest(Offset(widthPx * 1.5, shotY), units, geo);
+          expect(centerHit, const ShotBlockHit(unitIndex: 0, shotIndex: 1),
+              reason: '块宽 $widthPx 的镜头块心应命中块体');
+
+          // 左边界
+          final leftHit =
+              TimelineHitTester.hitTest(Offset(widthPx, shotY), units, geo);
+          expect(leftHit, const ShotBoundaryHit(unitIndex: 0, leftShotIndex: 0));
+
+          // 右边界
+          final rightHit =
+              TimelineHitTester.hitTest(Offset(widthPx * 2, shotY), units, geo);
+          expect(rightHit, const ShotBoundaryHit(unitIndex: 0, leftShotIndex: 1));
+        });
+
+        test('单元轨块宽 ${widthPx}px：左边界 / 块体 / 右边界都能命中', () {
+          final (geo, span) = tripleOf(widthPx);
+          final units = [
+            for (var i = 0; i < 3; i++)
+              SemanticUnit(
+                index: i,
+                startMs: span * i,
+                endMs: span * (i + 1),
+                transcript: 'u$i',
+                shots: [Shot(startMs: span * i, endMs: span * (i + 1))],
+              ),
+          ];
+
+          expect(
+              TimelineHitTester.hitTest(Offset(widthPx * 1.5, unitY), units, geo),
+              const UnitBlockHit(unitIndex: 1),
+              reason: '块宽 $widthPx 的单元块心应命中块体');
+          expect(TimelineHitTester.hitTest(Offset(widthPx, unitY), units, geo),
+              const UnitBoundaryHit(leftUnitIndex: 0));
+          expect(
+              TimelineHitTester.hitTest(Offset(widthPx * 2, unitY), units, geo),
+              const UnitBoundaryHit(leftUnitIndex: 1));
+        });
+      }
+
+      test('容差取「±6px」与「较窄一侧块宽的三分之一」中的较小者', () {
+        expect(TimelineHitTester.boundaryToleranceFor(40, 40), 6.0);
+        expect(TimelineHitTester.boundaryToleranceFor(12, 12), closeTo(4.0, 1e-9));
+        expect(TimelineHitTester.boundaryToleranceFor(40, 9), closeTo(3.0, 1e-9),
+            reason: '取较窄的一侧');
+        expect(TimelineHitTester.boundaryToleranceFor(9, 40), closeTo(3.0, 1e-9));
+      });
+
+      test('块体窄到容差不足 1px 时放弃边界命中，优先保证块体可选中', () {
+        expect(TimelineHitTester.boundaryToleranceFor(2, 40), 0.0);
+
+        final geo = const TimelineGeometry(
+            durationMs: 100000, msPerPx: 100.0, scrollPx: 0);
+        // 中间镜头只有 2px 宽（200ms）
+        final units = [
+          const SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 4200,
+            transcript: 'u0',
+            shots: [
+              Shot(startMs: 0, endMs: 2000),
+              Shot(startMs: 2000, endMs: 2200),
+              Shot(startMs: 2200, endMs: 4200),
+            ],
+          ),
+        ];
+        // 该镜头占 [20,22]px，两端边界都不再抢命中，块体整段可选中
+        for (final x in [20.0, 21.0, 21.9]) {
+          expect(TimelineHitTester.hitTest(Offset(x, shotY), units, geo),
+              const ShotBlockHit(unitIndex: 0, shotIndex: 1),
+              reason: 'x=$x');
+        }
+      });
+
+      test('单元交界处的边界仍归单元层（容差自适应后不改变这一优先级）', () {
+        final geo = const TimelineGeometry(
+            durationMs: 100000, msPerPx: 100.0, scrollPx: 0);
+        // 两个单元各一个 12px 宽的镜头，交界在 x=12
+        final units = [
+          const SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1200,
+            transcript: 'u0',
+            shots: [Shot(startMs: 0, endMs: 1200)],
+          ),
+          const SemanticUnit(
+            index: 1,
+            startMs: 1200,
+            endMs: 2400,
+            transcript: 'u1',
+            shots: [Shot(startMs: 1200, endMs: 2400)],
+          ),
+        ];
+        expect(TimelineHitTester.hitTest(const Offset(12, shotY), units, geo),
+            const UnitBoundaryHit(leftUnitIndex: 0));
+        // 块心仍可选中镜头
+        expect(TimelineHitTester.hitTest(const Offset(6, shotY), units, geo),
+            const ShotBlockHit(unitIndex: 0, shotIndex: 0));
+      });
+    });
+
     group('edge cases', () {
       test('empty units list on unit track → null', () {
         final hit = TimelineHitTester.hitTest(const Offset(10, 46), [], geometry);

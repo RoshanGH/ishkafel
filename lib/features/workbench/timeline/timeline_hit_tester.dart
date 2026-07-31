@@ -131,8 +131,30 @@ abstract final class TimelineTracks {
 
 /// 时间线命中判定器（纯函数，静态方法）
 class TimelineHitTester {
-  /// 边界容差（像素）：±6px 范围内视为边界命中
+  /// 边界容差上限（像素）：宽块体上 ±6px 范围内视为边界命中
   static const boundaryTolerancePx = 6.0;
+
+  /// 块体窄于该宽度时（三分之一容差已不足 1px）彻底放弃其两侧的边界命中
+  static const minBlockWidthForBoundaryPx = 3.0;
+
+  /// 相邻两块之间那条边界的命中容差：取 [boundaryTolerancePx] 与"较窄一侧
+  /// 块宽的三分之一"中的较小者。
+  ///
+  /// 固定 ±6px 会让窄块体（fit 缩放下 96 秒片长里 1.2 秒的镜头只有约 1.2px
+  /// 宽，很常见）两侧的容差区把整个块体盖住：块体分支永远进不去，该镜头
+  /// 在时间线上既选不中、也调不了右边界，用户只能靠放大缩放绕开。容差不
+  /// 超过块宽三分之一后，任意宽度下块体的"中间三分之一"必定留给块体本身，
+  /// 「左边界 / 块体 / 右边界」三个区域都可命中。
+  ///
+  /// 窄到连三分之一都不足 1px 时返回 0（放弃边界命中）：此时边界手柄本就
+  /// 无法用鼠标可靠命中，优先保证块体可选中——用户至少能选中它，再用检查器
+  /// 的 ±1 帧步进按钮精确调整边界。
+  static double boundaryToleranceFor(double leftWidthPx, double rightWidthPx) {
+    final narrower = leftWidthPx < rightWidthPx ? leftWidthPx : rightWidthPx;
+    if (narrower < minBlockWidthForBoundaryPx) return 0;
+    final third = narrower / 3;
+    return third < boundaryTolerancePx ? third : boundaryTolerancePx;
+  }
 
   /// 命中测试
   ///
@@ -171,7 +193,7 @@ class TimelineHitTester {
   }
 
   /// 单元轨命中判定
-  /// 边界优先：检查是否靠近单元边界（±6px）
+  /// 边界优先：检查是否靠近单元边界（容差随相邻两块宽度自适应）
   /// 否则检查块体
   static TimelineHit? _hitTestUnitTrack(
     double x,
@@ -182,14 +204,14 @@ class TimelineHitTester {
 
     // 遍历单元边界，检查是否靠近边界（优先级高）
     for (int i = 0; i < units.length - 1; i++) {
-      final currentUnit = units[i];
+      // 边界应该相邻（units[i].endMs == units[i+1].startMs）
+      final boundaryPx = geometry.msToPx(units[i].endMs);
+      final tolerance = boundaryToleranceFor(
+        _widthPx(units[i].startMs, units[i].endMs, geometry),
+        _widthPx(units[i + 1].startMs, units[i + 1].endMs, geometry),
+      );
 
-      // 边界应该相邻（currentUnit.endMs == nextUnit.startMs）
-      final boundaryMs = currentUnit.endMs;
-      final boundaryPx = geometry.msToPx(boundaryMs);
-
-      // 检查 x 是否在边界的容差范围内
-      if ((x - boundaryPx).abs() <= boundaryTolerancePx) {
+      if (tolerance > 0 && (x - boundaryPx).abs() <= tolerance) {
         return UnitBoundaryHit(leftUnitIndex: i);
       }
     }
@@ -208,59 +230,78 @@ class TimelineHitTester {
   }
 
   /// 镜头轨命中判定
-  /// 特殊逻辑：如果命中的边界恰好是单元边界，返回 UnitBoundaryHit（优先级更高）
-  /// 否则检查镜头边界、镜头块体
+  ///
+  /// 镜头轨上的块体就是镜头，因此先把所有单元的镜头拉平成一条块体序列，再对
+  /// 每条相邻块体之间的边界按两侧块宽算容差。命中的边界若同时是单元交界，
+  /// 返回 [UnitBoundaryHit]（单元边界属单元层，优先级更高）。
+  ///
+  /// 拉平后各边界的容差区互不重叠（每条边界最多吃掉相邻块体的三分之一，而
+  /// 一个块体的左右两条边界分别只吃头尾三分之一），所以"取第一个命中"不再
+  /// 存在歧义——此前固定 ±6px 时，窄块体上前一条边界的容差区会盖住后一条，
+  /// 造成命中被前面的边界抢走。
   static TimelineHit? _hitTestShotTrack(
     double x,
     List<SemanticUnit> units,
     TimelineGeometry geometry,
   ) {
     if (units.isEmpty) return null;
+    final blocks = _flattenShots(units, geometry);
 
-    // 首先检查是否靠近单元边界（优先级最高）
-    for (int i = 0; i < units.length - 1; i++) {
-      final currentUnit = units[i];
+    // 边界优先
+    for (int i = 0; i < blocks.length - 1; i++) {
+      final left = blocks[i];
+      final right = blocks[i + 1];
+      final tolerance = boundaryToleranceFor(
+        left.endPx - left.startPx,
+        right.endPx - right.startPx,
+      );
 
-      final boundaryMs = currentUnit.endMs;
-      final boundaryPx = geometry.msToPx(boundaryMs);
+      if (tolerance <= 0 || (x - left.endPx).abs() > tolerance) continue;
 
-      if ((x - boundaryPx).abs() <= boundaryTolerancePx) {
-        return UnitBoundaryHit(leftUnitIndex: i);
-      }
+      return left.endsUnit
+          ? UnitBoundaryHit(leftUnitIndex: left.unitIndex)
+          : ShotBoundaryHit(
+              unitIndex: left.unitIndex, leftShotIndex: left.shotIndex);
     }
 
-    // 检查镜头边界（优先级次高）
-    for (int unitIdx = 0; unitIdx < units.length; unitIdx++) {
-      final unit = units[unitIdx];
-
-      // 遍历该单元内的镜头边界
-      for (int shotIdx = 0; shotIdx < unit.shots.length - 1; shotIdx++) {
-        final currentShot = unit.shots[shotIdx];
-
-        final boundaryMs = currentShot.endMs;
-        final boundaryPx = geometry.msToPx(boundaryMs);
-
-        if ((x - boundaryPx).abs() <= boundaryTolerancePx) {
-          return ShotBoundaryHit(unitIndex: unitIdx, leftShotIndex: shotIdx);
-        }
-      }
-    }
-
-    // 检查镜头块体
-    for (int unitIdx = 0; unitIdx < units.length; unitIdx++) {
-      final unit = units[unitIdx];
-
-      for (int shotIdx = 0; shotIdx < unit.shots.length; shotIdx++) {
-        final shot = unit.shots[shotIdx];
-        final startPx = geometry.msToPx(shot.startMs);
-        final endPx = geometry.msToPx(shot.endMs);
-
-        if (x >= startPx && x < endPx) {
-          return ShotBlockHit(unitIndex: unitIdx, shotIndex: shotIdx);
-        }
+    // 边界未命中，检查块体
+    for (final block in blocks) {
+      if (x >= block.startPx && x < block.endPx) {
+        return ShotBlockHit(
+            unitIndex: block.unitIndex, shotIndex: block.shotIndex);
       }
     }
 
     return null;
   }
+
+  /// 把所有单元内的镜头按时间顺序拉平成镜头轨上的块体序列。
+  /// [endsUnit] 标记该块体的右边界同时是单元边界。
+  static List<_ShotBlock> _flattenShots(
+    List<SemanticUnit> units,
+    TimelineGeometry geometry,
+  ) =>
+      [
+        for (int u = 0; u < units.length; u++)
+          for (int s = 0; s < units[u].shots.length; s++)
+            (
+              unitIndex: u,
+              shotIndex: s,
+              startPx: geometry.msToPx(units[u].shots[s].startMs),
+              endPx: geometry.msToPx(units[u].shots[s].endMs),
+              endsUnit: s == units[u].shots.length - 1,
+            ),
+      ];
+
+  static double _widthPx(int startMs, int endMs, TimelineGeometry geometry) =>
+      geometry.msToPx(endMs) - geometry.msToPx(startMs);
 }
+
+/// 镜头轨上的一个块体（拉平后的镜头 + 其像素范围）
+typedef _ShotBlock = ({
+  int unitIndex,
+  int shotIndex,
+  double startPx,
+  double endPx,
+  bool endsUnit,
+});
