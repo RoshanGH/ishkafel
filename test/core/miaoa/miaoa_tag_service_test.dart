@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 
 /// Step 0 实测样例（截断自真实 CLI 输出，字段与顺序保持一致）：
@@ -106,6 +108,97 @@ void main() {
         () => service.listTags(1281),
         throwsA(isA<MiaoaException>()),
       );
+    });
+  });
+
+  group('CLI 输出不可信：字段缺失/类型不符都给人话中文错误', () {
+    late List<String> logs;
+
+    setUp(() {
+      logs = [];
+      final previous = AppLog.sink;
+      AppLog.sink = logs.add;
+      addTearDown(() => AppLog.sink = previous);
+    });
+
+    MiaoaTagService serviceReturning(Object? stdout) => MiaoaTagService(
+        run: (_, _) async => ProcessResult(1, 0, stdout, ''));
+
+    test('stdout 是字节流（stdoutEncoding: null 时的真实类型）也能解析', () async {
+      final service = serviceReturning(utf8.encode(groupListJson));
+      final groups = await service.listGroups();
+      expect(groups.length, 2);
+      expect(groups.first.name, '素材形态');
+    });
+
+    test('stdout 既不是字符串也不是字节流 → MiaoaException 而不是 TypeError', () async {
+      await expectLater(
+        serviceReturning(42).listGroups(),
+        throwsA(isA<MiaoaException>()
+            .having((e) => e.message, 'message', contains('输出'))),
+      );
+    });
+
+    test('顶层不是数组 → MiaoaException', () async {
+      await expectLater(
+        serviceReturning('{"items":[]}').listGroups(),
+        throwsA(isA<MiaoaException>()
+            .having((e) => e.message, 'message', contains('数组'))),
+      );
+    });
+
+    test('个别条目非法（非对象/缺字段/类型错）时跳过，合法条目照常返回', () async {
+      const json = '''
+[
+  "not-an-object",
+  {"groupName":"缺 id","materialType":"IMAGE","tagType":"AI"},
+  {"id":"396","groupName":"id 类型错","materialType":"IMAGE","tagType":"AI"},
+  {"id":365,"groupName":"合法组","materialType":"VIDEO","tagType":"TENANT"}
+]
+''';
+      final groups = await serviceReturning(json).listGroups();
+      expect(groups.length, 1);
+      expect(groups.single.id, 365);
+      expect(groups.single.name, '合法组');
+      expect(logs.join(), contains('3'));
+    });
+
+    test('全部条目非法 → MiaoaException 而不是静默返回空', () async {
+      await expectLater(
+        serviceReturning('[{"groupName":"缺 id"},"x"]').listGroups(),
+        throwsA(isA<MiaoaException>()
+            .having((e) => e.message, 'message', contains('全部'))),
+      );
+    });
+
+    test('空数组是合法结果，返回空列表', () async {
+      expect(await serviceReturning('[]').listGroups(), isEmpty);
+      expect(await serviceReturning('[]').listTags(1), isEmpty);
+    });
+
+    test('listTags 同样跳过非法条目', () async {
+      const json = '''
+[
+  {"id":18519,"tagName":"产品杀菌率展示"},
+  {"id":18528},
+  {"tagName":"缺 id"}
+]
+''';
+      final tags = await serviceReturning(json).listTags(1281);
+      expect(tags.length, 1);
+      expect(tags.single.name, '产品杀菌率展示');
+    });
+
+    test('返回的列表不可变，不把可变集合暴露给外部', () async {
+      final groups = await serviceReturning(groupListJson).listGroups();
+      expect(
+        () => groups.add(const TagGroup(
+            id: 1, name: 'x', materialType: 'IMAGE', tagType: 'AI')),
+        throwsUnsupportedError,
+      );
+      final tags = await serviceReturning(tagListJson).listTags(1);
+      expect(() => tags.add(const TagInfo(id: 1, name: 'x')),
+          throwsUnsupportedError);
     });
   });
 }

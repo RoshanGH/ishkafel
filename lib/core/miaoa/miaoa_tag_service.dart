@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import '../ffmpeg/process_runner.dart';
+import '../log/app_log.dart';
 
 /// miaoa CLI 调用失败（非零退出码或返回内容非法）
 class MiaoaException implements Exception {
@@ -24,12 +25,25 @@ class TagGroup {
     required this.tagType,
   });
 
-  factory TagGroup.fromJson(Map<String, dynamic> json) => TagGroup(
-        id: json['id'] as int,
-        name: json['groupName'] as String,
-        materialType: json['materialType'] as String,
-        tagType: json['tagType'] as String,
-      );
+  /// 宽松解析：任一字段缺失或类型不符都返回 null，由调用方跳过并汇总。
+  ///
+  /// 四个字段一律从严——materialType 决定标签组用在图片还是视频上，
+  /// 缺省成空串会导致后续按类型筛选悄悄筛错，宁可这条不要。
+  static TagGroup? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['id'];
+    final name = raw['groupName'];
+    final materialType = raw['materialType'];
+    final tagType = raw['tagType'];
+    if (id is! int || name is! String) return null;
+    if (materialType is! String || tagType is! String) return null;
+    return TagGroup(
+      id: id,
+      name: name,
+      materialType: materialType,
+      tagType: tagType,
+    );
+  }
 }
 
 /// 标签（对应 miaoa tag list 输出）
@@ -39,10 +53,14 @@ class TagInfo {
 
   const TagInfo({required this.id, required this.name});
 
-  factory TagInfo.fromJson(Map<String, dynamic> json) => TagInfo(
-        id: json['id'] as int,
-        name: json['tagName'] as String,
-      );
+  /// 宽松解析：字段缺失或类型不符返回 null，由调用方跳过并汇总
+  static TagInfo? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['id'];
+    final name = raw['tagName'];
+    if (id is! int || name is! String) return null;
+    return TagInfo(id: id, name: name);
+  }
 }
 
 /// miaoa 标签体系拉取（标签组、标签，均为只读子进程调用）
@@ -52,32 +70,74 @@ class MiaoaTagService {
 
   MiaoaTagService({this.run = systemProcessRunner, this.binary = 'miaoa'});
 
+  static const _groupAction = 'tag group list';
+  static const _tagAction = 'tag list';
+
   Future<List<TagGroup>> listGroups() async {
     final result = await run(
         binary, ['tag', 'group', 'list', '--scope', 'tenant', '--json']);
-    final list = _decodeList(result, 'tag group list');
-    return list
-        .map((e) => TagGroup.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final raw = _decodeList(result, _groupAction);
+    return _parseEntries(raw, TagGroup.tryFromJson, _groupAction);
   }
 
   Future<List<TagInfo>> listTags(int groupId) async {
-    final result = await run(
-        binary, ['tag', 'list', '--group', '$groupId', '--json']);
-    final list = _decodeList(result, 'tag list');
-    return list
-        .map((e) => TagInfo.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final result =
+        await run(binary, ['tag', 'list', '--group', '$groupId', '--json']);
+    final raw = _decodeList(result, _tagAction);
+    return _parseEntries(raw, TagInfo.tryFromJson, _tagAction);
   }
 
-  List<dynamic> _decodeList(ProcessResult result, String action) {
-    if (result.exitCode != 0) {
-      throw MiaoaException('miaoa $action 失败（exit=${result.exitCode}）：${result.stderr}');
+  /// 逐条宽松解析：非法条目跳过并汇总；全部非法则报错，不静默返回空列表
+  static List<T> _parseEntries<T>(
+      List<Object?> raw, T? Function(Object?) parse, String action) {
+    final items = <T>[];
+    var skipped = 0;
+    for (final entry in raw) {
+      final item = parse(entry);
+      if (item == null) {
+        skipped++;
+        continue;
+      }
+      items.add(item);
     }
-    try {
-      return jsonDecode(result.stdout as String) as List<dynamic>;
-    } on FormatException catch (e) {
-      throw MiaoaException('miaoa $action 返回非法 JSON：$e');
+    if (skipped > 0) {
+      AppLog.warn('miaoa $action 返回的 $skipped 条记录字段缺失或类型不符，已跳过');
     }
+    if (items.isEmpty && skipped > 0) {
+      throw MiaoaException('miaoa $action 返回的 $skipped 条记录全部格式异常，无法解析标签');
+    }
+    return List.unmodifiable(items);
   }
+
+  /// CLI 输出是不可信输入：类型、JSON 合法性、顶层结构逐级校验，
+  /// 一律转成中文 [MiaoaException]，不让 TypeError 原文穿透到用户面前
+  List<Object?> _decodeList(ProcessResult result, String action) {
+    if (result.exitCode != 0) {
+      throw MiaoaException(
+          'miaoa $action 失败（exit=${result.exitCode}）：${_asText(result.stderr)}');
+    }
+    final stdout = _stdoutText(result.stdout, action);
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(stdout);
+    } on FormatException catch (e) {
+      throw MiaoaException('miaoa $action 返回非法 JSON：${e.message}');
+    }
+    if (decoded is! List) {
+      throw MiaoaException('miaoa $action 返回的不是数组，无法解析标签列表');
+    }
+    return decoded;
+  }
+
+  /// [ProcessResult.stdout] 的静态类型是 dynamic：默认执行器给 String，
+  /// 而 `stdoutEncoding: null` 的执行器给的是 `List<int>`——两种都要认
+  static String _stdoutText(Object? stdout, String action) {
+    if (stdout is String) return stdout;
+    if (stdout is List<int>) return utf8.decode(stdout, allowMalformed: true);
+    throw MiaoaException('miaoa $action 输出类型异常，无法解析');
+  }
+
+  /// stderr 同样可能是字节流，拼进错误消息前先解码，避免显示成一串数字
+  static String _asText(Object? raw) =>
+      raw is List<int> ? utf8.decode(raw, allowMalformed: true) : '$raw';
 }
