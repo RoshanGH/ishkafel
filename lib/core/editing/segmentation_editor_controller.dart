@@ -64,9 +64,18 @@ class SegmentationEditorController extends ChangeNotifier {
     required this.fps,
     required this.sentences,
   })  : _initialUnits = initialUnits,
-        _units = initialUnits;
+        _units = initialUnits,
+        _unitsView = List.unmodifiable(initialUnits);
 
-  List<SemanticUnit> get units => _units;
+  /// 当前切分结构（**只读视图**）。
+  ///
+  /// 直接把内部列表交出去时，外部一次 `units.removeAt(0)` 就能绕过 undo 栈
+  /// 与不变量校验把切分结构改坏，而且没有任何提示。视图做缓存而不是每次
+  /// `List.unmodifiable`：这个 getter 在绘制与列表构建路径上被高频调用，
+  /// 每次分配一个包装对象是无谓开销。
+  List<SemanticUnit> get units => _unitsView;
+
+  List<SemanticUnit> _unitsView = const [];
   EditorSelection? get selection => _selection;
   bool get canUndo => _undoStack.isNotEmpty;
   bool get canRedo => _redoStack.isNotEmpty;
@@ -154,6 +163,7 @@ class SegmentationEditorController extends ChangeNotifier {
       _redoStack.clear();
     }
     _units = result;
+    _unitsView = List.unmodifiable(result);
     _selection =
         remapSelection != null ? remapSelection() : _clampSelection(_selection);
     notifyListeners();
@@ -255,6 +265,7 @@ class SegmentationEditorController extends ChangeNotifier {
     final previous = _undoStack.removeLast();
     _redoStack.add(_units);
     _units = previous;
+    _unitsView = List.unmodifiable(previous);
     // 撤销可能让 units 数量发生变化（如撤销一次拆分会变少），
     // 需要重新校验 selection 是否仍落在有效范围内
     _selection = _clampSelection(_selection);
@@ -266,6 +277,7 @@ class SegmentationEditorController extends ChangeNotifier {
     final next = _redoStack.removeLast();
     _undoStack.add(_units);
     _units = next;
+    _unitsView = List.unmodifiable(next);
     _selection = _clampSelection(_selection);
     notifyListeners();
   }
