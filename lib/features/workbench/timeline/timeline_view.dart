@@ -294,6 +294,8 @@ class _TimelineViewState extends State<TimelineView> {
         _viewportWidth = constraints.maxWidth;
         return Listener(
           onPointerSignal: _handlePointerSignal,
+          onPointerPanZoomStart: (_) => _panZoomScale = 1.0,
+          onPointerPanZoomUpdate: _handlePanZoomUpdate,
           child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // 让 onHorizontalDragStart 报告指针刚按下时的原始坐标（而非默认的
@@ -339,6 +341,26 @@ class _TimelineViewState extends State<TimelineView> {
   ///
   /// 纵向滚动也映射为平移：时间线本身没有纵向可滚内容，不映射就是一个
   /// 落空的手势；而触控板上纯粹的水平滑动很难做到，用户实际会带纵向分量。
+  /// 触控板双指捏合时上一次的累计缩放比例（用来算增量倍数）
+  double _panZoomScale = 1.0;
+
+  /// 触控板捏合缩放。
+  ///
+  /// 只处理 scale 分量：pan 分量已经由既有的水平拖拽手势消费（Flutter 会把
+  /// 触控板的平移转成 drag），在这里再处理一次会让平移量翻倍。
+  void _handlePanZoomUpdate(PointerPanZoomUpdateEvent event) {
+    if (_viewportWidth <= 0) return;
+    final scale = event.scale;
+    if (scale <= 0) return;
+    final factor = scale / _panZoomScale;
+    _panZoomScale = scale;
+    // 极小的抖动不触发重算，避免手指静止时的噪声让画面持续微动
+    if ((factor - 1).abs() < 0.005) return;
+    widget.onGeometryChanged(widget.geometry.zoomAt(
+        event.localPosition.dx, factor,
+        viewportWidthPx: _viewportWidth));
+  }
+
   void _handlePointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     if (_viewportWidth <= 0) return;
