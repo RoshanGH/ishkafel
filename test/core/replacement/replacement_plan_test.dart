@@ -104,6 +104,37 @@ void main() {
       expect(huge.combinationCount, greaterThan(ReplacementPlan.maxCombinations));
     });
 
+    test('超限时要能说出「超了多少」，而不是只说「超了」', () {
+      final over = ReplacementPlan([
+        UnitReplacement.whole(List.generate(10, (i) => i)),
+        UnitReplacement.whole(List.generate(11, (i) => 100 + i)),
+        UnitReplacement.whole([1, 2]),
+      ]);
+      expect(over.preciseCombinationCount, 220);
+      expect(over.overflowsPreciseCount, isFalse);
+    });
+
+    test('精确组合数同样带饱和，规模荒谬时如实标记而不是给个绕回的假数', () {
+      final huge = ReplacementPlan(
+          List.generate(60, (_) => UnitReplacement.whole([1, 2])));
+      expect(huge.overflowsPreciseCount, isTrue);
+      expect(huge.preciseCombinationCount,
+          greaterThan(ReplacementPlan.maxCombinations));
+    });
+
+    test('因子最大的单元下标（提示用户该从哪里减）', () {
+      final plan = ReplacementPlan([
+        UnitReplacement.whole([1, 2]),
+        UnitReplacement.whole(List.generate(5, (i) => i)),
+        UnitReplacement.keepOriginal(),
+      ]);
+      expect(plan.largestFactorUnitIndex, 1);
+      expect(ReplacementPlan(const []).largestFactorUnitIndex, isNull);
+      expect(ReplacementPlan([UnitReplacement.keepOriginal()]).largestFactorUnitIndex,
+          isNull,
+          reason: '全是保留原片时没有「可减的地方」，不能指着一个因子为 1 的单元让用户减');
+    });
+
     test('单元列表对外只读', () {
       final plan = ReplacementPlan([UnitReplacement.keepOriginal()]);
       expect(() => plan.units.clear(), throwsUnsupportedError);

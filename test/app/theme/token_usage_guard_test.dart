@@ -7,6 +7,7 @@ const _guardedDirs = <String>[
   'lib/features/workbench',
   'lib/features/tasks',
   'lib/features/settings',
+  'lib/features/picking',
 ];
 
 /// 同时盯住 `fontSize: 12` 与 `fontSize = 12` 两种写法——只匹配前者的话，

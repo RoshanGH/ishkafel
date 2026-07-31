@@ -195,17 +195,25 @@ class _StepChip extends StatelessWidget {
   }
 }
 
-/// 审片台底部栏：状态摘要 + 「重新 AI 切分」占位（禁用）+ 主按钮「确认切分」
+/// 审片台底部栏：状态摘要 + 「重新 AI 切分」占位（禁用）+ 主按钮。
+///
+/// 主按钮在两种状态下语义不同：待确认时是「确认切分，进入替换选材」，已确认
+/// （只读回看）时是「进入替换选材」——此前这里是一个灰着的「已确认」，用户
+/// 回看时找不到下一步在哪。
 class WorkbenchBottomBar extends StatelessWidget {
   final String summaryText;
   final bool confirmed;
   final VoidCallback? onConfirm;
+
+  /// 已确认状态下进入阶段②；为 null 时按钮禁用（如已导出的任务）
+  final VoidCallback? onEnterPicking;
 
   const WorkbenchBottomBar({
     super.key,
     required this.summaryText,
     required this.confirmed,
     required this.onConfirm,
+    this.onEnterPicking,
   });
 
   @override
@@ -239,8 +247,8 @@ class WorkbenchBottomBar extends StatelessWidget {
           const SizedBox(width: 12),
           FilledButton(
             key: const Key('workbench-confirm-btn'),
-            onPressed: confirmed ? null : onConfirm,
-            child: Text(confirmed ? '已确认' : '确认切分，进入替换选材'),
+            onPressed: confirmed ? onEnterPicking : onConfirm,
+            child: Text(confirmed ? '进入替换选材' : '确认切分，进入替换选材'),
           ),
         ],
       ),

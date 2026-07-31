@@ -6,6 +6,7 @@ import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
@@ -412,6 +413,20 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     final updated = task.copyWith(
       units: units,
       status: RenewTaskStatus.picking,
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 阶段②「替换选材」：保存各台词语义单元的替换方案。
+  ///
+  /// 不改变任务状态——状态要等阶段③真正导出后才该流转到 exported，
+  /// 提前改会让任务在列表里显示成已导出却拿不到成片。
+  Future<void> savePickingPlan(
+      RenewTask task, List<UnitReplacement> replacements) async {
+    final updated = task.copyWith(
+      replacements: replacements,
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);
