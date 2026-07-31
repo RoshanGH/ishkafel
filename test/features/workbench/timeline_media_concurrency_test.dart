@@ -104,4 +104,18 @@ void main() {
       }
     });
   });
+
+  group('包络采样密度随片长增长（固定桶数会让长素材的波形失去作用）', () {
+    test('每秒约 100 个样本', () {
+      expect(TimelineMediaBuilder.envelopeBucketsFor(96000), 9600);
+      expect(TimelineMediaBuilder.envelopeBucketsFor(300000), 30000);
+    });
+
+    test('极短素材有下限，超长素材有上限（内存兜底）', () {
+      expect(TimelineMediaBuilder.envelopeBucketsFor(500), 240,
+          reason: '半秒素材也要有足够柱子铺满视口');
+      expect(TimelineMediaBuilder.envelopeBucketsFor(3600000), 60000,
+          reason: '一小时素材不能无限增长；60000 个 double 约 480KB 已是上限');
+    });
+  });
 }

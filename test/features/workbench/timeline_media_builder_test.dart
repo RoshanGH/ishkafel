@@ -112,10 +112,14 @@ void main() {
         '${workDir.path}/t1_tl_2.jpg',
       ]);
       // atSeconds = durationMs * (i+0.5) / thumbCount / 1000.0 → 1.5, 4.5, 7.5（等间隔 3s）
+      // 抽帧是并发的，调用**顺序**不再固定；这里要守的是「取样时间点正确且
+      // 等间隔」，所以比较排序后的集合而不是调用顺序（顺序与下标的对应关系
+      // 由 timeline_media_concurrency_test.dart 的乱序用例单独保证）
       final atSecondsSeq = thumbs.calls.map((args) {
         final idx = args.indexOf('-ss');
         return double.parse(args[idx + 1]);
-      }).toList();
+      }).toList()
+        ..sort();
       expect(atSecondsSeq, [1.5, 4.5, 7.5]);
       expect(media.waveEnvelope.length, 8);
     });

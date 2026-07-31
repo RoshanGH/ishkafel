@@ -200,6 +200,10 @@ class TimelinePainter extends CustomPainter {
   /// 镜头编号标签的左内边距
   static const _shotLabelPadding = 4.0;
 
+  /// 波形按像素列重采样时每根柱子的宽度。取 2px 而不是 1px：
+  /// 1px 柱在 Retina 上会被抗锯齿糊掉，2px 既清晰又足够密。
+  static const _waveColumnWidth = 2.0;
+
   /// 画视觉镜头轨：每个镜头一个独立块体。
   ///
   /// 块体填充沿用**所属台词语义单元的颜色**（低透明度），让"视觉镜头严格
@@ -343,19 +347,39 @@ class TimelinePainter extends CustomPainter {
       return;
     }
 
+    // 按**可视像素列**重采样，而不是按包络桶逐个画矩形。
+    //
+    // 按桶画时，柱子的疏密取决于「桶数 ÷ 片长」这个固定值：5 分钟素材放大
+    // 20 倍后视口只覆盖 15 秒，里面只落得下约 100 个桶，于是满屏只有 100 根
+    // 等高的宽柱——而用户放大波形恰恰是为了看清语句之间的停顿，宽柱内部
+    // 没有任何起伏可看。按像素列取该列覆盖时间范围内的包络峰值，柱子密度
+    // 就与缩放无关，始终铺满视口。
     final midY = TimelineTracks.waveTop + TimelineTracks.waveH / 2;
-    final barPaint = Paint()..color = AppColors.accentBlue.withValues(alpha: 0.55);
+    final barPaint =
+        Paint()..color = AppColors.accentBlue.withValues(alpha: 0.55);
     final count = envelope.length;
-    for (var i = 0; i < count; i++) {
-      final segStartMs = geometry.durationMs * i / count;
-      final segEndMs = geometry.durationMs * (i + 1) / count;
-      final left = geometry.msToPx(segStartMs.round());
-      final right = geometry.msToPx(segEndMs.round());
-      if (right < 0 || left > size.width) continue;
+    final durationMs = geometry.durationMs;
+    if (durationMs <= 0) return;
 
-      final halfHeight = envelope[i].clamp(0.0, 1.0) * TimelineTracks.waveH / 2;
+    for (var x = 0.0; x < size.width; x += _waveColumnWidth) {
+      final startMs = geometry.pxToMs(x);
+      final endMs = geometry.pxToMs(x + _waveColumnWidth);
+      if (endMs < 0 || startMs > durationMs) continue;
+
+      // 该像素列覆盖的包络下标范围（至少取一个样本，避免高倍放大下取空）
+      var from = (count * startMs / durationMs).floor().clamp(0, count - 1);
+      var to = (count * endMs / durationMs).ceil().clamp(1, count);
+      if (to <= from) to = from + 1;
+
+      var peak = 0.0;
+      for (var i = from; i < to; i++) {
+        final v = envelope[i];
+        if (v > peak) peak = v;
+      }
+
+      final halfHeight = peak.clamp(0.0, 1.0) * TimelineTracks.waveH / 2;
       canvas.drawRect(
-        Rect.fromLTRB(left, midY - halfHeight, right, midY + halfHeight),
+        Rect.fromLTRB(x, midY - halfHeight, x + _waveColumnWidth, midY + halfHeight),
         barPaint,
       );
     }

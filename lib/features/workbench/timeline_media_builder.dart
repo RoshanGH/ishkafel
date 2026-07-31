@@ -36,6 +36,28 @@ class TimelineMediaBuilder {
   /// 留下的半截文件，凑不出一个完整采样）
   static const int _minValidPcmBytes = 1;
 
+  /// 包络采样密度（每秒样本数）。
+  ///
+  /// 波形的用途是让用户看清语句之间的停顿来定切点，因此它的分辨率必须跟得上
+  /// **放大后**的像素密度：固定 240 桶时，5 分钟素材每桶 1.25 秒，放大 20 倍后
+  /// 满屏只有十几根等高宽柱，完全看不出停顿。按每秒 100 个样本取，20 倍放大下
+  /// 每样本约 10ms，与像素密度同量级。代价可忽略：10 分钟素材 60000 个 double
+  /// 约 480KB，且 computeEnvelope 的耗时只与 PCM 采样数有关、与桶数无关。
+  static const int _envelopeSamplesPerSecond = 100;
+
+  /// 包络桶数下限（极短素材也要有足够的柱子）
+  static const int _minEnvelopeBuckets = 240;
+
+  /// 包络桶数上限（超长素材的内存兜底）
+  static const int _maxEnvelopeBuckets = 60000;
+
+  /// 按片长推导包络桶数
+  static int envelopeBucketsFor(int durationMs) {
+    final byDuration =
+        (durationMs / 1000 * _envelopeSamplesPerSecond).round();
+    return byDuration.clamp(_minEnvelopeBuckets, _maxEnvelopeBuckets);
+  }
+
   /// 抽帧并发上限。视频解码是重活，无上限并发会把 CPU 打满、拖慢正在
   /// 播放的预览；实测 4 路已能把 14 张的总耗时从 2.04s 压到 1.4s 以内。
   static const int _thumbConcurrency = 4;
@@ -46,7 +68,7 @@ class TimelineMediaBuilder {
     required int durationMs,
     required Directory workDir,
     int thumbCount = 14,
-    int waveBuckets = 240,
+    int? waveBuckets,
   }) async {
     // 抽帧与波形互不依赖，并行推进：此前波形要等 14 张图全抽完才开始，
     // 白白把两件事的耗时串成一条
@@ -62,7 +84,7 @@ class TimelineMediaBuilder {
         videoPath: videoPath,
         taskId: taskId,
         workDir: workDir,
-        waveBuckets: waveBuckets,
+        waveBuckets: waveBuckets ?? envelopeBucketsFor(durationMs),
       ),
     ]);
     return TimelineMedia(
