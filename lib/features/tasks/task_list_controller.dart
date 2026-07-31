@@ -9,6 +9,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
+import 'analysis_error_message.dart';
 import 'task_artifact_cleaner.dart';
 
 /// 由 main.dart（或测试）override 提供实例
@@ -307,12 +308,14 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await reload();
   }
 
-  /// 码点安全截断：Dart String 按 UTF-16 code unit 索引，朴素 substring
-  /// 可能切在代理对（surrogate pair）中间，留下落单的 high surrogate，
-  /// 写盘 UTF-8 编码时会被静默替换为 U+FFFD。改用 Characters 按用户可感知
-  /// 字符（grapheme cluster）截断，天然不会切碎代理对或组合字符。
+  /// 翻译成中文人话后再做码点安全截断。
+  ///
+  /// 码点安全：Dart String 按 UTF-16 code unit 索引，朴素 substring 可能切在
+  /// 代理对（surrogate pair）中间，留下落单的 high surrogate，写盘 UTF-8
+  /// 编码时会被静默替换为 U+FFFD。改用 Characters 按用户可感知字符
+  /// （grapheme cluster）截断，天然不会切碎代理对或组合字符。
   String _truncateAnalysisError(Object error) {
-    final message = error.toString();
+    final message = describeAnalysisError(error);
     final characters = message.characters;
     return characters.length > _maxAnalysisErrorLength
         ? characters.take(_maxAnalysisErrorLength).toString()

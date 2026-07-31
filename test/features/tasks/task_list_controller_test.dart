@@ -10,6 +10,8 @@ import 'package:ishkafel/core/analysis/scene_detector.dart';
 import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
+import 'package:ishkafel/core/ffmpeg/process_runner.dart';
+import 'package:ishkafel/core/net/json_poster.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
@@ -18,6 +20,7 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
+import 'package:ishkafel/features/tasks/analysis_error_message.dart';
 import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
@@ -36,13 +39,15 @@ class _NoopSplitter implements SemanticSplitter {
 class _FakePipeline extends AnalysisPipeline {
   final TaskRepository repo;
   final bool shouldFail;
-  final String failMessage;
+
+  /// 非 null 时直接抛出这个对象（用于验证各类真实异常的展示文案）
+  final Object? failWith;
   int analyzeCallCount = 0;
 
   _FakePipeline({
     required this.repo,
     this.shouldFail = false,
-    this.failMessage = '分析失败（模拟）',
+    this.failWith,
   }) : super(
           audio: AudioExtractor(run: (_, _) async => ProcessResult(1, 0, '', '')),
           silence: const SilenceDetector(),
@@ -57,7 +62,8 @@ class _FakePipeline extends AnalysisPipeline {
   @override
   Future<RenewTask> analyze(RenewTask task) async {
     analyzeCallCount++;
-    if (shouldFail) throw StateError(failMessage);
+    if (failWith != null) throw failWith!;
+    if (shouldFail) throw StateError('分析失败（模拟）');
     final updated =
         task.copyWith(status: RenewTaskStatus.awaitingCut, updatedAt: DateTime.now());
     await repo.save(updated);
@@ -275,7 +281,8 @@ void main() {
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
     expect(task.status, RenewTaskStatus.analyzing);
-    expect(task.analysisError, contains('分析失败（模拟）'));
+    // 未知异常统一落成一句中文（详见 Important 5 分组），不再是 toString()
+    expect(task.analysisError, unknownAnalysisErrorMessage);
 
     // 仓库中同样落库，保证重启后仍能读到失败原因
     final persisted = await repo.findById('new-id');
@@ -283,12 +290,14 @@ void main() {
   });
 
   test('分析失败信息落库前按 300 字截断，避免超长堆栈污染 JSON', () async {
+    // 用「上层直接给出的中文原因」这条会原样透传的路径来验证截断
+    // （未知异常已被翻译成固定短句，走不到截断逻辑）
     final longMessage = '错' * 500;
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       importServiceProvider.overrideWithValue(importService),
-      analysisPipelineProvider.overrideWithValue(
-          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+      analysisPipelineProvider
+          .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
     ]);
     addTearDown(pipelineContainer.dispose);
 
@@ -305,19 +314,15 @@ void main() {
   });
 
   test('分析失败信息截断码点安全，不切断 UTF-16 代理对（含 emoji 的错误信息）', () async {
-    // 落库前的原始异常经 StateError.toString() 会加上「Bad state: 」前缀，
-    // 这里按前缀长度动态推算 ASCII 填充数，使「前缀 + ASCII」恰好占满 299 个
-    // UTF-16 code unit——这样后面第一个 emoji（占 2 个 code unit）恰好横跨
-    // 第 300 个截断边界，若按 code unit 朴素 substring(0, 300) 截断会切在
-    // 代理对中间，留下落单的高位 surrogate。
-    final prefixLength = StateError('').toString().length;
-    final asciiCount = 299 - prefixLength;
-    final longMessage = '${'a' * asciiCount}${'😀' * 10}';
+    // ASCII 填充恰好占满 299 个 UTF-16 code unit，后面第一个 emoji
+    //（占 2 个 code unit）恰好横跨第 300 个截断边界：若按 code unit 朴素
+    // substring(0, 300) 截断会切在代理对中间，留下落单的高位 surrogate。
+    final longMessage = '${'a' * 299}${'😀' * 10}';
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       importServiceProvider.overrideWithValue(importService),
-      analysisPipelineProvider.overrideWithValue(
-          _FakePipeline(repo: repo, shouldFail: true, failMessage: longMessage)),
+      analysisPipelineProvider
+          .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
     ]);
     addTearDown(pipelineContainer.dispose);
 
@@ -543,6 +548,78 @@ void main() {
           );
 
       expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
+  group('分析失败原因要说人话（Important 5）', () {
+    /// 让假管线抛出 [error]，返回落库后的 analysisError
+    Future<String> analysisErrorFor(Object error) async {
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider
+            .overrideWithValue(_FakePipeline(repo: repo, failWith: error)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      await pipelineContainer
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+      await pumpEventQueue();
+      return (await repo.findById('new-id'))!.analysisError!;
+    }
+
+    test('MediaToolMissingException 的中文安装引导不再挂类名前缀', () async {
+      final message =
+          await analysisErrorFor(const MediaToolMissingException('ffmpeg'));
+
+      expect(message, missingToolMessage('ffmpeg'),
+          reason: 'message 本身就是可直接展示的安装引导，上层不该再包一层类名');
+    });
+
+    test('AiHttpException 不把类名与服务端英文原文摊给用户', () async {
+      final message = await analysisErrorFor(const AiHttpException(
+          'ASR 调用失败 [X-Api-Status-Code=45000001]：Invalid request parameter',
+          statusCode: 400));
+
+      expect(message, isNot(contains('AiHttpException')));
+      expect(message, isNot(contains('Invalid request parameter')));
+      expect(message, contains('AI'));
+    });
+
+    test('FfmpegException 不把类名与 ffmpeg 英文 stderr 摊给用户', () async {
+      final message = await analysisErrorFor(const FfmpegException(
+          'ffmpeg 音频提取失败（exit=1）：Invalid data found when processing input'));
+
+      expect(message, isNot(contains('FfmpegException')));
+      expect(message, isNot(contains('Invalid data found')));
+    });
+
+    test('未知异常统一落成一句中文，原始文本只进日志', () async {
+      final captured = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = captured.add;
+      addTearDown(() => AppLog.sink = original);
+
+      final message =
+          await analysisErrorFor(StateError('Concurrent modification'));
+
+      expect(message, isNot(contains('Bad state')));
+      expect(message, isNot(contains('Concurrent modification')));
+      expect(captured.where((l) => l.contains('Concurrent modification')),
+          isNotEmpty,
+          reason: '原始文本要能在日志里查到');
+    });
+
+    test('已经是中文人话的原因（AI 未配置）原样保留', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      expect((await repo.findById('new-id'))!.analysisError,
+          pipelineUnavailableMessage);
     });
   });
 
