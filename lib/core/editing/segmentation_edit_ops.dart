@@ -18,8 +18,42 @@ import 'transcript_splitter.dart';
 abstract final class SegmentationEditOps {
   static const _snapper = BoundarySnapper();
 
-  /// 一帧的毫秒时长（四舍五入）
+  /// 一帧的**标称**毫秒时长（四舍五入）。
+  ///
+  /// 只用于把"±N 帧"换算成一个目标 ms（换算结果随后必被 [_snap] 吸附回帧
+  /// 点，所以 ±0.5ms 的标称误差不会外泄）。**不要**用它当作"最小时长"或
+  /// clamp 的退让幅度——帧点在毫秒轴上非等距，真实最小间距见
+  /// [minFrameSpanMs]。
   static int frameMs(double fps) => (1000 / fps).round();
+
+  /// 一帧在毫秒轴上的**真实最小跨度**：相邻帧点毫秒值之差的最小值。
+  ///
+  /// 帧点由 [_msOfFrame] 定义（round(idx*1000/fps)），在毫秒轴上非等距：
+  /// 30fps 下是 0,33,67,100,133,167…（间距在 33/34 间交替），60fps 下是
+  /// …,967,983,1000…（间距在 16/17 间交替）。因此"一帧至少占多少毫秒"必须
+  /// 从帧序号域实测，而不是取 `round(1000/fps)`：
+  /// - 30fps：round=33，真实最小间距也是 33 → 恰好安全（历史行为得以保持）
+  /// - 24fps：round=42，真实最小间距 41
+  /// - 60/59.94fps：round=17，真实最小间距 16
+  /// 用偏大的标称值当阈值，会把 60fps 素材上**合法的单帧片段判为非法**，
+  /// 也会让 clamp 被迫多留一帧。
+  ///
+  /// 实现：扫描一秒（ceil(fps) 帧）内相邻帧点的间距取最小值。整数帧率下帧点
+  /// 序列以一秒为周期，非整数帧率（29.97/59.94）下相邻间距只可能取
+  /// floor/ceil(1000/fps) 两个值，一秒内两者必然都已出现，故扫描一秒足够。
+  static int minFrameSpanMs(double fps) {
+    if (fps <= 0) return 1;
+    var minSpan = 1 << 30;
+    var prev = _msOfFrame(0, fps);
+    for (var k = 1; k <= fps.ceil(); k++) {
+      final cur = _msOfFrame(k, fps);
+      final span = cur - prev;
+      if (span < minSpan) minSpan = span;
+      prev = cur;
+    }
+    // 帧率高到相邻帧点重合时（>1000fps）退化为 1ms，保证阈值恒为正
+    return minSpan < 1 ? 1 : minSpan;
+  }
 
   static int _snap(int ms, double fps) => _snapper.snapToFrame(ms, fps);
 
@@ -49,7 +83,7 @@ abstract final class SegmentationEditOps {
   /// 触发 `holdsInvariants` 断言失败）。这里改为直接在帧序号域里找"退让
   /// 一帧时长"之后落在的帧点，从根源上保证退让幅度恒 >= 一帧。
   static int _maxBoundaryLeavingOneFrame(int endMs, double fps) {
-    final gap = frameMs(fps);
+    final gap = minFrameSpanMs(fps);
     final threshold = endMs - gap;
     var idx = _frameIndex(threshold, fps);
     if (idx < 0) idx = 0;
@@ -161,10 +195,7 @@ abstract final class SegmentationEditOps {
       rightShots[0] = rightShots.first.copyWith(startMs: b);
     }
 
-    final overlapping = sentences
-        .where((s) => s.startMs < unit.endMs && s.endMs > unit.startMs)
-        .toList();
-    final (leftText, rightText) = TranscriptSplitter.splitAt(overlapping, b);
+    final (leftText, rightText) = _splitTranscript(unit, b, sentences);
 
     final leftUnit =
         unit.copyWith(endMs: b, transcript: leftText, shots: leftShots);
@@ -179,6 +210,35 @@ abstract final class SegmentationEditOps {
     ]);
     assert(holdsInvariants(result, durationMs, fps));
     return result;
+  }
+
+  /// 拆分单元时把该单元的台词分给左右两段。
+  ///
+  /// **单元现有台词是唯一权威**：`unit.transcript` 是用户在检查器里看到、
+  /// 并且可能刚刚手工改过的文本，也可能是 LLM 改写过的稿子——它未必等于
+  /// ASR 逐句原文。此前这里一律用 [TranscriptSplitter.splitAt] 从
+  /// [sentences] 重算，于是：
+  /// - `sentences` 为空（早期版本创建的任务没存 ASR 句子）时，两段台词被
+  ///   一起清空，用户的台词凭空消失；
+  /// - 台词被手工编辑/LLM 改写过时，拆分会把它静默还原成 ASR 原文。
+  ///
+  /// 现在只在"ASR 逐句拼接恰好等于当前台词"（说明台词就是 ASR 原文、没被
+  /// 动过）时才走句子时间戳分配这条更精确的路；否则按拆分点在单元时长中的
+  /// 比例切分现有台词。两条路径都满足 `left + right == unit.transcript`，
+  /// 因此拆分后再合并回来台词逐字复原，绝不会产出两段空台词。
+  static (String left, String right) _splitTranscript(
+      SemanticUnit unit, int b, List<AsrSentence> sentences) {
+    final overlapping = sentences
+        .where((s) => s.startMs < unit.endMs && s.endMs > unit.startMs)
+        .toList();
+    final asrText = overlapping.map((s) => s.text).join();
+    if (overlapping.isNotEmpty && asrText == unit.transcript) {
+      return TranscriptSplitter.splitAt(overlapping, b);
+    }
+
+    final span = unit.endMs - unit.startMs;
+    final ratio = span <= 0 ? 0.0 : (b - unit.startMs) / span;
+    return TranscriptSplitter.splitTextByRatio(unit.transcript, ratio);
   }
 
   /// 单元 u 并入前一单元（镜头列表拼接，原单元边界保留为镜头边界；台词拼接；tags 取并集）
@@ -200,24 +260,34 @@ abstract final class SegmentationEditOps {
     ]);
   }
 
-  /// 在 rawMs 处把单元 u 内包含该点的镜头拆成两个
+  /// 在 rawMs 处把单元 [u] 内**指定的**镜头 [shotIndex] 拆成两个。
+  ///
+  /// 语义（评审 Critical 2）：只拆调用方点名的那个镜头。此前这里用
+  /// `indexWhere` 找"包含拆分点的"镜头，而上层控制器又把选中的 shotIndex
+  /// 丢掉了，于是用户选中 S1、播放头停在 S3 时点「在游标处拆分」会拆掉 S3，
+  /// 选中态却仍停在 S1——用户完全不知道刚才改了什么、也无从撤回认知。
+  /// 现在拆分点不落在指定镜头内部（未能给两侧各留出至少一帧）时一律返回
+  /// null，由上层提示"播放头不在所选范围内"，绝不静默改拆别的镜头。
   static List<SemanticUnit>? splitShotAt(
-      List<SemanticUnit> units, int u, int rawMs, {required double fps}) {
+      List<SemanticUnit> units, int u, int rawMs,
+      {required double fps, required int shotIndex}) {
     if (u < 0 || u >= units.length) return null;
     final durationMs = units.last.endMs;
     final unit = units[u];
-    final b = _snap(rawMs, fps);
-    final s = unit.shots.indexWhere((shot) =>
-        _frameAfter(shot.startMs, fps) <= b &&
-        b <= _maxBoundaryLeavingOneFrame(shot.endMs, fps));
-    if (s == -1) return null;
+    if (shotIndex < 0 || shotIndex >= unit.shots.length) return null;
 
-    final shot = unit.shots[s];
+    final shot = unit.shots[shotIndex];
+    final minB = _frameAfter(shot.startMs, fps);
+    final maxB = _maxBoundaryLeavingOneFrame(shot.endMs, fps);
+    if (minB > maxB) return null;
+    final b = _snap(rawMs, fps);
+    if (b < minB || b > maxB) return null;
+
     final newShots = [
-      ...unit.shots.sublist(0, s),
+      ...unit.shots.sublist(0, shotIndex),
       shot.copyWith(endMs: b),
       Shot(startMs: b, endMs: shot.endMs, tags: shot.tags),
-      ...unit.shots.sublist(s + 1),
+      ...unit.shots.sublist(shotIndex + 1),
     ];
     final newUnit = unit.copyWith(shots: newShots);
     final result = _reindex([
@@ -278,7 +348,9 @@ abstract final class SegmentationEditOps {
   static bool holdsInvariants(
       List<SemanticUnit> units, int durationMs, double fps) {
     if (units.isEmpty) return durationMs == 0;
-    final frame = frameMs(fps);
+    // 「不小于一帧」的阈值取相邻帧点的真实最小间距：用偏大的标称帧时长会把
+    // 60fps 素材上合法的单帧片段误判为非法（30fps 下两者同为 33，行为不变）
+    final frame = minFrameSpanMs(fps);
     bool isFramePoint(int ms) => _snap(ms, fps) == ms;
 
     if (units.first.startMs != 0) return false;

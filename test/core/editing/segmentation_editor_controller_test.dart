@@ -130,7 +130,24 @@ void main() {
       expect(ok, true);
       expect(c.units.length, 3);
       expect(c.units[0].endMs, 3000);
-      expect(c.units[0].transcript, '第一句。');
+      // 单元台词（'第一段台词。'）与 ASR 逐句拼接不一致，说明已被改写过：
+      // 按比例切现有台词而非还原成 ASR 原文，两段拼接逐字复原（Critical 1）
+      expect(c.units[0].transcript + c.units[1].transcript, '第一段台词。');
+      expect(c.units[0].transcript, isNotEmpty);
+      expect(c.units[1].transcript, isNotEmpty);
+    });
+
+    test('sentences 为空（早期任务无 ASR 句子）时拆分不清空台词（Critical 1）', () {
+      final c = SegmentationEditorController(
+        initialUnits: fixture(),
+        durationMs: 12000,
+        fps: fps,
+        sentences: const [],
+      );
+      c.select(const EditorSelection.unit(0));
+
+      expect(c.splitSelectedAt(3000), true);
+      expect(c.units[0].transcript + c.units[1].transcript, '第一段台词。');
     });
 
     test('选中镜头 → 走 splitShotAt', () {
@@ -150,6 +167,29 @@ void main() {
     test('无选中 → 返回 false', () {
       final c = buildController();
       expect(c.splitSelectedAt(3000), false);
+    });
+
+    group('镜头层拆分只作用于选中的那个镜头（Critical 2）', () {
+      test('播放头落在别的镜头内 → 返回 false 且结构一字不动', () {
+        final c = buildController();
+        // 选中 unit0 的镜头 0（[0,3000]），播放头停在 4500（落在镜头 1 内）
+        c.select(const EditorSelection.shot(0, 0));
+
+        expect(c.splitSelectedAt(4500), false,
+            reason: '不能静默去拆播放头所在的镜头 1');
+        expect(c.units, fixture());
+        expect(c.canUndo, false);
+      });
+
+      test('播放头落在选中镜头内 → 正常拆分该镜头', () {
+        final c = buildController();
+        c.select(const EditorSelection.shot(0, 1));
+
+        expect(c.splitSelectedAt(4500), true);
+        expect(c.units[0].shots.length, 3);
+        expect(c.units[0].shots[1].endMs, 4500);
+        expect(c.units[0].shots[2].startMs, 4500);
+      });
     });
   });
 

@@ -86,7 +86,13 @@ void main() {
     ];
 
     test('拆分：镜头切开、台词按句子分配、index 重排', () {
-      final out = SegmentationEditOps.splitUnitAt(fixture(), 0, 3000,
+      // 台词与 ASR 重建文本一致（未被手工改过）时才走"按句子分配"这条路：
+      // 单元 0 覆盖 sentences[0]+sentences[1]，其拼接即为该单元台词
+      final units = [
+        fixture()[0].copyWith(transcript: '第一句。第二句。'),
+        fixture()[1].copyWith(transcript: '第三句。'),
+      ];
+      final out = SegmentationEditOps.splitUnitAt(units, 0, 3000,
           fps: fps, sentences: sentences)!;
       expect(out.length, 3);
       expect(out[0].endMs, 3000);
@@ -95,6 +101,35 @@ void main() {
       expect(out[1].transcript, '第二句。');
       expect(out.map((u) => u.index).toList(), [0, 1, 2]);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    group('拆分不得静默丢弃单元现有台词（评审 Critical 1）', () {
+      test('sentences 为空时不清空台词：两段拼接仍等于原台词', () {
+        final out = SegmentationEditOps.splitUnitAt(fixture(), 0, 3000,
+            fps: fps, sentences: const [])!;
+        expect(out[0].transcript, isNotEmpty);
+        expect(out[1].transcript, isNotEmpty);
+        expect(out[0].transcript + out[1].transcript, '第一段台词。');
+      });
+
+      test('台词被手工改过（与 ASR 重建文本不一致）时按比例切现有台词，不还原成 ASR 原文', () {
+        final edited = [
+          fixture()[0].copyWith(transcript: '手工改过的台词甲乙'),
+          fixture()[1],
+        ];
+        final out = SegmentationEditOps.splitUnitAt(edited, 0, 3000,
+            fps: fps, sentences: sentences)!;
+        expect(out[0].transcript + out[1].transcript, '手工改过的台词甲乙');
+        expect(out[0].transcript, isNot(contains('第一句')));
+        expect(out[1].transcript, isNot(contains('第二句')));
+      });
+
+      test('拆分再合并回来，台词逐字复原（左右两段拼接无损）', () {
+        final split = SegmentationEditOps.splitUnitAt(fixture(), 0, 4500,
+            fps: fps, sentences: const [])!;
+        final merged = SegmentationEditOps.mergeUnitWithPrevious(split, 1)!;
+        expect(merged[0].transcript, '第一段台词。');
+      });
     });
 
     test('拆分点在镜头内部时该镜头一分为二', () {
@@ -129,12 +164,63 @@ void main() {
 
   group('splitShotAt / mergeShotWithPrevious', () {
     test('镜头拆分保持单元边界不动', () {
-      final out = SegmentationEditOps.splitShotAt(fixture(), 0, 1500, fps: fps)!;
+      final out = SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+          fps: fps, shotIndex: 0)!;
       expect(out[0].shots.length, 3);
       expect(out[0].shots[0].endMs, 1500);
       expect(out[0].startMs, 0);
       expect(out[0].endMs, 6000);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    group('只拆指定的那个镜头（Critical 2）', () {
+      test('拆分点落在别的镜头内 → 返回 null，绝不改拆别的镜头', () {
+        // shotIndex=0 是 [0,3000]，拆分点 4500 落在镜头 1 内
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 4500,
+                fps: fps, shotIndex: 0),
+            isNull);
+      });
+
+      test('拆分点贴指定镜头边界（两侧留不出一帧）→ 返回 null', () {
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 10,
+                fps: fps, shotIndex: 0),
+            isNull);
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 3000,
+                fps: fps, shotIndex: 0),
+            isNull);
+      });
+
+      test('shotIndex 越界 → 返回 null', () {
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+                fps: fps, shotIndex: 9),
+            isNull);
+        expect(
+            SegmentationEditOps.splitShotAt(fixture(), 0, 1500,
+                fps: fps, shotIndex: -1),
+            isNull);
+      });
+
+      test('拆分点落在指定镜头内 → 只有该镜头被一分为二，标签继承', () {
+        final tagged = [
+          fixture()[0].copyWith(shots: const [
+            Shot(startMs: 0, endMs: 3000, tags: ['A']),
+            Shot(startMs: 3000, endMs: 6000, tags: ['B']),
+          ]),
+          fixture()[1],
+        ];
+        final out = SegmentationEditOps.splitShotAt(tagged, 0, 4500,
+            fps: fps, shotIndex: 1)!;
+        expect(out[0].shots.length, 3);
+        expect(out[0].shots[0], tagged[0].shots[0], reason: '镜头 0 不受影响');
+        expect(out[0].shots[1].endMs, 4500);
+        expect(out[0].shots[2].startMs, 4500);
+        expect(out[0].shots[2].tags, ['B']);
+        expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+      });
     });
 
     test('镜头合并保留标签并集', () {
@@ -273,7 +359,9 @@ void main() {
           final maxB = _expectedMaxBoundary(d, fps);
           List<SemanticUnit>? out;
           expect(() {
-            out = SegmentationEditOps.splitShotAt(fixtureFor(d), 1, maxB, fps: fps);
+            // maxB 落在末单元的末镜头（下标 1）内
+            out = SegmentationEditOps.splitShotAt(fixtureFor(d), 1, maxB,
+                fps: fps, shotIndex: 1);
           }, returnsNormally);
           expect(out, isNotNull, reason: 'maxB=$maxB 应是一个合法拆分点');
           expect(out![1].shots.last.endMs, d);
@@ -361,6 +449,95 @@ void main() {
     });
   });
 
+  group('一帧的真实最小跨度（Critical 3：帧率非 30 时误判合法片段为非法）', () {
+    // frameMs(fps)=round(1000/fps) 只是"标称帧时长"，与帧点在毫秒轴上的真实
+    // 相邻间距未必相等：
+    // - 30fps：round=33，帧点 0,33,67,100…，最小间距也是 33 → 恰好安全
+    // - 24fps：round=42，帧点 0,42,83,125…，最小间距 41 → 差 1ms
+    // - 60fps：round=17，帧点 …,967,983,1000…，最小间距 16 → 差 1ms
+    // 于是 24/60fps 素材下，恰好跨一帧的合法片段会被 holdsInvariants 判为
+    // 非法，clamp 也被迫多留一帧。
+
+    test('minFrameSpanMs 给出相邻帧点的真实最小间距（覆盖常见帧率）', () {
+      const expected = <(double, int)>[
+        (23.976, 41),
+        (24.0, 41),
+        (25.0, 40),
+        (29.97, 33),
+        (30.0, 33),
+        (50.0, 20),
+        (59.94, 16),
+        (60.0, 16),
+      ];
+      for (final (rate, span) in expected) {
+        expect(SegmentationEditOps.minFrameSpanMs(rate), span, reason: 'fps=$rate');
+      }
+    });
+
+    test('30fps 行为完全不变：真实最小间距恰等于标称帧时长 33ms', () {
+      expect(SegmentationEditOps.minFrameSpanMs(30), 33);
+      expect(SegmentationEditOps.minFrameSpanMs(30), SegmentationEditOps.frameMs(30));
+    });
+
+    test('60fps：跨一帧的片段（967→983，16ms）是合法结构', () {
+      // 60fps 帧点：58→967、59→983、60→1000、120→2000
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 967, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 967),
+        ]),
+        const SemanticUnit(index: 1, startMs: 967, endMs: 983, transcript: 'B', shots: [
+          Shot(startMs: 967, endMs: 983),
+        ]),
+        const SemanticUnit(index: 2, startMs: 983, endMs: 2000, transcript: 'C', shots: [
+          Shot(startMs: 983, endMs: 2000),
+        ]),
+      ];
+      expect(SegmentationEditOps.holdsInvariants(units, 2000, 60), true);
+    });
+
+    test('24fps：跨一帧的片段（42→83，41ms）是合法结构', () {
+      // 24fps 帧点：1→42、2→83、24→1000
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 42, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 42),
+        ]),
+        const SemanticUnit(index: 1, startMs: 42, endMs: 83, transcript: 'B', shots: [
+          Shot(startMs: 42, endMs: 83),
+        ]),
+        const SemanticUnit(index: 2, startMs: 83, endMs: 1000, transcript: 'C', shots: [
+          Shot(startMs: 83, endMs: 1000),
+        ]),
+      ];
+      expect(SegmentationEditOps.holdsInvariants(units, 1000, 24), true);
+    });
+
+    test('60fps：镜头边界推到极右可达 967（退让真实一帧 16ms），不再被迫多退一帧到 950', () {
+      // 末镜头 endMs=983（帧点 59）：真实上界是 967（983-967=16=一帧），
+      // 旧实现按 17ms 计算退让幅度，只能停在 950（多退了一整帧）
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 983, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 500),
+          Shot(startMs: 500, endMs: 983),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveShotBoundary(units, 0, 0, 999999, fps: 60)!;
+      expect(out[0].shots[0].endMs, 967);
+      expect(SegmentationEditOps.holdsInvariants(out, 983, 60), true);
+    });
+
+    test('60fps：拆分点可落在距镜头末端一帧处（967），不再被拒', () {
+      final units = [
+        const SemanticUnit(index: 0, startMs: 0, endMs: 983, transcript: 'A', shots: [
+          Shot(startMs: 0, endMs: 983),
+        ]),
+      ];
+      final out = SegmentationEditOps.splitShotAt(units, 0, 967, fps: 60, shotIndex: 0)!;
+      expect(out[0].shots.length, 2);
+      expect(out[0].shots[1].startMs, 967);
+      expect(SegmentationEditOps.holdsInvariants(out, 983, 60), true);
+    });
+  });
+
   group('边界情形：无合法移动/拆分位置时不产出非法结构（Critical 1 修法自检）', () {
     // 每个单元都恰好卡在"1 帧最小时长"上：unit0=[0,33]（帧点终点），
     // unit1=[33,73]（末单元，非帧点终点，尾段刚好 40ms，仍 >= 1 帧）——
@@ -389,8 +566,8 @@ void main() {
     });
 
     test('splitShotAt 尝试拆分已贴最小时长的末单元末镜头：无合法拆分点，返回 null', () {
-      final out =
-          SegmentationEditOps.splitShotAt(tightFixture(), 1, 999999, fps: fps);
+      final out = SegmentationEditOps.splitShotAt(tightFixture(), 1, 999999,
+          fps: fps, shotIndex: 0);
       expect(out, isNull);
     });
   });

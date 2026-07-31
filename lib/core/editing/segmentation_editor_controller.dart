@@ -167,15 +167,22 @@ class SegmentationEditorController extends ChangeNotifier {
       SegmentationEditOps.moveShotBoundary(_units, u, s, rawMs, fps: fps));
 
   /// 选中单元→splitUnitAt；选中镜头→splitShotAt；无选中→false
+  ///
+  /// 镜头层只拆**当前选中的那个镜头**（评审 Critical 2）：此前这里把
+  /// `sel.shotIndex` 丢掉了，域函数便自己去找"包含播放头的"镜头，导致用户
+  /// 选中 S1、播放头停在 S3 时点「拆分」会拆掉 S3。现在播放头不落在所选
+  /// 镜头内时域函数返回 null，本方法返回 false，由上层
+  /// （WorkbenchBody._splitAtPlayhead）弹 SnackBar 提示。
   bool splitSelectedAt(int rawMs) {
     final sel = _selection;
     if (sel == null) return false;
-    if (sel.shotIndex == null) {
+    final shotIndex = sel.shotIndex;
+    if (shotIndex == null) {
       return _apply(SegmentationEditOps.splitUnitAt(_units, sel.unitIndex, rawMs,
           fps: fps, sentences: sentences));
     }
-    return _apply(
-        SegmentationEditOps.splitShotAt(_units, sel.unitIndex, rawMs, fps: fps));
+    return _apply(SegmentationEditOps.splitShotAt(_units, sel.unitIndex, rawMs,
+        fps: fps, shotIndex: shotIndex));
   }
 
   /// 按选中层分派：选中单元→mergeUnitWithPrevious；选中镜头→mergeShotWithPrevious
