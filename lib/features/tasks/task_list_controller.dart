@@ -5,6 +5,7 @@ import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
@@ -181,8 +182,18 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     return [...sorted.take(index), task, ...sorted.skip(index)];
   }
 
-  Future<void> importFile(String path) async {
-    final task = await ref.read(importServiceProvider).importLocalFile(path);
+  /// 导入并自动分析。[unitTagGroup] / [shotTagGroup] 是新建向导选定的两个
+  /// miaoa 标签组，随任务落库，分析时据此解析各自的受控词表。
+  Future<void> importFile(
+    String path, {
+    TagGroupRef? unitTagGroup,
+    TagGroupRef? shotTagGroup,
+  }) async {
+    final task = await ref.read(importServiceProvider).importLocalFile(
+          path,
+          unitTagGroup: unitTagGroup,
+          shotTagGroup: shotTagGroup,
+        );
     await reload();
 
     final pipeline = ref.read(analysisPipelineProvider);

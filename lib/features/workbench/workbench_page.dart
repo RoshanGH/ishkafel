@@ -21,6 +21,7 @@ import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
 import 'workbench_chrome.dart';
+import 'workbench_summary.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
 ///
@@ -294,14 +295,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     Navigator.of(context).pop();
   }
 
-  String _summaryText(SegmentationEditorController editor) {
-    final units = editor.units;
-    final totalShots = units.fold<int>(0, (sum, u) => sum + u.shots.length);
-    final durationSec = (editor.durationMs / 1000).toStringAsFixed(1);
-    final dirtyHint = editor.dirty ? ' · 有未保存的修改' : '';
-    return '共 ${units.length} 个台词语义单元 · $totalShots 个视觉镜头 · '
-        '时长 $durationSec' 's$dirtyHint';
-  }
+  String _summaryText(SegmentationEditorController editor) =>
+      workbenchSummaryText(
+        units: editor.units,
+        durationMs: editor.durationMs,
+        dirty: editor.dirty,
+        hasTagGroups: widget.task.unitTagGroup != null ||
+            widget.task.shotTagGroup != null,
+      );
 
   @override
   Widget build(BuildContext context) {

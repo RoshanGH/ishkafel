@@ -4,6 +4,7 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/models/tag_group_ref.dart';
 
 void main() {
   final task = RenewTask(
@@ -114,6 +115,49 @@ void main() {
     final json = task.toJson()..remove('analysisError');
     final parsed = RenewTask.fromJson(json);
     expect(parsed.analysisError, isNull);
+  });
+
+  group('两个标签组（阶段②检索候选素材的键）', () {
+    test('unitTagGroup / shotTagGroup 序列化往返一致', () {
+      final tagged = task.copyWith(
+        unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
+        shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+      );
+      final parsed = RenewTask.fromJson(tagged.toJson());
+      expect(parsed, tagged);
+      expect(parsed.unitTagGroup!.id, 1279);
+      expect(parsed.unitTagGroup!.name, '衣清.消毒液');
+      expect(parsed.shotTagGroup!.id, 136);
+      expect(parsed.shotTagGroup!.name, '画面类型');
+    });
+
+    test('旧 JSON（无这两个键）照常读出，不让整条任务从列表消失', () {
+      final json = task.toJson()
+        ..remove('unitTagGroup')
+        ..remove('shotTagGroup');
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.unitTagGroup, isNull);
+      expect(parsed.shotTagGroup, isNull);
+      expect(parsed.id, task.id, reason: '其余字段必须完好');
+    });
+
+    test('字段类型不对（脏数据）时回退为 null，同样不抛异常', () {
+      final json = task.toJson()
+        ..['unitTagGroup'] = '衣清.消毒液'
+        ..['shotTagGroup'] = {'id': '136', 'name': 42};
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.unitTagGroup, isNull);
+      expect(parsed.shotTagGroup, isNull);
+      expect(parsed.name, task.name);
+    });
+
+    test('copyWith 不传标签组时沿用原值（不可变，返回新对象）', () {
+      final tagged =
+          task.copyWith(unitTagGroup: const TagGroupRef(id: 1, name: 'g'));
+      final renamed = tagged.copyWith(name: '改名');
+      expect(renamed.unitTagGroup, const TagGroupRef(id: 1, name: 'g'));
+      expect(task.unitTagGroup, isNull, reason: '原对象不得被就地修改');
+    });
   });
 
   test('copyWith(clearAnalysisError: true) 清空 analysisError，其余字段不变', () {

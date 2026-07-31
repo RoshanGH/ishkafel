@@ -4,6 +4,7 @@ import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/ffmpeg/process_runner.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_exception.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
@@ -53,6 +54,24 @@ void main() {
     expect(ffmpegCalls.single, contains('/videos/滴露_测试片.mp4'));
     // 已落库
     expect(await repo.findById('fixed-id'), task);
+  });
+
+  test('新建向导选定的两个标签组随任务一起落库（阶段②的检索键）', () async {
+    final task = await service.importLocalFile(
+      '/videos/滴露_测试片.mp4',
+      unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
+      shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+    );
+
+    expect(task.unitTagGroup, const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+    expect(task.shotTagGroup, const TagGroupRef(id: 136, name: '画面类型'));
+    expect((await repo.findById('fixed-id'))!.unitTagGroup!.name, '衣清.消毒液');
+  });
+
+  test('不传标签组时任务的标签组为空（该层不打标）', () async {
+    final task = await service.importLocalFile('/videos/滴露_测试片.mp4');
+    expect(task.unitTagGroup, isNull);
+    expect(task.shotTagGroup, isNull);
   });
 
   group('非法帧率素材在导入边界被拦下（审片台 frameMs(0) 会崩）', () {

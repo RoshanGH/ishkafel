@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
@@ -8,6 +7,7 @@ import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../import_flow/import_exception.dart';
 import '../workbench/workbench_page.dart';
+import 'new_task_wizard/new_task_wizard.dart';
 import 'environment_banner.dart';
 import 'source_availability.dart';
 import 'task_card.dart';
@@ -17,18 +17,25 @@ import 'task_list_controller.dart';
 class TaskListPage extends ConsumerWidget {
   const TaskListPage({super.key});
 
-  Future<void> _pickAndImport(WidgetRef ref, BuildContext context) async {
-    const typeGroup = XTypeGroup(label: '视频', extensions: ['mp4', 'mov']);
-    final file = await openFile(acceptedTypeGroups: const [typeGroup]);
-    if (file == null) return;
+  /// 新建任务：走向导（选来源 + 选两个标签组），确认后才导入并自动分析。
+  ///
+  /// 标签组必须在建任务时定下来——它既是两层打标的受控词表来源，也是后续
+  /// 阶段②「按相同标签检索候选素材」的检索键。
+  Future<void> _startNewTask(WidgetRef ref, BuildContext context) async {
+    final result = await showNewTaskWizard(context);
+    if (result == null) return;
     try {
-      await ref.read(taskListProvider.notifier).importFile(file.path);
+      await ref.read(taskListProvider.notifier).importFile(
+            result.filePath,
+            unitTagGroup: result.unitTagGroup,
+            shotTagGroup: result.shotTagGroup,
+          );
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志
-      AppLog.warn('导入失败 ${file.path}：${e.cause ?? e.message}');
+      AppLog.warn('导入失败 ${result.filePath}：${e.cause ?? e.message}');
       if (context.mounted) _showSnackBar(context, e.message);
     } catch (e) {
-      AppLog.warn('导入失败 ${file.path}：$e');
+      AppLog.warn('导入失败 ${result.filePath}：$e');
       if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
     }
   }
@@ -150,7 +157,7 @@ class TaskListPage extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: FilledButton.icon(
-              onPressed: () => _pickAndImport(ref, context),
+              onPressed: () => _startNewTask(ref, context),
               icon: const Icon(Icons.add, size: 16),
               label: const Text('新建任务'),
             ),

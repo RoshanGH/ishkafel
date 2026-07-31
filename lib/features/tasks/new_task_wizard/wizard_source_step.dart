@@ -1,0 +1,134 @@
+import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
+
+import '../../../app/theme/app_colors.dart';
+import '../../../app/theme/app_spacing.dart';
+import '../../../app/theme/app_typography.dart';
+
+/// 第 1 步：成片来源。
+///
+/// 设计稿里有「本地文件」与「miaoa 成片库」两条通道，本期只做本地文件。
+/// miaoa 通道保留但明确标注未开放并写清原因——项目刚清理过一个「点不动、
+/// 没有任何解释」的死按钮，那种控件只会让用户反复点击并怀疑软件坏了。
+class WizardSourceStep extends StatelessWidget {
+  final String? filePath;
+  final VoidCallback onPickFile;
+
+  const WizardSourceStep(
+      {super.key, required this.filePath, required this.onPickFile});
+
+  static const miaoaChannelNote = '本期未开放：需要 miaoa 成片下载通道。'
+      '请先把成片下载到本地，再用左侧「本地文件」导入。';
+
+  @override
+  Widget build(BuildContext context) {
+    // IntrinsicHeight：两张卡等高（文案长短不一时排版才整齐）。直接用
+    // CrossAxisAlignment.stretch 会在向导的滚动区（高度无界）里要求无限高。
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(child: _localCard()),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(child: _miaoaCard()),
+        ],
+      ),
+    );
+  }
+
+  Widget _localCard() {
+    final picked = filePath;
+    return _SourceCard(
+      cardKey: const Key('wizard-pick-local-file'),
+      icon: Icons.folder_open,
+      title: '本地文件',
+      description: picked == null
+          ? '点击选择 mp4 / mov 成片'
+          : '${p.basename(picked)}\n点击可重新选择',
+      selected: picked != null,
+      onTap: onPickFile,
+    );
+  }
+
+  Widget _miaoaCard() => Tooltip(
+        message: miaoaChannelNote,
+        child: const _SourceCard(
+          cardKey: Key('wizard-miaoa-source'),
+          icon: Icons.link,
+          title: 'miaoa 成片库',
+          description: miaoaChannelNote,
+          selected: false,
+          onTap: null,
+        ),
+      );
+}
+
+class _SourceCard extends StatelessWidget {
+  final Key cardKey;
+  final IconData icon;
+  final String title;
+  final String description;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  const _SourceCard({
+    required this.cardKey,
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = onTap == null;
+    return InkWell(
+      key: cardKey,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppColors.accentBlue.withValues(alpha: 0.10)
+              : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+              color: selected ? AppColors.accentBlue : AppColors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon,
+                size: 20,
+                color: disabled
+                    ? AppColors.textTertiary
+                    : AppColors.accentBlueLight),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          color: disabled
+                              ? AppColors.textTertiary
+                              : AppColors.textPrimary,
+                          fontSize: AppFontSize.body,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(description,
+                      style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: AppFontSize.caption,
+                          height: 1.4)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

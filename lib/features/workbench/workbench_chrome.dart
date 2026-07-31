@@ -69,7 +69,7 @@ class PlaybackDegradedBanner extends StatelessWidget {
   }
 }
 
-/// 审片台顶栏：返回按钮 + 成片信息 + 三步流程指示（阶段①激活）
+/// 审片台顶栏：返回按钮 + 成片信息（含标签组）+ 三步流程指示（阶段①激活）
 ///
 /// 纯展示组件，不持有状态；由 [WorkbenchPage] 传入文案与回调。
 class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
@@ -78,8 +78,19 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
 
   const WorkbenchTopBar({super.key, required this.task, required this.onBack});
 
+  /// 有标签组时多出一行；没有的话不留空行（旧任务不该被撑高）
   @override
-  Size get preferredSize => const Size.fromHeight(52);
+  Size get preferredSize => Size.fromHeight(_tagGroupText == null ? 52 : 62);
+
+  /// 「标签组 台词语义单元组 / 视觉镜头组」；两个都没选时返回 null。
+  /// 只显示名字——把标签组 id 摆到界面上是技术黑话。
+  String? get _tagGroupText {
+    final names = [
+      if (task.unitTagGroup != null) task.unitTagGroup!.name,
+      if (task.shotTagGroup != null) task.shotTagGroup!.name,
+    ];
+    return names.isEmpty ? null : '标签组 ${names.join(' / ')}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +99,7 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
         ? task.name
         : '${task.name} · ${info.width}×${info.height} · '
             '${(info.duration.inMilliseconds / 1000).toStringAsFixed(1)}s';
+    final tagGroups = _tagGroupText;
 
     return Container(
       height: preferredSize.height,
@@ -104,14 +116,29 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
             icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary, size: 18),
           ),
           Expanded(
-            child: Text(
-              metaText,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: AppFontSize.emphasis,
-                  fontWeight: FontWeight.w600),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  metaText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: AppFontSize.emphasis,
+                      fontWeight: FontWeight.w600),
+                ),
+                if (tagGroups != null)
+                  Text(
+                    tagGroups,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: AppFontSize.caption),
+                  ),
+              ],
             ),
           ),
           const _StepIndicator(),
