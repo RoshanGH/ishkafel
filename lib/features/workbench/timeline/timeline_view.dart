@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
@@ -92,6 +94,7 @@ class _TimelineViewState extends State<TimelineView> {
   void initState() {
     super.initState();
     _decodeThumbs(widget.media);
+    widget.playhead.addListener(_followPlayhead);
   }
 
   @override
@@ -100,10 +103,40 @@ class _TimelineViewState extends State<TimelineView> {
     if (!identical(oldWidget.media, widget.media)) {
       _decodeThumbs(widget.media);
     }
+    if (!identical(oldWidget.playhead, widget.playhead)) {
+      oldWidget.playhead.removeListener(_followPlayhead);
+      widget.playhead.addListener(_followPlayhead);
+    }
+  }
+
+  /// 播放头跑出可视区时把它带回来（对标剪映/FCP 的时间线跟随）。
+  ///
+  /// 放大之后视口只覆盖全片的一小段，一播放播放头几秒就跑到视口外，用户
+  /// 要么手动追着滚、要么只能缩回 fit——放大功能等于废掉一半。
+  ///
+  /// 只在**跑出去**时才滚（还在视野里就不动），避免每帧微调让画面无谓抖动、
+  /// 也避免跟用户正在查看的位置抢控制权。滚动后把播放头放在视口靠左三分之一
+  /// 处，留出更多"接下来要播的内容"，这是视频工具的通行做法。
+  void _followPlayhead() {
+    if (_viewportWidth <= 0) return;
+    final geometry = widget.geometry;
+    // fit 状态下整片都在视口里，没有滚动余地
+    if (geometry.totalWidthPx <= _viewportWidth) return;
+
+    final x = geometry.msToPx(widget.playhead.value);
+    if (x >= 0 && x <= _viewportWidth) return;
+
+    final targetScroll = geometry.msToPx(widget.playhead.value) +
+        geometry.scrollPx -
+        _viewportWidth / 3;
+    final next = geometry.scrolledBy(targetScroll - geometry.scrollPx,
+        viewportWidthPx: _viewportWidth);
+    widget.onGeometryChanged(next);
   }
 
   @override
   void dispose() {
+    widget.playhead.removeListener(_followPlayhead);
     _pendingUnitSelectTimer?.cancel();
     // 兜底：若卸载发生在拖拽会话进行中（Flutter 手势系统在卸载路径下不保证
     // onHorizontalDragEnd/onHorizontalDragCancel 一定会触发），必须显式结束
@@ -259,7 +292,9 @@ class _TimelineViewState extends State<TimelineView> {
     return LayoutBuilder(
       builder: (context, constraints) {
         _viewportWidth = constraints.maxWidth;
-        return GestureDetector(
+        return Listener(
+          onPointerSignal: _handlePointerSignal,
+          child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           // 让 onHorizontalDragStart 报告指针刚按下时的原始坐标（而非默认的
           // "越过触摸容差后手势识别器胜出时"的坐标），边界手柄 ±6px 的命中
@@ -292,8 +327,40 @@ class _TimelineViewState extends State<TimelineView> {
               ),
             ),
           ),
+        ),
         );
       },
     );
+  }
+
+  /// 滚轮 / 触控板双指手势：
+  /// - ⌘ + 滚动 → 以指针位置为锚点缩放（macOS 上缩放的通行手势）
+  /// - 其余滚动（含纵向）→ 平移时间线
+  ///
+  /// 纵向滚动也映射为平移：时间线本身没有纵向可滚内容，不映射就是一个
+  /// 落空的手势；而触控板上纯粹的水平滑动很难做到，用户实际会带纵向分量。
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (_viewportWidth <= 0) return;
+
+    final zooming = HardwareKeyboard.instance.isMetaPressed ||
+        HardwareKeyboard.instance.isControlPressed;
+    if (zooming) {
+      // 向上滚（dy<0）放大。每 100 单位对应 1.2 倍，手感与系统一致
+      final steps = -event.scrollDelta.dy / 100;
+      if (steps == 0) return;
+      final factor = math.pow(1.2, steps).toDouble();
+      widget.onGeometryChanged(widget.geometry.zoomAt(
+          event.localPosition.dx, factor,
+          viewportWidthPx: _viewportWidth));
+      return;
+    }
+
+    final delta = event.scrollDelta.dx.abs() >= event.scrollDelta.dy.abs()
+        ? event.scrollDelta.dx
+        : event.scrollDelta.dy;
+    if (delta == 0) return;
+    widget.onGeometryChanged(widget.geometry
+        .scrolledBy(delta, viewportWidthPx: _viewportWidth));
   }
 }
