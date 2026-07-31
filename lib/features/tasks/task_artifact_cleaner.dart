@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../core/log/app_log.dart';
+import '../../core/storage/cache_usage.dart';
 
 /// 任务中间产物清理接口（与 TaskRepository 同款：抽象接口 + 文件实现，便于测试替身）
 abstract class TaskArtifactCleaner {
@@ -33,15 +34,12 @@ class FileTaskArtifactCleaner implements TaskArtifactCleaner {
     if (!await workDir.exists()) return;
     await for (final entity in workDir.list()) {
       if (entity is! File) continue;
-      if (!_belongsTo(p.basename(entity.path), taskId)) continue;
+      // 归属判定与「缓存管理」共用一份（见 artifactBelongsTo）：两处规则一旦
+      // 分叉，设置页算出的可回收空间就会和删除任务实际清掉的东西对不上
+      if (!artifactBelongsTo(p.basename(entity.path), taskId)) continue;
       await _deleteIfExists(entity);
     }
   }
-
-  static bool _belongsTo(String fileName, String taskId) =>
-      fileName == taskId ||
-      fileName.startsWith('$taskId.') ||
-      fileName.startsWith('${taskId}_');
 
   /// 单个文件删除失败（权限/占用）只记录日志，不影响其余产物与任务删除本身
   Future<void> _deleteIfExists(File file) async {
