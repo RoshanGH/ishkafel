@@ -334,13 +334,21 @@ class _TimelineViewState extends State<TimelineView> {
           onHorizontalDragCancel: _handleDragCancel,
           // RepaintBoundary 是必需的：没有它时 RenderCustomPaint.markNeedsPaint
           // 会一路上溯到 RenderView，播放头每次移动都要把整页的绘制指令重录一遍。
-          child: RepaintBoundary(
+          // 轨道总高是固定的（四条轨 + 各自标题条 = 248px）。窗口太矮时
+          // 纵向滚动兜底，而不是让最后一条轨（音频波形）整条落在可视区外——
+          // 用户既看不到波形，也看不到为它准备的「生成中/生成失败」占位。
+          // 手势坐标取自 CustomPaint 内部，滚动不影响命中判定的 y 基准。
+          child: SingleChildScrollView(
+            child: RepaintBoundary(
             child: AnimatedBuilder(
               animation: widget.controller,
               builder: (context, _) => ValueListenableBuilder<int>(
                 valueListenable: widget.playhead,
                 builder: (context, playheadMs, _) => CustomPaint(
-                  size: Size(constraints.maxWidth, constraints.maxHeight),
+                  size: Size(
+                    constraints.maxWidth,
+                    math.max(constraints.maxHeight, TimelineTracks.totalHeight),
+                  ),
                   painter: TimelinePainter(
                     units: widget.controller.units,
                     selection: widget.controller.selection,
@@ -354,6 +362,7 @@ class _TimelineViewState extends State<TimelineView> {
                 ),
               ),
             ),
+          ),
           ),
         ),
         );

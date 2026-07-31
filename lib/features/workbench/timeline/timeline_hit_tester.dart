@@ -143,6 +143,14 @@ abstract final class TimelineTracks {
 
   /// 波形轨底部
   static double get waveBottom => waveTop + waveH;
+
+  /// 四条轨（含各自标题条）的总高。
+  ///
+  /// 窗口太矮时最后一条会整条落在可视区外——用户既看不到波形，也看不到
+  /// 为它准备的「生成中/生成失败」占位。窗口最小尺寸由它反推，见
+  /// `macos/Runner/MainFlutterWindow.swift` 与
+  /// `test/features/workbench/timeline/timeline_tracks_layout_test.dart`。
+  static double get totalHeight => waveBottom;
 }
 
 /// 时间线命中判定器（纯函数，静态方法）
