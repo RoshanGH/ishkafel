@@ -18,6 +18,53 @@ void main() {
     expect(byteData.getUint32(40, Endian.little), 4); // data 长度
   });
 
+  test('wrapPcmAsWav 头部各字段逐一正确', () {
+    final pcm = Uint8List.fromList(List.generate(100, (i) => i));
+    final wav = VolcanoAsrProvider.wrapPcmAsWav(pcm, 44100);
+    final d = ByteData.sublistView(wav);
+    expect(String.fromCharCodes(wav.sublist(0, 4)), 'RIFF');
+    expect(d.getUint32(4, Endian.little), 36 + 100); // RIFF chunk 大小
+    expect(String.fromCharCodes(wav.sublist(8, 12)), 'WAVE');
+    expect(String.fromCharCodes(wav.sublist(12, 16)), 'fmt ');
+    expect(d.getUint32(16, Endian.little), 16); // fmt chunk 大小
+    expect(d.getUint16(20, Endian.little), 1); // PCM
+    expect(d.getUint16(22, Endian.little), 1); // 单声道
+    expect(d.getUint32(24, Endian.little), 44100); // 采样率
+    expect(d.getUint32(28, Endian.little), 44100 * 2); // byteRate
+    expect(d.getUint16(32, Endian.little), 2); // blockAlign
+    expect(d.getUint16(34, Endian.little), 16); // 位深
+    expect(String.fromCharCodes(wav.sublist(36, 40)), 'data');
+    expect(d.getUint32(40, Endian.little), 100); // data 长度
+  });
+
+  test('wrapPcmAsWav 拼接后的 PCM 区与原始字节逐字节一致', () {
+    final pcm = Uint8List.fromList(List.generate(512, (i) => (i * 7) % 256));
+    final wav = VolcanoAsrProvider.wrapPcmAsWav(pcm, 16000);
+    expect(wav.length, 44 + 512);
+    expect(wav.sublist(44), pcm);
+  });
+
+  test('wrapPcmAsWav 空 PCM 只产出 44 字节头，data 长度为 0', () {
+    final wav = VolcanoAsrProvider.wrapPcmAsWav(Uint8List(0), 16000);
+    expect(wav.length, 44);
+    final d = ByteData.sublistView(wav);
+    expect(d.getUint32(4, Endian.little), 36);
+    expect(d.getUint32(40, Endian.little), 0);
+  });
+
+  test('wrapPcmAsWav 不得用展开操作符构造中间 List（大素材下主线程阻塞）', () {
+    // 5 分钟 16kHz 单声道 s16le ≈ 9.6MB。展开操作符会先建一个 960 万元素的
+    // growable List<int>（每元素 8 字节）再拷贝，实测 75.8ms 阻塞 + 77MB 瞬时
+    // 分配；预分配 + setRange 在同规模下是毫秒级。阈值 30ms 留了足够余量。
+    final pcm = Uint8List(9600000);
+    final sw = Stopwatch()..start();
+    final wav = VolcanoAsrProvider.wrapPcmAsWav(pcm, 16000);
+    sw.stop();
+    expect(wav.length, 44 + pcm.length);
+    expect(sw.elapsedMilliseconds, lessThan(30),
+        reason: '耗时 ${sw.elapsedMilliseconds}ms，说明仍在构造中间 List');
+  });
+
   test('transcribe 提交 base64 WAV 并解析 utterances 与逐字 words', () async {
     final tempDir = await Directory.systemTemp.createTemp('ishkafel_asr_');
     addTearDown(() => tempDir.delete(recursive: true));

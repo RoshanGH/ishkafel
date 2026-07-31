@@ -31,11 +31,18 @@ class VolcanoAsrProvider implements AsrProvider {
       '${DateTime.now().microsecondsSinceEpoch}-${Random().nextInt(1 << 32)}';
 
   /// s16le 单声道 PCM 包 44 字节标准 WAV 头
+  ///
+  /// 一次性预分配 `44 + n` 字节再原地写入：早先用展开操作符
+  /// `Uint8List.fromList([...header, ...pcm])`，会先建一个 n 元素的 growable
+  /// `List<int>`（每元素 8 字节）再整体拷贝——5 分钟素材实测 75.8ms 主线程阻塞
+  /// 加 77MB 瞬时分配，而这段代码跑在导入后的分析流程里，直接卡住 UI。
   static Uint8List wrapPcmAsWav(Uint8List pcmBytes, int sampleRate) {
     const channels = 1;
     const bitsPerSample = 16;
+    const headerSize = 44;
     final byteRate = sampleRate * channels * bitsPerSample ~/ 8;
-    final header = ByteData(44);
+    final wav = Uint8List(headerSize + pcmBytes.length);
+    final header = ByteData.sublistView(wav, 0, headerSize);
     void writeAscii(int offset, String s) {
       for (var i = 0; i < s.length; i++) {
         header.setUint8(offset + i, s.codeUnitAt(i));
@@ -55,7 +62,8 @@ class VolcanoAsrProvider implements AsrProvider {
     header.setUint16(34, bitsPerSample, Endian.little);
     writeAscii(36, 'data');
     header.setUint32(40, pcmBytes.length, Endian.little);
-    return Uint8List.fromList([...header.buffer.asUint8List(), ...pcmBytes]);
+    wav.setRange(headerSize, wav.length, pcmBytes);
+    return wav;
   }
 
   @override
