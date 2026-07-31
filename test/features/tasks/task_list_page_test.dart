@@ -431,6 +431,68 @@ void main() {
       expect(find.textContaining('源文件已不存在'), findsOneWidget);
     });
 
+    testWidgets('缓存说「在」但文件已被删掉：点击时实时校验必须拦住入口（Important 4）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = true;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsNothing);
+
+      // 用户在 Finder 里删掉了源视频；没有导入/删除/重命名/分析完成，
+      // 缓存不会重算，这条仍被当作「存在」
+      exists = false;
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing,
+          reason: '进去只会是播放器黑屏 + 两条辅助轨报失败');
+      expect(find.textContaining('源文件已不存在'), findsOneWidget);
+      expect(find.text('源文件缺失'), findsOneWidget,
+          reason: '实时校验的结果要回灌缓存，列表上的红标跟着更新');
+    });
+
+    testWidgets('文件放回原位后不必重启应用：点击时实时校验放行（Important 4）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = false;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsOneWidget);
+
+      exists = true;
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsOneWidget,
+          reason: '文件已经放回来了，入口不该继续被挡');
+    });
+
+    testWidgets('应用重新激活时重算缓存（在 Finder 里改动文件后回到应用即可见）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var exists = true;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async => exists),
+      ]));
+      await tester.pumpAndSettle();
+      expect(find.text('源文件缺失'), findsNothing);
+
+      exists = false;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(find.text('源文件缺失'), findsOneWidget);
+    });
+
     testWidgets('源文件存在性只在列表变化时探测一次，不随每帧重复（否则又是逐帧同步 IO）',
         (tester) async {
       final repo = InMemoryTaskRepository();
