@@ -86,7 +86,13 @@ void main() {
     ];
 
     test('拆分：镜头切开、台词按句子分配、index 重排', () {
-      final out = SegmentationEditOps.splitUnitAt(fixture(), 0, 3000,
+      // 台词与 ASR 重建文本一致（未被手工改过）时才走"按句子分配"这条路：
+      // 单元 0 覆盖 sentences[0]+sentences[1]，其拼接即为该单元台词
+      final units = [
+        fixture()[0].copyWith(transcript: '第一句。第二句。'),
+        fixture()[1].copyWith(transcript: '第三句。'),
+      ];
+      final out = SegmentationEditOps.splitUnitAt(units, 0, 3000,
           fps: fps, sentences: sentences)!;
       expect(out.length, 3);
       expect(out[0].endMs, 3000);
@@ -95,6 +101,35 @@ void main() {
       expect(out[1].transcript, '第二句。');
       expect(out.map((u) => u.index).toList(), [0, 1, 2]);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    group('拆分不得静默丢弃单元现有台词（评审 Critical 1）', () {
+      test('sentences 为空时不清空台词：两段拼接仍等于原台词', () {
+        final out = SegmentationEditOps.splitUnitAt(fixture(), 0, 3000,
+            fps: fps, sentences: const [])!;
+        expect(out[0].transcript, isNotEmpty);
+        expect(out[1].transcript, isNotEmpty);
+        expect(out[0].transcript + out[1].transcript, '第一段台词。');
+      });
+
+      test('台词被手工改过（与 ASR 重建文本不一致）时按比例切现有台词，不还原成 ASR 原文', () {
+        final edited = [
+          fixture()[0].copyWith(transcript: '手工改过的台词甲乙'),
+          fixture()[1],
+        ];
+        final out = SegmentationEditOps.splitUnitAt(edited, 0, 3000,
+            fps: fps, sentences: sentences)!;
+        expect(out[0].transcript + out[1].transcript, '手工改过的台词甲乙');
+        expect(out[0].transcript, isNot(contains('第一句')));
+        expect(out[1].transcript, isNot(contains('第二句')));
+      });
+
+      test('拆分再合并回来，台词逐字复原（左右两段拼接无损）', () {
+        final split = SegmentationEditOps.splitUnitAt(fixture(), 0, 4500,
+            fps: fps, sentences: const [])!;
+        final merged = SegmentationEditOps.mergeUnitWithPrevious(split, 1)!;
+        expect(merged[0].transcript, '第一段台词。');
+      });
     });
 
     test('拆分点在镜头内部时该镜头一分为二', () {

@@ -161,10 +161,7 @@ abstract final class SegmentationEditOps {
       rightShots[0] = rightShots.first.copyWith(startMs: b);
     }
 
-    final overlapping = sentences
-        .where((s) => s.startMs < unit.endMs && s.endMs > unit.startMs)
-        .toList();
-    final (leftText, rightText) = TranscriptSplitter.splitAt(overlapping, b);
+    final (leftText, rightText) = _splitTranscript(unit, b, sentences);
 
     final leftUnit =
         unit.copyWith(endMs: b, transcript: leftText, shots: leftShots);
@@ -179,6 +176,35 @@ abstract final class SegmentationEditOps {
     ]);
     assert(holdsInvariants(result, durationMs, fps));
     return result;
+  }
+
+  /// 拆分单元时把该单元的台词分给左右两段。
+  ///
+  /// **单元现有台词是唯一权威**：`unit.transcript` 是用户在检查器里看到、
+  /// 并且可能刚刚手工改过的文本，也可能是 LLM 改写过的稿子——它未必等于
+  /// ASR 逐句原文。此前这里一律用 [TranscriptSplitter.splitAt] 从
+  /// [sentences] 重算，于是：
+  /// - `sentences` 为空（早期版本创建的任务没存 ASR 句子）时，两段台词被
+  ///   一起清空，用户的台词凭空消失；
+  /// - 台词被手工编辑/LLM 改写过时，拆分会把它静默还原成 ASR 原文。
+  ///
+  /// 现在只在"ASR 逐句拼接恰好等于当前台词"（说明台词就是 ASR 原文、没被
+  /// 动过）时才走句子时间戳分配这条更精确的路；否则按拆分点在单元时长中的
+  /// 比例切分现有台词。两条路径都满足 `left + right == unit.transcript`，
+  /// 因此拆分后再合并回来台词逐字复原，绝不会产出两段空台词。
+  static (String left, String right) _splitTranscript(
+      SemanticUnit unit, int b, List<AsrSentence> sentences) {
+    final overlapping = sentences
+        .where((s) => s.startMs < unit.endMs && s.endMs > unit.startMs)
+        .toList();
+    final asrText = overlapping.map((s) => s.text).join();
+    if (overlapping.isNotEmpty && asrText == unit.transcript) {
+      return TranscriptSplitter.splitAt(overlapping, b);
+    }
+
+    final span = unit.endMs - unit.startMs;
+    final ratio = span <= 0 ? 0.0 : (b - unit.startMs) / span;
+    return TranscriptSplitter.splitTextByRatio(unit.transcript, ratio);
   }
 
   /// 单元 u 并入前一单元（镜头列表拼接，原单元边界保留为镜头边界；台词拼接；tags 取并集）
