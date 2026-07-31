@@ -48,6 +48,11 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
 
   /// 拉标签组列表。失败只翻译成中文引导展示，**不自动重试**——401 自动重试
   /// 只会连续撞墙，403/404 重试也不会变好，都得用户自己去处理。
+  ///
+  /// 前提：只在「还没有任何标签组可选」时才可能被重新调用（重试按钮只出现在
+  /// 失败/空列表两种状态，此时两个下拉根本没渲染，也就不可能已有选中项）。
+  /// 若将来把重试入口挪到列表已加载之后，必须同时清掉新列表里不存在的选中项，
+  /// 否则 DropdownButton 会因 value 不在 items 中而断言失败。
   Future<void> _loadGroups() async {
     setState(() {
       _groups = null;
