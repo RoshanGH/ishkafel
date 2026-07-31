@@ -118,9 +118,14 @@ class _TimelineViewState extends State<TimelineView> {
   /// 放大之后视口只覆盖全片的一小段，一播放播放头几秒就跑到视口外，用户
   /// 要么手动追着滚、要么只能缩回 fit——放大功能等于废掉一半。
   ///
-  /// 只在**跑出去**时才滚（还在视野里就不动），避免每帧微调让画面无谓抖动、
-  /// 也避免跟用户正在查看的位置抢控制权。滚动后把播放头放在视口靠左三分之一
-  /// 处，留出更多"接下来要播的内容"，这是视频工具的通行做法。
+  /// 只在**跑出去**时才滚（还在视野里就不动），避免每帧微调让画面无谓抖动。
+  /// 滚动后把播放头放在视口靠左三分之一处，留出更多"接下来要播的内容"，
+  /// 这是视频工具的通行做法。
+  ///
+  /// 用户手动平移/缩放后临时停跟随（[_followSuspended]）：否则播放中想看看
+  /// 别处，下一个 tick（≤33ms）就把视口拽回去，等于不让人看。播放头重新
+  /// 进入视野时视为"用户已经追上"，自动恢复跟随——暂停不能是永久的，
+  /// 否则浏览过一次之后播放头就再也不会被带回来。
   void _followPlayhead() {
     if (_viewportWidth <= 0) return;
     final geometry = widget.geometry;
@@ -128,7 +133,11 @@ class _TimelineViewState extends State<TimelineView> {
     if (geometry.totalWidthPx <= _viewportWidth) return;
 
     final x = geometry.msToPx(widget.playhead.value);
-    if (x >= 0 && x <= _viewportWidth) return;
+    if (x >= 0 && x <= _viewportWidth) {
+      _followSuspended = false;
+      return;
+    }
+    if (_followSuspended) return;
 
     final targetScroll = geometry.msToPx(widget.playhead.value) +
         geometry.scrollPx -
@@ -376,6 +385,9 @@ class _TimelineViewState extends State<TimelineView> {
   ///
   /// 纵向滚动也映射为平移：时间线本身没有纵向可滚内容，不映射就是一个
   /// 落空的手势；而触控板上纯粹的水平滑动很难做到，用户实际会带纵向分量。
+  /// 用户手动平移/缩放后临时停止跟随播放头；播放头重新进入视野时解除
+  bool _followSuspended = false;
+
   /// 触控板双指手势上一次的累计缩放比例与累计平移（事件给的是自手势开始
   /// 以来的累计值，需要自己算增量）
   double _panZoomScale = 1.0;
@@ -405,6 +417,7 @@ class _TimelineViewState extends State<TimelineView> {
       next = next.scrolledBy(-panDelta.dx, viewportWidthPx: _viewportWidth);
     }
     if (identical(next, widget.geometry)) return;
+    _followSuspended = true;
     widget.onGeometryChanged(next);
   }
 
@@ -419,6 +432,7 @@ class _TimelineViewState extends State<TimelineView> {
       final steps = -event.scrollDelta.dy / 100;
       if (steps == 0) return;
       final factor = math.pow(1.2, steps).toDouble();
+      _followSuspended = true;
       widget.onGeometryChanged(widget.geometry.zoomAt(
           event.localPosition.dx, factor,
           viewportWidthPx: _viewportWidth));
@@ -429,6 +443,7 @@ class _TimelineViewState extends State<TimelineView> {
         ? event.scrollDelta.dx
         : event.scrollDelta.dy;
     if (delta == 0) return;
+    _followSuspended = true;
     widget.onGeometryChanged(widget.geometry
         .scrolledBy(delta, viewportWidthPx: _viewportWidth));
   }

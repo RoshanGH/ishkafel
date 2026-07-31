@@ -15,6 +15,7 @@ import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
+import 'package:ishkafel/features/workbench/workbench_shortcuts.dart';
 
 class _Repo implements TaskRepository {
   final _store = <String, RenewTask>{};
@@ -121,6 +122,26 @@ void main() {
           reason: '只有 ±1 帧时，跨过一秒要按 30 次；专业工具都提供粗调档位');
     });
 
+    testWidgets('工具条被按键放行表包裹，方向键不会被页面级快捷键截走',
+        (tester) async {
+      await pump(tester);
+
+      // 接线断言：缩放滑块所在的工具条外面必须有一层 workbenchControlKeyPassthrough。
+      // 不直接模拟"聚焦滑块"是因为 Slider 的内部焦点节点在 widget 测试里拿不稳，
+      // 断言会退化成测不到真实路径的假绿（试过，primaryFocus 仍停在 PlayerPanel）。
+      final slider = find.byKey(const Key('timeline-zoom-slider'));
+      expect(slider, findsOneWidget);
+
+      final guards = tester
+          .widgetList<Shortcuts>(
+              find.ancestor(of: slider, matching: find.byType(Shortcuts)))
+          .where((w) => identical(w.shortcuts, workbenchControlKeyPassthrough));
+      expect(guards, isNotEmpty,
+          reason: '页面级快捷键的作用域包住了整个 body；工具条不单独放行的话，'
+              '焦点落在缩放滑块上时方向键会被截成逐帧步进，'
+              '滑块靠方向键微调（macOS 标准行为）就失效了');
+    });
+
     testWidgets('Home / End 跳到片头片尾', (tester) async {
       await pump(tester);
 
@@ -133,4 +154,52 @@ void main() {
       expect(playback.calls, contains('seekMs(8000)'));
     });
   });
+
+  group('按键放行表的机制本身', () {
+    testWidgets('被它包裹的子树里，方向键不再冒泡到外层快捷键', (tester) async {
+      var outerInvocations = 0;
+
+      Widget build({required bool withGuard}) {
+        final inner = Focus(autofocus: true, child: const SizedBox(width: 40, height: 40));
+        return MaterialApp(
+          home: Shortcuts(
+            shortcuts: const {
+              SingleActivator(LogicalKeyboardKey.arrowRight):
+                  _ProbeIntent(),
+            },
+            child: Actions(
+              actions: {
+                _ProbeIntent: CallbackAction<_ProbeIntent>(
+                    onInvoke: (_) => outerInvocations++),
+              },
+              child: withGuard
+                  ? Shortcuts(
+                      shortcuts: workbenchControlKeyPassthrough, child: inner)
+                  : inner,
+            ),
+          ),
+        );
+      }
+
+      // 没有放行表时：外层快捷键会截走方向键
+      await tester.pumpWidget(build(withGuard: false));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(outerInvocations, 1, reason: '前提：外层快捷键本来是会生效的');
+
+      // 有放行表时：按键停在这一层，交给控件自己处理
+      outerInvocations = 0;
+      await tester.pumpWidget(build(withGuard: true));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await tester.pump();
+      expect(outerInvocations, 0,
+          reason: '放行表若不起作用，接线断言就只是「包了一层没用的东西」');
+    });
+  });
+}
+
+class _ProbeIntent extends Intent {
+  const _ProbeIntent();
 }

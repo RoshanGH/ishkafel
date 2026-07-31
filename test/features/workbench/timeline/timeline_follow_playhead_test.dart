@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
@@ -102,6 +103,74 @@ void main() {
       expect(callCount, 0,
           reason: '播放头还在视野里就滚动，会让画面无谓地抖动，也会跟用户'
               '正在查看的位置抢控制权');
+    });
+
+    testWidgets('用户手动浏览后暂停跟随，不把视口从用户脚下拽走', (tester) async {
+      final zoomed = TimelineGeometry.fit(
+              durationMs: _durationMs, viewportWidthPx: _viewportWidth)
+          .zoomAt(0, 8, viewportWidthPx: _viewportWidth);
+      final playhead = ValueNotifier<int>(0);
+      addTearDown(playhead.dispose);
+      TimelineGeometry? latest;
+
+      await _pump(
+        tester,
+        geometry: zoomed,
+        playhead: playhead,
+        onGeometryChanged: (g) => latest = g,
+      );
+
+      // 用户滚轮浏览到别处（模拟播放中想看看后面的内容）
+      final center = tester.getCenter(find.byType(TimelineView));
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(center));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(200, 0)));
+      await tester.pump();
+      latest = null;
+
+      // 播放继续推进，播放头此时在视口之外
+      playhead.value = 60000;
+      await tester.pump();
+
+      expect(latest, isNull,
+          reason: '用户刚手动浏览过，下一个 tick（≤33ms）就把视口拽回去，'
+              '等于不让人看——剪映/FCP 都是用户一交互就临时停跟随');
+    });
+
+    testWidgets('播放头重新进入视野后恢复跟随', (tester) async {
+      final zoomed = TimelineGeometry.fit(
+              durationMs: _durationMs, viewportWidthPx: _viewportWidth)
+          .zoomAt(0, 8, viewportWidthPx: _viewportWidth);
+      final playhead = ValueNotifier<int>(0);
+      addTearDown(playhead.dispose);
+      TimelineGeometry? latest;
+
+      await _pump(
+        tester,
+        geometry: zoomed,
+        playhead: playhead,
+        onGeometryChanged: (g) => latest = g,
+      );
+
+      final center = tester.getCenter(find.byType(TimelineView));
+      final pointer = TestPointer(1, PointerDeviceKind.mouse);
+      await tester.sendEventToBinding(pointer.hover(center));
+      await tester.sendEventToBinding(pointer.scroll(const Offset(200, 0)));
+      await tester.pump();
+
+      // 播放头回到当前视口内 → 视为用户已经"追上"，恢复跟随
+      final insideMs = zoomed.pxToMs(_viewportWidth / 2).round();
+      playhead.value = insideMs;
+      await tester.pump();
+      latest = null;
+
+      // 再次跑出视口，这次应该重新跟随
+      playhead.value = 60000;
+      await tester.pump();
+
+      expect(latest, isNotNull,
+          reason: '暂停跟随不能是永久的，否则用户浏览一次之后播放头就再也'
+              '不会被带回来了');
     });
 
     testWidgets('未放大（整片铺满视口）时永远不滚动', (tester) async {

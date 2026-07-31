@@ -148,6 +148,35 @@ class PageSeekEdgeAction extends Action<PageSeekEdgeIntent> {
   void invoke(PageSeekEdgeIntent intent) => _callback(intent.toStart);
 }
 
+/// 工具条/滑块区域的按键放行表。
+///
+/// 页面级快捷键的作用域包住了整个 body（三栏 + 时间线），于是焦点落在时间线
+/// 工具条的按钮或缩放滑块上时，方向键会被截成逐帧步进、空格会被截成播放，
+/// 这些控件自身的键盘操作（滑块靠方向键微调是 macOS 的标准行为）全部失效。
+///
+/// 用 [DoNothingAndStopPropagationIntent] 在这一小块区域内把相关按键"吃掉"，
+/// 让它们停在这里、由控件自己按系统默认行为处理，而不是继续冒泡到页面级。
+const Map<ShortcutActivator, Intent> workbenchControlKeyPassthrough =
+    <ShortcutActivator, Intent>{
+  SingleActivator(LogicalKeyboardKey.space):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowLeft):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowRight):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowUp):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowDown):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.home):
+      DoNothingAndStopPropagationIntent(),
+  SingleActivator(LogicalKeyboardKey.end): DoNothingAndStopPropagationIntent(),
+};
+
 /// ⇧+方向键的粗调步长（帧）
 const int _coarseStepFrames = 10;
 

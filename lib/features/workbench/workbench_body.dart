@@ -210,9 +210,14 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           // 工具条按钮的禁用态取自编辑器（canUndo/canRedo/selection），必须
           // 自己监听：页面级 setState 已被移除（播放时每秒 30 次重建整页的
           // 性能问题），不能再指望父级顺手帮它重建
-          AnimatedBuilder(
-            animation: editor,
-            builder: (context, _) => _buildTimelineToolbar(editor),
+          // 工具条内的按钮与缩放滑块要保留自己的键盘操作，不能被页面级
+          // 快捷键截走（见 workbenchControlKeyPassthrough 的说明）
+          Shortcuts(
+            shortcuts: workbenchControlKeyPassthrough,
+            child: AnimatedBuilder(
+              animation: editor,
+              builder: (context, _) => _buildTimelineToolbar(editor),
+            ),
           ),
           Expanded(
             child: LayoutBuilder(
