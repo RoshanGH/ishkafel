@@ -185,6 +185,43 @@ void main() {
           return ProcessResult(1, 0, '', '');
         });
 
+    test('视觉镜头打标并发进行（串行时 32 个镜头要跑近十分钟）', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask()
+          .copyWith(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      await repo.save(task);
+
+      var inFlight = 0;
+      var peak = 0;
+      var calls = 0;
+
+      await taggingPipeline(
+        repo,
+        shotTagger: _FakeShotTagger(
+          onTag: () {
+            calls++;
+            inFlight++;
+            if (inFlight > peak) peak = inFlight;
+          },
+          work: () async {
+            await Future<void>.delayed(const Duration(milliseconds: 5));
+            inFlight--;
+          },
+        ),
+        thumbnails: fakeThumbnails(),
+        vocabulary: fakeSource({
+          136: const ['开箱']
+        }),
+      ).analyze(task);
+
+      expect(calls, greaterThan(1), reason: '前提：确实跑了多个镜头的打标');
+      expect(peak, greaterThan(1),
+          reason: '串行打标下峰值并发恒为 1。真机实测单个镜头的视觉打标约 18 秒，'
+              '32 个镜头串行就是近十分钟，用户只能对着「分析中」干等');
+      expect(peak, lessThanOrEqualTo(4),
+          reason: '云端 API 有并发与配额限制，不能无上限地打出去');
+    });
+
     test('配置 taggers 后单元按本任务的单元标签组打标', () async {
       final repo = FileTaskRepository(tempDir);
       final task = makeTask().copyWith(
@@ -392,9 +429,12 @@ class _ThrowingUnitTagger extends UnitTagger {
   }
 }
 
+/// 视觉镜头打标的并发度：真机实测单个镜头的视觉打标约 18 秒，
+/// 32 个镜头串行就是近十分钟，用户只能对着「分析中」干等。
 class _FakeShotTagger extends ShotTagger {
   final void Function() onTag;
-  _FakeShotTagger({required this.onTag})
+  final Future<void> Function()? work;
+  _FakeShotTagger({required this.onTag, this.work})
       : super(
             chat: ArkChatClient(
                 apiKey: 'x',
@@ -404,6 +444,7 @@ class _FakeShotTagger extends ShotTagger {
   Future<List<String>> tag(
       {required List<int> frameJpeg, required List<String> vocabulary}) async {
     onTag();
+    if (work != null) await work!();
     return ['开箱'];
   }
 }

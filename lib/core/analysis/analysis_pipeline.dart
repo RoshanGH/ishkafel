@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:path/path.dart' as p;
 import '../ai/taggers.dart';
 import '../ffmpeg/thumbnail_service.dart';
@@ -118,7 +119,6 @@ class AnalysisPipeline {
     final tagShots = shotVocabulary.isNotEmpty;
     if (!tagUnits && !tagShots) return units;
 
-    var shotIndex = 0;
     final result = <SemanticUnit>[];
     for (final unit in units) {
       var updatedUnit = unit;
@@ -131,16 +131,57 @@ class AnalysisPipeline {
           AppLog.warn('单元 ${unit.index} 打标失败：$e');
         }
       }
-      if (tagShots) {
-        final shots = <Shot>[];
-        for (final shot in updatedUnit.shots) {
-          shots.add(await _tagShot(task, shot, shotIndex++, shotVocabulary));
-        }
-        updatedUnit = updatedUnit.copyWith(shots: shots);
-      }
       result.add(updatedUnit);
     }
-    return result;
+    if (!tagShots) return result;
+    return _tagAllShotsConcurrently(task, result, shotVocabulary);
+  }
+
+  /// 视觉镜头打标的并发上限。
+  ///
+  /// 真机实测单个镜头的视觉打标约 18 秒（抽代表帧 + 云端多模态推理），
+  /// 32 个镜头串行就是近十分钟，用户只能对着「分析中」干等。并发上限取 4：
+  /// 云端 API 有并发与配额限制，不能无上限地打出去。
+  static const int _shotTaggingConcurrency = 4;
+
+  /// 给全片的视觉镜头并发打标。
+  ///
+  /// 并发要跨单元而不是只在单元内部：真实素材里很多单元只包含一个镜头，
+  /// 按单元并发等于没并发。结果按全局下标回填——按完成顺序收集会把标签
+  /// 串到别的镜头上。
+  Future<List<SemanticUnit>> _tagAllShotsConcurrently(
+      RenewTask task, List<SemanticUnit> units, List<String> vocabulary) async {
+    final flat = <({int unit, int shot})>[
+      for (var u = 0; u < units.length; u++)
+        for (var s = 0; s < units[u].shots.length; s++) (unit: u, shot: s),
+    ];
+    if (flat.isEmpty) return units;
+
+    final tagged = List<Shot?>.filled(flat.length, null);
+    var next = 0;
+
+    Future<void> worker() async {
+      while (true) {
+        final i = next++;
+        if (i >= flat.length) return;
+        final at = flat[i];
+        tagged[i] = await _tagShot(
+            task, units[at.unit].shots[at.shot], i, vocabulary);
+      }
+    }
+
+    await Future.wait(List.generate(
+        math.min(_shotTaggingConcurrency, flat.length), (_) => worker()));
+
+    final byUnit = <int, List<Shot>>{};
+    for (var i = 0; i < flat.length; i++) {
+      final at = flat[i];
+      (byUnit[at.unit] ??= []).add(tagged[i] ?? units[at.unit].shots[at.shot]);
+    }
+    return [
+      for (var u = 0; u < units.length; u++)
+        units[u].copyWith(shots: byUnit[u] ?? units[u].shots),
+    ];
   }
 
   /// 解析某一层的受控词表；未选组 / 无词表源 / 拉取失败 / 组内没标签
