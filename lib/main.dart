@@ -21,6 +21,7 @@ import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'core/log/app_log.dart';
+import 'core/miaoa/miaoa_locator.dart';
 import 'core/miaoa/miaoa_tag_service.dart';
 import 'core/storage/file_task_repository.dart';
 import 'features/import_flow/import_service.dart';
@@ -94,6 +95,7 @@ AnalysisPipeline? _buildAnalysisPipeline(
     thumbnails: ThumbnailService(),
     unitTagger: UnitTagger(chat: chat),
     shotTagger: ShotTagger(chat: chat),
-    vocabulary: MiaoaTagVocabularySource(MiaoaTagService()),
+    vocabulary: MiaoaTagVocabularySource(
+        MiaoaTagService(binary: resolveMiaoaBinary())),
   );
 }
