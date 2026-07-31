@@ -58,6 +58,48 @@ void main() {
     expect(drafts.length, 3);
   });
 
+  group('降级要能被上层感知（用户以为「AI 就这水平」是最坏的结果）', () {
+    test('输出非 JSON → 回调收到「无法解析」原因', () async {
+      final reasons = <SemanticSplitDegradation>[];
+      final splitter = VolcanoSemanticSplitter(
+          chat: fakeChat('抱歉我不明白'), onDegraded: reasons.add);
+      final drafts = await splitter.split(sentences);
+      expect(drafts.length, 3);
+      expect(reasons, [SemanticSplitDegradation.unparsableOutput]);
+    });
+
+    test('分组不合法（遗漏句子）→ 回调收到「分组不完整」原因', () async {
+      final reasons = <SemanticSplitDegradation>[];
+      final splitter = VolcanoSemanticSplitter(
+          chat: fakeChat('{"units":[{"sentenceIndexes":[0]}]}'),
+          onDegraded: reasons.add);
+      await splitter.split(sentences);
+      expect(reasons, [SemanticSplitDegradation.invalidPartition]);
+    });
+
+    test('分组正常时不触发回调', () async {
+      final reasons = <SemanticSplitDegradation>[];
+      final splitter = VolcanoSemanticSplitter(
+          chat: fakeChat(
+              '{"units":[{"sentenceIndexes":[0,1]},{"sentenceIndexes":[2]}]}'),
+          onDegraded: reasons.add);
+      await splitter.split(sentences);
+      expect(reasons, isEmpty);
+    });
+
+    test('未接回调时照常降级，不报错', () async {
+      final splitter = VolcanoSemanticSplitter(chat: fakeChat('乱码'));
+      expect((await splitter.split(sentences)).length, 3);
+    });
+
+    test('每个降级原因都带可直接展示的中文说明', () {
+      for (final reason in SemanticSplitDegradation.values) {
+        expect(reason.userMessage, contains('语义单元'));
+        expect(reason.userMessage, isNot(contains('JSON')));
+      }
+    });
+  });
+
   test('空输入返回空且不调用 LLM', () async {
     var called = false;
     final chat = ArkChatClient(
