@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
+import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 
 /// 时间线辅助素材（抽帧胶片条 / 音频波形）的就绪状态。
@@ -34,6 +34,10 @@ class TimelinePainter extends CustomPainter {
 
   /// 抽帧/波形的就绪状态，决定未就绪时画什么占位
   final TimelineMediaStatus mediaStatus;
+
+  /// 文字排版缓存。由 [TimelineView] 持有并跨帧复用——时间线每帧要画几十段
+  /// 文字，而它们在两帧之间几乎从不变化（播放头移动不改变任何一段文字）。
+  final TextLayoutCache textCache;
 
   /// 单元色块内标签文字的左右内边距（左右各一份）
   static const _unitLabelPadding = 6.0;
@@ -63,6 +67,7 @@ class TimelinePainter extends CustomPainter {
     this.waveEnvelope,
     required this.playheadMs,
     this.mediaStatus = TimelineMediaStatus.ready,
+    required this.textCache,
   });
 
   @override
@@ -416,14 +421,10 @@ class TimelinePainter extends CustomPainter {
     double fontSize = 12,
     double? maxWidth,
   }) {
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: TextStyle(color: color, fontSize: fontSize)),
-      textDirection: TextDirection.ltr,
-      maxLines: 1,
-      ellipsis: '…',
-    );
-    painter.layout(maxWidth: math.max(0, maxWidth ?? double.infinity));
-    painter.paint(canvas, offset);
+    textCache
+        .acquire(
+            text: text, color: color, fontSize: fontSize, maxWidth: maxWidth)
+        .paint(canvas, offset);
   }
 
   @override

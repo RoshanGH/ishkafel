@@ -6,6 +6,7 @@ import 'package:ishkafel/app/theme/app_colors.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
+import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 /// 时间线视口宽（与真机审片台一致的量级，保证极窄单元真的窄到亚像素）
@@ -48,7 +49,8 @@ TimelinePainter _painter({required int playheadMs}) {
     geometry: TimelineGeometry.fit(
         durationMs: 92253, viewportWidthPx: _viewportWidth),
     playheadMs: playheadMs,
-  );
+  
+    textCache: TextLayoutCache(),);
 }
 
 Future<ui.Image> _paintToImage(TimelinePainter painter) async {

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/log/app_log.dart';
+import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
@@ -90,6 +91,9 @@ class _TimelineViewState extends State<TimelineView> {
   /// 时已不是最新请求，需丢弃并 dispose，避免覆盖新结果（竞态）。
   int _decodeRequestId = 0;
 
+  /// 跨帧复用的文字排版缓存（时间线每帧几十段文字，内容几乎不变）
+  final _textCache = TextLayoutCache();
+
   @override
   void initState() {
     super.initState();
@@ -136,6 +140,7 @@ class _TimelineViewState extends State<TimelineView> {
 
   @override
   void dispose() {
+    _textCache.clear();
     widget.playhead.removeListener(_followPlayhead);
     _pendingUnitSelectTimer?.cancel();
     // 兜底：若卸载发生在拖拽会话进行中（Flutter 手势系统在卸载路径下不保证
@@ -339,6 +344,7 @@ class _TimelineViewState extends State<TimelineView> {
                     waveEnvelope: widget.media?.waveEnvelope,
                     playheadMs: playheadMs,
                     mediaStatus: widget.mediaStatus,
+                    textCache: _textCache,
                   ),
                 ),
               ),

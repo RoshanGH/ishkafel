@@ -8,6 +8,7 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
+import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 const _viewportWidth = 1600.0;
@@ -35,7 +36,8 @@ TimelinePainter _painter({EditorSelection? selection}) => TimelinePainter(
       geometry: TimelineGeometry.fit(
           durationMs: _durationMs, viewportWidthPx: _viewportWidth),
       playheadMs: 0,
-    );
+    
+    textCache: TextLayoutCache(),);
 
 Future<ByteData> _render(TimelinePainter painter) async {
   final recorder = ui.PictureRecorder();
@@ -119,7 +121,8 @@ void main() {
         geometry: TimelineGeometry.fit(
             durationMs: _durationMs, viewportWidthPx: _viewportWidth),
         playheadMs: 0,
-      );
+      
+    textCache: TextLayoutCache(),);
 
       expect(
         () => painter.paint(
