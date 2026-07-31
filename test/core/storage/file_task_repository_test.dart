@@ -1,6 +1,12 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 RenewTask makeTask(String id, DateTime updatedAt) => RenewTask(
@@ -8,6 +14,66 @@ RenewTask makeTask(String id, DateTime updatedAt) => RenewTask(
       status: RenewTaskStatus.analyzing,
       createdAt: DateTime.utc(2026, 7, 29), updatedAt: updatedAt,
     );
+
+/// 真实规模的任务：96 秒素材 / 10 个台词语义单元 / 48 个视觉镜头 /
+/// 26 句 ASR / 586 个字级时间戳，落盘约 44 KB——线上任务 JSON 的真实体量。
+RenewTask makeHeavyTask(String id) {
+  const totalMs = 96000;
+  const shotsPerUnit = 5;
+  final units = [
+    for (var i = 0; i < 10; i++)
+      SemanticUnit(
+        index: i,
+        startMs: i * 9600,
+        endMs: (i + 1) * 9600,
+        transcript: '这是第 $i 个台词语义单元的完整台词文本，长度贴近真实口播的一句话内容。',
+        tags: const ['口播', '产品特写'],
+        shots: [
+          for (var s = 0; s < shotsPerUnit; s++)
+            Shot(
+              startMs: i * 9600 + s * 1920,
+              endMs: i * 9600 + (s + 1) * 1920,
+              tags: const ['近景'],
+            ),
+        ],
+      ),
+  ];
+  final sentences = [
+    for (var i = 0; i < 26; i++)
+      AsrSentence(
+        startMs: i * 3692,
+        endMs: (i + 1) * 3692,
+        text: '第 $i 句识别文本，内容与口播台词一致，用于对齐语义单元边界。',
+        words: [
+          for (var w = 0; w < 23; w++)
+            AsrWord(
+              startMs: i * 3692 + w * 160,
+              endMs: i * 3692 + (w + 1) * 160,
+              text: '字',
+              confidence: 0.93,
+            ),
+        ],
+      ),
+  ];
+  return RenewTask(
+    id: id,
+    name: '滴露_植源喷雾_$id',
+    sourcePath: '/Users/x/Movies/素材/$id.mp4',
+    videoInfo: const VideoInfo(
+      width: 1080,
+      height: 1920,
+      duration: Duration(milliseconds: totalMs),
+      fps: 30,
+      fileSizeBytes: 41234567,
+    ),
+    coverPath: '/Users/x/Library/ishkafel/covers/$id.jpg',
+    status: RenewTaskStatus.awaitingCut,
+    createdAt: DateTime.utc(2026, 7, 20, 10),
+    updatedAt: DateTime.utc(2026, 7, 20, 11).add(Duration(seconds: id.hashCode % 1000)),
+    units: units,
+    asrSentences: sentences,
+  );
+}
 
 void main() {
   late Directory tempDir;
@@ -126,6 +192,67 @@ void main() {
       await repo.findAll();
 
       expect(repo.skippedTaskFileCount, 0);
+    });
+  });
+
+  group('解码不占用 UI isolate', () {
+    /// 模拟 60fps 渲染：每 16.67 ms 在主 isolate 上占用 12 ms 做同步工作
+    /// （用户正在滚动任务网格时的真实帧成本），即主 isolate 只剩约 28% 余量。
+    Timer startFrameLoad() =>
+        Timer.periodic(const Duration(microseconds: 16667), (_) {
+          final busy = Stopwatch()..start();
+          while (busy.elapsedMicroseconds < 12000) {}
+        });
+
+    Future<int> measureFindAllMs() async {
+      final stopwatch = Stopwatch()..start();
+      await repo.findAll();
+      return stopwatch.elapsedMilliseconds;
+    }
+
+    test('UI 忙于渲染时 findAll 不被拖慢（说明解码没跟渲染抢主 isolate）', () async {
+      for (var i = 0; i < 60; i++) {
+        await repo.save(makeHeavyTask('h$i'));
+      }
+      await repo.findAll(); // 预热：抹平 isolate 冷启动与文件缓存差异
+
+      final idleMs = await measureFindAllMs();
+      final frameLoad = startFrameLoad();
+      final busyMs = await measureFindAllMs();
+      frameLoad.cancel();
+
+      expect(idleMs, greaterThanOrEqualTo(5), reason: '样本太小则比值没有区分度');
+      // 解码留在 UI isolate 时只能抢到约 28% 的主线程，耗时会涨到 3~5 倍
+      // （实测 100 条：131 ms → 573 ms）；搬到后台 isolate 后基本不受影响。
+      expect(busyMs, lessThan(idleMs * 2.5),
+          reason: '解码仍在 UI isolate 上跟渲染抢时间片（空闲 $idleMs ms → 繁忙 $busyMs ms）');
+    });
+
+    test('跳过坏文件的告警仍走主 isolate 的 AppLog 出口（不能因换 isolate 而丢日志）',
+        () async {
+      final captured = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = captured.add;
+      addTearDown(() => AppLog.sink = original);
+
+      await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+      await File('${tempDir.path}/tasks/bad.json').writeAsString('{not valid');
+      await repo.findAll();
+
+      expect(captured.where((l) => l.contains('bad.json')), isNotEmpty,
+          reason: '后台 isolate 的 AppLog.sink 是另一份 static，日志必须带回主 isolate 输出');
+    });
+
+    test('跨 isolate 传回的任务对象与原对象逐字段相等（含 units / ASR 字级时间戳）',
+        () async {
+      final original = makeHeavyTask('roundtrip');
+      await repo.save(original);
+
+      final loaded = (await repo.findAll()).single;
+
+      expect(loaded, original);
+      expect(loaded.units!.length, 10);
+      expect(loaded.asrSentences!.expand((s) => s.words).length, 26 * 23);
     });
   });
 }
