@@ -18,7 +18,7 @@ void main() {
     test('把区间原样交给播放器', () async {
       _setUp();
 
-      await segment.play(2000, 5000);
+      await segment.play(2000, 5000, 30);
 
       expect(playback.calls, contains('playRange(2000, 5000)'),
           reason: '在外面盯位置流判「到点了没」，采样粒度决定了它必然过头'
@@ -30,7 +30,7 @@ void main() {
       _setUp();
 
       // S1 = [0, 2000)，S2 从 2000 开始
-      await segment.play(0, 2000);
+      await segment.play(0, 2000, 30);
 
       expect(playback.calls, contains('playRange(0, 2000)'),
           reason: '半开区间：2000 属于 S2。播到它之前的最后一帧为止，'
@@ -39,7 +39,7 @@ void main() {
 
     test('播放期间不会额外发定位指令（那正是回跳的来源）', () async {
       _setUp();
-      await segment.play(2000, 5000);
+      await segment.play(2000, 5000, 30);
       playback.calls.clear();
 
       await _settle();
@@ -48,29 +48,31 @@ void main() {
     });
   });
 
-  group('停下之后立刻解除区间', () {
-    test('播放器停住（playing 变 false）就清掉终点', () async {
+  group('段尾自然停住时不去动播放器', () {
+    test('停住（playing 变 false）后不解除区间', () async {
       _setUp();
-      await segment.play(2000, 5000);
+      await segment.play(2000, 5000, 30);
       await _settle();
       playback.calls.clear();
 
-      await playback.pause(); // 模拟播到终点后播放器自行暂停
+      await playback.pause(); // 模拟播到终点后播放器自行停住
       await _settle();
 
-      expect(playback.calls, contains('clearRange()'),
-          reason: '不清掉的话，用户按空格想接着往下看，'
-              '会因为位置已在终点而一按就停');
-      expect(segment.isActive, isFalse);
+      expect(playback.calls, isNot(contains('clearRange()')),
+          reason: 'mpv 是以「EOF + keep-open」的形态停在终点的，这时清掉'
+              '终点它会认为没有终点了而自己恢复播放——实测停在 2615ms 之后'
+              '二十秒，位置已经跑到 21 秒。就让它停在那儿，真正要继续播时'
+              '（PlaybackController.play）再解除');
+      expect(segment.isActive, isFalse, reason: '这一段已经放完了');
     });
 
     test('播下一段前先解除上一段', () async {
       _setUp();
-      await segment.play(0, 2000);
+      await segment.play(0, 2000, 30);
       await _settle();
       playback.calls.clear();
 
-      await segment.play(5000, 8000);
+      await segment.play(5000, 8000, 30);
 
       expect(playback.calls.indexOf('clearRange()'),
           lessThan(playback.calls.indexOf('playRange(5000, 8000)')));
@@ -80,7 +82,7 @@ void main() {
   group('用户另有动作时立刻放手', () {
     test('cancel 会解除区间', () async {
       _setUp();
-      await segment.play(2000, 5000);
+      await segment.play(2000, 5000, 30);
       await _settle();
       playback.calls.clear();
 
@@ -104,7 +106,7 @@ void main() {
     test('从起点播，但不假装停得住', () async {
       _setUp(supportsRange: false);
 
-      await segment.play(2000, 5000);
+      await segment.play(2000, 5000, 30);
 
       expect(playback.calls, containsAllInOrder(['seekMs(2000)', 'play()']));
       expect(segment.isActive, isFalse,
@@ -117,7 +119,7 @@ void main() {
     test('终点不在起点之后时什么都不做', () async {
       _setUp();
 
-      await segment.play(3000, 3000);
+      await segment.play(3000, 3000, 30);
 
       expect(playback.calls, isEmpty,
           reason: '零长度片段播了也只能立刻停，白闪一下不如不动');

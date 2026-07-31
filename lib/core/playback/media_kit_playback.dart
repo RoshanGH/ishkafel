@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../log/app_log.dart';
+import '../editing/frame_time.dart';
 import 'playback_controller.dart';
 
 /// media_kit 实现（薄封装 [Player]）；`Video` 组件由 player_panel 使用。
@@ -31,18 +32,40 @@ class MediaKitPlaybackController implements PlaybackController {
   /// 一帧然后暂停。在 Dart 层盯位置流判断「到点了没」做不到这一点——采样
   /// 粒度决定了它必然过头几十毫秒，再 seek 回去就是一次可见的回跳。
   @override
-  Future<bool> playRange(int startMs, int endMs) async {
+  Future<bool> playRange(int startMs, int endMs, double fps) async {
     if (endMs <= startMs) return false;
     // 先定位再设终点：反过来的话，当前位置若已在终点之后，mpv 会立刻判 EOF
-    await seekMs(startMs);
-    final ok = await _setMpv('end', _mpvSeconds(endMs));
+    final span = FrameSpan.fromMs(startMs, endMs, fps);
+    // 上一段可能刚停在 EOF 状态，先解除再定位，否则 seek 会被 end 拦住
+    await _setMpv('end', 'none');
+    // 定位到这一段的**第一帧**，而不是 startMs 本身（后者未必是帧点）
+    await seekMs(span.firstMs);
+    final ok = await _setMpv('end', _mpvSeconds(span.withinLastFrameMs));
     if (!ok) return false;
-    await play();
+    await player.play(); // 不走 play()：那里的 eof 处理会把刚设好的 end 清掉
     return true;
   }
 
+  /// 解除区间限制。
+  ///
+  /// **先暂停再清**：mpv 在 `end` 处是以「EOF + keep-open」的形态停住的，
+  /// 此时把 `end` 清掉，它会认为没有终点了而**自己恢复播放**（实测：停在
+  /// 2615ms 之后二十秒，位置已经跑到 21 秒）。显式 pause 一次把它钉住。
   @override
-  Future<void> clearRange() async => _setMpv('end', 'none');
+  Future<void> clearRange() async {
+    await player.pause();
+    await _setMpv('end', 'none');
+  }
+
+  Future<String?> _getMpv(String name) async {
+    final native = player.platform;
+    if (native is! NativePlayer) return null;
+    try {
+      return await native.getProperty(name);
+    } catch (e) {
+      return 'ERR';
+    }
+  }
 
   /// mpv 的时间值用秒（小数）。毫秒整数除以 1000 保三位小数即可无损。
   static String _mpvSeconds(int ms) => (ms / 1000).toStringAsFixed(3);
@@ -62,7 +85,21 @@ class MediaKitPlaybackController implements PlaybackController {
   }
 
   @override
-  Future<void> play() => player.play();
+  Future<void> play() async {
+    // 播到区间终点（或文件末尾）后 mpv 处于 eof-reached 状态，此时 play()
+    // 的语义是**重新播放**——用户按空格想接着看，画面却从头开始（实测）。
+    // 先原地 seek 一次把 eof 状态清掉，再播。
+    // 播到区间终点（或文件末尾）后 mpv 处于 eof-reached 状态。此时：
+    // - 直接 play() 的语义是**重新播放**，画面会从头开始（实测）；
+    // - 而残留的 `end` 会让它刚播就又停。
+    // 所以先解除区间、再原地 seek 一次把 eof 清掉，然后才真正播。
+    if (await _getMpv('eof-reached') == 'yes') {
+      final resumeAt = positionMs;
+      await _setMpv('end', 'none');
+      await player.seek(Duration(milliseconds: resumeAt));
+    }
+    await player.play();
+  }
 
   @override
   Future<void> pause() => player.pause();

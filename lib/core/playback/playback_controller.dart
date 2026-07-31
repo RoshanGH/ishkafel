@@ -23,7 +23,7 @@ abstract class PlaybackController {
   /// 一帧正常播到最后一帧然后停，不是播过了再倒带。
   ///
   /// 返回 false 表示当前实现没有这个能力，调用方据此降级（不要假装停得住）。
-  Future<bool> playRange(int startMs, int endMs);
+  Future<bool> playRange(int startMs, int endMs, double fps);
 
   /// 解除区间限制，恢复成一直往下播
   Future<void> clearRange();
@@ -95,7 +95,7 @@ class FakePlaybackController implements PlaybackController {
   bool supportsRange = true;
 
   @override
-  Future<bool> playRange(int startMs, int endMs) async {
+  Future<bool> playRange(int startMs, int endMs, double fps) async {
     calls.add('playRange($startMs, $endMs)');
     if (!supportsRange) return false;
     await seekMs(startMs);

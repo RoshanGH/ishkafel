@@ -29,11 +29,11 @@ class SegmentPlayback {
 
   /// 播放 [startMs, endMs)。区间非法（终点不在起点之后）时不发任何指令——
   /// 零长度片段播了也只能立刻停，白闪一下不如不动。
-  Future<void> play(int startMs, int endMs) async {
+  Future<void> play(int startMs, int endMs, double fps) async {
     await cancel();
     if (endMs <= startMs) return;
 
-    final ranged = await playback.playRange(startMs, endMs);
+    final ranged = await playback.playRange(startMs, endMs, fps);
     if (!ranged) {
       // 没有区间能力（播放器降级成无播放模式）时不假装停得住：
       // 老老实实从起点播，不去做那套会回跳的轮询兜底
@@ -43,20 +43,27 @@ class SegmentPlayback {
       return;
     }
     _active = true;
-    // 播放器在终点停下后（playing 变 false）要立刻解除区间限制，
-    // 否则用户按空格想接着往下看，会因为位置已在终点而一按就停
+    // 播到段尾时**不去解除区间**：mpv 是以「EOF + keep-open」的形态停住的，
+    // 这时清掉终点它会自己恢复播放（实测停在 2.6s 后二十秒跑到了 21s）。
+    // 就让它停在那儿；真正要继续播时（PlaybackController.play）再解除。
     _playingWatch = playback.playingStream.listen((playing) {
-      if (!playing) unawaited(cancel());
+      if (!playing) _stopWatching();
     });
   }
 
-  /// 解除区间限制。用户自己拖了播放头、点了刻度尺、按了空格都该调用它——
-  /// 否则播到某个位置会莫名其妙地停下。
-  Future<void> cancel() async {
+  /// 只撤监听、不碰播放器（段尾自然停住时用）
+  void _stopWatching() {
     _playingWatch?.cancel();
     _playingWatch = null;
-    if (!_active) return;
     _active = false;
+  }
+
+  /// 解除区间限制。用户自己拖了播放头、点了刻度尺都该调用它——
+  /// 否则播到某个位置会莫名其妙地停下。
+  Future<void> cancel() async {
+    final wasActive = _active;
+    _stopWatching();
+    if (!wasActive) return;
     try {
       await playback.clearRange();
     } catch (e) {
