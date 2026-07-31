@@ -35,8 +35,8 @@ void main() {
     test('成功：先出候选卡（规格标为探测中），再逐条填规格', () async {
       final probeGate = Completer<void>();
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(_searchJson(2))),
-        probe: CandidateProbe(run: (_, __) async {
+        service: MiaoaContentService(run: (_, _) async => _ok(_searchJson(2))),
+        probe: CandidateProbe(run: (_, _) async {
           await probeGate.future;
           return _ok(_probeStdout);
         }),
@@ -59,9 +59,9 @@ void main() {
     test('探测失败的那一条只是没有规格，不影响其余候选也不报错', () async {
       var call = 0;
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(_searchJson(2))),
+        service: MiaoaContentService(run: (_, _) async => _ok(_searchJson(2))),
         probe: CandidateProbe(
-            run: (_, __) async =>
+            run: (_, _) async =>
                 call++ == 0 ? ProcessResult(1, 1, '', 'boom') : _ok(_probeStdout)),
       );
 
@@ -77,8 +77,8 @@ void main() {
       var inFlight = 0;
       var peak = 0;
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(_searchJson(20))),
-        probe: CandidateProbe(run: (_, __) async {
+        service: MiaoaContentService(run: (_, _) async => _ok(_searchJson(20))),
+        probe: CandidateProbe(run: (_, _) async {
           inFlight++;
           if (inFlight > peak) peak = inFlight;
           await Future<void>.delayed(const Duration(milliseconds: 1));
@@ -96,8 +96,8 @@ void main() {
 
     test('0 条结果是正常状态（引导语由页面按检索方式给），不是失败', () async {
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(_searchJson(0))),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+        service: MiaoaContentService(run: (_, _) async => _ok(_searchJson(0))),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
       await controller.searchByTags(tagIds: const [7]);
       expect(controller.status, CandidateSearchStatus.ready);
@@ -114,8 +114,8 @@ void main() {
         ],
       });
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(json)),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+        service: MiaoaContentService(run: (_, _) async => _ok(json)),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
       await controller.searchByDescription('喷雾');
       expect(controller.total, 99);
@@ -127,8 +127,8 @@ void main() {
     test('401 直接给出可照做的中文，不包一层「未知错误」', () async {
       final controller = CandidateSearchController(
         service: MiaoaContentService(
-            run: (_, __) async => ProcessResult(1, 1, '', 'HTTP 401 unauthorized')),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+            run: (_, _) async => ProcessResult(1, 1, '', 'HTTP 401 unauthorized')),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
       await controller.searchByDescription('喷雾');
       expect(controller.status, CandidateSearchStatus.failed);
@@ -138,8 +138,8 @@ void main() {
 
     test('未选标签就检索：服务层的中文提示照样透出，不崩', () async {
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async => _ok(_searchJson(1))),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+        service: MiaoaContentService(run: (_, _) async => _ok(_searchJson(1))),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
       await controller.searchByTags(tagIds: const []);
       expect(controller.status, CandidateSearchStatus.failed);
@@ -149,9 +149,9 @@ void main() {
     test('重试成功后失败提示要清掉', () async {
       var fail = true;
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async =>
+        service: MiaoaContentService(run: (_, _) async =>
             fail ? ProcessResult(1, 1, '', 'timeout') : _ok(_searchJson(1))),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
       await controller.searchByDescription('喷雾');
       expect(controller.failureMessage, isNotNull);
@@ -174,7 +174,7 @@ void main() {
           }
           return _ok(_searchJson(5, total: 5));
         }),
-        probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
       );
 
       final stale = controller.searchByDescription('旧的');
@@ -193,9 +193,9 @@ void main() {
       var searchCall = 0;
       var probeCall = 0;
       final controller = CandidateSearchController(
-        service: MiaoaContentService(run: (_, __) async =>
+        service: MiaoaContentService(run: (_, _) async =>
             _ok(_searchJson(searchCall++ == 0 ? 1 : 1))),
-        probe: CandidateProbe(run: (_, __) async {
+        probe: CandidateProbe(run: (_, _) async {
           if (probeCall++ == 0) await probeGate.future;
           return _ok(_probeStdout);
         }),
@@ -214,11 +214,11 @@ void main() {
   test('dispose 后到达的结果不再 notify（避免对已销毁的控制器发通知）', () async {
     final gate = Completer<void>();
     final controller = CandidateSearchController(
-      service: MiaoaContentService(run: (_, __) async {
+      service: MiaoaContentService(run: (_, _) async {
         await gate.future;
         return _ok(_searchJson(1));
       }),
-      probe: CandidateProbe(run: (_, __) async => _ok(_probeStdout)),
+      probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
     );
     final pending = controller.searchByDescription('喷雾');
     controller.dispose();
