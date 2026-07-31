@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
 import 'inspector_panel.dart' show formatTimecode;
@@ -23,27 +25,72 @@ class UnitListPanel extends StatelessWidget {
       animation: controller,
       builder: (context, _) {
         final units = controller.units;
-        return ListView.separated(
-          padding: const EdgeInsets.all(10),
-          itemCount: units.length,
-          separatorBuilder: (context, i) => const SizedBox(height: 4),
-          itemBuilder: (context, i) {
-            final unit = units[i];
-            final selected = controller.selection?.unitIndex == i &&
-                controller.selection?.shotIndex == null;
-            return _UnitRow(
-              unit: unit,
-              index: i,
-              fps: controller.fps,
-              selected: selected,
-              onTap: () {
-                controller.select(EditorSelection.unit(i));
-                onUnitTap?.call(unit);
-              },
-            );
-          },
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ListHeader(count: units.length),
+            Expanded(
+              child: ListView.separated(
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                itemCount: units.length,
+                separatorBuilder: (context, i) =>
+                    const SizedBox(height: AppSpacing.xs),
+                itemBuilder: (context, i) {
+                  final unit = units[i];
+                  final selected = controller.selection?.unitIndex == i &&
+                      controller.selection?.shotIndex == null;
+                  return _UnitRow(
+                    unit: unit,
+                    index: i,
+                    fps: controller.fps,
+                    selected: selected,
+                    onTap: () {
+                      controller.select(EditorSelection.unit(i));
+                      onUnitTap?.call(unit);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
         );
       },
+    );
+  }
+}
+
+/// 列表头：标明这一栏是两层结构里的哪一层，并给出总数
+class _ListHeader extends StatelessWidget {
+  final int count;
+
+  const _ListHeader({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            '台词语义单元',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: AppFontSize.body,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Text(
+            '$count 个',
+            style: const TextStyle(
+                color: AppColors.textTertiary, fontSize: AppFontSize.caption),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -94,17 +141,21 @@ class _UnitRow extends StatelessWidget {
                     style: const TextStyle(
                         color: AppColors.accentBlue,
                         fontWeight: FontWeight.bold,
-                        fontSize: 11),
+                        fontSize: AppFontSize.caption),
                   ),
-                  const SizedBox(width: 7),
+                  const SizedBox(width: AppSpacing.sm),
                   Text(
                     '${formatTimecode(unit.startMs, fps)}–${formatTimecode(unit.endMs, fps)}',
                     style: const TextStyle(
-                        color: AppColors.textTertiary, fontSize: 10.5),
+                        color: AppColors.textTertiary,
+                        fontSize: AppFontSize.micro),
                   ),
+                  const Spacer(),
+                  // 镜头数：判断这个单元要不要展开细调的关键信息
+                  _ShotCountBadge(count: unit.shots.length),
                 ],
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: AppSpacing.xs),
               Text(
                 unit.transcript,
                 maxLines: 1,
@@ -124,6 +175,30 @@ class _UnitRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 镜头数徽标：底色取中性灰，避免与标签 chip（蓝色）混淆
+class _ShotCountBadge extends StatelessWidget {
+  final int count;
+
+  const _ShotCountBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: 1),
+      decoration: BoxDecoration(
+        color: AppColors.textTertiary.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(AppRadius.xs),
+      ),
+      child: Text(
+        '$count 镜头',
+        style: const TextStyle(
+            color: AppColors.textSecondary, fontSize: AppFontSize.micro),
       ),
     );
   }
