@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ffmpeg/media_tools_locator.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/tasks/environment_banner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -33,8 +35,12 @@ RenewTask makeTask(String id, String name, RenewTaskStatus status) => RenewTask(
       createdAt: DateTime.utc(2026, 7, 29), updatedAt: DateTime.utc(2026, 7, 29),
     );
 
-Widget wrap(TaskRepository repo) => ProviderScope(
-      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
+    ProviderScope(
+      overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        ...overrides,
+      ],
       child: const MaterialApp(home: TaskListPage()),
     );
 
@@ -55,6 +61,36 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  group('运行环境横幅（ffmpeg/ffprobe 缺失）', () {
+    testWidgets('未检测到 ffmpeg/ffprobe 时常驻横幅给出中文安装引导', (tester) async {
+      await tester.pumpWidget(wrap(
+        InMemoryTaskRepository(),
+        overrides: [
+          mediaToolsStatusProvider.overrideWithValue(
+              const MediaToolsStatus(ffmpegPath: null, ffprobePath: null)),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('未检测到'), findsOneWidget);
+      expect(find.textContaining('brew install ffmpeg'), findsOneWidget);
+    });
+
+    testWidgets('工具就绪时不显示横幅', (tester) async {
+      await tester.pumpWidget(wrap(
+        InMemoryTaskRepository(),
+        overrides: [
+          mediaToolsStatusProvider.overrideWithValue(const MediaToolsStatus(
+              ffmpegPath: '/opt/homebrew/bin/ffmpeg',
+              ffprobePath: '/opt/homebrew/bin/ffprobe')),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('未检测到'), findsNothing);
+    });
   });
 
   group('任务卡点击路由', () {

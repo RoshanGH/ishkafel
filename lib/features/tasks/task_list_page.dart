@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/models/renew_task.dart';
 import '../workbench/workbench_page.dart';
+import 'environment_banner.dart';
 import 'task_card.dart';
 import 'task_list_controller.dart';
 
@@ -85,29 +86,37 @@ class TaskListPage extends ConsumerWidget {
           ),
         ],
       ),
-      body: tasks.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-            child: Text('加载失败：$e',
-                style: const TextStyle(color: AppColors.textSecondary))),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
-                    style: TextStyle(color: AppColors.textSecondary)))
-            : GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 260,
-                  childAspectRatio: 0.72,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                ),
-                itemCount: list.length,
-                itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => _openTask(context, ref, list[i]),
-                  child: TaskCard(task: list[i]),
-                ),
-              ),
+      body: Column(
+        children: [
+          const EnvironmentBanners(),
+          Expanded(
+            child: tasks.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                  child: Text('加载失败：$e',
+                      style: const TextStyle(color: AppColors.textSecondary))),
+              data: (list) => list.isEmpty
+                  ? const Center(
+                      child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
+                          style: TextStyle(color: AppColors.textSecondary)))
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 260,
+                        childAspectRatio: 0.72,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                      ),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) => GestureDetector(
+                        onTap: () => _openTask(context, ref, list[i]),
+                        child: TaskCard(task: list[i]),
+                      ),
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

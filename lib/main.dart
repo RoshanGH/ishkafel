@@ -16,10 +16,12 @@ import 'core/analysis/scene_detector.dart';
 import 'core/analysis/segmentation_builder.dart';
 import 'core/analysis/silence_detector.dart';
 import 'core/ffmpeg/ffprobe_service.dart';
+import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'core/log/app_log.dart';
 import 'core/storage/file_task_repository.dart';
 import 'features/import_flow/import_service.dart';
+import 'features/tasks/environment_banner.dart';
 import 'features/tasks/task_list_controller.dart';
 
 Future<void> main() async {
@@ -41,11 +43,16 @@ Future<void> main() async {
       devSecretsDir: Directory('${Directory.current.path}/.secrets'));
   final analysisPipeline = _buildAnalysisPipeline(credentials, dataDir);
 
+  // 启动期预检 ffmpeg/ffprobe：GUI 进程 PATH 不含 Homebrew 目录，
+  // 缺失时列表页常驻横幅引导安装，而不是等用户导入时撞见子进程异常
+  final mediaTools = sharedMediaToolsLocator.preflight();
+
   runApp(ProviderScope(
     overrides: [
       taskRepositoryProvider.overrideWithValue(repository),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider.overrideWithValue(analysisPipeline),
+      mediaToolsStatusProvider.overrideWithValue(mediaTools),
     ],
     child: const IshkafelApp(),
   ));
