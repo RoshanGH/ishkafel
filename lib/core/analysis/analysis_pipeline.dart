@@ -4,6 +4,7 @@ import '../ai/taggers.dart';
 import '../ffmpeg/thumbnail_service.dart';
 import '../log/app_log.dart';
 import '../models/renew_task.dart';
+import '../models/tag_group_ref.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
 import '../storage/task_repository.dart';
@@ -12,6 +13,7 @@ import 'providers.dart';
 import 'scene_detector.dart';
 import 'segmentation_builder.dart';
 import 'silence_detector.dart';
+import 'tag_vocabulary.dart';
 
 /// 任务音频 PCM 的中间产物路径（分析管线与时间线波形共用同一份）。
 ///
@@ -36,8 +38,11 @@ class AnalysisPipeline {
   final UnitTagger? unitTagger;
   final ShotTagger? shotTagger;
   final ThumbnailService? thumbnails;
-  final List<String> unitVocabulary;
-  final List<String> shotVocabulary;
+
+  /// 受控词表的来源。词表是**按任务**解析的（取决于该任务在新建向导里选的
+  /// 两个标签组），所以这里注入的是「按组 id 查词表」的能力，而不是一份写死
+  /// 的词表——后者等于所有任务共用一份，受控词表也就名存实亡。
+  final TagVocabularySource? vocabulary;
 
   AnalysisPipeline({
     required this.audio,
@@ -53,8 +58,7 @@ class AnalysisPipeline {
     this.unitTagger,
     this.shotTagger,
     this.thumbnails,
-    this.unitVocabulary = const [],
-    this.shotVocabulary = const [],
+    this.vocabulary,
   }) : clock = clock ?? DateTime.now;
 
   Future<RenewTask> analyze(RenewTask task) async {
@@ -96,13 +100,22 @@ class AnalysisPipeline {
     return updated;
   }
 
-  /// 两层打标：台词语义单元（文本）+ 视觉镜头（代表帧）。打标失败不中断分析。
+  /// 两层打标：台词语义单元（文本）+ 视觉镜头（代表帧）。
+  ///
+  /// 词表按本任务选定的标签组现取（每个任务可能选不同的组），任何一层
+  /// 取不到词表都只降级掉那一层，不中断整条分析——分析结果（切分）本身
+  /// 仍然有价值，为了标签把它整条废掉不划算。
   Future<List<SemanticUnit>> _tagUnits(
       RenewTask task, List<SemanticUnit> units) async {
-    final tagUnits = unitTagger != null && unitVocabulary.isNotEmpty;
-    final tagShots = shotTagger != null &&
-        shotVocabulary.isNotEmpty &&
-        thumbnails != null;
+    final unitVocabulary = unitTagger == null
+        ? const <String>[]
+        : await _vocabularyFor(task.unitTagGroup, '台词语义单元');
+    final shotVocabulary = (shotTagger == null || thumbnails == null)
+        ? const <String>[]
+        : await _vocabularyFor(task.shotTagGroup, '视觉镜头');
+
+    final tagUnits = unitVocabulary.isNotEmpty;
+    final tagShots = shotVocabulary.isNotEmpty;
     if (!tagUnits && !tagShots) return units;
 
     var shotIndex = 0;
@@ -121,7 +134,7 @@ class AnalysisPipeline {
       if (tagShots) {
         final shots = <Shot>[];
         for (final shot in updatedUnit.shots) {
-          shots.add(await _tagShot(task, shot, shotIndex++));
+          shots.add(await _tagShot(task, shot, shotIndex++, shotVocabulary));
         }
         updatedUnit = updatedUnit.copyWith(shots: shots);
       }
@@ -130,7 +143,25 @@ class AnalysisPipeline {
     return result;
   }
 
-  Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex) async {
+  /// 解析某一层的受控词表；未选组 / 无词表源 / 拉取失败 / 组内没标签
+  /// 都返回空列表（=该层不打标），并各自记一条可排查的告警
+  Future<List<String>> _vocabularyFor(TagGroupRef? group, String layer) async {
+    final source = vocabulary;
+    if (group == null || source == null) return const [];
+    try {
+      final words = await source.vocabularyOf(group.id);
+      if (words.isEmpty) {
+        AppLog.warn('$layer 标签组「${group.name}」内没有任何标签，跳过该层打标');
+      }
+      return words;
+    } catch (e) {
+      AppLog.warn('$layer 标签组「${group.name}」的词表拉取失败，跳过该层打标：$e');
+      return const [];
+    }
+  }
+
+  Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
+      List<String> shotVocabulary) async {
     try {
       final midSeconds = (shot.startMs + shot.endMs) / 2 / 1000.0;
       final outPath = p.join(workDir.path, '${task.id}_shot$shotIndex.jpg');

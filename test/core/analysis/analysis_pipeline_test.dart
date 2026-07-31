@@ -10,6 +10,9 @@ import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/analysis/scene_detector.dart';
 import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/silence_detector.dart';
+import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
+import 'package:ishkafel/core/log/app_log.dart';
+import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/video_info.dart';
@@ -142,108 +145,236 @@ void main() {
     expect(persisted!.asrSentences, result.asrSentences);
   });
 
-  test('配置 taggers 后单元与镜头被打标，且打标失败不中断', () async {
-    final repo = FileTaskRepository(tempDir);
-    final task = makeTask();
-    await repo.save(task);
-    var unitCalls = 0;
-    final pipeline = AnalysisPipeline(
-      audio: AudioExtractor(run: (_, args) async {
-        await File(args.last).writeAsBytes(Uint8List(16000));
-        return ProcessResult(1, 0, '', '');
-      }),
-      silence: const SilenceDetector(),
-      scenes: SceneDetector(
-          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
-      asr: FakeAsr(),
-      splitter: FakeSplitter(),
-      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
-      repository: repo,
-      workDir: Directory('${tempDir.path}/work'),
-      clock: () => DateTime.utc(2026, 7, 30),
-      unitTagger: _FakeUnitTagger(onTag: () => unitCalls++),
-      unitVocabulary: const ['功效演示'],
-    );
-    final result = await pipeline.analyze(task);
-    expect(unitCalls, result.units!.length);
-    expect(result.units!.first.tags, ['功效演示']);
-  });
+  group('两层打标的受控词表按任务的标签组解析（不同任务不共用一份词表）', () {
+    /// 假词表源：按组 id 返回不同词表，并记录被问过哪些组
+    final asked = <int>[];
+    TagVocabularySource fakeSource(Map<int, List<String>> byGroup) =>
+        _FakeVocabularySource(byGroup, asked);
 
-  test('shotTagger 配置后镜头被打标（抽帧+词表）', () async {
-    final repo = FileTaskRepository(tempDir);
-    final task = makeTask();
-    await repo.save(task);
-    var shotCalls = 0;
-    final pipeline = AnalysisPipeline(
-      audio: AudioExtractor(run: (_, args) async {
-        await File(args.last).writeAsBytes(Uint8List(16000));
-        return ProcessResult(1, 0, '', '');
-      }),
-      silence: const SilenceDetector(),
-      scenes: SceneDetector(
-          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
-      asr: FakeAsr(),
-      splitter: FakeSplitter(),
-      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
-      repository: repo,
-      workDir: Directory('${tempDir.path}/work'),
-      clock: () => DateTime.utc(2026, 7, 30),
-      thumbnails: ThumbnailService(run: (_, args) async {
-        await File(args.last).writeAsBytes(Uint8List.fromList([1, 2, 3]));
-        return ProcessResult(1, 0, '', '');
-      }),
-      shotTagger: _FakeShotTagger(onTag: () => shotCalls++),
-      shotVocabulary: const ['开箱'],
-    );
-    final result = await pipeline.analyze(task);
-    final totalShots =
-        result.units!.fold<int>(0, (n, u) => n + u.shots.length);
-    expect(shotCalls, totalShots);
-    expect(result.units!.first.shots.first.tags, ['开箱']);
-  });
+    setUp(asked.clear);
 
-  test('unitTagger 抛异常不中断分析，该单元 tags 留空', () async {
-    final repo = FileTaskRepository(tempDir);
-    final task = makeTask();
-    await repo.save(task);
-    final pipeline = AnalysisPipeline(
-      audio: AudioExtractor(run: (_, args) async {
-        await File(args.last).writeAsBytes(Uint8List(16000));
-        return ProcessResult(1, 0, '', '');
-      }),
-      silence: const SilenceDetector(),
-      scenes: SceneDetector(
-          run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
-      asr: FakeAsr(),
-      splitter: FakeSplitter(),
-      builder: const SegmentationBuilder(snapper: BoundarySnapper()),
-      repository: repo,
-      workDir: Directory('${tempDir.path}/work'),
-      clock: () => DateTime.utc(2026, 7, 30),
-      unitTagger: _ThrowingUnitTagger(),
-      unitVocabulary: const ['功效演示'],
-    );
-    final result = await pipeline.analyze(task);
-    expect(result.units, isNotNull);
-    for (final u in result.units!) {
-      expect(u.tags, isEmpty);
-    }
+    AnalysisPipeline taggingPipeline(
+      FileTaskRepository repo, {
+      UnitTagger? unitTagger,
+      ShotTagger? shotTagger,
+      TagVocabularySource? vocabulary,
+      ThumbnailService? thumbnails,
+    }) =>
+        AnalysisPipeline(
+          audio: AudioExtractor(run: (_, args) async {
+            await File(args.last).writeAsBytes(Uint8List(16000));
+            return ProcessResult(1, 0, '', '');
+          }),
+          silence: const SilenceDetector(),
+          scenes: SceneDetector(
+              run: (_, _) async => ProcessResult(1, 0, '', showinfoFixture)),
+          asr: FakeAsr(),
+          splitter: FakeSplitter(),
+          builder: const SegmentationBuilder(snapper: BoundarySnapper()),
+          repository: repo,
+          workDir: Directory('${tempDir.path}/work'),
+          clock: () => DateTime.utc(2026, 7, 30),
+          unitTagger: unitTagger,
+          shotTagger: shotTagger,
+          thumbnails: thumbnails,
+          vocabulary: vocabulary,
+        );
+
+    ThumbnailService fakeThumbnails() => ThumbnailService(run: (_, args) async {
+          await File(args.last).writeAsBytes(Uint8List.fromList([1, 2, 3]));
+          return ProcessResult(1, 0, '', '');
+        });
+
+    test('配置 taggers 后单元按本任务的单元标签组打标', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask().copyWith(
+          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+      await repo.save(task);
+      final tagger = _RecordingUnitTagger(reply: const ['功效演示']);
+
+      final result = await taggingPipeline(repo,
+              unitTagger: tagger,
+              vocabulary: fakeSource({
+                1279: const ['功效演示', '价格机制']
+              }))
+          .analyze(task);
+
+      expect(tagger.calls, result.units!.length);
+      expect(result.units!.first.tags, ['功效演示']);
+      expect(tagger.vocabularies.first, ['功效演示', '价格机制'],
+          reason: '词表必须来自本任务选的那个标签组');
+      expect(asked, [1279]);
+    });
+
+    test('两个任务选了不同标签组时，各自拿到各自的词表', () async {
+      final repo = FileTaskRepository(tempDir);
+      final source = fakeSource({
+        1279: const ['功效演示'],
+        1281: const ['开箱'],
+      });
+      final tagger = _RecordingUnitTagger(reply: const []);
+      final a = makeTask().copyWith(
+          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+      final b = RenewTask.fromJson(makeTask().toJson())
+          .copyWith(unitTagGroup: const TagGroupRef(id: 1281, name: '衣清.立白卫仕'));
+      await repo.save(a);
+
+      await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
+          .analyze(a);
+      final vocabA = tagger.vocabularies.last;
+      await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
+          .analyze(b);
+
+      expect(vocabA, ['功效演示']);
+      expect(tagger.vocabularies.last, ['开箱']);
+    });
+
+    test('镜头层按视觉镜头标签组打标（抽帧 + 该组词表）', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask()
+          .copyWith(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      await repo.save(task);
+      var shotCalls = 0;
+
+      final result = await taggingPipeline(
+        repo,
+        shotTagger: _FakeShotTagger(onTag: () => shotCalls++),
+        thumbnails: fakeThumbnails(),
+        vocabulary: fakeSource({
+          136: const ['开箱']
+        }),
+      ).analyze(task);
+
+      final totalShots =
+          result.units!.fold<int>(0, (n, u) => n + u.shots.length);
+      expect(shotCalls, totalShots);
+      expect(result.units!.first.shots.first.tags, ['开箱']);
+      expect(asked, [136]);
+    });
+
+    test('任务没选标签组时该层不打标，也不去拉词表（不许退回共用词表）', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask();
+      await repo.save(task);
+      final tagger = _RecordingUnitTagger(reply: const ['功效演示']);
+
+      final result = await taggingPipeline(repo,
+              unitTagger: tagger,
+              vocabulary: fakeSource({
+                1279: const ['功效演示']
+              }))
+          .analyze(task);
+
+      expect(tagger.calls, 0);
+      expect(asked, isEmpty);
+      for (final u in result.units!) {
+        expect(u.tags, isEmpty);
+      }
+    });
+
+    test('拉词表失败不中断分析：该层留空并告警（不静默）', () async {
+      final logs = <String>[];
+      final previous = AppLog.sink;
+      AppLog.sink = logs.add;
+      addTearDown(() => AppLog.sink = previous);
+
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask().copyWith(
+          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+      await repo.save(task);
+
+      final result = await taggingPipeline(repo,
+              unitTagger: _RecordingUnitTagger(reply: const ['功效演示']),
+              vocabulary: _ThrowingVocabularySource())
+          .analyze(task);
+
+      expect(result.status, RenewTaskStatus.awaitingCut);
+      for (final u in result.units!) {
+        expect(u.tags, isEmpty);
+      }
+      expect(logs.join(), contains('词表'));
+    });
+
+    test('标签组存在但组内没有标签时跳过打标并告警（空词表打标毫无意义）', () async {
+      final logs = <String>[];
+      final previous = AppLog.sink;
+      AppLog.sink = logs.add;
+      addTearDown(() => AppLog.sink = previous);
+
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask().copyWith(
+          unitTagGroup: const TagGroupRef(id: 1279, name: '空组'));
+      await repo.save(task);
+      final tagger = _RecordingUnitTagger(reply: const ['功效演示']);
+
+      await taggingPipeline(repo,
+              unitTagger: tagger,
+              vocabulary: fakeSource({1279: const []}))
+          .analyze(task);
+
+      expect(tagger.calls, 0);
+      expect(logs.join(), contains('空组'));
+    });
+
+    test('unitTagger 抛异常不中断分析，该单元 tags 留空', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask().copyWith(
+          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+      await repo.save(task);
+
+      final result = await taggingPipeline(repo,
+              unitTagger: _ThrowingUnitTagger(),
+              vocabulary: fakeSource({
+                1279: const ['功效演示']
+              }))
+          .analyze(task);
+
+      expect(result.units, isNotNull);
+      for (final u in result.units!) {
+        expect(u.tags, isEmpty);
+      }
+    });
   });
 }
 
-class _FakeUnitTagger extends UnitTagger {
-  final void Function() onTag;
-  _FakeUnitTagger({required this.onTag})
+/// 假词表源：按组 id 给不同词表，并记录被问过的组 id
+class _FakeVocabularySource implements TagVocabularySource {
+  final Map<int, List<String>> byGroup;
+  final List<int> asked;
+  _FakeVocabularySource(this.byGroup, this.asked);
+
+  @override
+  Future<List<String>> vocabularyOf(int groupId) async {
+    asked.add(groupId);
+    return byGroup[groupId] ?? const [];
+  }
+}
+
+class _ThrowingVocabularySource implements TagVocabularySource {
+  @override
+  Future<List<String>> vocabularyOf(int groupId) async =>
+      throw StateError('拉词表失败（模拟）');
+}
+
+/// 记录每次调用与传入词表的假 UnitTagger
+class _RecordingUnitTagger extends UnitTagger {
+  final List<String> reply;
+  final vocabularies = <List<String>>[];
+  int calls = 0;
+
+  _RecordingUnitTagger({required this.reply})
       : super(
             chat: ArkChatClient(
                 apiKey: 'x',
                 post: (_, _, _) async =>
                     const JsonPostResult(statusCode: 200, body: '{}')));
+
   @override
   Future<List<String>> tag(
       {required String transcript, required List<String> vocabulary}) async {
-    onTag();
-    return ['功效演示'];
+    calls++;
+    vocabularies.add(vocabulary);
+    return reply;
   }
 }
 

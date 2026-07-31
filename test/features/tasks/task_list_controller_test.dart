@@ -12,6 +12,7 @@ import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
@@ -173,6 +174,23 @@ void main() {
     final tasks = state.value!;
     expect(tasks.map((t) => t.id), contains('new-id'));
     expect(tasks.firstWhere((t) => t.id == 'new-id').name, '新片');
+  });
+
+  test('importFile 把向导选的两个标签组带给导入服务', () async {
+    await container.read(taskListProvider.future);
+
+    await container.read(taskListProvider.notifier).importFile(
+          '/videos/新片.mp4',
+          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
+          shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+        );
+
+    final task = container
+        .read(taskListProvider)
+        .value!
+        .firstWhere((t) => t.id == 'new-id');
+    expect(task.unitTagGroup, const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+    expect(task.shotTagGroup, const TagGroupRef(id: 136, name: '画面类型'));
   });
 
   test('reload 重新从仓库拉取内容', () async {

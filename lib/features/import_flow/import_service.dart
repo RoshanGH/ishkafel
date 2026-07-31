@@ -5,6 +5,7 @@ import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/models/tag_group_ref.dart';
 import '../../core/models/video_info.dart';
 import '../../core/storage/task_repository.dart';
 import 'import_exception.dart';
@@ -31,7 +32,13 @@ class ImportService {
   static String _defaultId() =>
       DateTime.now().microsecondsSinceEpoch.toRadixString(36);
 
-  Future<RenewTask> importLocalFile(String filePath) async {
+  /// [unitTagGroup] / [shotTagGroup] 来自新建任务向导；为 null 表示该层
+  /// 不打标（无受控词表可用）
+  Future<RenewTask> importLocalFile(
+    String filePath, {
+    TagGroupRef? unitTagGroup,
+    TagGroupRef? shotTagGroup,
+  }) async {
     final info = await _probe(filePath);
     final id = idGenerator();
     final now = clock();
@@ -47,6 +54,8 @@ class ImportService {
       status: RenewTaskStatus.analyzing,
       createdAt: now,
       updatedAt: now,
+      unitTagGroup: unitTagGroup,
+      shotTagGroup: shotTagGroup,
     );
     await repository.save(task);
     return task;
