@@ -3,6 +3,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ai/volcano_asr_provider.dart';
+import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/net/json_poster.dart';
 
 void main() {
@@ -178,5 +180,164 @@ void main() {
           body: jsonEncode({'result': {'text': '只有整段'}})),
     );
     expect(await provider.transcribe(pcmPath), isEmpty);
+  });
+
+  group('响应体非法时给人话中文错误，不把 TypeError 摊给用户', () {
+    late String pcmPath;
+    late List<String> logs;
+
+    setUp(() async {
+      final tempDir = await Directory.systemTemp.createTemp('ishkafel_asr_bad_');
+      addTearDown(() => tempDir.delete(recursive: true));
+      pcmPath = '${tempDir.path}/a.pcm';
+      await File(pcmPath).writeAsBytes(List.filled(320, 0));
+      logs = [];
+      final previous = AppLog.sink;
+      AppLog.sink = logs.add;
+      addTearDown(() => AppLog.sink = previous);
+    });
+
+    VolcanoAsrProvider providerReturning(String body) => VolcanoAsrProvider(
+          appId: 'app-secret-id',
+          accessToken: 'tok-secret-value',
+          post: (_, _, _) async => JsonPostResult(
+              statusCode: 200,
+              headers: const {'x-api-status-code': '20000000'},
+              body: body),
+        );
+
+    test('响应体不是 JSON（网关 HTML）→ 中文错误，且不回显响应体与凭据', () async {
+      final provider =
+          providerReturning('<html><body>502 Bad Gateway</body></html>');
+      await expectLater(
+        provider.transcribe(pcmPath),
+        throwsA(isA<AiHttpException>().having(
+            (e) => e.message, 'message', contains('不是合法 JSON'))),
+      );
+      try {
+        await provider.transcribe(pcmPath);
+      } on AiHttpException catch (e) {
+        expect(e.message, isNot(contains('Bad Gateway')));
+        expect(e.message, isNot(contains('app-secret-id')));
+        expect(e.message, isNot(contains('tok-secret-value')));
+        expect(e.message, isNot(contains('TypeError')));
+      }
+    });
+
+    test('顶层不是 JSON 对象（数组）→ 中文错误', () async {
+      await expectLater(
+        providerReturning('[1,2,3]').transcribe(pcmPath),
+        throwsA(isA<AiHttpException>()
+            .having((e) => e.message, 'message', contains('格式异常'))),
+      );
+    });
+
+    test('utterances 不是数组 → 中文错误', () async {
+      final body = jsonEncode({
+        'result': {'utterances': 'not-a-list'}
+      });
+      await expectLater(
+        providerReturning(body).transcribe(pcmPath),
+        throwsA(isA<AiHttpException>().having(
+            (e) => e.message, 'message', contains('utterances'))),
+      );
+    });
+
+    test('result 不是对象 → 中文错误', () async {
+      await expectLater(
+        providerReturning(jsonEncode({'result': 'oops'})).transcribe(pcmPath),
+        throwsA(isA<AiHttpException>()
+            .having((e) => e.message, 'message', contains('格式异常'))),
+      );
+    });
+
+    test('个别条目非法（非对象/缺字段/类型错）时跳过，合法条目照常返回', () async {
+      final body = jsonEncode({
+        'result': {
+          'utterances': [
+            'not-an-object',
+            {'text': '缺时间戳'},
+            {'start_time': 0, 'end_time': 100}, // 缺 text
+            {'start_time': '0', 'end_time': 100, 'text': '时间戳类型错'},
+            {'start_time': 200, 'end_time': 900, 'text': '合法句'},
+          ]
+        }
+      });
+      final sentences = await providerReturning(body).transcribe(pcmPath);
+      expect(sentences.length, 1);
+      expect(sentences.single.text, '合法句');
+      expect(sentences.single.startMs, 200);
+      expect(logs.join(), contains('4'));
+    });
+
+    test('全部条目非法 → 中文错误而不是静默返回空', () async {
+      final body = jsonEncode({
+        'result': {
+          'utterances': [
+            {'text': '缺时间戳'},
+            'not-an-object',
+          ]
+        }
+      });
+      await expectLater(
+        providerReturning(body).transcribe(pcmPath),
+        throwsA(isA<AiHttpException>()
+            .having((e) => e.message, 'message', contains('全部'))),
+      );
+    });
+
+    test('words 畸形不牵连整句：非数组→空，个别字非法→跳过该字', () async {
+      final body = jsonEncode({
+        'result': {
+          'utterances': [
+            {
+              'start_time': 0,
+              'end_time': 500,
+              'text': '甲乙',
+              'words': 'not-a-list',
+            },
+            {
+              'start_time': 600,
+              'end_time': 900,
+              'text': '丙丁',
+              'words': [
+                {'text': '丙', 'start_time': 600, 'end_time': 700},
+                'not-an-object',
+                {'text': '丁', 'start_time': 700},
+                {'text': 42, 'start_time': 700, 'end_time': 900},
+                {
+                  'text': '丁',
+                  'start_time': 700,
+                  'end_time': 900,
+                  'confidence': 'high',
+                },
+              ],
+            },
+          ]
+        }
+      });
+      final sentences = await providerReturning(body).transcribe(pcmPath);
+      expect(sentences.length, 2);
+      expect(sentences.first.words, isEmpty);
+      expect(sentences.last.words.length, 2);
+      expect(sentences.last.words.first.text, '丙');
+      // confidence 类型错时降级为 null，不牵连该字
+      expect(sentences.last.words.last.confidence, isNull);
+    });
+
+    test('返回的句子列表不可变，不把可变集合暴露给外部', () async {
+      final body = jsonEncode({
+        'result': {
+          'utterances': [
+            {'start_time': 0, 'end_time': 100, 'text': '甲'},
+          ]
+        }
+      });
+      final sentences = await providerReturning(body).transcribe(pcmPath);
+      expect(
+          () => sentences.add(const AsrSentence(
+              startMs: 0, endMs: 1, text: 'x')),
+          throwsUnsupportedError);
+    });
   });
 }

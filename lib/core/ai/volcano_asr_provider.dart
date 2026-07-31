@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 import '../analysis/providers.dart';
+import '../log/app_log.dart';
 import '../net/json_poster.dart';
 
 /// 火山大模型录音文件极速版识别（base64 直传，一次请求返回结果）
@@ -92,37 +93,136 @@ class VolcanoAsrProvider implements AsrProvider {
     );
     final statusCode = result.headers['x-api-status-code'];
     if (result.statusCode != 200 || statusCode != '20000000') {
-      final message = result.headers['x-api-message'] ?? result.body;
+      // 只用服务端给的 message 头；缺失时不回显响应体——响应体可能整段回显请求
+      // 内容（含 base64 音频），拿给用户看既无意义又有泄漏风险，只进日志
+      final message = result.headers['x-api-message'];
+      if (message == null) {
+        AppLog.warn('ASR 调用失败且无 x-api-message，响应体片段：'
+            '${_preview(result.body)}');
+      }
       throw AiHttpException(
-          'ASR 调用失败 [X-Api-Status-Code=$statusCode]：$message',
+          'ASR 调用失败 [X-Api-Status-Code=$statusCode]：${message ?? '服务端未返回错误说明'}',
           statusCode: result.statusCode);
     }
-    final json = jsonDecode(result.body) as Map<String, dynamic>;
-    final utterances =
-        ((json['result'] as Map<String, dynamic>?)?['utterances'] as List?) ??
-            const [];
-    return List.unmodifiable([
-      for (final u in utterances.cast<Map<String, dynamic>>())
-        AsrSentence(
-          startMs: (u['start_time'] as num).round(),
-          endMs: (u['end_time'] as num).round(),
-          text: u['text'] as String,
-          words: _parseWords(u['words'] as List?),
-        ),
-    ]);
+    return parseResponse(result);
   }
 
-  /// 解析逐字时间戳，缺失（字段不存在）时返回空列表，不报错
-  static List<AsrWord> _parseWords(List? rawWords) {
-    if (rawWords == null) return const [];
-    return List.unmodifiable([
-      for (final w in rawWords.cast<Map<String, dynamic>>())
-        AsrWord(
-          startMs: (w['start_time'] as num).round(),
-          endMs: (w['end_time'] as num).round(),
-          text: w['text'] as String,
-          confidence: (w['confidence'] as num?)?.toDouble(),
-        ),
-    ]);
+  /// 解析识别响应：任何字段缺失或类型不符都转成人话中文错误。
+  ///
+  /// 云端响应是不可信输入，早先全是强制 cast——网关返回 HTML 就 FormatException、
+  /// 少个 start_time 就「type 'Null' is not a subtype of type 'num'」，这些原文
+  /// 会一路冒到用户面前。这里的口径与 [ArkChatClient] 一致：逐级校验，非法条目
+  /// 跳过并汇总，异常消息里绝不带响应体原文与凭据。
+  static List<AsrSentence> parseResponse(JsonPostResult result) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(result.body);
+    } on FormatException {
+      AppLog.warn('ASR 响应不是合法 JSON，响应体片段：${_preview(result.body)}');
+      throw AiHttpException('ASR 响应不是合法 JSON，可能被网关拦截，请稍后重试',
+          statusCode: result.statusCode);
+    }
+    if (decoded is! Map) {
+      throw AiHttpException('ASR 响应格式异常：顶层不是 JSON 对象',
+          statusCode: result.statusCode);
+    }
+    final rawResult = decoded['result'];
+    if (rawResult == null) return const [];
+    if (rawResult is! Map) {
+      throw AiHttpException('ASR 响应格式异常：result 不是对象',
+          statusCode: result.statusCode);
+    }
+    final rawUtterances = rawResult['utterances'];
+    if (rawUtterances == null) return const [];
+    if (rawUtterances is! List) {
+      throw AiHttpException('ASR 响应格式异常：utterances 不是数组',
+          statusCode: result.statusCode);
+    }
+    return _parseUtterances(rawUtterances, result.statusCode);
+  }
+
+  /// 逐条解析台词，非法条目跳过并汇总；全军覆没则报错，不静默返回空
+  static List<AsrSentence> _parseUtterances(List<Object?> raw, int statusCode) {
+    final sentences = <AsrSentence>[];
+    var skipped = 0;
+    for (final item in raw) {
+      final sentence = _tryParseSentence(item);
+      if (sentence == null) {
+        skipped++;
+        continue;
+      }
+      sentences.add(sentence);
+    }
+    if (skipped > 0) {
+      AppLog.warn('ASR 响应中 $skipped 条识别结果字段缺失或类型不符，已跳过');
+    }
+    if (sentences.isEmpty && skipped > 0) {
+      throw AiHttpException('ASR 响应中 $skipped 条识别结果全部格式异常，无法解析出台词',
+          statusCode: statusCode);
+    }
+    return List.unmodifiable(sentences);
+  }
+
+  static AsrSentence? _tryParseSentence(Object? raw) {
+    if (raw is! Map) return null;
+    final startMs = _tryMs(raw['start_time']);
+    final endMs = _tryMs(raw['end_time']);
+    final text = raw['text'];
+    if (startMs == null || endMs == null || text is! String) return null;
+    return AsrSentence(
+      startMs: startMs,
+      endMs: endMs,
+      text: text,
+      words: _parseWords(raw['words']),
+    );
+  }
+
+  /// 解析逐字时间戳：字段缺失或畸形都不牵连整句，只丢掉畸形的那个字
+  static List<AsrWord> _parseWords(Object? raw) {
+    if (raw is! List) return const [];
+    final words = <AsrWord>[];
+    var skipped = 0;
+    for (final item in raw) {
+      final word = _tryParseWord(item);
+      if (word == null) {
+        skipped++;
+        continue;
+      }
+      words.add(word);
+    }
+    if (skipped > 0) {
+      AppLog.warn('ASR 逐字时间戳中 $skipped 个字段缺失或类型不符，已跳过');
+    }
+    return List.unmodifiable(words);
+  }
+
+  static AsrWord? _tryParseWord(Object? raw) {
+    if (raw is! Map) return null;
+    final startMs = _tryMs(raw['start_time']);
+    final endMs = _tryMs(raw['end_time']);
+    final text = raw['text'];
+    if (startMs == null || endMs == null || text is! String) return null;
+    final confidence = raw['confidence'];
+    return AsrWord(
+      startMs: startMs,
+      endMs: endMs,
+      text: text,
+      // 置信度是可选信息，类型不对就当没有，不因此丢字
+      confidence:
+          confidence is num && confidence.isFinite ? confidence.toDouble() : null,
+    );
+  }
+
+  /// 毫秒时间戳：非数值或非有限值一律视为缺失
+  static int? _tryMs(Object? raw) =>
+      raw is num && raw.isFinite ? raw.round() : null;
+
+  /// 仅用于日志的响应体片段（截断，避免把 base64 音频回显整段写进日志）
+  static String _preview(String body) {
+    const limit = 120;
+    final flat = body.replaceAll(RegExp(r'\s+'), ' ');
+    return flat.length <= limit
+        ? flat
+        : '${flat.substring(0, limit)}…（共 ${body.length} 字符）';
   }
 }
