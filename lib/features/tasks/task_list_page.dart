@@ -7,6 +7,9 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../home/help_sheet.dart';
+import '../home/readiness_provider.dart';
+import '../home/welcome_view.dart';
 import '../import_flow/import_exception.dart';
 import '../settings/settings_page.dart';
 import '../workbench/workbench_page.dart';
@@ -72,6 +75,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
     }
   }
+
+  void _openSettings(BuildContext context) => Navigator.of(context)
+      .push(MaterialPageRoute(builder: (_) => const SettingsPage()));
 
   void _showSnackBar(BuildContext context, String message) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -196,12 +202,19 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             style: TextStyle(
                 fontSize: AppFontSize.title, fontWeight: FontWeight.w700)),
         actions: [
+          // 常驻入口：忘掉流程的时刻，恰恰是列表里已经堆了一屏任务的时候，
+          // 只在空状态露一次脸的说明等于没有
+          IconButton(
+            key: const Key('task-list-help'),
+            tooltip: '使用说明',
+            icon: const Icon(Icons.help_outline, size: 18),
+            onPressed: () => showHelpSheet(context),
+          ),
           IconButton(
             key: const Key('task-list-settings'),
             tooltip: '设置',
             icon: const Icon(Icons.settings_outlined, size: 18),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const SettingsPage())),
+            onPressed: () => _openSettings(context),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -242,9 +255,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
           : const Center(child: CircularProgressIndicator());
     }
     if (list.isEmpty) {
-      return const Center(
-          child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
-              style: TextStyle(color: AppColors.textSecondary)));
+      // 首屏是产品的门面：本应用靠「把 .app 交给同事双击打开」分发，
+      // 一行灰字既不说这是什么，也不说要先准备什么
+      return WelcomeView(
+        readiness: ref.watch(readinessProvider),
+        onStart: () => _startNewTask(ref, context),
+        onOpenSettings: () => _openSettings(context),
+      );
     }
     return GridView.builder(
       padding: const EdgeInsets.all(AppSpacing.lg),

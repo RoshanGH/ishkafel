@@ -23,6 +23,10 @@ abstract final class AppFontSize {
   /// 15 — 页面标题
   static const title = 15.0;
 
+  /// 24 — 首屏主标题。全应用只用在一处（欢迎页的产品名）：首屏要先回答
+  /// 「这是什么」，用 15px 说这句话会被当成又一行说明文字。
+  static const display = 24.0;
+
   /// 全部字号（供阶梯校验测试使用）
-  static const all = <double>[micro, caption, body, emphasis, title];
+  static const all = <double>[micro, caption, body, emphasis, title, display];
 }

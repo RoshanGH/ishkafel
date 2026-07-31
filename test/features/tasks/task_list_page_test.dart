@@ -94,10 +94,21 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
     );
 
 void main() {
-  testWidgets('空状态显示引导文案', (tester) async {
+  testWidgets('没有任务时首屏先回答「这是什么、怎么开始」', (tester) async {
     await tester.pumpWidget(wrap(InMemoryTaskRepository()));
     await tester.pumpAndSettle();
-    expect(find.textContaining('还没有任务'), findsOneWidget);
+
+    // 原来这里只有一行灰字「还没有任务，点击右上角新建任务导入一条成片」。
+    // 本应用靠「把 .app 交给同事双击打开」分发，没有安装向导也没有培训，
+    // 首屏必须自己把产品说清楚。
+    expect(find.textContaining('只换画面'), findsWidgets, reason: '缺一句话说明它是做什么的');
+    expect(find.byKey(const Key('welcome-start')), findsOneWidget,
+        reason: '缺一个显眼的主行动号召');
+    expect(find.byKey(const Key('welcome-help')), findsOneWidget,
+        reason: '缺使用说明入口');
+    expect(find.textContaining('准备工作'), findsOneWidget,
+        reason: '缺前置条件清单——缺 ffmpeg / 没登录 miaoa 原来只在出错时才说，'
+            '那时用户已经在半路上了');
   });
 
   testWidgets('有任务时按卡片渲染名称与状态徽标', (tester) async {
@@ -186,8 +197,10 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('未检测到'), findsOneWidget);
-      expect(find.textContaining('brew install ffmpeg'), findsOneWidget);
+      // 空状态下首屏的「准备工作」清单也会说同一件事，因此不是唯一一处。
+      // 这条测试盯的是**常驻横幅**：列表里有任务时它是唯一的提示。
+      expect(find.byType(NoticeBanner), findsWidgets);
+      expect(find.textContaining('brew install ffmpeg'), findsWidgets);
     });
 
     testWidgets('工具就绪时不显示横幅', (tester) async {

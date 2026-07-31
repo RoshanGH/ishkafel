@@ -7,6 +7,7 @@ const _guardedDirs = <String>[
   'lib/features/workbench',
   'lib/features/tasks',
   'lib/features/settings',
+  'lib/features/home',
   'lib/features/picking',
 ];
 

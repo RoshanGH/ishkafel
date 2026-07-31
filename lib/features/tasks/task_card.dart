@@ -7,6 +7,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/analysis/analysis_progress.dart';
 import '../../core/models/renew_task.dart';
 import 'analysis_progress_store.dart';
+import 'task_card_hint.dart';
 import 'source_availability.dart';
 
 /// 状态徽标文案与配色
@@ -93,21 +94,38 @@ class TaskCard extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(10, 6, 4, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  // 12.5 不在阶梯上（相邻两级只差 0.5px 读不出层级），
-                  // 收敛到 body 级
-                  child: Text(task.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: AppFontSize.body,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary)),
+                Row(
+                  children: [
+                    Expanded(
+                      // 12.5 不在阶梯上（相邻两级只差 0.5px 读不出层级），
+                      // 收敛到 body 级
+                      child: Text(task.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: AppFontSize.body,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textPrimary)),
+                    ),
+                    if (onMenu != null) _MenuButton(onMenu: onMenu!),
+                  ],
                 ),
-                if (onMenu != null) _MenuButton(onMenu: onMenu!),
+                // 状态徽标只说「现在是什么状态」，这一行说「接下来做什么」
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.sm),
+                  child: Text(
+                    taskCardHint(task, sourceMissing: sourceMissing),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textTertiary),
+                  ),
+                ),
               ],
             ),
           ),
