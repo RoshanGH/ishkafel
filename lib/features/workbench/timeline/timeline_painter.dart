@@ -3,6 +3,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:ishkafel/app/theme/app_colors.dart';
+import 'package:ishkafel/app/theme/app_spacing.dart';
+import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
@@ -25,6 +27,13 @@ class TimelinePainter extends CustomPainter {
 
   /// 单元色块内标签文字的左右内边距（左右各一份）
   static const _unitLabelPadding = 6.0;
+
+  /// 单元块内两行文字的行距（首行 12px 字号 + 行间呼吸）
+  static const _unitLineHeight = 17.0;
+
+  /// 标签窄于这个宽度就不画：只画得下一个省略号，白付文字 layout 的开销
+  /// （实测 60 单元 fit 视图下每帧 2.1ms 全花在渲染省略号上）
+  static const _minLabelWidth = 24.0;
 
   /// 单元色块 6 色循环
   static const _unitColors = [
@@ -118,20 +127,39 @@ class TimelinePainter extends CustomPainter {
       // 直接跳过：此时 `rect.width - 内边距*2` 为负，交给 TextPainter 会在
       // 绘制中途抛异常，让本帧后续所有绘制丢失（见 [_drawText] 文档）。
       final labelMaxWidth = rect.width - _unitLabelPadding * 2;
-      if (labelMaxWidth <= 0) continue;
+      if (labelMaxWidth < _minLabelWidth) continue;
 
+      // 两行信息层级：第一行是定位用的编号与时长（扫读时先找它），
+      // 第二行才是台词摘要。挤成一行时编号会被长台词淹没。
       canvas.save();
       canvas.clipRect(rect);
+      final textLeft = rect.left + _unitLabelPadding;
       _drawText(
         canvas,
-        'U${unit.index + 1} ${unit.transcript}',
-        Offset(rect.left + _unitLabelPadding, rect.top + _unitLabelPadding),
+        _unitHeadline(unit),
+        Offset(textLeft, rect.top + AppSpacing.xs),
         AppColors.textPrimary,
-        fontSize: 12,
+        fontSize: AppFontSize.body,
+        maxWidth: labelMaxWidth,
+      );
+      _drawText(
+        canvas,
+        unit.transcript,
+        Offset(textLeft, rect.top + AppSpacing.xs + _unitLineHeight),
+        AppColors.textSecondary,
+        fontSize: AppFontSize.caption,
         maxWidth: labelMaxWidth,
       );
       canvas.restore();
     }
+  }
+
+  /// 单元块首行：编号 + 标签（打标接通后）或时长
+  String _unitHeadline(SemanticUnit unit) {
+    final id = 'U${unit.index + 1}';
+    if (unit.tags.isNotEmpty) return '$id ${unit.tags.first}';
+    final seconds = (unit.endMs - unit.startMs) / 1000;
+    return '$id · ${seconds.toStringAsFixed(1)}s';
   }
 
   /// 相邻镜头块体之间的视觉间隙（左右各内缩一半）
