@@ -10,7 +10,7 @@ import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 const _viewportWidth = 1600.0;
-const _canvasHeight = 220.0;
+const _canvasHeight = 300.0;
 const _durationMs = 40000;
 
 List<SemanticUnit> _units() => const [

@@ -12,7 +12,7 @@ import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 const _viewportWidth = 1600.0;
 
 /// 画布高度取到波形轨以下，留出一段只有播放头会经过的空白区域用于像素取样
-const _canvasHeight = 220.0;
+const _canvasHeight = 300.0;
 
 /// 真机复现数据的等价缩影：末单元只有 53ms，在 1600px 视口下宽约 0.92px，
 /// 「块宽 - 左右内边距」为负数 —— 这正是让整帧绘制中断的输入。

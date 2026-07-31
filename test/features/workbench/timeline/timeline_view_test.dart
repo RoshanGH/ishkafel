@@ -5,6 +5,7 @@ import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
+import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_view.dart';
 
 /// fixture：2 个单元，各 2 个镜头，总时长 4000ms，fps=30
@@ -225,7 +226,9 @@ void main() {
     ));
 
     // unit0 内 shot0：ms[0,1000) → px[0,200)；镜头轨 y 取中值 85
-    const shotPos = Offset(100, 85);
+    // 从轨道常量推导，避免布局调整（如加轨道标题条）时坐标失效
+    final shotPos = Offset(
+        100, (TimelineTracks.shotsTop + TimelineTracks.shotsBottom) / 2);
     await tester.tapAt(shotPos);
     await tester.pump(const Duration(milliseconds: 80));
     await tester.tapAt(shotPos);
@@ -247,7 +250,9 @@ void main() {
       onGeometryChanged: (_) {},
     ));
 
-    const shotPos = Offset(100, 85);
+    // 从轨道常量推导，避免布局调整（如加轨道标题条）时坐标失效
+    final shotPos = Offset(
+        100, (TimelineTracks.shotsTop + TimelineTracks.shotsBottom) / 2);
     await tester.tapAt(shotPos);
     await tester.pump(const Duration(milliseconds: 80)); // 双击窗口内，未超时
     await tester.tapAt(shotPos);

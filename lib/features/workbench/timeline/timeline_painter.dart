@@ -68,11 +68,32 @@ class TimelinePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     _paintRuler(canvas, size);
+    _paintTrackLabels(canvas, size);
     _paintUnitsTrack(canvas, size);
     _paintShotsTrack(canvas, size);
     _paintThumbsTrack(canvas, size);
     _paintWaveTrack(canvas, size);
     _paintPlayhead(canvas, size);
+  }
+
+  /// 四条轨的标题条。标题同时是操作说明——「视觉镜头严格嵌套在台词语义
+  /// 单元内」是本产品的核心约束，写在轨道上比藏进帮助文档有效得多。
+  void _paintTrackLabels(Canvas canvas, Size size) {
+    final entries = <(double, String, String)>[
+      (TimelineTracks.unitsLabelTop, '台词语义单元', '拖大边界调整'),
+      (TimelineTracks.shotsLabelTop, '视觉镜头', '拖小边界调整，限制在所属单元内'),
+      (TimelineTracks.thumbsLabelTop, '画面', ''),
+      (TimelineTracks.waveLabelTop, '音频', ''),
+    ];
+    for (final (top, title, hint) in entries) {
+      _drawText(canvas, title, Offset(AppSpacing.xs, top),
+          AppColors.textSecondary,
+          fontSize: AppFontSize.micro);
+      if (hint.isEmpty) continue;
+      _drawText(canvas, '（$hint）', Offset(AppSpacing.xs + 68, top),
+          AppColors.textTertiary,
+          fontSize: AppFontSize.micro);
+    }
   }
 
   void _paintRuler(Canvas canvas, Size size) {

@@ -98,32 +98,48 @@ abstract final class TimelineTracks {
   static const waveH = 34.0;
   static const gap = 4.0;
 
+  /// 每条轨上方的标题条高度。轨道标题同时承担操作说明的职责
+  /// （「拖大边界调整」/「限制在所属单元内」），对理解两层嵌套关系很关键。
+  static const labelH = 14.0;
+
   /// 刻度轨顶部
   static double get rulerTop => 0;
 
   /// 刻度轨底部
   static double get rulerBottom => rulerTop + rulerH;
 
+  /// 单元轨标题条顶部
+  static double get unitsLabelTop => rulerBottom + gap;
+
   /// 单元轨顶部
-  static double get unitsTop => rulerBottom + gap;
+  static double get unitsTop => unitsLabelTop + labelH;
 
   /// 单元轨底部
   static double get unitsBottom => unitsTop + unitsH;
 
+  /// 镜头轨标题条顶部
+  static double get shotsLabelTop => unitsBottom + gap;
+
   /// 镜头轨顶部
-  static double get shotsTop => unitsBottom + gap;
+  static double get shotsTop => shotsLabelTop + labelH;
 
   /// 镜头轨底部
   static double get shotsBottom => shotsTop + shotsH;
 
+  /// 缩图轨标题条顶部
+  static double get thumbsLabelTop => shotsBottom + gap;
+
   /// 缩图轨顶部
-  static double get thumbsTop => shotsBottom + gap;
+  static double get thumbsTop => thumbsLabelTop + labelH;
 
   /// 缩图轨底部
   static double get thumbsBottom => thumbsTop + thumbsH;
 
+  /// 波形轨标题条顶部
+  static double get waveLabelTop => thumbsBottom + gap;
+
   /// 波形轨顶部
-  static double get waveTop => thumbsBottom + gap;
+  static double get waveTop => waveLabelTop + labelH;
 
   /// 波形轨底部
   static double get waveBottom => waveTop + waveH;

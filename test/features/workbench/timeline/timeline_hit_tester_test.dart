@@ -4,6 +4,16 @@ import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 
+
+/// 各轨的取样 y 坐标一律从 [TimelineTracks] 推导，避免布局调整（例如给每条
+/// 轨加标题条）时测试因硬编码坐标而集体失效
+final _unitCenterY = (TimelineTracks.unitsTop + TimelineTracks.unitsBottom) / 2;
+final _shotCenterY = (TimelineTracks.shotsTop + TimelineTracks.shotsBottom) / 2;
+final _aboveUnitsY = TimelineTracks.unitsTop - 1;
+final _belowUnitsY = TimelineTracks.unitsBottom + 1;
+final _aboveShotsY = TimelineTracks.shotsTop - 1;
+final _belowShotsY = TimelineTracks.shotsBottom + 1;
+
 void main() {
   group('TimelineHitTester', () {
     late TimelineGeometry geometry;
@@ -48,7 +58,7 @@ void main() {
         ];
         // unit 0: x in [0, 20] (0~2000ms)
         // 点击 x=10px (1000ms)，在 unit 内部，不靠近边界
-        final hit = TimelineHitTester.hitTest(const Offset(10, 46), units, geometry);
+        final hit = TimelineHitTester.hitTest(Offset(10, _unitCenterY), units, geometry);
         expect(hit, isA<UnitBlockHit>());
         expect((hit as UnitBlockHit).unitIndex, equals(0));
       });
@@ -60,11 +70,11 @@ void main() {
         ];
         // unit0: [0, 20]px，unit1: [20, 40]px
         // 在 x=20±6 范围内（边界处）
-        final hitLeft = TimelineHitTester.hitTest(const Offset(18, 46), units, geometry);
+        final hitLeft = TimelineHitTester.hitTest(Offset(18, _unitCenterY), units, geometry);
         expect(hitLeft, isA<UnitBoundaryHit>());
         expect((hitLeft as UnitBoundaryHit).leftUnitIndex, equals(0));
 
-        final hitRight = TimelineHitTester.hitTest(const Offset(22, 46), units, geometry);
+        final hitRight = TimelineHitTester.hitTest(Offset(22, _unitCenterY), units, geometry);
         expect(hitRight, isA<UnitBoundaryHit>());
         expect((hitRight as UnitBoundaryHit).leftUnitIndex, equals(0));
       });
@@ -73,10 +83,10 @@ void main() {
         final units = [
           SemanticUnit(index: 0, startMs: 0, endMs: 2000, transcript: 'unit0'),
         ];
-        final hitAbove = TimelineHitTester.hitTest(const Offset(10, 23), units, geometry);
+        final hitAbove = TimelineHitTester.hitTest(Offset(10, _aboveUnitsY), units, geometry);
         expect(hitAbove, isNull);
 
-        final hitBelow = TimelineHitTester.hitTest(const Offset(10, 69), units, geometry);
+        final hitBelow = TimelineHitTester.hitTest(Offset(10, _belowUnitsY), units, geometry);
         expect(hitBelow, isNull);
       });
     });
@@ -96,7 +106,7 @@ void main() {
           ),
         ];
         // 点击 shot0 中间（不靠近边界）
-        final hit = TimelineHitTester.hitTest(const Offset(10, 85), units, geometry);
+        final hit = TimelineHitTester.hitTest(Offset(10, _shotCenterY), units, geometry);
         expect(hit, isA<ShotBlockHit>());
         expect((hit as ShotBlockHit).unitIndex, equals(0));
         expect(hit.shotIndex, equals(0));
@@ -116,7 +126,7 @@ void main() {
           ),
         ];
         // shot 边界在 x=20px
-        final hit = TimelineHitTester.hitTest(const Offset(20, 85), units, geometry);
+        final hit = TimelineHitTester.hitTest(Offset(20, _shotCenterY), units, geometry);
         expect(hit, isA<ShotBoundaryHit>());
         expect((hit as ShotBoundaryHit).unitIndex, equals(0));
         expect(hit.leftShotIndex, equals(0));
@@ -141,7 +151,7 @@ void main() {
         ];
         // unit 边界在 x=20px，shot 边界也在 x=20px
         // 应该返回 UnitBoundaryHit（单元边界属单元层）
-        final hit = TimelineHitTester.hitTest(const Offset(20, 85), units, geometry);
+        final hit = TimelineHitTester.hitTest(Offset(20, _shotCenterY), units, geometry);
         expect(hit, isA<UnitBoundaryHit>());
         expect((hit as UnitBoundaryHit).leftUnitIndex, equals(0));
       });
@@ -156,10 +166,10 @@ void main() {
             shots: [Shot(startMs: 0, endMs: 2000)],
           ),
         ];
-        final hitAbove = TimelineHitTester.hitTest(const Offset(10, 71), units, geometry);
+        final hitAbove = TimelineHitTester.hitTest(Offset(10, _aboveShotsY), units, geometry);
         expect(hitAbove, isNull);
 
-        final hitBelow = TimelineHitTester.hitTest(const Offset(10, 99), units, geometry);
+        final hitBelow = TimelineHitTester.hitTest(Offset(10, _belowShotsY), units, geometry);
         expect(hitBelow, isNull);
       });
     });
@@ -172,7 +182,7 @@ void main() {
         ];
         // unit 边界在 x=20px，测试 ±6px 范围
         for (int x = 14; x <= 26; x++) {
-          final hit = TimelineHitTester.hitTest(Offset(x.toDouble(), 46), units, geometry);
+          final hit = TimelineHitTester.hitTest(Offset(x.toDouble(), _unitCenterY), units, geometry);
           expect(hit, isA<UnitBoundaryHit>(), reason: 'x=$x should hit boundary');
         }
       });
@@ -183,7 +193,7 @@ void main() {
           SemanticUnit(index: 1, startMs: 2000, endMs: 4000, transcript: 'unit1'),
         ];
         // unit 边界在 x=20px，x=7 应该在 unit0 块体内
-        final hit = TimelineHitTester.hitTest(const Offset(7, 46), units, geometry);
+        final hit = TimelineHitTester.hitTest(Offset(7, _unitCenterY), units, geometry);
         expect(hit, isA<UnitBlockHit>());
         expect((hit as UnitBlockHit).unitIndex, equals(0));
       });
@@ -193,8 +203,8 @@ void main() {
       // fit 缩放下 96 秒片长里 1.2 秒的镜头只有约 1.2px 宽，很常见。固定 ±6px
       // 容差会让相邻两条边界的容差区把整个块体盖住：块体本身永远命中不到，
       // 用户既选不中这个镜头、也无从调它的右边界，只能靠放大缩放绕开。
-      const shotY = 85.0;
-      const unitY = 46.0;
+      final shotY = _shotCenterY;
+      final unitY = _unitCenterY;
       const msPerPx = 100.0;
 
       /// 三个等宽块体（每个 [widthPx] 像素）的几何 + ms 跨度
@@ -318,17 +328,17 @@ void main() {
             shots: [Shot(startMs: 1200, endMs: 2400)],
           ),
         ];
-        expect(TimelineHitTester.hitTest(const Offset(12, shotY), units, geo),
+        expect(TimelineHitTester.hitTest(Offset(12, shotY), units, geo),
             const UnitBoundaryHit(leftUnitIndex: 0));
         // 块心仍可选中镜头
-        expect(TimelineHitTester.hitTest(const Offset(6, shotY), units, geo),
+        expect(TimelineHitTester.hitTest(Offset(6, shotY), units, geo),
             const ShotBlockHit(unitIndex: 0, shotIndex: 0));
       });
     });
 
     group('edge cases', () {
       test('empty units list on unit track → null', () {
-        final hit = TimelineHitTester.hitTest(const Offset(10, 46), [], geometry);
+        final hit = TimelineHitTester.hitTest(Offset(10, _unitCenterY), [], geometry);
         expect(hit, isNull);
       });
 

@@ -11,7 +11,7 @@ import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 const _viewportWidth = 1600.0;
-const _canvasHeight = 220.0;
+const _canvasHeight = 300.0;
 const _durationMs = 40000;
 
 /// 单元内三个视觉镜头，块宽分别 400/600/600px，足够画出块体与编号
