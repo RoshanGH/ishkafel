@@ -96,6 +96,17 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> delete(String id) async => _store.remove(id);
 }
 
+/// 记录 findAll 调用次数的假仓库：用于证明「保存一条任务不再全量重读」
+class _CountingRepository extends InMemoryTaskRepository {
+  int findAllCallCount = 0;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    findAllCallCount++;
+    return super.findAll();
+  }
+}
+
 RenewTask makeExternalTask(String id, String name, DateTime updatedAt) =>
     RenewTask(
       id: id,
@@ -611,6 +622,122 @@ void main() {
       final saved = await repo.findById('cut-1');
       expect(saved!.status, RenewTaskStatus.awaitingCut);
       expect(saved.units, units);
+    });
+  });
+
+  group('保存后局部更新（不再全量重读所有任务 JSON）', () {
+    late _CountingRepository counting;
+    late ProviderContainer localContainer;
+
+    RenewTask makeStored(String id, DateTime updatedAt) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 1),
+          updatedAt: updatedAt,
+          units: const [],
+        );
+
+    List<SemanticUnit> makeUnits() => const [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '第一句',
+            shots: [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ];
+
+    setUp(() async {
+      counting = _CountingRepository();
+      // 三条任务，updatedAt 依次递增（列表按 updatedAt 倒序：c、b、a）
+      await counting.save(makeStored('a', DateTime.utc(2026, 7, 20)));
+      await counting.save(makeStored('b', DateTime.utc(2026, 7, 21)));
+      await counting.save(makeStored('c', DateTime.utc(2026, 7, 22)));
+      localContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(counting),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(localContainer.dispose);
+      await localContainer.read(taskListProvider.future);
+    });
+
+    test('confirmSegmentation 不触发 findAll，且列表里那一条已更新', () async {
+      final before = counting.findAllCallCount;
+
+      await localContainer
+          .read(taskListProvider.notifier)
+          .confirmSegmentation(makeStored('a', DateTime.utc(2026, 7, 20)),
+              makeUnits());
+
+      expect(counting.findAllCallCount, before,
+          reason: '保存一条任务不应再遍历目录全量解码所有任务 JSON');
+      final tasks = localContainer.read(taskListProvider).value!;
+      expect(tasks.length, 3);
+      final updated = tasks.firstWhere((t) => t.id == 'a');
+      expect(updated.status, RenewTaskStatus.picking);
+      expect(updated.units, makeUnits());
+    });
+
+    test('saveSegmentationDraft 不触发 findAll，且列表里那一条已更新', () async {
+      final before = counting.findAllCallCount;
+
+      await localContainer
+          .read(taskListProvider.notifier)
+          .saveSegmentationDraft(
+              makeStored('b', DateTime.utc(2026, 7, 21)), makeUnits());
+
+      expect(counting.findAllCallCount, before);
+      final tasks = localContainer.read(taskListProvider).value!;
+      expect(tasks.firstWhere((t) => t.id == 'b').units, makeUnits());
+      expect(tasks.firstWhere((t) => t.id == 'b').status,
+          RenewTaskStatus.awaitingCut);
+    });
+
+    test('局部更新后列表排序与全量重读一致（按 updatedAt 倒序）', () async {
+      expect(localContainer.read(taskListProvider).value!.map((t) => t.id),
+          ['c', 'b', 'a']);
+
+      // 更新最旧的一条：updatedAt 变成 now，应排到最前
+      await localContainer
+          .read(taskListProvider.notifier)
+          .saveSegmentationDraft(
+              makeStored('a', DateTime.utc(2026, 7, 20)), makeUnits());
+
+      final localOrder =
+          localContainer.read(taskListProvider).value!.map((t) => t.id).toList();
+      expect(localOrder, ['a', 'c', 'b']);
+
+      // 与真正重读一次的结果逐条对齐，证明排序口径没有分叉
+      await localContainer.read(taskListProvider.notifier).reload();
+      expect(
+          localContainer.read(taskListProvider).value!.map((t) => t.id).toList(),
+          localOrder);
+    });
+
+    test('renameTask 同样局部更新，不全量重读', () async {
+      final before = counting.findAllCallCount;
+
+      await localContainer
+          .read(taskListProvider.notifier)
+          .renameTask(makeStored('c', DateTime.utc(2026, 7, 22)), '新名字');
+
+      expect(counting.findAllCallCount, before);
+      expect(localContainer.read(taskListProvider).value!
+          .firstWhere((t) => t.id == 'c').name, '新名字');
+    });
+
+    test('deleteTask 局部移除那一条，不全量重读', () async {
+      final before = counting.findAllCallCount;
+
+      await localContainer
+          .read(taskListProvider.notifier)
+          .deleteTask(makeStored('b', DateTime.utc(2026, 7, 21)));
+
+      expect(counting.findAllCallCount, before);
+      expect(localContainer.read(taskListProvider).value!.map((t) => t.id),
+          ['c', 'a']);
     });
   });
 }

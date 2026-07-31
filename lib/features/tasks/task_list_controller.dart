@@ -106,7 +106,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       task.analysisError == null &&
       !_analyzingTaskIds.contains(task.id);
 
-  /// 删除任务：先清理中间产物（失败不阻断），再删记录并刷新列表
+  /// 删除任务：先清理中间产物（失败不阻断），再删记录并从列表中移除那一条
   Future<void> deleteTask(RenewTask task) async {
     try {
       await ref.read(taskArtifactCleanerProvider)?.cleanup(task.id);
@@ -114,7 +114,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       AppLog.warn('任务 ${task.id} 中间产物清理失败（不影响删除）：$e');
     }
     await ref.read(taskRepositoryProvider).delete(task.id);
-    await reload();
+    if (!_removeLocally(task.id)) await reload();
   }
 
   /// 重命名：空白名称视为无效输入，直接忽略（调用方在 UI 层已给出提示）
@@ -126,12 +126,59 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     }
     final renamed = task.copyWith(name: trimmed, updatedAt: DateTime.now());
     await ref.read(taskRepositoryProvider).save(renamed);
-    await reload();
+    await _refreshAfterSave(renamed);
   }
 
+  /// 全量重新装载。
+  ///
+  /// 用 `copyWithPrevious` 保留上一份数据：直接置 `AsyncLoading()` 会把 value
+  /// 抹成 null，列表页据此渲染整页 spinner——于是「确认切分」「保存草稿」这类
+  /// 只动一条任务的操作，也会让整个任务网格白屏闪一下。保留旧数据后，加载中
+  /// 只是 `isRefreshing`，页面继续显示旧列表直到新数据就绪。
   Future<void> reload() async {
-    state = const AsyncLoading();
+    state = const AsyncLoading<List<RenewTask>>().copyWithPrevious(state);
     state = await AsyncValue.guard(_findAll);
+  }
+
+  /// 保存单条任务后刷新列表：优先局部更新，只有在列表尚未装载出来（还在
+  /// loading 或上次装载出错）时才退回全量重读。
+  ///
+  /// 全量重读会遍历任务目录并把每条任务 JSON 完整解码重建对象——实测约
+  /// 1 ms/任务（96 秒素材，40 KB JSON），5 分钟素材外推约 3.5 ms/任务；
+  /// 而「保存草稿」在审片台里是高频操作，每次都付这份钱不划算。
+  Future<void> _refreshAfterSave(RenewTask updated) async {
+    if (!_upsertLocally(updated)) await reload();
+  }
+
+  /// 就地替换（或插入）一条任务，返回是否成功应用局部更新。
+  ///
+  /// 全程不可变：构造新列表而不改动原列表。
+  bool _upsertLocally(RenewTask updated) {
+    final current = state.valueOrNull;
+    if (current == null) return false;
+    final rest = current.where((t) => t.id != updated.id).toList(growable: false);
+    state = AsyncData(List.unmodifiable(_insertByUpdatedAtDesc(rest, updated)));
+    return true;
+  }
+
+  /// 从列表中移除一条任务，返回是否成功应用局部更新
+  bool _removeLocally(String id) {
+    final current = state.valueOrNull;
+    if (current == null) return false;
+    state = AsyncData(
+        List.unmodifiable(current.where((t) => t.id != id).toList()));
+    return true;
+  }
+
+  /// 按 updatedAt 倒序插入，与 FileTaskRepository.findAll 的排序口径一致。
+  ///
+  /// 用「找插入位」而不是整表 sort：Dart 的 List.sort 不保证稳定，updatedAt
+  /// 相同的任务会被随机重排，用户会看到列表无缘无故跳动。
+  static List<RenewTask> _insertByUpdatedAtDesc(
+      List<RenewTask> sorted, RenewTask task) {
+    final at = sorted.indexWhere((t) => t.updatedAt.isBefore(task.updatedAt));
+    final index = at < 0 ? sorted.length : at;
+    return [...sorted.take(index), task, ...sorted.skip(index)];
   }
 
   Future<void> importFile(String path) async {
@@ -231,7 +278,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);
-    await reload();
+    await _refreshAfterSave(updated);
   }
 
   /// 审片台「保存草稿」：仅保存编辑后的 units，不改变任务状态
@@ -239,7 +286,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       RenewTask task, List<SemanticUnit> units) async {
     final updated = task.copyWith(units: units, updatedAt: DateTime.now());
     await ref.read(taskRepositoryProvider).save(updated);
-    await reload();
+    await _refreshAfterSave(updated);
   }
 }
 

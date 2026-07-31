@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +11,7 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/environment_banner.dart';
+import 'package:ishkafel/features/tasks/source_availability.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -31,6 +34,19 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> delete(String id) async => _store.remove(id);
 }
 
+/// findAll 可被挂起的假仓库：用于观察「重新加载进行中」这一中间态
+class _BlockingRepository extends InMemoryTaskRepository {
+  /// 非 null 时 findAll 会挂起，直到测试主动 complete
+  Completer<void>? gate;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    final pending = gate;
+    if (pending != null) await pending.future;
+    return super.findAll();
+  }
+}
+
 /// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
 class _SkippingRepository extends InMemoryTaskRepository
     implements TaskLoadDiagnostics {
@@ -48,6 +64,8 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
     ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 默认假定源文件都在：测试不该依赖真实文件系统
+        fileExistsProbeProvider.overrideWithValue((_) async => true),
         ...overrides,
       ],
       child: const MaterialApp(home: TaskListPage()),
@@ -70,6 +88,44 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  group('重新加载不闪白（保存后整页 spinner）', () {
+    testWidgets('重新加载期间旧列表仍然可见，且不出现整页 spinner', (tester) async {
+      final repo = _BlockingRepository();
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+      expect(find.text('已有任务'), findsOneWidget);
+
+      final container = ProviderScope.containerOf(
+          tester.element(find.byType(TaskListPage)));
+      final gate = Completer<void>();
+      repo.gate = gate;
+      final reloading = container.read(taskListProvider.notifier).reload();
+
+      // 重新加载已开始但未完成：旧数据必须还在，不能整页换成 spinner
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+          reason: '保存一条任务不应让整页任务网格闪白');
+      expect(find.text('已有任务'), findsOneWidget);
+
+      gate.complete();
+      await reloading;
+      await tester.pumpAndSettle();
+      expect(find.text('已有任务'), findsOneWidget);
+    });
+
+    testWidgets('首次装载仍展示 spinner（此时无旧数据可保留）', (tester) async {
+      final repo = _BlockingRepository()..gate = Completer<void>();
+      await tester.pumpWidget(wrap(repo));
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      repo.gate!.complete();
+      await tester.pumpAndSettle();
+    });
   });
 
   group('运行环境横幅（ffmpeg/ffprobe 缺失）', () {
@@ -247,6 +303,82 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.textContaining('无法读取'), findsNothing);
+    });
+  });
+
+  group('源文件已不存在时，列表与卡片要说人话', () {
+    RenewTask makeOpenableTask() => RenewTask(
+          id: 's1',
+          name: '素材已被删除的任务',
+          sourcePath: '/v/已删除.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: [
+            SemanticUnit(
+              index: 0,
+              startMs: 0,
+              endMs: 1000,
+              transcript: 't',
+              shots: const [Shot(startMs: 0, endMs: 1000)],
+            ),
+          ],
+          videoInfo: const VideoInfo(
+            width: 1080,
+            height: 1920,
+            duration: Duration(milliseconds: 1000),
+            fps: 30,
+            fileSizeBytes: 10,
+          ),
+        );
+
+    Override missingSourceOverride() =>
+        fileExistsProbeProvider.overrideWithValue((_) async => false);
+
+    testWidgets('探测到源文件缺失时卡片给出可见标记', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      await tester.pumpWidget(
+          wrap(repo, overrides: [missingSourceOverride()]));
+      await tester.pumpAndSettle();
+
+      expect(find.text('源文件缺失'), findsOneWidget);
+    });
+
+    testWidgets('点击源文件缺失的任务不进入审片台，给出可操作的中文说明', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      await tester.pumpWidget(
+          wrap(repo, overrides: [missingSourceOverride()]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('素材已被删除的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('源文件已不存在'), findsOneWidget);
+    });
+
+    testWidgets('源文件存在性只在列表变化时探测一次，不随每帧重复（否则又是逐帧同步 IO）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeOpenableTask());
+      var probeCount = 0;
+      await tester.pumpWidget(wrap(repo, overrides: [
+        fileExistsProbeProvider.overrideWithValue((_) async {
+          probeCount++;
+          return true;
+        }),
+      ]));
+      await tester.pumpAndSettle();
+      final afterLoad = probeCount;
+
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+
+      expect(afterLoad, 1, reason: '一条任务只该探一次');
+      expect(probeCount, afterLoad, reason: '重绘不应重新探测文件系统');
     });
   });
 
