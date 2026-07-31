@@ -1,83 +1,72 @@
 import 'dart:async';
 
-import '../../core/editing/frame_time.dart';
 import '../../core/log/app_log.dart';
 import '../../core/playback/playback_controller.dart';
 
-/// 「只播这一段」：从片段起点播到终点自动停。
+/// 「只播这一段」：从片段起点一帧一帧正常播到**本段最后一帧**，然后停住。
 ///
 /// 双击时间线上的台词语义单元 / 视觉镜头就走这里——逐段试看是审片的主要
 /// 动作，比「从这里一直播下去」有用得多。
 ///
-/// 播放器本身没有区间播放能力，这里靠盯位置流实现。两个坑必须防住：
-/// - **seek 尚未生效前的旧位置**：`seekMs` 之后播放器还会报几次上一次的位置。
-///   若那个位置正好在终点之后，片段刚播就被掐停。因此先要观察到一个「确实
-///   落在区间内」的位置，之后的判定才作数。
-/// - **监听不撤**：停过之后不撤订阅，用户手动再播时会被反复摁停。
+/// **停的动作交给播放器自己做**（[PlaybackController.playRange]）。曾经的
+/// 做法是在这里盯位置流、发现越过终点就暂停再 seek 回去——那是错的：位置
+/// 回调是离散采样的，触发时往往已经过头几十毫秒，拉回来在画面上就是一次
+/// 肉眼可见的回跳。用户要的是正常播到最后一帧停下，不是播过了再倒带。
 ///
-/// 停在哪一帧也讲究：相邻片段是无缝覆盖的半开区间（S1 = [0, 2000)、
-/// S2 = [2000, 5000)），终点 `endMs` **就是下一段的第一帧**。停在那里等于
-/// 双击 S1 却看到 S2 的画面。因此停的目标是 [lastFrameBefore]，而且暂停后
-/// 要显式定位回去——位置回调是离散采样的，触发时往往已经越过终点几十毫秒。
+/// 相邻片段是无缝覆盖的半开区间（S1 = [0, 2000)、S2 = [2000, 5000)），
+/// 终点 `endMs` 属于**下一段**，所以传给播放器的终点就是 endMs 本身：
+/// 播到它之前的最后一帧为止，正好是本段的最后一帧。
 class SegmentPlayback {
   final PlaybackController playback;
 
-  StreamSubscription<int>? _watch;
-
-  /// 停的目标：这一段的**最后一帧**（不是终点，终点属于下一段）
-  int? _stopAtMs;
-
-  /// 是否已经观察到「位置确实进到区间内」（防住 seek 前的残留位置）
-  bool _armed = false;
+  StreamSubscription<bool>? _playingWatch;
+  bool _active = false;
 
   SegmentPlayback(this.playback);
 
-  /// 播放 [startMs, endMs)，走到这一段的最后一帧即停。区间非法（终点不在
-  /// 起点之后）时不发任何指令——零长度片段播了也只能立刻停，白闪一下不如不动。
-  Future<void> play(int startMs, int endMs, double fps) async {
-    cancel();
+  /// 当前是否正处于「只播这一段」状态
+  bool get isActive => _active;
+
+  /// 播放 [startMs, endMs)。区间非法（终点不在起点之后）时不发任何指令——
+  /// 零长度片段播了也只能立刻停，白闪一下不如不动。
+  Future<void> play(int startMs, int endMs) async {
+    await cancel();
     if (endMs <= startMs) return;
 
-    // 至少不早于起点：一帧长的片段里 lastFrameBefore 可能落在起点之前
-    final stopAt = lastFrameBefore(endMs, fps);
-    _stopAtMs = stopAt < startMs ? startMs : stopAt;
-    _armed = false;
-    _watch = playback.positionMsStream.listen(_onPosition);
-    await playback.seekMs(startMs);
-    await playback.play();
-  }
-
-  void _onPosition(int ms) {
-    final stopAt = _stopAtMs;
-    if (stopAt == null) return;
-    if (!_armed) {
-      // 还没看到区间内的位置，说明 seek 还没落地，这一拍不作数
-      if (ms <= stopAt) _armed = true;
+    final ranged = await playback.playRange(startMs, endMs);
+    if (!ranged) {
+      // 没有区间能力（播放器降级成无播放模式）时不假装停得住：
+      // 老老实实从起点播，不去做那套会回跳的轮询兜底
+      AppLog.info('播放器不支持区间播放，双击片段退化为从起点播放');
+      await playback.seekMs(startMs);
+      await playback.play();
       return;
     }
-    if (ms < stopAt) return;
-    cancel();
-    unawaited(_stopOn(stopAt));
+    _active = true;
+    // 播放器在终点停下后（playing 变 false）要立刻解除区间限制，
+    // 否则用户按空格想接着往下看，会因为位置已在终点而一按就停
+    _playingWatch = playback.playingStream.listen((playing) {
+      if (!playing) unawaited(cancel());
+    });
   }
 
-  /// 先停再定位：顺序反过来的话，定位完成前播放还在往前走，刚拉回来又跑掉
-  Future<void> _stopOn(int ms) async {
+  /// 解除区间限制。用户自己拖了播放头、点了刻度尺、按了空格都该调用它——
+  /// 否则播到某个位置会莫名其妙地停下。
+  Future<void> cancel() async {
+    _playingWatch?.cancel();
+    _playingWatch = null;
+    if (!_active) return;
+    _active = false;
     try {
-      await playback.pause();
-      await playback.seekMs(ms);
+      await playback.clearRange();
     } catch (e) {
-      AppLog.warn('片段播放收尾失败（暂停/定位）：$e');
+      AppLog.warn('解除片段播放区间失败：$e');
     }
   }
 
-  /// 放弃当前片段约束。用户自己拖了播放头、按了空格、点了别处都该调用它——
-  /// 否则播到某个位置会莫名其妙地停下。
-  void cancel() {
-    _watch?.cancel();
-    _watch = null;
-    _stopAtMs = null;
-    _armed = false;
+  void dispose() {
+    _playingWatch?.cancel();
+    _playingWatch = null;
+    _active = false;
   }
-
-  void dispose() => cancel();
 }

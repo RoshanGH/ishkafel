@@ -1,5 +1,4 @@
 import '../analysis/boundary_snapper.dart';
-import 'frame_time.dart';
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
@@ -62,10 +61,8 @@ abstract final class SegmentationEditOps {
   // 间距在 33/34ms 间交替），因此"向内收缩一帧"不能用 ms 域常数偏移
   // （如 ms±frameMs(fps)），必须先转换到帧序号，加减 1 帧后再换算回 ms，
   // 这样得到的边界本身即为合法帧点，clamp 结果必然合法。
-  // 委托到 frame_time.dart：帧域算术全项目只留一份。片段播放要算「这一段
-  // 的最后一帧」，与这里的边界收缩用的是同一套规则，分成两份迟早会分叉。
-  static int _frameIndex(int ms, double fps) => frameIndex(ms, fps);
-  static int _msOfFrame(int idx, double fps) => msOfFrame(idx, fps);
+  static int _frameIndex(int ms, double fps) => (ms * fps / 1000).round();
+  static int _msOfFrame(int idx, double fps) => (idx * 1000 / fps).round();
 
   /// ms 处的帧点向后收缩一帧得到的合法帧点（用作区间下界）
   static int _frameAfter(int ms, double fps) =>

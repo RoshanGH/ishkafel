@@ -16,6 +16,18 @@ abstract class PlaybackController {
   /// 跳转到指定毫秒位置。
   Future<void> seekMs(int ms);
 
+  /// 播放 [startMs, endMs) 并**由播放器自己**在终点停住。
+  ///
+  /// 为什么必须交给播放器：在外面盯位置流判「到点了没」，采样粒度决定了它
+  /// 必然过头几十毫秒，再 seek 回去就是一次肉眼可见的回跳。用户要的是一帧
+  /// 一帧正常播到最后一帧然后停，不是播过了再倒带。
+  ///
+  /// 返回 false 表示当前实现没有这个能力，调用方据此降级（不要假装停得住）。
+  Future<bool> playRange(int startMs, int endMs);
+
+  /// 解除区间限制，恢复成一直往下播
+  Future<void> clearRange();
+
   /// 按帧步进（暂停态逐帧）：`frames` 为正前进、为负后退，`fps` 为素材帧率。
   Future<void> stepFrames(int frames, double fps);
 
@@ -78,6 +90,21 @@ class FakePlaybackController implements PlaybackController {
     _positionMs = math.max(0, ms);
     _positionController.add(_positionMs);
   }
+
+  /// 是否具备区间播放能力（测试可置 false 来验证降级路径）
+  bool supportsRange = true;
+
+  @override
+  Future<bool> playRange(int startMs, int endMs) async {
+    calls.add('playRange($startMs, $endMs)');
+    if (!supportsRange) return false;
+    await seekMs(startMs);
+    await play();
+    return true;
+  }
+
+  @override
+  Future<void> clearRange() async => calls.add('clearRange()');
 
   @override
   Future<void> stepFrames(int frames, double fps) async {

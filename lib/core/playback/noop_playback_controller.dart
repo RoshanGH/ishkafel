@@ -19,6 +19,13 @@ class NoopPlaybackController implements PlaybackController {
   @override
   Future<void> seekMs(int ms) async {}
 
+  /// 无播放能力，自然也停不住——如实返回 false，不假装
+  @override
+  Future<bool> playRange(int startMs, int endMs) async => false;
+
+  @override
+  Future<void> clearRange() async {}
+
   @override
   Future<void> stepFrames(int frames, double fps) async {}
 

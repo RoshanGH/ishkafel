@@ -75,7 +75,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   /// 拖动播放头期间必须暂停：画面还在自己往前走的话，用户根本对不准位置。
   /// 同时作废「只播这一段」的约束——他已经自己接管定位了。
   void _onScrubStart() {
-    _segment.cancel();
+    unawaited(_segment.cancel());
     _resumeAfterScrub = widget.playback.isPlaying;
     if (_resumeAfterScrub) unawaited(widget.playback.pause());
   }
@@ -270,14 +270,14 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   mediaStatus: widget.mediaStatus,
                   onSeek: (ms) {
                     // 用户自己定位了，上一段的「播到这儿停」约束随即作废
-                    _segment.cancel();
+                    unawaited(_segment.cancel());
                     playback.seekMs(ms);
                   },
                   onGeometryChanged: (g) => setState(() => _geometry = g),
                   onScrubStart: _onScrubStart,
                   onScrubEnd: _onScrubEnd,
                   onPlaySegment: (start, end) =>
-                      unawaited(_segment.play(start, end, editor.fps)),
+                      unawaited(_segment.play(start, end)),
                   readOnly: widget.readOnly,
                 );
               },
