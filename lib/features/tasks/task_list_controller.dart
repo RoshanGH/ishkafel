@@ -11,6 +11,7 @@ import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
 import 'analysis_error_message.dart';
 import 'task_artifact_cleaner.dart';
+import 'task_list_merge.dart';
 
 /// 由 main.dart（或测试）override 提供实例
 final taskRepositoryProvider = Provider<TaskRepository>(
@@ -213,13 +214,25 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 只是 `isRefreshing`，页面继续显示旧列表直到新数据就绪。
   Future<void> reload() async {
     state = const AsyncLoading<List<RenewTask>>().copyWithPrevious(state);
+    // 记下起步代次：这之后发生的局部更新不在这份快照里，回写前要叠加回去
+    final since = _localChangeGeneration;
+    _reloadsInFlight++;
     try {
-      state = AsyncData(List.unmodifiable(await _findAll()));
+      final snapshot = await _findAll();
+      state = AsyncData(List.unmodifiable(mergeLocalChanges(
+        snapshot: snapshot,
+        changes: _localChanges,
+        since: since,
+      )));
     } catch (e, stackTrace) {
       // 原始异常（PathNotFoundException + errno 之类）只进日志：
       // AsyncValue.guard 会把它静默塞进 state，页面再原样摊给用户
       AppLog.warn('任务列表装载失败：$e');
       state = AsyncError(e, stackTrace);
+    } finally {
+      _reloadsInFlight--;
+      // 没有 reload 在飞时这些记录就没人再用了，及时清空防止无界增长
+      if (_reloadsInFlight == 0) _localChanges.clear();
     }
   }
 
@@ -240,7 +253,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     final current = state.valueOrNull;
     if (current == null) return false;
     final rest = current.where((t) => t.id != updated.id).toList(growable: false);
-    state = AsyncData(List.unmodifiable(_insertByUpdatedAtDesc(rest, updated)));
+    state = AsyncData(List.unmodifiable(insertByUpdatedAtDesc(rest, updated)));
+    _recordLocalChange(updated.id, updated);
     return true;
   }
 
@@ -250,18 +264,24 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     if (current == null) return false;
     state = AsyncData(
         List.unmodifiable(current.where((t) => t.id != id).toList()));
+    _recordLocalChange(id, null);
     return true;
   }
 
-  /// 按 updatedAt 倒序插入，与 FileTaskRepository.findAll 的排序口径一致。
-  ///
-  /// 用「找插入位」而不是整表 sort：Dart 的 List.sort 不保证稳定，updatedAt
-  /// 相同的任务会被随机重排，用户会看到列表无缘无故跳动。
-  static List<RenewTask> _insertByUpdatedAtDesc(
-      List<RenewTask> sorted, RenewTask task) {
-    final at = sorted.indexWhere((t) => t.updatedAt.isBefore(task.updatedAt));
-    final index = at < 0 ? sorted.length : at;
-    return [...sorted.take(index), task, ...sorted.skip(index)];
+  /// 代次号：每次局部更新自增，[reload] 用它判断哪些更新发生在自己起步之后
+  int _localChangeGeneration = 0;
+
+  /// 正在进行中的 reload 数量（可能有多个并发：后台分析结束 + 用户操作）
+  int _reloadsInFlight = 0;
+
+  /// 有 reload 在飞时才需要留档，否则记录立刻就没人用了
+  final List<LocalTaskChange> _localChanges = [];
+
+  void _recordLocalChange(String id, RenewTask? task) {
+    _localChangeGeneration++;
+    if (_reloadsInFlight == 0) return;
+    _localChanges.add(LocalTaskChange(
+        generation: _localChangeGeneration, id: id, task: task));
   }
 
   /// 导入并自动分析。[unitTagGroup] / [shotTagGroup] 是新建向导选定的两个

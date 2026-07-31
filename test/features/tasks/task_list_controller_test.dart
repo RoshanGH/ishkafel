@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -125,6 +126,23 @@ class _FindAllFailingRepository extends InMemoryTaskRepository {
       throw const PathNotFoundException('/tasks', OSError('No such file', 2));
     }
     return super.findAll();
+  }
+}
+
+/// findAll 取完快照后可被挂起的假仓库。
+///
+/// 精确复刻真实行为：`findAll` 的结果是「**开始那一刻**的磁盘快照」
+///（真实实现里是后台 isolate 遍历目录读盘，100 条约 131 ms），
+/// 期间发生的写盘不会进入这一份快照。
+class _SnapshotGatedRepository extends InMemoryTaskRepository {
+  Completer<void>? gate;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    final snapshot = await super.findAll();
+    final pending = gate;
+    if (pending != null) await pending.future;
+    return snapshot;
   }
 }
 
@@ -548,6 +566,91 @@ void main() {
           );
 
       expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
+  group('reload 的旧快照不能覆盖期间的局部更新（Important 3）', () {
+    late _SnapshotGatedRepository gated;
+    late ProviderContainer gatedContainer;
+
+    RenewTask makeAwaitingCut(String id) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    List<SemanticUnit> makeUnits() => const [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 1000,
+            transcript: '确认切分后的台词',
+            shots: [Shot(startMs: 0, endMs: 1000)],
+          ),
+        ];
+
+    setUp(() async {
+      gated = _SnapshotGatedRepository();
+      await gated.save(makeAwaitingCut('b'));
+      gatedContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(gated),
+        importServiceProvider.overrideWithValue(importService),
+      ]);
+      addTearDown(gatedContainer.dispose);
+      await gatedContainer.read(taskListProvider.future);
+    });
+
+    test('后台分析结束触发的 reload 不把「确认切分」的结果冲掉', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      // ① 后台分析结束 → reload 起步，快照此刻已定格（任务 B 仍是 awaitingCut）
+      final gate = Completer<void>();
+      gated.gate = gate;
+      final reloading = notifier.reload();
+
+      // ② 这段时间里用户在审片台点了「确认切分」，落库成功、页面已 pop
+      //（这条路径走局部更新，不会再碰 findAll，因此闸门保持关着）
+      await notifier.confirmSegmentation(makeAwaitingCut('b'), makeUnits());
+
+      // ③ 步骤①的快照这才返回
+      gate.complete();
+      await reloading;
+
+      final inMemory = gatedContainer
+          .read(taskListProvider)
+          .value!
+          .firstWhere((t) => t.id == 'b');
+      expect(inMemory.status, RenewTaskStatus.picking,
+          reason: '内存态落后磁盘且不自愈：用户再进审片台会以旧 units 为基线，'
+              '再保存就把上一次确认的切分永久覆盖');
+      expect(inMemory.units, makeUnits());
+    });
+
+    test('reload 期间被删除的任务不会被旧快照带回列表', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      final gate = Completer<void>();
+      gated.gate = gate;
+      final reloading = notifier.reload();
+
+      await notifier.deleteTask(makeAwaitingCut('b'));
+
+      gate.complete();
+      await reloading;
+
+      expect(gatedContainer.read(taskListProvider).value, isEmpty);
+    });
+
+    test('没有并发局部更新时，reload 照常反映磁盘上的外部变化', () async {
+      final notifier = gatedContainer.read(taskListProvider.notifier);
+      await gated.save(makeAwaitingCut('ext'));
+
+      await notifier.reload();
+
+      expect(gatedContainer.read(taskListProvider).value!.map((t) => t.id).toSet(),
+          {'b', 'ext'});
     });
   });
 
