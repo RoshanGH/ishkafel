@@ -96,9 +96,20 @@ class TimelinePainter extends CustomPainter {
           AppColors.textSecondary,
           fontSize: AppFontSize.micro);
       if (hint.isEmpty) continue;
-      _drawText(canvas, '（$hint）', Offset(AppSpacing.xs + 68, top),
-          AppColors.textTertiary,
-          fontSize: AppFontSize.micro);
+      // 提示文字紧跟标题排布：此前用硬编码偏移，标题文案一变长就会重叠
+      final titleWidth = textCache
+          .acquire(
+              text: title,
+              color: AppColors.textSecondary,
+              fontSize: AppFontSize.micro)
+          .width;
+      _drawText(
+        canvas,
+        '（$hint）',
+        Offset(AppSpacing.xs + titleWidth + AppSpacing.sm, top),
+        AppColors.textTertiary,
+        fontSize: AppFontSize.micro,
+      );
     }
   }
 

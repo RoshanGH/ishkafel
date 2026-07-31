@@ -240,13 +240,19 @@ class TimelineHitTester {
       }
     }
 
-    // 边界未命中，检查块体
-    for (final unit in units) {
+    // 边界未命中，检查块体。
+    //
+    // 返回**列表位置**而不是 `unit.index`：上层 EditorSelection.unitIndex 被
+    // 当列表下标使用（controller 直接 `_units[sel.unitIndex]`），而镜头轨那边
+    // 返回的也是列表位置。两者靠 SegmentationEditOps._reindex 恒等才没出事，
+    // 但任何一条产出 units 的路径忘了 reindex，点击就会选中错误的单元甚至越界。
+    for (var i = 0; i < units.length; i++) {
+      final unit = units[i];
       final startPx = geometry.msToPx(unit.startMs);
       final endPx = geometry.msToPx(unit.endMs);
 
       if (x >= startPx && x < endPx) {
-        return UnitBlockHit(unitIndex: unit.index);
+        return UnitBlockHit(unitIndex: i);
       }
     }
 

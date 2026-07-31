@@ -367,4 +367,42 @@ void main() {
       });
     });
   });
+
+  group('命中结果的 unitIndex 口径（上层当列表下标用）', () {
+    test('模型 index 与列表位置不一致时，返回的是列表位置', () {
+      // 上层 EditorSelection.unitIndex 被当**列表下标**使用
+      // （controller.selectedStartMs 直接 _units[sel.unitIndex]）。
+      // 单元轨此前返回 unit.index（模型字段），镜头轨返回列表位置 u——
+      // 两者靠 SegmentationEditOps._reindex 恒等才没出事，是颗定时炸弹：
+      // 任何一条产出 units 的路径忘了 reindex，点击就会选中错误的单元。
+      const units = [
+        SemanticUnit(
+          index: 7, // 故意与列表位置 0 不一致
+          startMs: 0,
+          endMs: 4000,
+          transcript: 'A',
+          shots: [Shot(startMs: 0, endMs: 4000)],
+        ),
+        SemanticUnit(
+          index: 9, // 故意与列表位置 1 不一致
+          startMs: 4000,
+          endMs: 8000,
+          transcript: 'B',
+          shots: [Shot(startMs: 4000, endMs: 8000)],
+        ),
+      ];
+      final geo =
+          TimelineGeometry.fit(durationMs: 8000, viewportWidthPx: 800);
+
+      final hit = TimelineHitTester.hitTest(
+          Offset(200, _unitCenterY), units, geo);
+      expect(hit, isA<UnitBlockHit>());
+      expect((hit as UnitBlockHit).unitIndex, 0,
+          reason: '上层拿它当列表下标；返回模型 index 7 会直接越界或选错单元');
+
+      final second = TimelineHitTester.hitTest(
+          Offset(600, _unitCenterY), units, geo);
+      expect((second as UnitBlockHit).unitIndex, 1);
+    });
+  });
 }
