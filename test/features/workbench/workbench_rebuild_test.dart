@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
@@ -137,13 +138,20 @@ void main() {
         (tester) async {
       await pumpPage(tester);
 
-      final boundaries = find.ancestor(
-        of: find.byType(CustomPaint).last,
-        matching: find.byType(RepaintBoundary),
+      // 不能用 find.ancestor(matching: RepaintBoundary) 断言：Flutter 自己在
+      // 每个路由页外面就套了一层（routes.dart 的 _ModalScopeState._page），
+      // 于是 MaterialApp 路由内任何 widget 都必然有 RepaintBoundary 祖先——
+      // 把实现里那行整个删掉，这种断言照样绿。要验的是**渲染层**：时间线
+      // 那个 RenderCustomPaint 的直接父节点就是一个 RenderRepaintBoundary。
+      final paintFinder = find.descendant(
+        of: find.byType(TimelineView),
+        matching: find.byType(CustomPaint),
       );
-      expect(boundaries, findsWidgets,
-          reason: 'CustomPaint 没有 RepaintBoundary 时，markNeedsPaint 会一路上溯到 '
-              'RenderView，每次播放头移动都要重录整页绘制指令');
+      expect(paintFinder, findsWidgets, reason: '前提：时间线里有 CustomPaint');
+      final renderPaint = tester.renderObject(paintFinder.last);
+      expect(renderPaint.parent, isA<RenderRepaintBoundary>(),
+          reason: 'CustomPaint 没有紧邻的 RepaintBoundary 时，markNeedsPaint 会'
+              '一路上溯到 RenderView，每次播放头移动都要重录整页绘制指令');
     });
   });
 }

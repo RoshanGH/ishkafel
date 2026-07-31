@@ -141,7 +141,11 @@ void main() {
       expect(next, isNotNull,
           reason: '时间线本身没有纵向可滚内容，纵向滚动若不映射为平移就是'
               '一个落空的手势');
-      expect(next!.msPerPx, zoomed.msPerPx);
+      expect(next!.msPerPx, zoomed.msPerPx, reason: '不带修饰键不应改变缩放');
+      // 只断言「不是缩放」不够：实现若把纵向滚动错映射成 scrolledBy(0)、
+      // 或方向反了，这条测试依然会绿。必须验平移真的发生且方向正确。
+      expect(next.scrollPx, greaterThan(zoomed.scrollPx),
+          reason: '向下滚（dy 为正）应让时间线向后平移');
     });
   });
 

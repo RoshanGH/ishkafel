@@ -93,10 +93,21 @@ void main() {
 
       final button = find.byKey(const Key('workbench-reanalyze-btn'));
       expect(button, findsOneWidget);
+      expect(tester.widget<OutlinedButton>(button).onPressed, isNull,
+          reason: '前提：这个按钮当前确实是禁用的');
 
       final tooltip = find.ancestor(of: button, matching: find.byType(Tooltip));
       expect(tooltip, findsOneWidget,
           reason: '永久禁用且无任何解释的按钮，用户只会反复点它并怀疑软件坏了');
+
+      // 只断言「有 tooltip」不够：把 message 改成空串，"说明原因"就完全消失了，
+      // 断言却照样绿。要验它真的说了「为什么不能用」。
+      final message = tester.widget<Tooltip>(tooltip).message ?? '';
+      expect(message.trim(), isNotEmpty);
+      expect(message, contains('尚未'),
+          reason: 'tooltip 要说清是"还没开放"而不是"出错了"');
+      expect(message, contains('人工调整'),
+          reason: '还要说清重新切分的代价，否则用户不知道为什么要设确认流程');
     });
 
     testWidgets('摘要文案用术语表全称', (tester) async {
