@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
@@ -168,7 +169,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       color: AppColors.surface,
       child: Column(
         children: [
-          _buildTimelineToolbar(widget.editor),
+          // 工具条按钮的禁用态取自编辑器（canUndo/canRedo/selection），必须
+          // 自己监听：页面级 setState 已被移除（播放时每秒 30 次重建整页的
+          // 性能问题），不能再指望父级顺手帮它重建
+          AnimatedBuilder(
+            animation: editor,
+            builder: (context, _) => _buildTimelineToolbar(editor),
+          ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -218,7 +225,28 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             enabled: editor.canRedo,
             onTap: editor.redo,
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: AppSpacing.sm),
+          const _ToolbarDivider(),
+          const SizedBox(width: AppSpacing.sm),
+          // 拆分/合并在时间线上也给入口：此前只能从右侧检查器触发，而用户
+          // 调整切分时视线与鼠标都在时间线上，来回横跨整个窗口很别扭
+          _undoRedoButton(
+            key: const Key('timeline-split-btn'),
+            icon: Icons.content_cut,
+            tooltip: '在游标处拆分所选（台词语义单元或视觉镜头）',
+            enabled: !widget.readOnly && editor.selection != null,
+            onTap: () => _splitAtPlayhead(context, editor, widget.playback),
+          ),
+          _undoRedoButton(
+            key: const Key('timeline-merge-btn'),
+            icon: Icons.merge_type,
+            tooltip: '把所选并入前一个',
+            enabled: !widget.readOnly && editor.selection != null,
+            onTap: editor.mergeSelectedWithPrevious,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          const _ToolbarDivider(),
+          const SizedBox(width: AppSpacing.sm),
           const Icon(Icons.zoom_out, color: AppColors.textTertiary, size: 16),
           Expanded(
             child: Slider(
@@ -242,10 +270,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     required IconData icon,
     required bool enabled,
     required VoidCallback onTap,
+    String? tooltip,
   }) {
     return IconButton(
       key: key,
       onPressed: enabled ? onTap : null,
+      tooltip: tooltip,
       visualDensity: VisualDensity.compact,
       icon: Icon(
         icon,
@@ -256,4 +286,16 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       ),
     );
   }
+}
+
+/// 工具条分组分隔线：把撤销/编辑/缩放三组操作在视觉上分开
+class _ToolbarDivider extends StatelessWidget {
+  const _ToolbarDivider();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        width: AppStroke.hairline,
+        height: 16,
+        color: AppColors.border,
+      );
 }
