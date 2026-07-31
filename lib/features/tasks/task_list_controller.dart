@@ -10,6 +10,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
 import 'analysis_error_message.dart';
+import 'analysis_progress_store.dart';
 import 'task_artifact_cleaner.dart';
 import 'task_list_merge.dart';
 
@@ -346,13 +347,17 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 无论成功或失败，结束时都在 finally 中释放守卫，避免占位泄漏导致
   /// 任务永久无法再次触发分析。
   Future<void> _runAnalyze(AnalysisPipeline pipeline, RenewTask task) async {
+    final progress = ref.read(analysisProgressProvider.notifier);
     try {
-      await pipeline.analyze(task);
+      await pipeline.analyze(task,
+          onProgress: (p) => progress.report(task.id, p));
       await reload();
     } catch (e) {
       AppLog.warn('任务 ${task.id} 分析失败：$e');
       await _markAnalysisFailed(task, e);
     } finally {
+      // 成功与失败都要清：留着最后一步的文案，卡片看起来像还在跑
+      progress.clear(task.id);
       _analyzingTaskIds.remove(task.id);
     }
   }

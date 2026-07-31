@@ -9,6 +9,7 @@ import '../models/tag_group_ref.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
 import '../storage/task_repository.dart';
+import 'analysis_progress.dart';
 import 'audio_extractor.dart';
 import 'providers.dart';
 import 'scene_detector.dart';
@@ -62,7 +63,24 @@ class AnalysisPipeline {
     this.vocabulary,
   }) : clock = clock ?? DateTime.now;
 
-  Future<RenewTask> analyze(RenewTask task) async {
+  /// 上报一步进度。
+  ///
+  /// 回调抛异常只记日志：进度只是「说一声」，因为没人听就把整条分析废掉，
+  /// 等于让十几分钟的计算白跑。
+  void _report(AnalysisProgressSink? sink, AnalysisStage stage,
+      {int? done, int? total}) {
+    if (sink == null) return;
+    try {
+      sink(AnalysisProgress(stage: stage, done: done, total: total));
+    } catch (e) {
+      AppLog.warn('分析进度回调抛异常（已忽略）：$e');
+    }
+  }
+
+  /// [onProgress] 逐次传入而不是挂在实例上：管线是全应用共享的单例，
+  /// 挂在实例上会让所有任务的进度都涌向同一个回调，还分不清是谁的。
+  Future<RenewTask> analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress}) async {
     final info = task.videoInfo;
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
@@ -72,15 +90,23 @@ class AnalysisPipeline {
     // 复用可能残留的半截文件会让 ASR 拿到不完整音频
     final pcmPath = analysisPcmPath(workDir, task.id);
 
+    _report(onProgress, AnalysisStage.extractingAudio);
     final samples = await audio.extractSamples(
         videoPath: task.sourcePath,
         outPcmPath: pcmPath,
         sampleRate: sampleRate);
     final valleys = silence.detectValleyCenters(samples, sampleRate);
+
+    _report(onProgress, AnalysisStage.detectingScenes);
     final shotBounds = await scenes.detect(task.sourcePath);
+
+    _report(onProgress, AnalysisStage.transcribing);
     final sentences = await asr.transcribe(pcmPath);
+
+    _report(onProgress, AnalysisStage.splitting);
     final drafts = await splitter.split(sentences);
 
+    _report(onProgress, AnalysisStage.building);
     final units = builder.build(
       drafts: drafts,
       shotBoundaryMs: shotBounds,
@@ -89,7 +115,7 @@ class AnalysisPipeline {
       fps: info.fps,
     );
 
-    final taggedUnits = await _tagUnits(task, units);
+    final taggedUnits = await _tagUnits(task, units, onProgress);
 
     final updated = task.copyWith(
       units: taggedUnits,
@@ -106,8 +132,8 @@ class AnalysisPipeline {
   /// 词表按本任务选定的标签组现取（每个任务可能选不同的组），任何一层
   /// 取不到词表都只降级掉那一层，不中断整条分析——分析结果（切分）本身
   /// 仍然有价值，为了标签把它整条废掉不划算。
-  Future<List<SemanticUnit>> _tagUnits(
-      RenewTask task, List<SemanticUnit> units) async {
+  Future<List<SemanticUnit>> _tagUnits(RenewTask task,
+      List<SemanticUnit> units, AnalysisProgressSink? onProgress) async {
     final unitVocabulary = unitTagger == null
         ? const <String>[]
         : await _vocabularyFor(task.unitTagGroup, '台词语义单元');
@@ -120,6 +146,7 @@ class AnalysisPipeline {
     if (!tagUnits && !tagShots) return units;
 
     final result = <SemanticUnit>[];
+    if (tagUnits) _report(onProgress, AnalysisStage.taggingUnits, done: 0, total: units.length);
     for (final unit in units) {
       var updatedUnit = unit;
       if (tagUnits) {
@@ -132,9 +159,13 @@ class AnalysisPipeline {
         }
       }
       result.add(updatedUnit);
+      if (tagUnits) {
+        _report(onProgress, AnalysisStage.taggingUnits,
+            done: result.length, total: units.length);
+      }
     }
     if (!tagShots) return result;
-    return _tagAllShotsConcurrently(task, result, shotVocabulary);
+    return _tagAllShotsConcurrently(task, result, shotVocabulary, onProgress);
   }
 
   /// 视觉镜头打标的并发上限。
@@ -150,7 +181,10 @@ class AnalysisPipeline {
   /// 按单元并发等于没并发。结果按全局下标回填——按完成顺序收集会把标签
   /// 串到别的镜头上。
   Future<List<SemanticUnit>> _tagAllShotsConcurrently(
-      RenewTask task, List<SemanticUnit> units, List<String> vocabulary) async {
+      RenewTask task,
+      List<SemanticUnit> units,
+      List<String> vocabulary,
+      AnalysisProgressSink? onProgress) async {
     final flat = <({int unit, int shot})>[
       for (var u = 0; u < units.length; u++)
         for (var s = 0; s < units[u].shots.length; s++) (unit: u, shot: s),
@@ -159,6 +193,10 @@ class AnalysisPipeline {
 
     final tagged = List<Shot?>.filled(flat.length, null);
     var next = 0;
+    // 完成计数与回填下标是两回事：并发下第 5 个开工的可能第 1 个结束，
+    // 用下标当进度会让数字来回跳
+    var completed = 0;
+    _report(onProgress, AnalysisStage.taggingShots, done: 0, total: flat.length);
 
     Future<void> worker() async {
       while (true) {
@@ -167,6 +205,8 @@ class AnalysisPipeline {
         final at = flat[i];
         tagged[i] = await _tagShot(
             task, units[at.unit].shots[at.shot], i, vocabulary);
+        _report(onProgress, AnalysisStage.taggingShots,
+            done: ++completed, total: flat.length);
       }
     }
 

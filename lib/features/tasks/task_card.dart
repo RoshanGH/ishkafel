@@ -1,9 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/analysis/analysis_progress.dart';
 import '../../core/models/renew_task.dart';
+import 'analysis_progress_store.dart';
 import 'source_availability.dart';
 
 /// 状态徽标文案与配色
@@ -15,7 +18,7 @@ import 'source_availability.dart';
       RenewTaskStatus.exported => (label: '已导出', color: AppColors.green),
     };
 
-class TaskCard extends StatelessWidget {
+class TaskCard extends ConsumerWidget {
   /// 封面缺失/加载失败时的黑底占位（供测试定位）
   static const coverPlaceholderKey = ValueKey('task-card-cover-placeholder');
 
@@ -36,11 +39,17 @@ class TaskCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     // 分析失败优先级高于普通状态徽标：只要 analysisError 非空就顶替显示
     final badge = task.analysisError != null
         ? (label: '分析失败', color: AppColors.red)
         : statusBadge(task.status);
+    // 只有真正在分析的任务才看进度：分析已经结束的卡片还挂着进度条，
+    // 会让人以为它又在跑了。select 保证只有本任务的进度变化才重绘本卡片。
+    final progress = task.status == RenewTaskStatus.analyzing &&
+            task.analysisError == null
+        ? ref.watch(taskProgressOf(task.id))
+        : null;
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,
@@ -74,6 +83,12 @@ class TaskCard extends StatelessWidget {
                             color: Colors.black)),
                   ),
                 ),
+                if (progress != null)
+                  Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: _ProgressStrip(progress: progress)),
               ],
             ),
           ),
@@ -100,6 +115,47 @@ class TaskCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 分析进度条：封面底部一条细进度 + 一行当前步骤。
+///
+/// 没有它的时候，一条 75 秒素材实测跑了十几分钟，全程只有「分析中」三个字，
+/// 用户无从判断是在推进还是卡死了。
+class _ProgressStrip extends StatelessWidget {
+  final AnalysisProgress progress;
+
+  const _ProgressStrip({required this.progress});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LinearProgressIndicator(
+            key: const Key('task-card-progress'),
+            // 无计数阶段给 null（不确定态）：一根卡在 0% 的确定态进度条，
+            // 看起来就是卡死了
+            value: progress.fraction,
+            minHeight: 3,
+            backgroundColor: AppColors.stageBackground.withValues(alpha: 0.55),
+            valueColor:
+                const AlwaysStoppedAnimation<Color>(AppColors.accentBlue),
+          ),
+          Container(
+            width: double.infinity,
+            color: AppColors.stageBackground.withValues(alpha: 0.72),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+            child: Text(
+              '第 ${progress.stageNumber}/${AnalysisProgress.stageCount} 步 · ${progress.summary}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textPrimary),
+            ),
+          ),
+        ],
+      );
 }
 
 /// 源文件缺失的可见标记：压暗封面 + 左上角红色徽标 + 一句人话说明。

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/analysis/analysis_progress.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -61,8 +62,11 @@ class _FakePipeline extends AnalysisPipeline {
         );
 
   @override
-  Future<RenewTask> analyze(RenewTask task) async {
+  Future<RenewTask> analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress}) async {
     analyzeCallCount++;
+    onProgress?.call(
+        const AnalysisProgress(stage: AnalysisStage.extractingAudio));
     if (failWith != null) throw failWith!;
     if (shouldFail) throw StateError('分析失败（模拟）');
     final updated =
