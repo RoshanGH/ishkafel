@@ -236,15 +236,35 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         editor.units, editor.durationMs, editor.fps);
     if (!valid) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('切分结构不合法，无法确认（存在越界或过短的边界）')));
+          content: Text('有片段短于一帧，无法确认。请调整过窄的台词语义单元或视觉镜头')));
       return;
     }
-    await ref
-        .read(taskListProvider.notifier)
-        .confirmSegmentation(widget.task, editor.units);
+    // 落库失败必须让用户看见：此前这个 Future 无人接管，磁盘写满/权限问题时
+    // 既不提示也不返回，用户看到的就是「点了确认没反应」。
+    try {
+      await ref
+          .read(taskListProvider.notifier)
+          .confirmSegmentation(widget.task, editor.units);
+    } catch (e) {
+      AppLog.warn('确认切分落库失败（taskId=${widget.task.id}）：$e');
+      if (!mounted) return;
+      _showSaveFailure('确认切分');
+      return;
+    }
     _confirmed = true;
     if (!mounted) return;
     Navigator.of(context).pop();
+  }
+
+  /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
+  /// 不把原始异常文本摊给用户（详情已进日志）。
+  void _showSaveFailure(String what) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$what保存失败，请检查磁盘空间后重试'),
+        backgroundColor: AppColors.red,
+      ),
+    );
   }
 
   Future<void> _handleBackRequest() async {
@@ -258,9 +278,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (!mounted) return;
     if (action == null || action == LeaveAction.cancel) return;
     if (action == LeaveAction.saveDraft) {
-      await ref
-          .read(taskListProvider.notifier)
-          .saveSegmentationDraft(widget.task, _editor!.units);
+      try {
+        await ref
+            .read(taskListProvider.notifier)
+            .saveSegmentationDraft(widget.task, _editor!.units);
+      } catch (e) {
+        // 草稿没存上还照常离开，用户的调整就凭空消失了：提示并留在页面
+        AppLog.warn('保存草稿失败（taskId=${widget.task.id}）：$e');
+        if (!mounted) return;
+        _showSaveFailure('草稿');
+        return;
+      }
       if (!mounted) return;
     }
     Navigator.of(context).pop();
@@ -271,7 +299,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final totalShots = units.fold<int>(0, (sum, u) => sum + u.shots.length);
     final durationSec = (editor.durationMs / 1000).toStringAsFixed(1);
     final dirtyHint = editor.dirty ? ' · 有未保存的修改' : '';
-    return '共 ${units.length} 个语义单元 · $totalShots 个镜头 · 时长 $durationSec' 's$dirtyHint';
+    return '共 ${units.length} 个台词语义单元 · $totalShots 个视觉镜头 · '
+        '时长 $durationSec' 's$dirtyHint';
   }
 
   @override

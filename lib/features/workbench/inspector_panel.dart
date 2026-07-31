@@ -169,7 +169,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          inspectorTitle('单元详情 — U${unit.index + 1}'),
+          inspectorTitle('台词语义单元 — U${unit.index + 1}'),
           const SizedBox(height: 10),
           inspectorCard([
             inspectorTimeRow(
@@ -216,6 +216,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           ]),
           const SizedBox(height: 10),
           inspectorActionsRow(
+            splitLabel: '✂ 在游标处拆分单元',
             mergeLabel: '⇧ 并入上一单元',
             onSplit: widget.readOnly
                 ? null
@@ -244,7 +245,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          inspectorTitle('镜头详情 — U${unit.index + 1} · S${shotIndex + 1}'),
+          inspectorTitle('视觉镜头 — U${unit.index + 1} · S${shotIndex + 1}'),
           const SizedBox(height: 10),
           inspectorCard([
             inspectorInfoRow('所属单元',
@@ -284,6 +285,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           ]),
           const SizedBox(height: 10),
           inspectorActionsRow(
+            splitLabel: '✂ 在游标处拆分镜头',
             mergeLabel: '⇧ 并入前一镜头',
             onSplit: widget.readOnly
                 ? null

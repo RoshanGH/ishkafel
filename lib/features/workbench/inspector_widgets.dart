@@ -135,6 +135,7 @@ Widget inspectorTagChips(List<String> tags) {
 /// [onSplit]/[onMerge] 为 null 时按钮禁用（降透明度且不响应点击）——
 /// 只读回看模式（评审 Important 1）下不允许拆分/合并已确认的切分结构。
 Widget inspectorActionsRow({
+  required String splitLabel,
   required String mergeLabel,
   required VoidCallback? onSplit,
   required VoidCallback? onMerge,
@@ -144,7 +145,7 @@ Widget inspectorActionsRow({
       Expanded(
         child: _actionButton(
           key: const Key('inspector-split-btn'),
-          label: '✂ 在游标处拆分',
+          label: splitLabel,
           onTap: onSplit,
         ),
       ),

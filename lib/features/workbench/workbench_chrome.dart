@@ -197,10 +197,16 @@ class WorkbenchBottomBar extends StatelessWidget {
               style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
             ),
           ),
-          OutlinedButton(
-            key: const Key('workbench-reanalyze-btn'),
-            onPressed: null,
-            child: const Text('重新 AI 切分'),
+          // 该能力尚未接通（重新分析会丢弃当前所有人工调整，需先设计二次确认
+          // 与进度反馈）。在接通前也不能留一个点不动、没有任何解释的灰按钮——
+          // 用户只会反复点它并怀疑软件坏了，违反「主操作有明确反馈」的标准。
+          Tooltip(
+            message: '此功能尚未开放。重新切分会丢弃当前所有人工调整，正在设计确认流程',
+            child: OutlinedButton(
+              key: const Key('workbench-reanalyze-btn'),
+              onPressed: null,
+              child: const Text('重新 AI 切分'),
+            ),
           ),
           const SizedBox(width: 12),
           FilledButton(
