@@ -93,6 +93,9 @@ class _PickingPageState extends ConsumerState<PickingPage> {
       _videoWidget = playback.buildVideoWidget();
     }
     unawaited(playback.open(widget.task.sourcePath));
+    // 进页面就要定下检索方式：没有视觉镜头标签组时「标签」这一段本来就点不动，
+    // 留它选中着，用户只会盯着一个永远空白的候选面板
+    _syncSearchMode();
     unawaited(_loadTagVocabulary());
   }
 
@@ -117,7 +120,11 @@ class _PickingPageState extends ConsumerState<PickingPage> {
     if (group == null) return;
     await _tagResolver.load(group.id);
     if (!mounted) return;
+    // 标签表是异步拉的：进页面时看着可用、拉完（或拉失败）才知道到底行不行，
+    // 这一刻同样不能把点不动的段留在选中态
+    _syncSearchMode();
     setState(() {});
+    unawaited(_refreshSearchIfNeeded());
   }
 
   @override
@@ -151,8 +158,12 @@ class _PickingPageState extends ConsumerState<PickingPage> {
   /// 标签不可用时自动落到画面描述——把一个用不了的检索方式选中着，
   /// 面板就永远是空的，用户不知道该做什么
   void _syncSearchMode() {
-    if (_searchMode == CandidateSearchMode.tag &&
-        _scope.tagUnavailableText != null) {
+    if (_searchMode != CandidateSearchMode.tag) return;
+    final scope = _scope;
+    // 「还在读标签表」不是「用不了」：这一刻切走是不可逆的（不会再切回来），
+    // 拉完一切正常时用户就白白丢了主路径
+    if (scope.tagPending) return;
+    if (scope.tagUnavailableText != null) {
       _searchMode = CandidateSearchMode.description;
     }
   }

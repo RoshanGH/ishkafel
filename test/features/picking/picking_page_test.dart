@@ -16,6 +16,7 @@ import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/picking/picking_page.dart';
+import 'package:ishkafel/features/picking/picking_widgets.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 class _InMemoryRepo implements TaskRepository {
@@ -429,6 +430,8 @@ void main() {
       expect(seg.ignoring, isTrue);
     });
   });
+
+  _searchModeRegressions();
 }
 
 class _FailingRepo implements TaskRepository {
@@ -443,4 +446,84 @@ class _FailingRepo implements TaskRepository {
 
   @override
   Future<void> delete(String id) async {}
+}
+
+void _searchModeRegressions() {
+  group('检索方式的默认选中（真机验收发现）', () {
+    testWidgets('标签不可用时，进页面就不该把「标签」选中着', (tester) async {
+      final repo = _InMemoryRepo();
+      final task = _task(shotTagGroup: null); // 建任务时没选视觉镜头标签组
+      repo.store[task.id] = task;
+
+      await _pump(
+          tester,
+          task: task,
+          repo: repo,
+          playback: FakePlaybackController());
+
+      final segmented = tester.widget<PickingSegmented>(find
+          .ancestor(
+              of: find.byKey(const Key('picking-search-tag')),
+              matching: find.byType(PickingSegmented))
+          .first);
+
+      expect(segmented.selectedIndex,
+          isNot(CandidateSearchMode.values.indexOf(CandidateSearchMode.tag)),
+          reason: '「标签」这一段是点不动的（没有标签组就没有检索键）。'
+              '把一个点不动的段画成选中态，用户只会盯着一个永远空白的候选面板，'
+              '既不知道为什么，也不知道该点哪儿');
+      expect(
+          segmented.selectedIndex,
+          CandidateSearchMode.values
+              .indexOf(CandidateSearchMode.description),
+          reason: '应当自动落到「画面描述」——它是此时唯一能用的检索方式');
+    });
+
+    testWidgets('标签可用时仍然默认选「标签」', (tester) async {
+      final repo = _InMemoryRepo();
+      final task = _task(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      repo.store[task.id] = task;
+
+      await _pump(
+          tester,
+          task: task,
+          repo: repo,
+          playback: FakePlaybackController());
+
+      final segmented = tester.widget<PickingSegmented>(find
+          .ancestor(
+              of: find.byKey(const Key('picking-search-tag')),
+              matching: find.byType(PickingSegmented))
+          .first);
+
+      expect(segmented.selectedIndex,
+          CandidateSearchMode.values.indexOf(CandidateSearchMode.tag),
+          reason: '标签检索是主路径，能用时就该是默认');
+    });
+
+    testWidgets('标签表拉取失败后也要让出选中态', (tester) async {
+      final repo = _InMemoryRepo();
+      final task = _task(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      repo.store[task.id] = task;
+
+      await _pump(
+        tester,
+        task: task,
+        repo: repo,
+        playback: FakePlaybackController(),
+        tags: (_, _) async => ProcessResult(1, 1, '', '401 Unauthorized'),
+      );
+
+      final segmented = tester.widget<PickingSegmented>(find
+          .ancestor(
+              of: find.byKey(const Key('picking-search-tag')),
+              matching: find.byType(PickingSegmented))
+          .first);
+
+      expect(segmented.selectedIndex,
+          isNot(CandidateSearchMode.values.indexOf(CandidateSearchMode.tag)),
+          reason: '标签表是异步拉的：进页面时还可用、拉完才发现不可用，'
+              '这一刻同样不能把点不动的段留在选中态');
+    });
+  });
 }

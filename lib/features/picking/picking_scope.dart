@@ -28,12 +28,18 @@ class PickingScope {
   /// 标签检索不可用的原因；可用时为 null
   final String? tagUnavailableText;
 
+  /// 标签表还在拉取中——「暂时不能用」不等于「不能用」。
+  /// 这一刻不该把检索方式改判成画面描述：拉完可能一切正常，
+  /// 而自动切换是不可逆的（不会再切回来），用户会莫名其妙地丢掉主路径。
+  final bool tagPending;
+
   const PickingScope({
     required this.tagNames,
     required this.tagIds,
     required this.targetDurationMs,
     required this.descriptionKeyword,
     required this.tagUnavailableText,
+    this.tagPending = false,
   });
 
   /// 从当前状态推导作用域。
@@ -79,6 +85,7 @@ class PickingScope {
         names: names,
         ids: ids,
       ),
+      tagPending: _tagPending(resolver, shotTagGroup),
     );
   }
 
@@ -92,7 +99,11 @@ class PickingScope {
     return seen;
   }
 
-  /// 四种「标签检索用不了」的处境，各自的下一步完全不同，必须分开说
+  /// 有标签组、但表还没拉回来也没失败：结论未知
+  static bool _tagPending(TagIdResolver resolver, TagGroupRef? shotTagGroup) =>
+      shotTagGroup != null && !resolver.loaded && resolver.loadFailure == null;
+
+  /// 五种「标签检索用不了」的处境，各自的下一步完全不同，必须分开说
   static String? _tagUnavailable({
     required TagIdResolver resolver,
     required TagGroupRef? shotTagGroup,
@@ -104,6 +115,9 @@ class PickingScope {
     }
     final failure = resolver.loadFailure;
     if (failure != null) return failure;
+    // 表还没到手时不能说「找不到对应项」——那是拉完之后才成立的判断，
+    // 提前说出来是一条转瞬即逝的假错误
+    if (!resolver.loaded) return '正在读取标签表…';
     if (names.isEmpty) {
       return tagSearchUnavailableText(hasShotTagGroup: true, queryTagCount: 0);
     }
