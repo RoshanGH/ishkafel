@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
@@ -94,7 +95,9 @@ class TimelineMediaBuilder {
     required Directory workDir,
     required int waveBuckets,
   }) async {
-    final pcmPath = '${workDir.path}/${taskId}_tl.pcm';
+    // 与分析管线共用同一份 PCM（同为 16kHz 单声道 s16le）：管线跑过就直接
+    // 命中缓存，既不重复占磁盘，也省掉第二次 ffmpeg 提取
+    final pcmPath = analysisPcmPath(workDir, taskId);
     try {
       final samples = await _isValidCacheFile(pcmPath, _minValidPcmBytes)
           ? AudioExtractor.bytesToPcm16(await File(pcmPath).readAsBytes())

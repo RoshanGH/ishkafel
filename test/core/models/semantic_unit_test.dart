@@ -54,6 +54,30 @@ void main() {
     expect(legacy == const Shot(startMs: 0, endMs: 1000), true);
   });
 
+  test('SemanticUnit.fromJson 缺 tags/shots 时兜底为空列表（与 Shot 同款兼容）', () {
+    final legacy = SemanticUnit.fromJson(const {
+      'index': 0,
+      'startMs': 0,
+      'endMs': 1000,
+      'transcript': '旧版本写入的单元',
+    });
+    expect(legacy.tags, isEmpty);
+    expect(legacy.shots, isEmpty);
+  });
+
+  test('SemanticUnit.fromJson 的 tags/shots 显式为 null 时同样兜底', () {
+    final unitWithNulls = SemanticUnit.fromJson(const {
+      'index': 1,
+      'startMs': 0,
+      'endMs': 1000,
+      'transcript': 't',
+      'tags': null,
+      'shots': null,
+    });
+    expect(unitWithNulls.tags, isEmpty);
+    expect(unitWithNulls.shots, isEmpty);
+  });
+
   test('Shot.copyWith 不改原对象', () {
     const shot = Shot(startMs: 0, endMs: 1000);
     final tagged = shot.copyWith(tags: ['使用动作']);

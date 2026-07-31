@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ffmpeg/media_tools_locator.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/storage/file_task_repository.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/tasks/environment_banner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -28,13 +31,25 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> delete(String id) async => _store.remove(id);
 }
 
+/// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
+class _SkippingRepository extends InMemoryTaskRepository
+    implements TaskLoadDiagnostics {
+  @override
+  final int skippedTaskFileCount;
+  _SkippingRepository({required int skipped}) : skippedTaskFileCount = skipped;
+}
+
 RenewTask makeTask(String id, String name, RenewTaskStatus status) => RenewTask(
       id: id, name: name, sourcePath: '/v/$id.mp4', status: status,
       createdAt: DateTime.utc(2026, 7, 29), updatedAt: DateTime.utc(2026, 7, 29),
     );
 
-Widget wrap(TaskRepository repo) => ProviderScope(
-      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
+    ProviderScope(
+      overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        ...overrides,
+      ],
       child: const MaterialApp(home: TaskListPage()),
     );
 
@@ -55,6 +70,36 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  group('运行环境横幅（ffmpeg/ffprobe 缺失）', () {
+    testWidgets('未检测到 ffmpeg/ffprobe 时常驻横幅给出中文安装引导', (tester) async {
+      await tester.pumpWidget(wrap(
+        InMemoryTaskRepository(),
+        overrides: [
+          mediaToolsStatusProvider.overrideWithValue(
+              const MediaToolsStatus(ffmpegPath: null, ffprobePath: null)),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('未检测到'), findsOneWidget);
+      expect(find.textContaining('brew install ffmpeg'), findsOneWidget);
+    });
+
+    testWidgets('工具就绪时不显示横幅', (tester) async {
+      await tester.pumpWidget(wrap(
+        InMemoryTaskRepository(),
+        overrides: [
+          mediaToolsStatusProvider.overrideWithValue(const MediaToolsStatus(
+              ffmpegPath: '/opt/homebrew/bin/ffmpeg',
+              ffprobePath: '/opt/homebrew/bin/ffprobe')),
+        ],
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('未检测到'), findsNothing);
+    });
   });
 
   group('任务卡点击路由', () {
@@ -121,7 +166,30 @@ void main() {
       expect(find.textContaining('已导出的任务'), findsOneWidget);
     });
 
-    testWidgets('analyzing 状态点击不进入审片台，提示分析中', (tester) async {
+    testWidgets('历史遗留的非法帧率任务点击不进入审片台（否则按帧计算会红屏）',
+        (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeCuttableTask(RenewTaskStatus.awaitingCut).copyWith(
+        videoInfo: const VideoInfo(
+          width: 1080,
+          height: 1920,
+          duration: Duration(milliseconds: 1000),
+          fps: 0,
+          fileSizeBytes: 10,
+        ),
+      ));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('可进入审片台的任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(WorkbenchPage), findsNothing);
+      expect(find.textContaining('帧率'), findsOneWidget);
+    });
+
+    testWidgets('启动后装载到的 analyzing 任务被判为中断，点击给出中断原因与重试入口',
+        (tester) async {
       final repo = InMemoryTaskRepository();
       await repo.save(makeTask('a2', '分析中的任务', RenewTaskStatus.analyzing));
       await tester.pumpWidget(wrap(repo));
@@ -131,7 +199,140 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(WorkbenchPage), findsNothing);
-      expect(find.textContaining('分析中'), findsWidgets);
+      expect(find.textContaining('中断'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+    });
+  });
+
+  group('AI 未配置的常驻提示', () {
+    testWidgets('分析管线未配置时列表页常驻横幅说明后果', (tester) async {
+      await tester.pumpWidget(wrap(InMemoryTaskRepository()));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('尚未配置'), findsOneWidget);
+    });
+
+    testWidgets('点「重试」时给出「AI 服务未配置」的即时反馈', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo
+          .save(makeTask('f2', '失败任务', RenewTaskStatus.analyzing)
+              .copyWith(analysisError: '上次分析被中断'));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('失败任务'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('重试'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('AI 服务未配置'), findsWidgets);
+    });
+  });
+
+  group('损坏任务文件的可见提示', () {
+    testWidgets('跳过无法读取的任务文件时列表页顶部给出提示', (tester) async {
+      final repo = _SkippingRepository(skipped: 2);
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('2 个'), findsOneWidget);
+      expect(find.textContaining('无法读取'), findsOneWidget);
+    });
+
+    testWidgets('没有跳过时不显示提示', (tester) async {
+      final repo = _SkippingRepository(skipped: 0);
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('无法读取'), findsNothing);
+    });
+  });
+
+  group('任务卡菜单：删除 / 重命名 / 重新分析', () {
+    Future<void> openMenu(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('「更多」按钮弹出三项菜单', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m1', '待办任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+
+      expect(find.text('重命名'), findsOneWidget);
+      expect(find.text('重新分析'), findsOneWidget);
+      expect(find.text('删除'), findsOneWidget);
+    });
+
+    testWidgets('删除需要二次确认，确认后任务消失', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m2', '要删的任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+
+      // 确认对话框：任务仍在
+      expect(find.textContaining('无法撤销'), findsOneWidget);
+      expect(await repo.findById('m2'), isNotNull);
+
+      await tester.tap(find.widgetWithText(TextButton, '删除'));
+      await tester.pumpAndSettle();
+
+      expect(await repo.findById('m2'), isNull);
+      expect(find.text('要删的任务'), findsNothing);
+    });
+
+    testWidgets('删除确认框点「取消」则任务保留', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m3', '保留任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+
+      expect(await repo.findById('m3'), isNotNull);
+      expect(find.text('保留任务'), findsOneWidget);
+    });
+
+    testWidgets('重命名对话框保存后卡片显示新名称', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m4', '旧名字', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('重命名'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '新名字');
+      await tester.tap(find.widgetWithText(TextButton, '保存'));
+      await tester.pumpAndSettle();
+
+      expect((await repo.findById('m4'))!.name, '新名字');
+      expect(find.text('新名字'), findsOneWidget);
+    });
+
+    testWidgets('点「重新分析」不崩溃（分析管线未配置场景）', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m5', '重跑任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('重新分析'));
+      await tester.pumpAndSettle();
     });
   });
 

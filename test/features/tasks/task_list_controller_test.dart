@@ -16,6 +16,7 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
+import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 /// 假 ASR/切分：不会被调用（_FakePipeline 覆写 analyze，不走真实管线）
@@ -60,6 +61,21 @@ class _FakePipeline extends AnalysisPipeline {
     await repo.save(updated);
     return updated;
   }
+}
+
+/// 记录被清理的任务 id，验证删除确实连带清理中间产物
+class _RecordingCleaner implements TaskArtifactCleaner {
+  final List<String> cleaned;
+  _RecordingCleaner(this.cleaned);
+  @override
+  Future<void> cleanup(String taskId) async => cleaned.add(taskId);
+}
+
+/// 清理失败的假实现：不应阻断任务删除
+class _ThrowingCleaner implements TaskArtifactCleaner {
+  @override
+  Future<void> cleanup(String taskId) async =>
+      throw const FileSystemException('磁盘只读');
 }
 
 /// 内存假实现，避免测试碰文件系统（仿照 task_list_page_test.dart 的做法）
@@ -270,6 +286,183 @@ void main() {
     expect(decoded.analysisError, result);
   });
 
+  group('AI 未配置：导入后不能静默卡死在「分析中」', () {
+    test('管线不可用时导入立即落成失败态并带人话原因', () async {
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+
+      final task = container
+          .read(taskListProvider)
+          .value!
+          .firstWhere((t) => t.id == 'new-id');
+      expect(task.analysisError, isNotNull);
+      expect(task.analysisError, contains('AI'));
+      expect((await repo.findById('new-id'))!.analysisError, isNotNull,
+          reason: '必须落库，重启后仍能看到原因并重试');
+    });
+
+    test('并发守卫命中时 retryAnalysis 返回 alreadyRunning', () async {
+      final task = makeExternalTask('busy', '进行中', DateTime.utc(2026, 7, 29));
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+      final notifier = pipelineContainer.read(taskListProvider.notifier);
+
+      final first = notifier.retryAnalysis(task);
+      final second = notifier.retryAnalysis(task);
+      final outcomes = await Future.wait([first, second]);
+      await pumpEventQueue();
+
+      expect(outcomes, [RetryOutcome.started, RetryOutcome.alreadyRunning]);
+    });
+  });
+
+  group('启动装载：僵死的「分析中」任务恢复', () {
+    RenewTask makeAnalyzing(String id, {String? analysisError}) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.analyzing,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          analysisError: analysisError,
+        );
+
+    test('分析中途退出 app 的任务被标记为「已中断」并落库，从而可走重试路径', () async {
+      await repo.save(makeAnalyzing('stalled'));
+
+      final tasks = await container.read(taskListProvider.future);
+
+      final task = tasks.firstWhere((t) => t.id == 'stalled');
+      expect(task.status, RenewTaskStatus.analyzing);
+      expect(task.analysisError, isNotNull);
+      expect(task.analysisError, contains('中断'));
+      expect((await repo.findById('stalled'))!.analysisError, isNotNull,
+          reason: '必须落库，否则重启后仍然卡死');
+    });
+
+    test('已带失败原因的任务不被覆盖', () async {
+      await repo.save(makeAnalyzing('failed', analysisError: '网络连接超时'));
+
+      final tasks = await container.read(taskListProvider.future);
+
+      expect(tasks.firstWhere((t) => t.id == 'failed').analysisError, '网络连接超时');
+    });
+
+    test('非「分析中」状态的任务不受影响', () async {
+      await repo.save(makeAnalyzing('done').copyWith(
+          status: RenewTaskStatus.awaitingCut, units: const []));
+
+      final tasks = await container.read(taskListProvider.future);
+
+      expect(tasks.firstWhere((t) => t.id == 'done').analysisError, isNull);
+    });
+
+    test('本次运行中正在分析的任务不会被 reload 误标为中断', () async {
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+
+      await pipelineContainer.read(taskListProvider.future);
+      await pipelineContainer
+          .read(taskListProvider.notifier)
+          .importFile('/videos/新片.mp4');
+      await pumpEventQueue();
+
+      final task = pipelineContainer
+          .read(taskListProvider)
+          .value!
+          .firstWhere((t) => t.id == 'new-id');
+      expect(task.analysisError, isNull);
+    });
+  });
+
+  group('删除 / 重命名', () {
+    RenewTask makeTask(String id) => RenewTask(
+          id: id,
+          name: '任务$id',
+          sourcePath: '/v/$id.mp4',
+          status: RenewTaskStatus.awaitingCut,
+          createdAt: DateTime.utc(2026, 7, 29),
+          updatedAt: DateTime.utc(2026, 7, 29),
+          units: const [],
+        );
+
+    test('deleteTask 从仓库移除并连带清理中间产物', () async {
+      final cleaned = <String>[];
+      await repo.save(makeTask('d1'));
+      final deleteContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        taskArtifactCleanerProvider.overrideWithValue(
+            _RecordingCleaner(cleaned)),
+      ]);
+      addTearDown(deleteContainer.dispose);
+
+      await deleteContainer.read(taskListProvider.future);
+      await deleteContainer
+          .read(taskListProvider.notifier)
+          .deleteTask(makeTask('d1'));
+
+      expect(await repo.findById('d1'), isNull);
+      expect(cleaned, ['d1']);
+      expect(deleteContainer.read(taskListProvider).value, isEmpty);
+    });
+
+    test('产物清理失败不阻断删除', () async {
+      await repo.save(makeTask('d2'));
+      final deleteContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        taskArtifactCleanerProvider.overrideWithValue(_ThrowingCleaner()),
+      ]);
+      addTearDown(deleteContainer.dispose);
+
+      await deleteContainer.read(taskListProvider.future);
+      await deleteContainer
+          .read(taskListProvider.notifier)
+          .deleteTask(makeTask('d2'));
+
+      expect(await repo.findById('d2'), isNull);
+    });
+
+    test('renameTask 保存新名称并刷新列表', () async {
+      await repo.save(makeTask('r1'));
+      await container.read(taskListProvider.future);
+
+      await container
+          .read(taskListProvider.notifier)
+          .renameTask(makeTask('r1'), '  滴露_植源喷雾  ');
+
+      final saved = await repo.findById('r1');
+      expect(saved!.name, '滴露_植源喷雾', reason: '首尾空白应被去除');
+      expect(container.read(taskListProvider).value!.single.name, '滴露_植源喷雾');
+    });
+
+    test('renameTask 空名称被拒绝，原名保留', () async {
+      await repo.save(makeTask('r2'));
+      await container.read(taskListProvider.future);
+
+      await container.read(taskListProvider.notifier).renameTask(
+            makeTask('r2'),
+            '   ',
+          );
+
+      expect((await repo.findById('r2'))!.name, '任务r2');
+    });
+  });
+
   group('retryAnalysis', () {
     RenewTask makeFailedTask() => RenewTask(
           id: 'fail-1',
@@ -302,16 +495,38 @@ void main() {
       expect(updated.analysisError, isNull);
     });
 
-    test('retryAnalysis 在 pipeline 未配置时直接返回，不修改任务', () async {
+    test('pipeline 未配置时 retryAnalysis 返回 pipelineUnavailable 并写入人话原因', () async {
       final task = makeFailedTask();
       await repo.save(task);
       await container.read(taskListProvider.future);
 
-      await container.read(taskListProvider.notifier).retryAnalysis(task);
+      final outcome =
+          await container.read(taskListProvider.notifier).retryAnalysis(task);
 
+      expect(outcome, RetryOutcome.pipelineUnavailable);
       final persisted = await repo.findById('fail-1');
-      expect(persisted!.analysisError, '分析失败（模拟）');
+      expect(persisted!.analysisError, contains('AI'));
+      expect(persisted.analysisError, isNot(contains('Exception')));
       expect(persisted.status, RenewTaskStatus.analyzing);
+    });
+
+    test('pipeline 可用时 retryAnalysis 返回 started', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+      final pipelineContainer = ProviderContainer(overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        importServiceProvider.overrideWithValue(importService),
+        analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
+      ]);
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+
+      final outcome = await pipelineContainer
+          .read(taskListProvider.notifier)
+          .retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(outcome, RetryOutcome.started);
     });
 
     test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {

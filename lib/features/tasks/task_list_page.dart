@@ -1,10 +1,16 @@
+import 'dart:async';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../import_flow/import_exception.dart';
 import '../workbench/workbench_page.dart';
+import 'environment_banner.dart';
 import 'task_card.dart';
+import 'task_card_menu.dart';
 import 'task_list_controller.dart';
 
 class TaskListPage extends ConsumerWidget {
@@ -16,13 +22,18 @@ class TaskListPage extends ConsumerWidget {
     if (file == null) return;
     try {
       await ref.read(taskListProvider.notifier).importFile(file.path);
+    } on ImportException catch (e) {
+      // message 已是面向用户的中文提示，直接展示；原始异常只进日志
+      AppLog.warn('导入失败 ${file.path}：${e.cause ?? e.message}');
+      if (context.mounted) _showSnackBar(context, e.message);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('导入失败：$e')));
-      }
+      AppLog.warn('导入失败 ${file.path}：$e');
+      if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
     }
   }
+
+  void _showSnackBar(BuildContext context, String message) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
   /// 任务卡点击路由：analysisError 非空（分析失败）优先级最高——不进入审片台，
   /// 只弹出失败原因与「重试」action；其次 `analyzing` 状态或缺少 units（尚未
@@ -43,13 +54,38 @@ class TaskListPage extends ConsumerWidget {
       return;
     }
     if (task.status == RenewTaskStatus.exported) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已导出的任务不再支持进入审片台')));
+      _showSnackBar(context, '已导出的任务不再支持进入审片台');
+      return;
+    }
+    // 历史遗留数据兜底：帧率非法（旧版本把 ffprobe 的 0/0 解析成 0 后落了库）
+    // 时审片台按帧计算会得到 Infinity/整除零而红屏，这里拦在入口
+    final fps = task.videoInfo?.fps ?? 0;
+    if (fps <= 0 || !fps.isFinite) {
+      _showSnackBar(context, '这条素材缺少可用的帧率信息，无法按帧切分，请重新导入转码后的文件。');
       return;
     }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
     );
+  }
+
+  /// 任务卡菜单：重命名 / 重新分析 / 删除（删除为破坏性操作，需二次确认）
+  Future<void> _openCardMenu(BuildContext context, WidgetRef ref,
+      RenewTask task, Offset position) async {
+    final action = await showTaskCardMenu(context, position);
+    if (action == null || !context.mounted) return;
+    final controller = ref.read(taskListProvider.notifier);
+    switch (action) {
+      case TaskCardAction.rename:
+        final name = await promptRenameTask(context, task);
+        if (name != null) await controller.renameTask(task, name);
+      case TaskCardAction.reanalyze:
+        await _retryAnalysis(context, ref, task);
+      case TaskCardAction.delete:
+        if (await confirmDeleteTask(context, task)) {
+          await controller.deleteTask(task);
+        }
+    }
   }
 
   void _showAnalysisFailedSnackBar(
@@ -59,11 +95,32 @@ class TaskListPage extends ConsumerWidget {
         content: Text('分析失败：${task.analysisError}'),
         action: SnackBarAction(
           label: '重试',
-          onPressed: () =>
-              ref.read(taskListProvider.notifier).retryAnalysis(task),
+          // 不能丢弃 Future：异常无人接收，用户也看不到任何反馈
+          onPressed: () => unawaited(_retryAnalysis(context, ref, task)),
         ),
       ),
     );
+  }
+
+  /// 触发重试并把结果翻译成用户看得懂的一句话（静默 return 会让用户以为点击无效）
+  Future<void> _retryAnalysis(
+      BuildContext context, WidgetRef ref, RenewTask task) async {
+    try {
+      final outcome =
+          await ref.read(taskListProvider.notifier).retryAnalysis(task);
+      if (!context.mounted) return;
+      switch (outcome) {
+        case RetryOutcome.started:
+          _showSnackBar(context, '已开始重新分析「${task.name}」');
+        case RetryOutcome.alreadyRunning:
+          _showSnackBar(context, '该任务正在分析中，请稍候');
+        case RetryOutcome.pipelineUnavailable:
+          _showSnackBar(context, pipelineUnavailableMessage);
+      }
+    } catch (e) {
+      AppLog.warn('任务 ${task.id} 重试分析失败：$e');
+      if (context.mounted) _showSnackBar(context, '重新分析未能启动，请稍后再试。');
+    }
   }
 
   @override
@@ -85,29 +142,44 @@ class TaskListPage extends ConsumerWidget {
           ),
         ],
       ),
-      body: tasks.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-            child: Text('加载失败：$e',
-                style: const TextStyle(color: AppColors.textSecondary))),
-        data: (list) => list.isEmpty
-            ? const Center(
-                child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
-                    style: TextStyle(color: AppColors.textSecondary)))
-            : GridView.builder(
-                padding: const EdgeInsets.all(16),
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 260,
-                  childAspectRatio: 0.72,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                ),
-                itemCount: list.length,
-                itemBuilder: (_, i) => GestureDetector(
-                  onTap: () => _openTask(context, ref, list[i]),
-                  child: TaskCard(task: list[i]),
-                ),
-              ),
+      body: Column(
+        children: [
+          const EnvironmentBanners(),
+          Expanded(
+            child: tasks.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                  child: Text('加载失败：$e',
+                      style: const TextStyle(color: AppColors.textSecondary))),
+              data: (list) => list.isEmpty
+                  ? const Center(
+                      child: Text('还没有任务，点击右上角「新建任务」导入一条成片',
+                          style: TextStyle(color: AppColors.textSecondary)))
+                  : GridView.builder(
+                      padding: const EdgeInsets.all(16),
+                      gridDelegate:
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                        maxCrossAxisExtent: 260,
+                        childAspectRatio: 0.72,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                      ),
+                      itemCount: list.length,
+                      itemBuilder: (_, i) => GestureDetector(
+                        onTap: () => _openTask(context, ref, list[i]),
+                        // macOS 习惯：右键唤出上下文菜单；同时保留卡内「更多」按钮
+                        onSecondaryTapUp: (details) => _openCardMenu(
+                            context, ref, list[i], details.globalPosition),
+                        child: TaskCard(
+                          task: list[i],
+                          onMenu: (position) =>
+                              _openCardMenu(context, ref, list[i], position),
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }

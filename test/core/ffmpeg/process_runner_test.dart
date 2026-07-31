@@ -1,0 +1,134 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ffmpeg/media_tools_locator.dart';
+import 'package:ishkafel/core/ffmpeg/process_runner.dart';
+
+/// 假子进程：不依赖真实二进制即可验证超时与收尾逻辑
+class _FakeProcess implements Process {
+  @override
+  final int pid = 4242;
+  final Completer<int> _exitCode = Completer<int>();
+  final String stdoutText;
+  final String stderrText;
+  int killCount = 0;
+
+  _FakeProcess({this.stdoutText = '', this.stderrText = ''});
+
+  @override
+  Future<int> get exitCode => _exitCode.future;
+
+  @override
+  Stream<List<int>> get stdout => Stream.value(utf8.encode(stdoutText));
+
+  @override
+  Stream<List<int>> get stderr => Stream.value(utf8.encode(stderrText));
+
+  @override
+  IOSink get stdin => throw UnimplementedError();
+
+  @override
+  bool kill([ProcessSignal signal = ProcessSignal.sigterm]) {
+    killCount++;
+    if (!_exitCode.isCompleted) _exitCode.complete(-9);
+    return true;
+  }
+
+  void finish(int code) => _exitCode.complete(code);
+}
+
+void main() {
+  group('TimeoutProcessInvoker', () {
+    test('子进程正常结束时返回 exitCode 与 stdout/stderr', () async {
+      final process = _FakeProcess(stdoutText: '正常输出', stderrText: '警告');
+      final invoker = TimeoutProcessInvoker(
+        timeout: const Duration(seconds: 5),
+        starter: (_, _) async {
+          Future.microtask(() => process.finish(0));
+          return process;
+        },
+      );
+
+      final result = await invoker('ffmpeg', const ['-version']);
+
+      expect(result.exitCode, 0);
+      expect(result.stdout, '正常输出');
+      expect(result.stderr, '警告');
+      expect(process.killCount, 0);
+    });
+
+    test('超时后杀掉子进程并抛出带中文说明的异常', () async {
+      final process = _FakeProcess();
+      final invoker = TimeoutProcessInvoker(
+        timeout: const Duration(milliseconds: 30),
+        starter: (_, _) async => process, // 永不结束
+      );
+
+      await expectLater(
+        invoker('ffmpeg', const ['-i', 'x.mp4']),
+        throwsA(isA<FfmpegException>().having((e) => e.message, 'message',
+            allOf(contains('超时'), contains('ffmpeg')))),
+      );
+      expect(process.killCount, 1, reason: '必须杀掉卡住的子进程，避免永久挂起');
+    });
+
+    test('默认超时时长为正且足够整片场景检测（不小于 5 分钟）', () {
+      expect(defaultProcessTimeout.inMinutes, greaterThanOrEqualTo(5));
+    });
+  });
+
+  group('ResolvingProcessRunner', () {
+    test('裸名 ffmpeg 先解析成绝对路径再启动子进程', () async {
+      final invoked = <String>[];
+      final runner = ResolvingProcessRunner(
+        locator: MediaToolsLocator(
+          probe: (path) => path.startsWith('/opt/homebrew/bin/'),
+          lookupOnPath: (_) => null,
+        ),
+        invoke: (executable, args) async {
+          invoked.add(executable);
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      final result = await runner('ffmpeg', const ['-version']);
+
+      expect(result.exitCode, 0);
+      expect(invoked, ['/opt/homebrew/bin/ffmpeg']);
+    });
+
+    test('工具缺失时抛中文提示的 FfmpegException，且不启动任何子进程', () async {
+      final runner = ResolvingProcessRunner(
+        locator:
+            MediaToolsLocator(probe: (_) => false, lookupOnPath: (_) => null),
+        invoke: (_, _) async => fail('工具缺失时不应启动子进程'),
+      );
+
+      await expectLater(
+        runner('ffprobe', const []),
+        throwsA(isA<FfmpegException>().having(
+            (e) => e.message, 'message', allOf(contains('ffprobe'), contains('未找到')))),
+      );
+    });
+
+    test('绝对路径调用不再二次解析，直接透传', () async {
+      final invoked = <String>[];
+      final runner = ResolvingProcessRunner(
+        locator: MediaToolsLocator(
+          probe: (_) => fail('绝对路径无需解析'),
+          lookupOnPath: (_) => fail('绝对路径无需解析'),
+        ),
+        invoke: (executable, args) async {
+          invoked.add(executable);
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+      await runner('/custom/bin/ffmpeg', const []);
+
+      expect(invoked, ['/custom/bin/ffmpeg']);
+    });
+  });
+}

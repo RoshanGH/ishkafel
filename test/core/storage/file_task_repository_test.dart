@@ -77,7 +77,7 @@ void main() {
     expect(await repo.findById('badtype'), isNull);
   });
 
-  test('status 为未知枚举名的 JSON 被 findAll 跳过', () async {
+  test('status 为未知枚举名的任务仍能读出（回退安全状态，不再整条消失）', () async {
     await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
     final bad = File('${tempDir.path}/tasks/bad_enum.json');
     await bad.create(recursive: true);
@@ -85,15 +85,47 @@ void main() {
         '{"id":"bad_enum","name":"n","sourcePath":"/x.mp4","status":"notAStatus",'
         '"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}');
     final all = await repo.findAll();
-    expect(all.map((t) => t.id).toList(), ['good']);
+    expect(all.map((t) => t.id).toSet(), {'good', 'bad_enum'});
+    expect(repo.skippedTaskFileCount, 0);
   });
 
-  test('status 为未知枚举名的文件 findById 返回 null', () async {
+  test('status 为未知枚举名的文件 findById 也能读出', () async {
     final bad = File('${tempDir.path}/tasks/x.json');
     await bad.create(recursive: true);
     await bad.writeAsString(
         '{"id":"x","name":"n","sourcePath":"/x.mp4","status":"notAStatus",'
         '"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}');
-    expect(await repo.findById('x'), isNull);
+    final parsed = await repo.findById('x');
+    expect(parsed, isNotNull);
+    expect(parsed!.status, RenewTaskStatus.picking);
+  });
+
+  group('跳过的损坏任务文件要上报，不能只写日志', () {
+    test('findAll 记录本次跳过的文件数', () async {
+      await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+      await File('${tempDir.path}/tasks/bad1.json').writeAsString('{not valid');
+      await File('${tempDir.path}/tasks/bad2.json')
+          .writeAsString('{"id": 123, "name": "t", "sourcePath": "/v.mp4",'
+              '"status": "analyzing", "createdAt": "2026-07-29T00:00:00.000Z",'
+              '"updatedAt": "2026-07-29T00:00:00.000Z"}');
+
+      final all = await repo.findAll();
+
+      expect(all.map((t) => t.id).toList(), ['good']);
+      expect(repo.skippedTaskFileCount, 2);
+    });
+
+    test('再次 findAll 全部正常时计数归零（反映最近一次装载）', () async {
+      await Directory('${tempDir.path}/tasks').create(recursive: true);
+      await File('${tempDir.path}/tasks/bad.json').writeAsString('{not valid');
+      await repo.findAll();
+      expect(repo.skippedTaskFileCount, 1);
+
+      await File('${tempDir.path}/tasks/bad.json').delete();
+      await repo.save(makeTask('good', DateTime.utc(2026, 7, 29)));
+      await repo.findAll();
+
+      expect(repo.skippedTaskFileCount, 0);
+    });
   });
 }
