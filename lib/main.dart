@@ -22,6 +22,7 @@ import 'core/log/app_log.dart';
 import 'core/storage/file_task_repository.dart';
 import 'features/import_flow/import_service.dart';
 import 'features/tasks/environment_banner.dart';
+import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
 
 Future<void> main() async {
@@ -32,6 +33,10 @@ Future<void> main() async {
   final supportDir = await getApplicationSupportDirectory();
   final dataDir = Directory(p.join(supportDir.path, 'ishkafel_data'));
   final repository = FileTaskRepository(dataDir);
+  final artifactCleaner = FileTaskArtifactCleaner(
+    coversDir: Directory(p.join(dataDir.path, 'covers')),
+    workDir: Directory(p.join(dataDir.path, 'analysis_work')),
+  );
   final importService = ImportService(
     repository: repository,
     ffprobe: FfprobeService(),
@@ -53,6 +58,7 @@ Future<void> main() async {
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider.overrideWithValue(analysisPipeline),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
+      taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
     ],
     child: const IshkafelApp(),
   ));

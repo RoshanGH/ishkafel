@@ -7,6 +7,7 @@ import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/storage/task_repository.dart';
 import '../import_flow/import_service.dart';
+import 'task_artifact_cleaner.dart';
 
 /// 由 main.dart（或测试）override 提供实例
 final taskRepositoryProvider = Provider<TaskRepository>(
@@ -17,8 +18,15 @@ final importServiceProvider = Provider<ImportService>(
 /// 分析管线：null 表示凭据未配置，导入后跳过自动分析（main.dart 按凭据完整性 override）
 final analysisPipelineProvider = Provider<AnalysisPipeline?>((ref) => null);
 
+/// 任务中间产物清理器：null 表示未接线（测试场景），删除任务时只删记录
+final taskArtifactCleanerProvider = Provider<TaskArtifactCleaner?>((ref) => null);
+
 /// 分析失败原因落库前的最大长度，避免超长堆栈/报错文本污染任务 JSON
 const _maxAnalysisErrorLength = 300;
+
+/// 上次运行中途退出留下的「分析中」任务，装载时写入此原因，
+/// 使其能走已有的失败重试路径（不新增状态枚举值——新增会让旧版本读不出）
+const stalledAnalysisMessage = '上次分析被中断（应用退出或异常关闭），请重新分析';
 
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 正在分析中的任务 id 集合：并发守卫。同一任务 id 若已在集合中，
@@ -28,7 +36,66 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   final Set<String> _analyzingTaskIds = {};
 
   @override
-  Future<List<RenewTask>> build() => ref.read(taskRepositoryProvider).findAll();
+  Future<List<RenewTask>> build() async {
+    final tasks = await ref.read(taskRepositoryProvider).findAll();
+    return _recoverStalledTasks(tasks);
+  }
+
+  /// 启动装载：把「状态仍是分析中、又没有任何进行中分析」的任务标记为已中断。
+  ///
+  /// 分析是纯内存态的后台任务（unawaited），进程一关就没了，而任务状态停在
+  /// analyzing 且 analysisError 为 null——列表只显示「分析中」、点开只提示
+  /// 「请稍候」、重试入口又只在有 analysisError 时出现，用户走进死路。
+  /// 只在 build（启动装载）做，reload 不做，避免把本次运行中真正在分析的
+  /// 任务误标为中断。
+  Future<List<RenewTask>> _recoverStalledTasks(List<RenewTask> tasks) async {
+    final repo = ref.read(taskRepositoryProvider);
+    final recovered = <RenewTask>[];
+    for (final task in tasks) {
+      if (!_isStalled(task)) {
+        recovered.add(task);
+        continue;
+      }
+      final marked = task.copyWith(analysisError: stalledAnalysisMessage);
+      try {
+        await repo.save(marked);
+        AppLog.warn('任务 ${task.id} 上次分析被中断，已标记为可重试');
+      } catch (e) {
+        // 落库失败不影响本次展示，下次启动会再尝试
+        AppLog.warn('任务 ${task.id} 中断标记落库失败：$e');
+      }
+      recovered.add(marked);
+    }
+    return List.unmodifiable(recovered);
+  }
+
+  bool _isStalled(RenewTask task) =>
+      task.status == RenewTaskStatus.analyzing &&
+      task.analysisError == null &&
+      !_analyzingTaskIds.contains(task.id);
+
+  /// 删除任务：先清理中间产物（失败不阻断），再删记录并刷新列表
+  Future<void> deleteTask(RenewTask task) async {
+    try {
+      await ref.read(taskArtifactCleanerProvider)?.cleanup(task.id);
+    } catch (e) {
+      AppLog.warn('任务 ${task.id} 中间产物清理失败（不影响删除）：$e');
+    }
+    await ref.read(taskRepositoryProvider).delete(task.id);
+    await reload();
+  }
+
+  /// 重命名：空白名称视为无效输入，直接忽略（调用方在 UI 层已给出提示）
+  Future<void> renameTask(RenewTask task, String newName) async {
+    final trimmed = newName.trim();
+    if (trimmed.isEmpty) {
+      AppLog.warn('任务 ${task.id} 重命名已忽略：名称为空');
+      return;
+    }
+    final renamed = task.copyWith(name: trimmed, updatedAt: DateTime.now());
+    await ref.read(taskRepositoryProvider).save(renamed);
+    await reload();
+  }
 
   Future<void> reload() async {
     state = const AsyncLoading();

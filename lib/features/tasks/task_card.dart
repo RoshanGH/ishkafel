@@ -14,7 +14,11 @@ import '../../core/models/renew_task.dart';
 
 class TaskCard extends StatelessWidget {
   final RenewTask task;
-  const TaskCard({super.key, required this.task});
+
+  /// 「更多」按钮回调，参数为按钮中心的屏幕坐标（用于定位弹出菜单）
+  final void Function(Offset globalPosition)? onMenu;
+
+  const TaskCard({super.key, required this.task, this.onMenu});
 
   @override
   Widget build(BuildContext context) {
@@ -61,17 +65,48 @@ class TaskCard extends StatelessWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.all(10),
-            child: Text(task.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary)),
+            padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(task.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                ),
+                if (onMenu != null) _MenuButton(onMenu: onMenu!),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
+}
+
+/// 「更多」按钮：把自身中心的屏幕坐标回传，供菜单贴着按钮弹出
+class _MenuButton extends StatelessWidget {
+  final void Function(Offset globalPosition) onMenu;
+  const _MenuButton({required this.onMenu});
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: '更多',
+        iconSize: 16,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+        splashRadius: 14,
+        color: AppColors.textSecondary,
+        icon: const Icon(Icons.more_horiz),
+        onPressed: () {
+          final box = context.findRenderObject() as RenderBox?;
+          final position = box == null
+              ? Offset.zero
+              : box.localToGlobal(box.size.center(Offset.zero));
+          onMenu(position);
+        },
+      );
 }

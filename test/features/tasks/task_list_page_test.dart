@@ -179,7 +179,8 @@ void main() {
       expect(find.textContaining('帧率'), findsOneWidget);
     });
 
-    testWidgets('analyzing 状态点击不进入审片台，提示分析中', (tester) async {
+    testWidgets('启动后装载到的 analyzing 任务被判为中断，点击给出中断原因与重试入口',
+        (tester) async {
       final repo = InMemoryTaskRepository();
       await repo.save(makeTask('a2', '分析中的任务', RenewTaskStatus.analyzing));
       await tester.pumpWidget(wrap(repo));
@@ -189,7 +190,94 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(WorkbenchPage), findsNothing);
-      expect(find.textContaining('分析中'), findsWidgets);
+      expect(find.textContaining('中断'), findsOneWidget);
+      expect(find.text('重试'), findsOneWidget);
+    });
+  });
+
+  group('任务卡菜单：删除 / 重命名 / 重新分析', () {
+    Future<void> openMenu(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('更多'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('「更多」按钮弹出三项菜单', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m1', '待办任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+
+      expect(find.text('重命名'), findsOneWidget);
+      expect(find.text('重新分析'), findsOneWidget);
+      expect(find.text('删除'), findsOneWidget);
+    });
+
+    testWidgets('删除需要二次确认，确认后任务消失', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m2', '要删的任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+
+      // 确认对话框：任务仍在
+      expect(find.textContaining('无法撤销'), findsOneWidget);
+      expect(await repo.findById('m2'), isNotNull);
+
+      await tester.tap(find.widgetWithText(TextButton, '删除'));
+      await tester.pumpAndSettle();
+
+      expect(await repo.findById('m2'), isNull);
+      expect(find.text('要删的任务'), findsNothing);
+    });
+
+    testWidgets('删除确认框点「取消」则任务保留', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m3', '保留任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('删除'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, '取消'));
+      await tester.pumpAndSettle();
+
+      expect(await repo.findById('m3'), isNotNull);
+      expect(find.text('保留任务'), findsOneWidget);
+    });
+
+    testWidgets('重命名对话框保存后卡片显示新名称', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m4', '旧名字', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('重命名'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), '新名字');
+      await tester.tap(find.widgetWithText(TextButton, '保存'));
+      await tester.pumpAndSettle();
+
+      expect((await repo.findById('m4'))!.name, '新名字');
+      expect(find.text('新名字'), findsOneWidget);
+    });
+
+    testWidgets('点「重新分析」不崩溃（分析管线未配置场景）', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeTask('m5', '重跑任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await openMenu(tester);
+      await tester.tap(find.text('重新分析'));
+      await tester.pumpAndSettle();
     });
   });
 

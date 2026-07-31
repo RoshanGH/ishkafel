@@ -8,6 +8,7 @@ import '../import_flow/import_exception.dart';
 import '../workbench/workbench_page.dart';
 import 'environment_banner.dart';
 import 'task_card.dart';
+import 'task_card_menu.dart';
 import 'task_list_controller.dart';
 
 class TaskListPage extends ConsumerWidget {
@@ -64,6 +65,25 @@ class TaskListPage extends ConsumerWidget {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
     );
+  }
+
+  /// 任务卡菜单：重命名 / 重新分析 / 删除（删除为破坏性操作，需二次确认）
+  Future<void> _openCardMenu(BuildContext context, WidgetRef ref,
+      RenewTask task, Offset position) async {
+    final action = await showTaskCardMenu(context, position);
+    if (action == null || !context.mounted) return;
+    final controller = ref.read(taskListProvider.notifier);
+    switch (action) {
+      case TaskCardAction.rename:
+        final name = await promptRenameTask(context, task);
+        if (name != null) await controller.renameTask(task, name);
+      case TaskCardAction.reanalyze:
+        await controller.retryAnalysis(task);
+      case TaskCardAction.delete:
+        if (await confirmDeleteTask(context, task)) {
+          await controller.deleteTask(task);
+        }
+    }
   }
 
   void _showAnalysisFailedSnackBar(
@@ -124,7 +144,14 @@ class TaskListPage extends ConsumerWidget {
                       itemCount: list.length,
                       itemBuilder: (_, i) => GestureDetector(
                         onTap: () => _openTask(context, ref, list[i]),
-                        child: TaskCard(task: list[i]),
+                        // macOS 习惯：右键唤出上下文菜单；同时保留卡内「更多」按钮
+                        onSecondaryTapUp: (details) => _openCardMenu(
+                            context, ref, list[i], details.globalPosition),
+                        child: TaskCard(
+                          task: list[i],
+                          onMenu: (position) =>
+                              _openCardMenu(context, ref, list[i], position),
+                        ),
                       ),
                     ),
             ),
