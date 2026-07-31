@@ -147,6 +147,9 @@ class TaskListPage extends ConsumerWidget {
           const EnvironmentBanners(),
           Expanded(
             child: tasks.when(
+              // 重新加载（保存草稿/确认切分等）时继续显示旧列表，只有首次装载
+              // 才展示 spinner——否则整页会白屏闪一下
+              skipLoadingOnReload: true,
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(
                   child: Text('加载失败：$e',

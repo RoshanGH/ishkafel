@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -29,6 +31,19 @@ class InMemoryTaskRepository implements TaskRepository {
   Future<void> save(RenewTask task) async => _store[task.id] = task;
   @override
   Future<void> delete(String id) async => _store.remove(id);
+}
+
+/// findAll 可被挂起的假仓库：用于观察「重新加载进行中」这一中间态
+class _BlockingRepository extends InMemoryTaskRepository {
+  /// 非 null 时 findAll 会挂起，直到测试主动 complete
+  Completer<void>? gate;
+
+  @override
+  Future<List<RenewTask>> findAll() async {
+    final pending = gate;
+    if (pending != null) await pending.future;
+    return super.findAll();
+  }
 }
 
 /// 会上报「跳过了 N 个无法读取的任务文件」的假仓库
@@ -70,6 +85,44 @@ void main() {
     expect(find.text('选材中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
+  });
+
+  group('重新加载不闪白（保存后整页 spinner）', () {
+    testWidgets('重新加载期间旧列表仍然可见，且不出现整页 spinner', (tester) async {
+      final repo = _BlockingRepository();
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+      expect(find.text('已有任务'), findsOneWidget);
+
+      final container = ProviderScope.containerOf(
+          tester.element(find.byType(TaskListPage)));
+      final gate = Completer<void>();
+      repo.gate = gate;
+      final reloading = container.read(taskListProvider.notifier).reload();
+
+      // 重新加载已开始但未完成：旧数据必须还在，不能整页换成 spinner
+      await tester.pump();
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+          reason: '保存一条任务不应让整页任务网格闪白');
+      expect(find.text('已有任务'), findsOneWidget);
+
+      gate.complete();
+      await reloading;
+      await tester.pumpAndSettle();
+      expect(find.text('已有任务'), findsOneWidget);
+    });
+
+    testWidgets('首次装载仍展示 spinner（此时无旧数据可保留）', (tester) async {
+      final repo = _BlockingRepository()..gate = Completer<void>();
+      await tester.pumpWidget(wrap(repo));
+      await tester.pump();
+
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+      repo.gate!.complete();
+      await tester.pumpAndSettle();
+    });
   });
 
   group('运行环境横幅（ffmpeg/ffprobe 缺失）', () {

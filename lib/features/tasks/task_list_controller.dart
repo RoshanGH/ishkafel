@@ -129,8 +129,14 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await reload();
   }
 
+  /// 全量重新装载。
+  ///
+  /// 用 `copyWithPrevious` 保留上一份数据：直接置 `AsyncLoading()` 会把 value
+  /// 抹成 null，列表页据此渲染整页 spinner——于是「确认切分」「保存草稿」这类
+  /// 只动一条任务的操作，也会让整个任务网格白屏闪一下。保留旧数据后，加载中
+  /// 只是 `isRefreshing`，页面继续显示旧列表直到新数据就绪。
   Future<void> reload() async {
-    state = const AsyncLoading();
+    state = const AsyncLoading<List<RenewTask>>().copyWithPrevious(state);
     state = await AsyncValue.guard(_findAll);
   }
 
