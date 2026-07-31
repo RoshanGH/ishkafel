@@ -4,11 +4,41 @@ import '../analysis/segmentation_builder.dart';
 import '../log/app_log.dart';
 import 'ark_chat_client.dart';
 
+/// 语义分组降级的原因（LLM 输出不可用，退回「每句一个台词语义单元」）
+enum SemanticSplitDegradation {
+  /// 输出根本不是约定格式（模型答非所问、被截断、夹带解释文字等）
+  unparsableOutput,
+
+  /// 输出能读出来但不是合法分组（跳句、重排、遗漏、索引越界）
+  invalidPartition;
+
+  /// 面向用户的中文说明，上层可直接展示，不含技术黑话
+  String get userMessage => switch (this) {
+        SemanticSplitDegradation.unparsableOutput =>
+          'AI 未按约定格式返回语义分组，已退回按每句台词切一个语义单元，'
+              '可在时间线上手动合并',
+        SemanticSplitDegradation.invalidPartition =>
+          'AI 返回的语义分组不完整（有跳句或重复），已退回按每句台词切一个语义单元，'
+              '可在时间线上手动合并',
+      };
+}
+
+/// 降级通知：分组降级时同步回调一次。
+///
+/// [SemanticSplitter] 接口只返回单元列表，降级与否从结果里看不出来——用户拿到
+/// 一堆碎片单元只会以为「AI 就这水平」。上层接上这个回调后可以明确告诉用户
+/// 这是降级结果。
+typedef SemanticSplitDegradationCallback = void Function(
+    SemanticSplitDegradation reason);
+
 /// LLM 语义分组（句子索引协议）：模型只分组，不产时间戳——边界由代码从句子时间戳推导
 class VolcanoSemanticSplitter implements SemanticSplitter {
   final ArkChatClient chat;
 
-  VolcanoSemanticSplitter({required this.chat});
+  /// 可选：降级通知出口，不接则只写日志（行为与接之前一致）
+  final SemanticSplitDegradationCallback? onDegraded;
+
+  VolcanoSemanticSplitter({required this.chat, this.onDegraded});
 
   static const _systemPrompt = '''
 你是短视频广告的台词语义切分专家。台词语义单元的定义：一段表达完整语义的台词（可能一句或多句），
@@ -32,19 +62,21 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
       system: _systemPrompt,
       user: '句子列表：\n${jsonEncode(numbered)}',
     );
-    return parseGrouping(content, sentences);
+    return parseGrouping(content, sentences, onDegraded: onDegraded);
   }
 
-  /// 解析并校验分组；任何不合法整体回退「每句一单元」
+  /// 解析并校验分组；任何不合法整体回退「每句一单元」，并通过 [onDegraded] 上报
   static List<UnitDraft> parseGrouping(
-      String content, List<AsrSentence> sentences) {
+      String content, List<AsrSentence> sentences,
+      {SemanticSplitDegradationCallback? onDegraded}) {
     final groups = _tryParseIndexGroups(content);
-    if (groups == null || !_isValidPartition(groups, sentences.length)) {
-      AppLog.warn('语义分组输出不合法，回退每句一单元');
-      return List.unmodifiable([
-        for (final s in sentences)
-          UnitDraft(startMs: s.startMs, endMs: s.endMs, transcript: s.text),
-      ]);
+    if (groups == null) {
+      return _degradeToOneUnitPerSentence(
+          sentences, SemanticSplitDegradation.unparsableOutput, onDegraded);
+    }
+    if (!_isValidPartition(groups, sentences.length)) {
+      return _degradeToOneUnitPerSentence(
+          sentences, SemanticSplitDegradation.invalidPartition, onDegraded);
     }
     return List.unmodifiable([
       for (final g in groups)
@@ -53,6 +85,19 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
           endMs: sentences[g.last].endMs,
           transcript: [for (final i in g) sentences[i].text].join(),
         ),
+    ]);
+  }
+
+  /// 降级路径：每句台词各成一个语义单元，同时写日志并通知上层
+  static List<UnitDraft> _degradeToOneUnitPerSentence(
+      List<AsrSentence> sentences,
+      SemanticSplitDegradation reason,
+      SemanticSplitDegradationCallback? onDegraded) {
+    AppLog.warn('语义分组降级（${reason.name}）：${reason.userMessage}');
+    onDegraded?.call(reason);
+    return List.unmodifiable([
+      for (final s in sentences)
+        UnitDraft(startMs: s.startMs, endMs: s.endMs, transcript: s.text),
     ]);
   }
 
