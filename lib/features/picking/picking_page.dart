@@ -135,10 +135,16 @@ class _PickingPageState extends ConsumerState<PickingPage> {
         shotTagGroup: widget.task.shotTagGroup,
       );
 
-  /// 方案/选中变化后按需重新检索（同一作用域不重复打网络）
+  /// 方案/选中变化后按需重新检索（同一作用域不重复打网络）。
+  ///
+  /// **不做无条件 setState**：左栏、右栏、底部栏各自监听同一个 controller，
+  /// 页面本身只在检索方式被迫改变时才需要重建。每勾一个候选就重建整页会把
+  /// 播放器一起带上，是阶段①踩过的同一个坑。
   void _onPickingChanged() {
     if (!mounted) return;
-    setState(_syncSearchMode);
+    final before = _searchMode;
+    _syncSearchMode();
+    if (before != _searchMode) setState(() {});
     unawaited(_refreshSearchIfNeeded());
   }
 
