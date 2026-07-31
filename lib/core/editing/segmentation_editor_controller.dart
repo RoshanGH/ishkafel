@@ -95,6 +95,55 @@ class SegmentationEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 把选中对象移动到相邻的一个（[delta] 为 +1 向后、-1 向前）。
+  ///
+  /// 未选中时选第一个；到头/到尾停住不回绕（回绕会让用户失去位置感）。
+  /// 镜头层跨单元连续移动：视觉镜头是连续覆盖整片的，导航到单元末尾就卡住
+  /// 不符合直觉。
+  void selectAdjacent(int delta) {
+    if (_units.isEmpty || delta == 0) return;
+    final sel = _selection;
+    if (sel == null) {
+      select(EditorSelection.unit(delta > 0 ? 0 : _units.length - 1));
+      return;
+    }
+    if (sel.shotIndex == null) {
+      final next = (sel.unitIndex + delta).clamp(0, _units.length - 1);
+      select(EditorSelection.unit(next));
+      return;
+    }
+    select(_adjacentShot(sel.unitIndex, sel.shotIndex!, delta));
+  }
+
+  /// 镜头层的相邻位置（跨单元）
+  EditorSelection _adjacentShot(int u, int s, int delta) {
+    var unit = u;
+    var shot = s + delta;
+    while (shot < 0) {
+      if (unit == 0) return EditorSelection.shot(0, 0);
+      unit--;
+      shot += _units[unit].shots.length;
+    }
+    while (shot >= _units[unit].shots.length) {
+      if (unit == _units.length - 1) {
+        return EditorSelection.shot(unit, _units[unit].shots.length - 1);
+      }
+      shot -= _units[unit].shots.length;
+      unit++;
+    }
+    return EditorSelection.shot(unit, shot);
+  }
+
+  /// 当前选中对象的起点（毫秒）；未选中返回 null。
+  /// 供上层在键盘导航后把播放头同步过去。
+  int? get selectedStartMs {
+    final sel = _selection;
+    if (sel == null) return null;
+    final unit = _units[sel.unitIndex];
+    final s = sel.shotIndex;
+    return s == null ? unit.startMs : unit.shots[s].startMs;
+  }
+
   /// 开启拖拽会话：记录当前 units 作为会话快照；重复调用无副作用（幂等，
   /// `??=` 保证嵌套 begin 不会覆盖已有快照）。与文本会话互不干扰。
   void beginDragSession() {

@@ -37,6 +37,12 @@ class PageShuttleIntent extends Intent {
   const PageShuttleIntent(this.direction);
 }
 
+/// 在相邻的台词语义单元/视觉镜头之间移动选中（[delta] 为 +1/-1）
+class PageSelectAdjacentIntent extends Intent {
+  final int delta;
+  const PageSelectAdjacentIntent(this.delta);
+}
+
 /// 跳到片头/片尾
 class PageSeekEdgeIntent extends Intent {
   final bool toStart;
@@ -118,6 +124,18 @@ class PageShuttleAction extends Action<PageShuttleIntent> {
   void invoke(PageShuttleIntent intent) => _callback(intent.direction);
 }
 
+/// 选中导航 Action，同样在文本框聚焦时让路（否则方向键移动不了光标）
+class PageSelectAdjacentAction extends Action<PageSelectAdjacentIntent> {
+  PageSelectAdjacentAction(this._callback);
+  final ValueChanged<int> _callback;
+
+  @override
+  bool isEnabled(PageSelectAdjacentIntent intent) => !isEditableTextFocused();
+
+  @override
+  void invoke(PageSelectAdjacentIntent intent) => _callback(intent.delta);
+}
+
 /// 跳到片头/片尾 Action
 class PageSeekEdgeAction extends Action<PageSeekEdgeIntent> {
   PageSeekEdgeAction(this._callback);
@@ -150,6 +168,9 @@ const Map<ShortcutActivator, Intent> workbenchPlaybackShortcuts =
   SingleActivator(LogicalKeyboardKey.keyJ): PageShuttleIntent(-1),
   SingleActivator(LogicalKeyboardKey.keyK): PageShuttleIntent(0),
   SingleActivator(LogicalKeyboardKey.keyL): PageShuttleIntent(1),
+  // ↑↓ 在相邻对象之间移动选中（左右方向键已用于逐帧步进）
+  SingleActivator(LogicalKeyboardKey.arrowUp): PageSelectAdjacentIntent(-1),
+  SingleActivator(LogicalKeyboardKey.arrowDown): PageSelectAdjacentIntent(1),
   SingleActivator(LogicalKeyboardKey.home): PageSeekEdgeIntent(toStart: true),
   SingleActivator(LogicalKeyboardKey.end): PageSeekEdgeIntent(toStart: false),
   SingleActivator(LogicalKeyboardKey.keyZ, meta: true): PageUndoIntent(),
@@ -169,6 +190,7 @@ Map<Type, Action<Intent>> workbenchPlaybackActions({
   required VoidCallback onRedo,
   required ValueChanged<int> onShuttle,
   required ValueChanged<bool> onSeekEdge,
+  required ValueChanged<int> onSelectAdjacent,
 }) =>
     <Type, Action<Intent>>{
       PageTogglePlayIntent: PageTogglePlayAction(onTogglePlay),
@@ -177,4 +199,5 @@ Map<Type, Action<Intent>> workbenchPlaybackActions({
       PageRedoIntent: PageRedoAction(onRedo),
       PageShuttleIntent: PageShuttleAction(onShuttle),
       PageSeekEdgeIntent: PageSeekEdgeAction(onSeekEdge),
+      PageSelectAdjacentIntent: PageSelectAdjacentAction(onSelectAdjacent),
     };

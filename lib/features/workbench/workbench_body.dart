@@ -103,6 +103,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           onShuttle: _shuttle,
           onSeekEdge: (toStart) => playback
               .seekMs(toStart ? 0 : editor.durationMs),
+          onSelectAdjacent: (delta) => _selectAdjacent(editor, playback, delta),
         ),
         child: Column(
           children: [
@@ -150,6 +151,15 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
         ),
       ),
     );
+  }
+
+  /// ↑↓ 在相邻对象间移动选中，并把播放头同步到该对象起点——只改选中不动
+  /// 播放头的话，用户按了半天方向键，播放器画面纹丝不动，会以为没生效。
+  void _selectAdjacent(
+      SegmentationEditorController editor, PlaybackController playback, int delta) {
+    editor.selectAdjacent(delta);
+    final startMs = editor.selectedStartMs;
+    if (startMs != null) playback.seekMs(startMs);
   }
 
   /// JKL 走带：L 正向播放、K 停、J 反向。
