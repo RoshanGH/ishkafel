@@ -208,6 +208,45 @@ class ReplacementPlan {
 
   bool get exceedsLimit => combinationCount > maxCombinations;
 
+  /// 精确统计的上限。超过它就没必要再算下去：界面上写「1.15 万亿条」既不可读，
+  /// 也不比一句「远超上限」更有用，而继续乘下去会溢出成负数。
+  static const int preciseCeiling = 1000000;
+
+  /// 精确组合数（[combinationCount] 一超限就停在哨兵值，说不出「超了多少」）。
+  ///
+  /// 同样带饱和：超过 [preciseCeiling] 时停在该值，并由
+  /// [overflowsPreciseCount] 如实标记「这个数不是真值」。
+  int get preciseCombinationCount {
+    var total = 1;
+    for (final unit in units) {
+      final f = unit.factor;
+      if (f <= 0) continue;
+      if (total > preciseCeiling ~/ f) return preciseCeiling;
+      total *= f;
+      if (total >= preciseCeiling) return preciseCeiling;
+    }
+    return total;
+  }
+
+  /// 组合数是否已大到无法精确统计（界面据此改说「远超上限」）
+  bool get overflowsPreciseCount => preciseCombinationCount >= preciseCeiling;
+
+  /// 因子最大的单元下标——超限时用来告诉用户「该从哪儿减」。
+  /// 全是保留原片（因子都为 1）时返回 null：指着一个没得减的单元让用户减，
+  /// 只会让人更困惑。
+  int? get largestFactorUnitIndex {
+    int? best;
+    var bestFactor = 1;
+    for (var i = 0; i < units.length; i++) {
+      final f = units[i].factor;
+      if (f > bestFactor) {
+        bestFactor = f;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   /// 是否一条替换都没设置（组合数为 1 意味着导出结果与原片相同）
   bool get isEmpty => units.every((u) => !u.producesReplacement);
 }
