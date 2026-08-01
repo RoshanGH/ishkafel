@@ -19,7 +19,7 @@ final _many = [
   for (var i = 3; i <= 127; i++) _g(i, '其他分组 $i', tags: ['标签$i']),
 ];
 
-late TagGroupRef? picked;
+late List<TagGroupRef>? picked;
 
 Future<void> _open(WidgetTester tester, {List<TagGroup>? groups}) async {
   picked = null;
@@ -97,21 +97,110 @@ void main() {
     });
   });
 
-  group('选中与取消', () {
-    testWidgets('点一项即选中并关闭', (tester) async {
+  group('多选', () {
+    testWidgets('勾选多个后确定，一次带回全部', (tester) async {
       await _open(tester);
-      await _type(tester, '话术');
 
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('脚本话术'));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tag-group-confirm')));
+      await tester.pumpAndSettle();
 
-      expect(picked?.id, 2);
-      expect(picked?.name, '脚本话术');
-      expect(find.byKey(const Key('tag-group-search')), findsNothing);
+      expect(picked?.map((g) => g.id), [1, 2],
+          reason: '一个镜头本来就该同时有几个维度的标签，'
+              '只能选一个组等于只能打一个维度');
     });
 
-    testWidgets('取消返回 null', (tester) async {
+    testWidgets('勾选后不关闭，可以接着搜下一个组', (tester) async {
       await _open(tester);
+
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('tag-group-search')), findsOneWidget,
+          reason: '选一个就关掉的话，选第二个组要重新打开、重新搜一遍');
+      expect(find.textContaining('已选 1 个'), findsOneWidget);
+    });
+
+    testWidgets('再点一次取消勾选', (tester) async {
+      await _open(tester);
+
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已选'), findsNothing);
+    });
+
+    testWidgets('搜索过滤不影响已经勾上的（换个词搜时选中态要留着）', (tester) async {
+      await _open(tester);
+
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
+      await _type(tester, '话术');
+      await tester.tap(find.text('脚本话术'));
+      await tester.pumpAndSettle();
+      await _type(tester, '');
+      await tester.tap(find.byKey(const Key('tag-group-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(picked?.map((g) => g.id), [1, 2],
+          reason: '过滤会重建列表，用对象而不是 id 记选中就会在这里丢');
+    });
+
+    testWidgets('返回顺序按列表原顺序，与点选先后无关', (tester) async {
+      await _open(tester);
+
+      await tester.tap(find.text('脚本话术')); // 先点第 2 个
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tag-group-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(picked?.map((g) => g.id), [1, 2],
+          reason: '顺序不稳定会让「已选」区域每次看起来都不一样');
+    });
+
+    testWidgets('一个都没勾时确定按钮禁用', (tester) async {
+      await _open(tester);
+
+      final btn = tester.widget<FilledButton>(
+          find.byKey(const Key('tag-group-confirm')));
+
+      expect(btn.onPressed, isNull, reason: '确认一个空选择等于清空，没有意义');
+    });
+
+    testWidgets('带着已选进来时保持勾选', (tester) async {
+      picked = null;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () async {
+                picked = await showTagGroupPicker(context,
+                    title: '视觉镜头标签组',
+                    groups: _many,
+                    selected: const [TagGroupRef(id: 1, name: '画面类型')]);
+              },
+              child: const Text('打开'),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('打开'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已选 1 个'), findsOneWidget);
+    });
+
+    testWidgets('取消返回 null（区别于清空后确认）', (tester) async {
+      await _open(tester);
+      await tester.tap(find.text('画面类型'));
+      await tester.pumpAndSettle();
 
       await tester.tap(find.text('取消'));
       await tester.pumpAndSettle();

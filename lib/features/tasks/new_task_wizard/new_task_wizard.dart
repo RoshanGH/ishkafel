@@ -31,14 +31,10 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   String? _filePath;
   List<TagGroup>? _groups;
   String? _groupsError;
-  TagGroupRef? _unitGroup;
-  TagGroupRef? _shotGroup;
+  final List<TagGroupRef> _unitGroups = [];
+  final List<TagGroupRef> _shotGroups = [];
   TagPreview? _unitPreview;
   TagPreview? _shotPreview;
-
-  /// 预览请求的序号：用户快速切换标签组时，晚到的旧响应不得覆盖新选择
-  int _unitPreviewToken = 0;
-  int _shotPreviewToken = 0;
 
   @override
   void initState() {
@@ -83,73 +79,61 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   void _showSnackBar(String message) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
 
-  void _selectUnitGroup(TagGroupRef group) {
+  void _selectUnitGroups(List<TagGroupRef> groups) {
     setState(() {
-      _unitGroup = group;
-      _unitPreview = _cachedPreview(group) ?? const TagPreviewLoading();
+      _unitGroups
+        ..clear()
+        ..addAll(groups);
+      _unitPreview = _mergedPreview(groups);
     });
-    if (_unitPreview is TagPreviewLoading) {
-      _loadPreview(group, ++_unitPreviewToken, isUnitLayer: true);
-    }
   }
 
-  void _selectShotGroup(TagGroupRef group) {
+  void _selectShotGroups(List<TagGroupRef> groups) {
     setState(() {
-      _shotGroup = group;
-      _shotPreview = _cachedPreview(group) ?? const TagPreviewLoading();
+      _shotGroups
+        ..clear()
+        ..addAll(groups);
+      _shotPreview = _mergedPreview(groups);
     });
-    if (_shotPreview is TagPreviewLoading) {
-      _loadPreview(group, ++_shotPreviewToken, isUnitLayer: false);
-    }
   }
 
-  /// 标签组列表是带 `--include-tags` 拉的，标签已经在手上了——不必为了
-  /// 预览再往返一次。只有拉列表时没带上标签（老数据/降级路径）才现拉。
-  TagPreview? _cachedPreview(TagGroupRef group) {
-    final found =
-        _groups?.where((g) => g.id == group.id).firstOrNull;
-    if (found == null || found.tags.isEmpty) return null;
-    return TagPreviewReady(found.tags);
-  }
-
-  Future<void> _loadPreview(TagGroupRef group, int token,
-      {required bool isUnitLayer}) async {
-    TagPreview result;
-    try {
-      final tags = await ref.read(miaoaTagServiceProvider).listTags(group.id);
-      result = TagPreviewReady(tags.map((t) => t.name).toList(growable: false));
-    } catch (e) {
-      AppLog.warn('读取标签组 ${group.id} 的标签失败：$e');
-      result = TagPreviewFailed(miaoaFriendlyMessage(e));
-    }
-    if (!mounted) return;
-    final stale = isUnitLayer
-        ? token != _unitPreviewToken
-        : token != _shotPreviewToken;
-    if (stale) return;
-    setState(() {
-      if (isUnitLayer) {
-        _unitPreview = result;
-      } else {
-        _shotPreview = result;
+  /// 选中若干组后的标签预览：把它们的标签合并去重——打标用的就是这份合并
+  /// 后的受控词表，预览就该长成它实际的样子。
+  ///
+  /// 标签随组一起拉回来（`--include-tags`），所以纯本地算，不再往返。
+  TagPreview _mergedPreview(List<TagGroupRef> groups) {
+    if (groups.isEmpty) return const TagPreviewReady([]);
+    final merged = <String>[];
+    var anyMissing = false;
+    for (final g in groups) {
+      final found = _groups?.where((x) => x.id == g.id).firstOrNull;
+      if (found == null || found.tags.isEmpty) {
+        anyMissing = true;
+        continue;
       }
-    });
+      for (final t in found.tags) {
+        if (!merged.contains(t)) merged.add(t);
+      }
+    }
+    // 列表没带上标签（降级路径）时不谎报「这个组没有标签」
+    if (merged.isEmpty && anyMissing) return const TagPreviewLoading();
+    return TagPreviewReady(merged);
   }
 
   /// 还差哪些必填项；为空表示可以开始分析
   List<String> get _missing => [
         if (_filePath == null) '选择本地成片文件',
-        if (_unitGroup == null) '选择台词语义单元标签组',
-        if (_shotGroup == null) '选择视觉镜头标签组',
+        if (_unitGroups.isEmpty) '选择台词语义单元标签组',
+        if (_shotGroups.isEmpty) '选择视觉镜头标签组',
       ];
 
   void _start() {
     final path = _filePath;
-    final unit = _unitGroup;
-    final shot = _shotGroup;
-    if (path == null || unit == null || shot == null) return;
+    if (path == null || _unitGroups.isEmpty || _shotGroups.isEmpty) return;
     Navigator.of(context).pop(NewTaskWizardResult(
-        filePath: path, unitTagGroup: unit, shotTagGroup: shot));
+        filePath: path,
+        unitTagGroups: List.of(_unitGroups),
+        shotTagGroups: List.of(_shotGroups)));
   }
 
   @override
@@ -176,12 +160,12 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     groups: _groups,
                     groupsError: _groupsError,
                     onRetryGroups: _loadGroups,
-                    unitGroup: _unitGroup,
-                    shotGroup: _shotGroup,
+                    unitGroups: _unitGroups,
+                    shotGroups: _shotGroups,
                     unitPreview: _unitPreview,
                     shotPreview: _shotPreview,
-                    onUnitGroupChanged: _selectUnitGroup,
-                    onShotGroupChanged: _selectShotGroup,
+                    onUnitGroupsChanged: _selectUnitGroups,
+                    onShotGroupsChanged: _selectShotGroups,
                   ),
                 ),
               ),

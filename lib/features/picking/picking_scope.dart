@@ -50,7 +50,7 @@ class PickingScope {
   factory PickingScope.from({
     required PickingController picking,
     required TagIdResolver resolver,
-    required TagGroupRef? shotTagGroup,
+    required List<TagGroupRef> shotTagGroups,
   }) {
     final unit = picking.currentUnit;
     if (unit == null) {
@@ -81,11 +81,11 @@ class PickingScope {
       descriptionKeyword: unit.transcript,
       tagUnavailableText: _tagUnavailable(
         resolver: resolver,
-        shotTagGroup: shotTagGroup,
+        shotTagGroups: shotTagGroups,
         names: names,
         ids: ids,
       ),
-      tagPending: _tagPending(resolver, shotTagGroup),
+      tagPending: _tagPending(resolver, shotTagGroups),
     );
   }
 
@@ -100,17 +100,20 @@ class PickingScope {
   }
 
   /// 有标签组、但表还没拉回来也没失败：结论未知
-  static bool _tagPending(TagIdResolver resolver, TagGroupRef? shotTagGroup) =>
-      shotTagGroup != null && !resolver.loaded && resolver.loadFailure == null;
+  static bool _tagPending(
+          TagIdResolver resolver, List<TagGroupRef> shotTagGroups) =>
+      shotTagGroups.isNotEmpty &&
+      !resolver.loaded &&
+      resolver.loadFailure == null;
 
   /// 五种「标签检索用不了」的处境，各自的下一步完全不同，必须分开说
   static String? _tagUnavailable({
     required TagIdResolver resolver,
-    required TagGroupRef? shotTagGroup,
+    required List<TagGroupRef> shotTagGroups,
     required List<String> names,
     required List<int> ids,
   }) {
-    if (shotTagGroup == null) {
+    if (shotTagGroups.isEmpty) {
       return tagSearchUnavailableText(hasShotTagGroup: false, queryTagCount: 0);
     }
     final failure = resolver.loadFailure;

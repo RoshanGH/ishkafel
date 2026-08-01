@@ -21,8 +21,8 @@ RenewTask _task({TagGroupRef? unitGroup, TagGroupRef? shotGroup}) => RenewTask(
           duration: Duration(seconds: 75),
           fps: 30,
           fileSizeBytes: 1),
-      unitTagGroup: unitGroup,
-      shotTagGroup: shotGroup,
+      unitTagGroups: unitGroup == null ? const [] : [unitGroup],
+      shotTagGroups: shotGroup == null ? const [] : [shotGroup],
     );
 
 List<SemanticUnit> _units({

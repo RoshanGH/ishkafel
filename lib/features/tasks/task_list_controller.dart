@@ -286,17 +286,17 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         generation: _localChangeGeneration, id: id, task: task));
   }
 
-  /// 导入并自动分析。[unitTagGroup] / [shotTagGroup] 是新建向导选定的两个
+  /// 导入并自动分析。[unitTagGroups] / [shotTagGroups] 是新建向导选定的两层
   /// miaoa 标签组，随任务落库，分析时据此解析各自的受控词表。
   Future<void> importFile(
     String path, {
-    TagGroupRef? unitTagGroup,
-    TagGroupRef? shotTagGroup,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
   }) async {
     final task = await ref.read(importServiceProvider).importLocalFile(
           path,
-          unitTagGroup: unitTagGroup,
-          shotTagGroup: shotTagGroup,
+          unitTagGroups: unitTagGroups,
+          shotTagGroups: shotTagGroups,
         );
     await reload();
 

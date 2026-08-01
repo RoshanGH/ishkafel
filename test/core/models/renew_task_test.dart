@@ -123,8 +123,8 @@ void main() {
   group('两个标签组（阶段②检索候选素材的键）', () {
     test('unitTagGroup / shotTagGroup 序列化往返一致', () {
       final tagged = task.copyWith(
-        unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
-        shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+        unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')],
+        shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')],
       );
       final parsed = RenewTask.fromJson(tagged.toJson());
       expect(parsed, tagged);
@@ -156,7 +156,7 @@ void main() {
 
     test('copyWith 不传标签组时沿用原值（不可变，返回新对象）', () {
       final tagged =
-          task.copyWith(unitTagGroup: const TagGroupRef(id: 1, name: 'g'));
+          task.copyWith(unitTagGroups: [const TagGroupRef(id: 1, name: 'g')]);
       final renamed = tagged.copyWith(name: '改名');
       expect(renamed.unitTagGroup, const TagGroupRef(id: 1, name: 'g'));
       expect(task.unitTagGroup, isNull, reason: '原对象不得被就地修改');

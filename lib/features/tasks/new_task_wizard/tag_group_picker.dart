@@ -15,13 +15,14 @@ import 'tag_group_search.dart';
 ///
 /// 过滤全在本地：标签组连同标签一次拉回来才 210KB，本地过滤才是真正的
 /// 「敲一个字就出结果」；走服务端每敲一个字起一次子进程还得防抖，反而卡。
-Future<TagGroupRef?> showTagGroupPicker(
+/// 返回用户确认后的选择；取消时返回 null（区别于「清空后确认」的空列表）
+Future<List<TagGroupRef>?> showTagGroupPicker(
   BuildContext context, {
   required String title,
   required List<TagGroup> groups,
-  TagGroupRef? selected,
+  List<TagGroupRef> selected = const [],
 }) =>
-    showDialog<TagGroupRef>(
+    showDialog<List<TagGroupRef>>(
       context: context,
       builder: (_) =>
           _PickerDialog(title: title, groups: groups, selected: selected),
@@ -30,10 +31,10 @@ Future<TagGroupRef?> showTagGroupPicker(
 class _PickerDialog extends StatefulWidget {
   final String title;
   final List<TagGroup> groups;
-  final TagGroupRef? selected;
+  final List<TagGroupRef> selected;
 
   const _PickerDialog(
-      {required this.title, required this.groups, this.selected});
+      {required this.title, required this.groups, this.selected = const []});
 
   @override
   State<_PickerDialog> createState() => _PickerDialogState();
@@ -43,11 +44,21 @@ class _PickerDialogState extends State<_PickerDialog> {
   late final TextEditingController _controller = TextEditingController();
   String _keyword = '';
 
+  /// 用 id 记选中，而不是整个对象——搜索会让列表重建，按对象比较容易漏
+  late final Set<int> _picked = {for (final g in widget.selected) g.id};
+
   @override
   void dispose() {
     _controller.dispose();
     super.dispose();
   }
+
+  void _confirm() => Navigator.of(context).pop([
+        // 按标签组列表的原顺序返回，与用户点选的先后无关——顺序不稳定会让
+        // 「已选」区域每次看起来都不一样
+        for (final g in widget.groups)
+          if (_picked.contains(g.id)) TagGroupRef(id: g.id, name: g.name),
+      ]);
 
   @override
   Widget build(BuildContext context) {
@@ -107,7 +118,8 @@ class _PickerDialogState extends State<_PickerDialog> {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.xs),
-                  Text('共 ${widget.groups.length} 个标签组，当前匹配 ${hits.length} 个',
+                  Text('共 ${widget.groups.length} 个标签组，当前匹配 ${hits.length} 个'
+                      '${_picked.isEmpty ? '' : ' · 已选 ${_picked.length} 个'}',
                       style: const TextStyle(
                           fontSize: AppFontSize.micro,
                           color: AppColors.textTertiary)),
@@ -123,19 +135,35 @@ class _PickerDialogState extends State<_PickerDialog> {
                       itemCount: hits.length,
                       itemBuilder: (_, i) => _HitTile(
                         hit: hits[i],
-                        isSelected: widget.selected?.id == hits[i].group.id,
-                        onTap: () => Navigator.of(context).pop(TagGroupRef(
-                            id: hits[i].group.id, name: hits[i].group.name)),
+                        isSelected: _picked.contains(hits[i].group.id),
+                        onTap: () => setState(() {
+                          final id = hits[i].group.id;
+                          if (!_picked.remove(id)) _picked.add(id);
+                        }),
                       ),
                     ),
             ),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('取消')),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text('可多选：选中的组，标签会合并成一份打标词表',
+                        style: TextStyle(
+                            fontSize: AppFontSize.micro,
+                            color: AppColors.textTertiary)),
+                  ),
+                  TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('取消')),
+                  const SizedBox(width: AppSpacing.sm),
+                  FilledButton(
+                    key: const Key('tag-group-confirm'),
+                    // 一个都没选就确认等于清空，没有意义，直接禁用
+                    onPressed: _picked.isEmpty ? null : _confirm,
+                    child: const Text('确定'),
+                  ),
+                ],
               ),
             ),
           ],
@@ -185,6 +213,15 @@ class _HitTile extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  Icon(
+                      isSelected
+                          ? Icons.check_box
+                          : Icons.check_box_outline_blank,
+                      size: 16,
+                      color: isSelected
+                          ? AppColors.accentBlue
+                          : AppColors.textTertiary),
+                  const SizedBox(width: AppSpacing.sm),
                   Flexible(
                     child: Text(group.name,
                         overflow: TextOverflow.ellipsis,

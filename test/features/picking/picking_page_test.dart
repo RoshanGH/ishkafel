@@ -36,7 +36,7 @@ class _InMemoryRepo implements TaskRepository {
 }
 
 RenewTask _task({
-  TagGroupRef? shotTagGroup,
+  List<TagGroupRef> shotTagGroups = const [],
   List<UnitReplacement>? replacements,
   List<String> shotTags = const ['厨房', '特写'],
 }) =>
@@ -47,7 +47,7 @@ RenewTask _task({
       status: RenewTaskStatus.picking,
       createdAt: DateTime.utc(2026, 7, 30),
       updatedAt: DateTime.utc(2026, 7, 30),
-      shotTagGroup: shotTagGroup,
+      shotTagGroups: shotTagGroups,
       replacements: replacements,
       videoInfo: const VideoInfo(
           width: 1080,
@@ -301,7 +301,7 @@ void main() {
     testWidgets('检索 0 条：标签模式下按「有没有打标签」给不同引导', (tester) async {
       await _pump(
         tester,
-        task: _task(shotTagGroup: const TagGroupRef(id: 9, name: '画面类型')),
+        task: _task(shotTagGroups: [const TagGroupRef(id: 9, name: '画面类型')]),
         repo: repo,
         playback: playback,
         search: (_, _) async => ProcessResult(1, 0, _searchJson(0), ''),
@@ -452,7 +452,7 @@ void _searchModeRegressions() {
   group('检索方式的默认选中（真机验收发现）', () {
     testWidgets('标签不可用时，进页面就不该把「标签」选中着', (tester) async {
       final repo = _InMemoryRepo();
-      final task = _task(shotTagGroup: null); // 建任务时没选视觉镜头标签组
+      final task = _task(shotTagGroups: const []); // 建任务时没选视觉镜头标签组
       repo.store[task.id] = task;
 
       await _pump(
@@ -481,7 +481,7 @@ void _searchModeRegressions() {
 
     testWidgets('标签可用时仍然默认选「标签」', (tester) async {
       final repo = _InMemoryRepo();
-      final task = _task(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      final task = _task(shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')]);
       repo.store[task.id] = task;
 
       await _pump(
@@ -503,7 +503,7 @@ void _searchModeRegressions() {
 
     testWidgets('标签表拉取失败后也要让出选中态', (tester) async {
       final repo = _InMemoryRepo();
-      final task = _task(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+      final task = _task(shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')]);
       repo.store[task.id] = task;
 
       await _pump(

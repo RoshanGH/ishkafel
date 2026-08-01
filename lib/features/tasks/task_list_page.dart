@@ -70,8 +70,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     try {
       await ref.read(taskListProvider.notifier).importFile(
             result.filePath,
-            unitTagGroup: result.unitTagGroup,
-            shotTagGroup: result.shotTagGroup,
+            unitTagGroups: result.unitTagGroups,
+            shotTagGroups: result.shotTagGroups,
           );
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志

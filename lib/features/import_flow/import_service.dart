@@ -32,12 +32,12 @@ class ImportService {
   static String _defaultId() =>
       DateTime.now().microsecondsSinceEpoch.toRadixString(36);
 
-  /// [unitTagGroup] / [shotTagGroup] 来自新建任务向导；为 null 表示该层
+  /// [unitTagGroups] / [shotTagGroups] 来自新建任务向导；为空表示该层
   /// 不打标（无受控词表可用）
   Future<RenewTask> importLocalFile(
     String filePath, {
-    TagGroupRef? unitTagGroup,
-    TagGroupRef? shotTagGroup,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
   }) async {
     final info = await _probe(filePath);
     final id = idGenerator();
@@ -54,8 +54,8 @@ class ImportService {
       status: RenewTaskStatus.analyzing,
       createdAt: now,
       updatedAt: now,
-      unitTagGroup: unitTagGroup,
-      shotTagGroup: shotTagGroup,
+      unitTagGroups: unitTagGroups,
+      shotTagGroups: shotTagGroups,
     );
     await repository.save(task);
     return task;

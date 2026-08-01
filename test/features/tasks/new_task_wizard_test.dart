@@ -10,10 +10,15 @@ import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_body.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 
+/// 带 tags：标签组现在用 `--include-tags` 一次拉回，预览直接用这份数据，
+/// 不再为每个组单独请求一次
 const _groupsJson = '''
 [
-  {"id":1279,"groupName":"衣清.消毒液","materialType":"STORYBOARD","tagType":"TENANT"},
-  {"id":136,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI"}
+  {"id":1279,"groupName":"衣清.消毒液","materialType":"STORYBOARD","tagType":"TENANT",
+   "tags":[{"id":1,"tagName":"痛点引入"},{"id":2,"tagName":"产品引入"},
+           {"id":3,"tagName":"功效演示"}]},
+  {"id":136,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI",
+   "tags":[{"id":4,"tagName":"真人口播"},{"id":5,"tagName":"产品特写"}]}
 ]
 ''';
 
@@ -82,6 +87,9 @@ Future<void> pickGroup(WidgetTester tester, Key fieldKey, String name) async {
   await tester.tap(find.byKey(fieldKey));
   await tester.pumpAndSettle();
   await tester.tap(find.text(name).last);
+  await tester.pumpAndSettle();
+  // 多选后勾选不再直接关闭，要按「确定」
+  await tester.tap(find.byKey(const Key('tag-group-confirm')));
   await tester.pumpAndSettle();
 }
 
@@ -216,9 +224,50 @@ void main() {
 
       expect(lastResult, isNotNull);
       expect(lastResult!.filePath, '/videos/滴露_测试片.mp4');
-      expect(lastResult!.unitTagGroup,
+      expect(lastResult!.unitTagGroups.single,
           const TagGroupRef(id: 1279, name: '衣清.消毒液'));
-      expect(lastResult!.shotTagGroup, const TagGroupRef(id: 136, name: '画面类型'));
+      expect(lastResult!.shotTagGroups.single, const TagGroupRef(id: 136, name: '画面类型'));
+    });
+
+    testWidgets('两层各自可以选多个标签组', (tester) async {
+      await openWizard(tester, wrap());
+      await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
+      await tester.pumpAndSettle();
+
+      // 视觉镜头层一次勾两个组
+      await tester.tap(find.byKey(const Key('wizard-shot-tag-group')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('画面类型').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('衣清.消毒液').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tag-group-confirm')));
+      await tester.pumpAndSettle();
+
+      await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
+      await tester.tap(find.byKey(const Key('wizard-start-btn')));
+      await tester.pumpAndSettle();
+
+      expect(lastResult!.shotTagGroups.map((g) => g.id), [1279, 136],
+          reason: '一个镜头本来就该同时有几个维度的标签');
+    });
+
+    testWidgets('选多个组时预览是它们标签的并集（打标用的就是这份合并词表）',
+        (tester) async {
+      await openWizard(tester, wrap());
+
+      await tester.tap(find.byKey(const Key('wizard-shot-tag-group')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('画面类型').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('衣清.消毒液').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('tag-group-confirm')));
+      await tester.pumpAndSettle();
+
+      // 两个组的标签都出现在预览里
+      expect(find.text('痛点引入'), findsOneWidget);
+      expect(find.text('真人口播'), findsOneWidget);
     });
 
     testWidgets('取消返回 null，不建任务', (tester) async {

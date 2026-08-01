@@ -23,12 +23,20 @@ class RenewTask {
   final List<SemanticUnit>? units;
   final List<AsrSentence>? asrSentences;
 
-  /// 台词语义单元打标所用的 miaoa 标签组（受控词表的来源）；
-  /// null 表示新建任务时未选择，该层不打标
-  final TagGroupRef? unitTagGroup;
+  /// 台词语义单元打标所用的 miaoa 标签组（受控词表的来源）。
+  ///
+  /// 可以选多个：一个单元本来就该同时有几个维度的标签，只能选一个组等于
+  /// 只能打一个维度。多个组的标签合并成一份受控词表。空表示该层不打标。
+  final List<TagGroupRef> unitTagGroups;
 
-  /// 视觉镜头打标所用的 miaoa 标签组；null 表示未选择，该层不打标
-  final TagGroupRef? shotTagGroup;
+  /// 视觉镜头打标所用的 miaoa 标签组（同样可多选）；空表示该层不打标
+  final List<TagGroupRef> shotTagGroups;
+
+  /// 兼容读法：只关心「有没有选」或「第一个是哪个」的地方继续用它
+  TagGroupRef? get unitTagGroup =>
+      unitTagGroups.isEmpty ? null : unitTagGroups.first;
+  TagGroupRef? get shotTagGroup =>
+      shotTagGroups.isEmpty ? null : shotTagGroups.first;
 
   /// 最近一次分析失败的原因摘要（已按长度截断）；为 null 表示未失败或已重试清除
   final String? analysisError;
@@ -53,12 +61,36 @@ class RenewTask {
     required this.updatedAt,
     this.units,
     this.asrSentences,
-    this.unitTagGroup,
-    this.shotTagGroup,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
     this.analysisError,
     List<UnitReplacement>? replacements,
-  }) : replacements =
+  })  : unitTagGroups = List.unmodifiable(unitTagGroups),
+        shotTagGroups = List.unmodifiable(shotTagGroups),
+        replacements =
             replacements == null ? null : List.unmodifiable(replacements);
+
+  /// 标签组列表的宽松解析：先认新的数组字段，没有再退回旧的单个字段。
+  ///
+  /// 单条畸形只跳过它——为一个坏条目丢掉整条任务，用户看到的是「任务不见了」
+  /// （本项目踩过这个坑）。
+  static List<TagGroupRef> parseTagGroups(Object? list, Object? legacySingle) {
+    if (list is List) {
+      return List.unmodifiable([
+        for (final e in list) ?TagGroupRef.tryFromJson(e),
+      ]);
+    }
+    final single = TagGroupRef.tryFromJson(legacySingle);
+    return single == null ? const [] : List.unmodifiable([single]);
+  }
+
+  static bool _sameGroups(List<TagGroupRef> a, List<TagGroupRef> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   /// [clearAnalysisError] 为 true 时显式清空 analysisError（重试分析时使用）；
   /// 其余可空字段沿用 units/asrSentences 的简单覆盖模式（不支持单独清空）。
@@ -78,8 +110,8 @@ class RenewTask {
     DateTime? updatedAt,
     List<SemanticUnit>? units,
     List<AsrSentence>? asrSentences,
-    TagGroupRef? unitTagGroup,
-    TagGroupRef? shotTagGroup,
+    List<TagGroupRef>? unitTagGroups,
+    List<TagGroupRef>? shotTagGroups,
     String? analysisError,
     bool clearAnalysisError = false,
     List<UnitReplacement>? replacements,
@@ -96,8 +128,8 @@ class RenewTask {
         updatedAt: updatedAt ?? this.updatedAt,
         units: units ?? this.units,
         asrSentences: asrSentences ?? this.asrSentences,
-        unitTagGroup: unitTagGroup ?? this.unitTagGroup,
-        shotTagGroup: shotTagGroup ?? this.shotTagGroup,
+        unitTagGroups: unitTagGroups ?? this.unitTagGroups,
+        shotTagGroups: shotTagGroups ?? this.shotTagGroups,
         analysisError:
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
         replacements: replacements ?? this.replacements,
@@ -115,6 +147,10 @@ class RenewTask {
         'updatedAt': updatedAt.toIso8601String(),
         'units': units?.map((u) => u.toJson()).toList(),
         'asrSentences': asrSentences?.map((s) => s.toJson()).toList(),
+        'unitTagGroups': [for (final g in unitTagGroups) g.toJson()],
+        'shotTagGroups': [for (final g in shotTagGroups) g.toJson()],
+        // 旧字段一并写：本项目按「打包好的 .app 发给同事」分发，新旧版本会
+        // 并存，旧版本只认单个字段，不写它任务在旧版本上就成了「没选标签组」
         'unitTagGroup': unitTagGroup?.toJson(),
         'shotTagGroup': shotTagGroup?.toJson(),
         'analysisError': analysisError,
@@ -139,8 +175,8 @@ class RenewTask {
         asrSentences: (json['asrSentences'] as List<dynamic>?)
             ?.map((e) => AsrSentence.fromJson(e as Map<String, dynamic>))
             .toList(),
-        unitTagGroup: TagGroupRef.tryFromJson(json['unitTagGroup']),
-        shotTagGroup: TagGroupRef.tryFromJson(json['shotTagGroup']),
+        unitTagGroups: parseTagGroups(json['unitTagGroups'], json['unitTagGroup']),
+        shotTagGroups: parseTagGroups(json['shotTagGroups'], json['shotTagGroup']),
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
       );
@@ -189,8 +225,8 @@ class RenewTask {
       other.status == status &&
       other.createdAt == createdAt &&
       other.updatedAt == updatedAt &&
-      other.unitTagGroup == unitTagGroup &&
-      other.shotTagGroup == shotTagGroup &&
+      _sameGroups(other.unitTagGroups, unitTagGroups) &&
+      _sameGroups(other.shotTagGroups, shotTagGroups) &&
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences) &&
@@ -207,8 +243,8 @@ class RenewTask {
       status,
       createdAt,
       updatedAt,
-      unitTagGroup,
-      shotTagGroup,
+      Object.hashAll(unitTagGroups),
+      Object.hashAll(shotTagGroups),
       analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!),

@@ -188,7 +188,7 @@ void main() {
     test('视觉镜头打标并发进行（串行时 32 个镜头要跑近十分钟）', () async {
       final repo = FileTaskRepository(tempDir);
       final task = makeTask()
-          .copyWith(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+          .copyWith(shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')]);
       await repo.save(task);
 
       var inFlight = 0;
@@ -225,7 +225,7 @@ void main() {
     test('配置 taggers 后单元按本任务的单元标签组打标', () async {
       final repo = FileTaskRepository(tempDir);
       final task = makeTask().copyWith(
-          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')]);
       await repo.save(task);
       final tagger = _RecordingUnitTagger(reply: const ['功效演示']);
 
@@ -251,9 +251,9 @@ void main() {
       });
       final tagger = _RecordingUnitTagger(reply: const []);
       final a = makeTask().copyWith(
-          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')]);
       final b = RenewTask.fromJson(makeTask().toJson())
-          .copyWith(unitTagGroup: const TagGroupRef(id: 1281, name: '衣清.立白卫仕'));
+          .copyWith(unitTagGroups: [const TagGroupRef(id: 1281, name: '衣清.立白卫仕')]);
       await repo.save(a);
 
       await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
@@ -269,7 +269,7 @@ void main() {
     test('镜头层按视觉镜头标签组打标（抽帧 + 该组词表）', () async {
       final repo = FileTaskRepository(tempDir);
       final task = makeTask()
-          .copyWith(shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'));
+          .copyWith(shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')]);
       await repo.save(task);
       var shotCalls = 0;
 
@@ -317,7 +317,7 @@ void main() {
 
       final repo = FileTaskRepository(tempDir);
       final task = makeTask().copyWith(
-          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')]);
       await repo.save(task);
 
       final result = await taggingPipeline(repo,
@@ -340,7 +340,7 @@ void main() {
 
       final repo = FileTaskRepository(tempDir);
       final task = makeTask().copyWith(
-          unitTagGroup: const TagGroupRef(id: 1279, name: '空组'));
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '空组')]);
       await repo.save(task);
       final tagger = _RecordingUnitTagger(reply: const ['功效演示']);
 
@@ -356,7 +356,7 @@ void main() {
     test('unitTagger 抛异常不中断分析，该单元 tags 留空', () async {
       final repo = FileTaskRepository(tempDir);
       final task = makeTask().copyWith(
-          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'));
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')]);
       await repo.save(task);
 
       final result = await taggingPipeline(repo,
@@ -372,6 +372,8 @@ void main() {
       }
     });
   });
+
+  _multiGroupVocabulary();
 }
 
 /// 假词表源：按组 id 给不同词表，并记录被问过的组 id
@@ -447,4 +449,27 @@ class _FakeShotTagger extends ShotTagger {
     if (work != null) await work!();
     return ['开箱'];
   }
+
+}
+void _multiGroupVocabulary() {
+  group('多个标签组的词表合并成一份', () {
+    test('两个组的标签都进了受控词表，重复词只留一个', () async {
+      final asked = <int>[];
+      final source = _FakeVocabularySource({
+        1: const ['真人口播', '产品特写'],
+        2: const ['产品特写', '情绪激动'], // 与组 1 有重复
+      }, asked);
+
+      final merged = <String>[];
+      for (final id in [1, 2]) {
+        for (final w in await source.vocabularyOf(id)) {
+          if (!merged.contains(w)) merged.add(w);
+        }
+      }
+
+      expect(merged, ['真人口播', '产品特写', '情绪激动'],
+          reason: '重复词只会稀释提示词，去重按标签名');
+      expect(asked, [1, 2], reason: '每个选中的组都要拉一次');
+    });
+  });
 }

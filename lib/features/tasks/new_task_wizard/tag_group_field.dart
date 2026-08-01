@@ -37,8 +37,8 @@ class TagGroupField extends StatelessWidget {
   final String label;
   final String hint;
   final List<TagGroup> groups;
-  final TagGroupRef? selected;
-  final ValueChanged<TagGroupRef> onChanged;
+  final List<TagGroupRef> selected;
+  final ValueChanged<List<TagGroupRef>> onChanged;
   final TagPreview? preview;
 
   const TagGroupField({
@@ -79,70 +79,41 @@ class TagGroupField extends StatelessWidget {
     );
   }
 
-  /// 点开一个带搜索的选择弹层，而不是铺一个 127 项的下拉——
+  /// 点开一个带搜索的多选弹层，而不是铺一个 127 项的下拉——
   /// 在长列表里一个个翻是新建任务里最费劲的一步
-  Widget _trigger(BuildContext context) {
-    final current = selected;
-    final group = current == null
-        ? null
-        : groups.where((g) => g.id == current.id).firstOrNull;
-    return InkWell(
-      key: dropdownKey,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      onTap: () async {
-        final picked = await showTagGroupPicker(context,
-            title: label, groups: groups, selected: selected);
-        if (picked != null) onChanged(picked);
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-        child: Row(
-          children: [
-            Expanded(
-              child: current == null
-                  ? Text(hint,
-                      style: const TextStyle(
-                          color: AppColors.textTertiary,
-                          fontSize: AppFontSize.body))
-                  : _GroupItem(
-                      group: group ??
-                          TagGroup(
-                              id: current.id,
-                              name: current.name,
-                              materialType: '',
-                              tagType: '')),
-            ),
-            const Icon(Icons.arrow_drop_down,
-                size: 18, color: AppColors.textSecondary),
-          ],
+  Widget _trigger(BuildContext context) => InkWell(
+        key: dropdownKey,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        onTap: () async {
+          final picked = await showTagGroupPicker(context,
+              title: label, groups: groups, selected: selected);
+          if (picked != null) onChanged(picked);
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: Row(
+            children: [
+              Expanded(child: _selectedSummary()),
+              const Icon(Icons.arrow_drop_down,
+                  size: 18, color: AppColors.textSecondary),
+            ],
+          ),
         ),
-      ),
-    );
-  }
-}
+      );
 
-/// 下拉项：组名 + 素材类型徽标。
-///
-/// 必须带素材类型：真实租户里存在同名不同类型的组（如「脚本话术」同时存在
-/// AUDIO 与 STORYBOARD 两个），只显示名字用户无从分辨。
-class _GroupItem extends StatelessWidget {
-  final TagGroup group;
-  const _GroupItem({required this.group});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
+  /// 选中的组名逐个列出——只显示「已选 3 个」的话，用户没法确认选对了没有
+  Widget _selectedSummary() {
+    if (selected.isEmpty) {
+      return Text(hint,
+          style: const TextStyle(
+              color: AppColors.textTertiary, fontSize: AppFontSize.body));
+    }
+    return Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
       children: [
-        Flexible(
-          child: Text(group.name,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                  color: AppColors.textPrimary, fontSize: AppFontSize.body)),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        Text(group.materialType,
-            style: const TextStyle(
-                color: AppColors.textTertiary, fontSize: AppFontSize.micro)),
+        for (final ref in selected)
+          _MiniChip(text: ref.name),
       ],
     );
   }

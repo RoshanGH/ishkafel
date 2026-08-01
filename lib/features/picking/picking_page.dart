@@ -116,9 +116,9 @@ class _PickingPageState extends ConsumerState<PickingPage> {
   /// 标签表拉取失败不阻断页面：候选面板会把标签检索标为不可用并说明原因，
   /// 画面描述检索照常可用。
   Future<void> _loadTagVocabulary() async {
-    final group = widget.task.shotTagGroup;
-    if (group == null) return;
-    await _tagResolver.load(group.id);
+    final groups = widget.task.shotTagGroups;
+    if (groups.isEmpty) return;
+    await _tagResolver.loadAll([for (final g in groups) g.id]);
     if (!mounted) return;
     // 标签表是异步拉的：进页面时看着可用、拉完（或拉失败）才知道到底行不行，
     // 这一刻同样不能把点不动的段留在选中态
@@ -139,7 +139,7 @@ class _PickingPageState extends ConsumerState<PickingPage> {
   PickingScope get _scope => PickingScope.from(
         picking: _picking,
         resolver: _tagResolver,
-        shotTagGroup: widget.task.shotTagGroup,
+        shotTagGroups: widget.task.shotTagGroups,
       );
 
   /// 方案/选中变化后按需重新检索（同一作用域不重复打网络）。

@@ -234,8 +234,8 @@ void main() {
 
     await container.read(taskListProvider.notifier).importFile(
           '/videos/新片.mp4',
-          unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
-          shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+          unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')],
+          shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')],
         );
 
     final task = container

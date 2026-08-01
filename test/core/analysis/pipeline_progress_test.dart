@@ -111,10 +111,8 @@ RenewTask _task({bool withTagGroups = false}) => RenewTask(
       status: RenewTaskStatus.analyzing,
       createdAt: DateTime.utc(2026, 7, 31),
       updatedAt: DateTime.utc(2026, 7, 31),
-      unitTagGroup:
-          withTagGroups ? const TagGroupRef(id: 1, name: '语义类型') : null,
-      shotTagGroup:
-          withTagGroups ? const TagGroupRef(id: 2, name: '画面类型') : null,
+      unitTagGroups: withTagGroups ? [const TagGroupRef(id: 1, name: '语义类型')] : const [],
+      shotTagGroups: withTagGroups ? [const TagGroupRef(id: 2, name: '画面类型')] : const [],
     );
 
 void main() {

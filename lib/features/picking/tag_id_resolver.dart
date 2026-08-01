@@ -26,7 +26,35 @@ class TagIdResolver {
   /// 拉取失败的中文原因（成功或未拉取时为 null）
   String? get loadFailure => _loadFailure;
 
-  /// 拉取标签组的标签表。重复调用只在未成功时重试。
+  /// 拉取若干标签组的标签表并合并。重复调用只在未成功时重试。
+  ///
+  /// 合并是必须的：一个层可以选多个标签组，打标产出的标签名散落在各组里，
+  /// 只解析第一个组会让其余组的标签统统查不到 id，检索键悄悄缺一半。
+  Future<void> loadAll(Iterable<int> groupIds) async {
+    if (_loaded || groupIds.isEmpty) return;
+    final merged = <String, int>{};
+    String? failure;
+    for (final id in groupIds) {
+      try {
+        for (final t in await service.listTags(id)) {
+          merged.putIfAbsent(t.name, () => t.id);
+        }
+      } catch (e) {
+        // 单个组拉失败不牵连其余组；全都失败时才对外报错
+        AppLog.warn('阶段②标签表拉取失败（groupId=$id）：$e');
+        failure ??= '无法读取标签组，暂时不能按标签检索，请稍后重试';
+      }
+    }
+    if (merged.isEmpty && failure != null) {
+      _loadFailure = failure;
+      return;
+    }
+    _byName = Map.unmodifiable(merged);
+    _loaded = true;
+    _loadFailure = null;
+  }
+
+  /// 单组快捷方式（保留给只关心一个组的调用方）
   Future<void> load(int groupId) async {
     if (_loaded) return;
     try {

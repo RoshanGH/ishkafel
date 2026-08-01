@@ -20,12 +20,12 @@ class WizardBody extends StatelessWidget {
   final String? groupsError;
   final VoidCallback onRetryGroups;
 
-  final TagGroupRef? unitGroup;
-  final TagGroupRef? shotGroup;
+  final List<TagGroupRef> unitGroups;
+  final List<TagGroupRef> shotGroups;
   final TagPreview? unitPreview;
   final TagPreview? shotPreview;
-  final ValueChanged<TagGroupRef> onUnitGroupChanged;
-  final ValueChanged<TagGroupRef> onShotGroupChanged;
+  final ValueChanged<List<TagGroupRef>> onUnitGroupsChanged;
+  final ValueChanged<List<TagGroupRef>> onShotGroupsChanged;
 
   const WizardBody({
     super.key,
@@ -34,12 +34,12 @@ class WizardBody extends StatelessWidget {
     required this.groups,
     required this.groupsError,
     required this.onRetryGroups,
-    required this.unitGroup,
-    required this.shotGroup,
+    required this.unitGroups,
+    required this.shotGroups,
     required this.unitPreview,
     required this.shotPreview,
-    required this.onUnitGroupChanged,
-    required this.onShotGroupChanged,
+    required this.onUnitGroupsChanged,
+    required this.onShotGroupsChanged,
   });
 
   @override
@@ -75,20 +75,20 @@ class WizardBody extends StatelessWidget {
         TagGroupField(
           dropdownKey: const Key('wizard-unit-tag-group'),
           label: '台词语义单元标签组',
-          hint: '选择用于台词打标的标签组',
+          hint: '选择用于台词打标的标签组（可多选）',
           groups: list,
-          selected: unitGroup,
-          onChanged: onUnitGroupChanged,
+          selected: unitGroups,
+          onChanged: onUnitGroupsChanged,
           preview: unitPreview,
         ),
         const SizedBox(height: AppSpacing.md),
         TagGroupField(
           dropdownKey: const Key('wizard-shot-tag-group'),
           label: '视觉镜头标签组',
-          hint: '选择用于画面打标的标签组',
+          hint: '选择用于画面打标的标签组（可多选）',
           groups: list,
-          selected: shotGroup,
-          onChanged: onShotGroupChanged,
+          selected: shotGroups,
+          onChanged: onShotGroupsChanged,
           preview: shotPreview,
         ),
       ],

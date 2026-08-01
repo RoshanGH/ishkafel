@@ -59,8 +59,8 @@ void main() {
   test('新建向导选定的两个标签组随任务一起落库（阶段②的检索键）', () async {
     final task = await service.importLocalFile(
       '/videos/滴露_测试片.mp4',
-      unitTagGroup: const TagGroupRef(id: 1279, name: '衣清.消毒液'),
-      shotTagGroup: const TagGroupRef(id: 136, name: '画面类型'),
+      unitTagGroups: [const TagGroupRef(id: 1279, name: '衣清.消毒液')],
+      shotTagGroups: [const TagGroupRef(id: 136, name: '画面类型')],
     );
 
     expect(task.unitTagGroup, const TagGroupRef(id: 1279, name: '衣清.消毒液'));

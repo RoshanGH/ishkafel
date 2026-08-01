@@ -157,10 +157,10 @@ class AnalysisPipeline {
       List<SemanticUnit> units, AnalysisProgressSink? onProgress) async {
     final unitVocabulary = unitTagger == null
         ? const <String>[]
-        : await _vocabularyFor(task.unitTagGroup, '台词语义单元');
+        : await _vocabularyFor(task.unitTagGroups, '台词语义单元');
     final shotVocabulary = (shotTagger == null || thumbnails == null)
         ? const <String>[]
-        : await _vocabularyFor(task.shotTagGroup, '视觉镜头');
+        : await _vocabularyFor(task.shotTagGroups, '视觉镜头');
 
     final tagUnits = unitVocabulary.isNotEmpty;
     final tagShots = shotVocabulary.isNotEmpty;
@@ -247,19 +247,35 @@ class AnalysisPipeline {
 
   /// 解析某一层的受控词表；未选组 / 无词表源 / 拉取失败 / 组内没标签
   /// 都返回空列表（=该层不打标），并各自记一条可排查的告警
-  Future<List<String>> _vocabularyFor(TagGroupRef? group, String layer) async {
+  /// 把选中的若干标签组合并成一份受控词表。
+  ///
+  /// 合并而不是逐组各打一轮：一个单元/镜头本来就该同时有几个维度的标签，
+  /// 逐组打会让 API 调用次数按组数翻倍（镜头打标已经是最慢的一步）。
+  /// 去重按标签名——不同组里出现同名标签是常事，重复词只会稀释提示词。
+  ///
+  /// 单个组拉失败只跳过它，其余组照常用：为一个组把整层打标废掉不划算。
+  Future<List<String>> _vocabularyFor(
+      List<TagGroupRef> groups, String layer) async {
     final source = vocabulary;
-    if (group == null || source == null) return const [];
-    try {
-      final words = await source.vocabularyOf(group.id);
-      if (words.isEmpty) {
-        AppLog.warn('$layer 标签组「${group.name}」内没有任何标签，跳过该层打标');
+    if (groups.isEmpty || source == null) return const [];
+    final merged = <String>[];
+    for (final group in groups) {
+      try {
+        final words = await source.vocabularyOf(group.id);
+        if (words.isEmpty) {
+          AppLog.warn('$layer 标签组「${group.name}」内没有任何标签');
+        }
+        for (final w in words) {
+          if (!merged.contains(w)) merged.add(w);
+        }
+      } catch (e) {
+        AppLog.warn('$layer 标签组「${group.name}」的词表拉取失败，跳过这个组：$e');
       }
-      return words;
-    } catch (e) {
-      AppLog.warn('$layer 标签组「${group.name}」的词表拉取失败，跳过该层打标：$e');
-      return const [];
     }
+    if (merged.isEmpty) {
+      AppLog.warn('$layer 没有可用的受控词表，跳过该层打标');
+    }
+    return List.unmodifiable(merged);
   }
 
   Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,

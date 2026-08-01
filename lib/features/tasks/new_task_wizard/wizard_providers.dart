@@ -11,14 +11,16 @@ import '../../../core/models/tag_group_ref.dart';
 /// 到检索键，所以向导在选齐之前不放行（见 `new_task_wizard.dart` 的禁用理由）。
 class NewTaskWizardResult {
   final String filePath;
-  final TagGroupRef unitTagGroup;
-  final TagGroupRef shotTagGroup;
+  /// 两层各自可以选多个标签组，标签合并成一份受控词表
+  final List<TagGroupRef> unitTagGroups;
+  final List<TagGroupRef> shotTagGroups;
 
-  const NewTaskWizardResult({
+  NewTaskWizardResult({
     required this.filePath,
-    required this.unitTagGroup,
-    required this.shotTagGroup,
-  });
+    required List<TagGroupRef> unitTagGroups,
+    required List<TagGroupRef> shotTagGroups,
+  })  : unitTagGroups = List.unmodifiable(unitTagGroups),
+        shotTagGroups = List.unmodifiable(shotTagGroups);
 }
 
 /// 选择本地成片文件，返回路径；用户取消时返回 null
