@@ -48,7 +48,54 @@ void main() {
       });
       await service.listGroups();
       expect(usedExe, 'miaoa');
-      expect(usedArgs, ['tag', 'group', 'list', '--scope', 'tenant', '--json']);
+      expect(usedArgs,
+          ['tag', 'group', 'list', '--scope', 'tenant', '--include-tags', '--json']);
+      expect(usedArgs, contains('--include-tags'),
+          reason: '一次把组内标签也带回来（127 组 / 2461 标签共约 210KB），'
+              '省掉「每选一个组再拉一次」的往返，也让新建向导能按标签名搜组');
+    });
+
+    test('带回来的标签被解析出来', () async {
+      const withTags = '''
+[
+  {"id":1,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI",
+   "tags":[{"id":11,"tagName":"真人口播"},{"id":12,"tagName":"产品特写"}]}
+]
+''';
+      final service = MiaoaTagService(
+          run: (_, _) async => ProcessResult(1, 0, withTags, ''));
+
+      final groups = await service.listGroups();
+
+      expect(groups.single.tags, ['真人口播', '产品特写']);
+    });
+
+    test('没有 tags 字段时当作空，不丢掉整个标签组', () async {
+      const noTags = '''
+[{"id":1,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI"}]
+''';
+      final service = MiaoaTagService(
+          run: (_, _) async => ProcessResult(1, 0, noTags, ''));
+
+      final groups = await service.listGroups();
+
+      expect(groups, hasLength(1));
+      expect(groups.single.tags, isEmpty);
+    });
+
+    test('个别标签条目非法只跳过它，不牵连整个标签组', () async {
+      const partial = '''
+[
+  {"id":1,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI",
+   "tags":[{"id":11,"tagName":"真人口播"},{"id":12},{"tagName":123}]}
+]
+''';
+      final service = MiaoaTagService(
+          run: (_, _) async => ProcessResult(1, 0, partial, ''));
+
+      final groups = await service.listGroups();
+
+      expect(groups.single.tags, ['真人口播']);
     });
 
     test('非零退出码抛 MiaoaException 且带 stderr', () async {

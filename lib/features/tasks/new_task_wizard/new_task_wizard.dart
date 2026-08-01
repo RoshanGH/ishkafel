@@ -86,17 +86,30 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   void _selectUnitGroup(TagGroupRef group) {
     setState(() {
       _unitGroup = group;
-      _unitPreview = const TagPreviewLoading();
+      _unitPreview = _cachedPreview(group) ?? const TagPreviewLoading();
     });
-    _loadPreview(group, ++_unitPreviewToken, isUnitLayer: true);
+    if (_unitPreview is TagPreviewLoading) {
+      _loadPreview(group, ++_unitPreviewToken, isUnitLayer: true);
+    }
   }
 
   void _selectShotGroup(TagGroupRef group) {
     setState(() {
       _shotGroup = group;
-      _shotPreview = const TagPreviewLoading();
+      _shotPreview = _cachedPreview(group) ?? const TagPreviewLoading();
     });
-    _loadPreview(group, ++_shotPreviewToken, isUnitLayer: false);
+    if (_shotPreview is TagPreviewLoading) {
+      _loadPreview(group, ++_shotPreviewToken, isUnitLayer: false);
+    }
+  }
+
+  /// 标签组列表是带 `--include-tags` 拉的，标签已经在手上了——不必为了
+  /// 预览再往返一次。只有拉列表时没带上标签（老数据/降级路径）才现拉。
+  TagPreview? _cachedPreview(TagGroupRef group) {
+    final found =
+        _groups?.where((g) => g.id == group.id).firstOrNull;
+    if (found == null || found.tags.isEmpty) return null;
+    return TagPreviewReady(found.tags);
   }
 
   Future<void> _loadPreview(TagGroupRef group, int token,

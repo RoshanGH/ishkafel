@@ -5,6 +5,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
 import '../../../core/models/tag_group_ref.dart';
+import 'tag_group_picker.dart';
 
 /// 组内标签预览的三态（选中标签组后展开显示，让用户确认选对了组）
 sealed class TagPreview {
@@ -68,7 +69,7 @@ class TagGroupField extends StatelessWidget {
                   color: AppColors.textSecondary,
                   fontSize: AppFontSize.caption)),
           const SizedBox(height: AppSpacing.sm),
-          _dropdown(),
+          _trigger(context),
           if (preview != null) ...[
             const SizedBox(height: AppSpacing.sm),
             _PreviewArea(preview: preview!),
@@ -78,28 +79,46 @@ class TagGroupField extends StatelessWidget {
     );
   }
 
-  Widget _dropdown() => DropdownButtonHideUnderline(
-        child: DropdownButton<TagGroupRef>(
-          key: dropdownKey,
-          isExpanded: true,
-          value: selected,
-          dropdownColor: AppColors.surfaceRaised,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          hint: Text(hint,
-              style: const TextStyle(
-                  color: AppColors.textTertiary, fontSize: AppFontSize.body)),
-          items: [
-            for (final group in groups)
-              DropdownMenuItem(
-                value: TagGroupRef(id: group.id, name: group.name),
-                child: _GroupItem(group: group),
-              ),
+  /// 点开一个带搜索的选择弹层，而不是铺一个 127 项的下拉——
+  /// 在长列表里一个个翻是新建任务里最费劲的一步
+  Widget _trigger(BuildContext context) {
+    final current = selected;
+    final group = current == null
+        ? null
+        : groups.where((g) => g.id == current.id).firstOrNull;
+    return InkWell(
+      key: dropdownKey,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      onTap: () async {
+        final picked = await showTagGroupPicker(context,
+            title: label, groups: groups, selected: selected);
+        if (picked != null) onChanged(picked);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: Row(
+          children: [
+            Expanded(
+              child: current == null
+                  ? Text(hint,
+                      style: const TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: AppFontSize.body))
+                  : _GroupItem(
+                      group: group ??
+                          TagGroup(
+                              id: current.id,
+                              name: current.name,
+                              materialType: '',
+                              tagType: '')),
+            ),
+            const Icon(Icons.arrow_drop_down,
+                size: 18, color: AppColors.textSecondary),
           ],
-          onChanged: (value) {
-            if (value != null) onChanged(value);
-          },
         ),
-      );
+      ),
+    );
+  }
 }
 
 /// 下拉项：组名 + 素材类型徽标。

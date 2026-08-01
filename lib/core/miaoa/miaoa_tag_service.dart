@@ -18,12 +18,28 @@ class TagGroup {
   final String materialType;
   final String tagType;
 
+  /// 组内标签名。拉取时带 `--include-tags` 一次取回——127 个组、2461 个
+  /// 标签合计只有约 210KB，一次拿全比「选中后再拉一次」更省事，也让
+  /// 「按标签名搜组」成为可能（用户往往记得住标签、记不住它在哪个组）。
+  final List<String> tags;
+
   const TagGroup({
     required this.id,
     required this.name,
     required this.materialType,
     required this.tagType,
+    this.tags = const [],
   });
+
+  /// 组内标签名；字段缺失（未带 --include-tags）或个别条目非法都只当没有，
+  /// 不因为标签解析失败而丢掉整个标签组
+  static List<String> _tagNames(Object? raw) {
+    if (raw is! List) return const [];
+    return List.unmodifiable([
+      for (final t in raw)
+        if (t is Map && t['tagName'] is String) t['tagName'] as String,
+    ]);
+  }
 
   /// 宽松解析：任一字段缺失或类型不符都返回 null，由调用方跳过并汇总。
   ///
@@ -42,6 +58,7 @@ class TagGroup {
       name: name,
       materialType: materialType,
       tagType: tagType,
+      tags: _tagNames(raw['tags']),
     );
   }
 }
@@ -75,7 +92,10 @@ class MiaoaTagService {
 
   Future<List<TagGroup>> listGroups() async {
     final result = await run(
-        binary, ['tag', 'group', 'list', '--scope', 'tenant', '--json']);
+        binary,
+        // --include-tags：一次把组内标签也带回来。多出的约 200KB 换掉了
+        // 「每选一个组再拉一次标签」的往返，也让搜索能匹配标签名
+        ['tag', 'group', 'list', '--scope', 'tenant', '--include-tags', '--json']);
     final raw = _decodeList(result, _groupAction);
     return _parseEntries(raw, TagGroup.tryFromJson, _groupAction);
   }
