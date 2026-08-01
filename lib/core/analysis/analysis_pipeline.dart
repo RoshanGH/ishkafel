@@ -14,6 +14,7 @@ import 'audio_extractor.dart';
 import 'providers.dart';
 import 'scene_detector.dart';
 import 'segmentation_builder.dart';
+import 'shot_boundary_finder.dart';
 import 'silence_detector.dart';
 import 'tag_vocabulary.dart';
 
@@ -30,6 +31,11 @@ class AnalysisPipeline {
   final AudioExtractor audio;
   final SilenceDetector silence;
   final SceneDetector scenes;
+
+  /// 视觉镜头切点求解（双判据 + 灰区画面复核）。null 时回退到 [scenes] 的
+  /// 单一 scene 阈值——旧口径，只抓得住最剧烈的硬切，见
+  /// docs/plans/2026-08-01-镜头切分优化.md
+  final ShotBoundaryFinder? shotBoundaries;
   final AsrProvider asr;
   final SemanticSplitter splitter;
   final SegmentationBuilder builder;
@@ -50,6 +56,7 @@ class AnalysisPipeline {
     required this.audio,
     required this.silence,
     required this.scenes,
+    this.shotBoundaries,
     required this.asr,
     required this.splitter,
     required this.builder,
@@ -98,7 +105,7 @@ class AnalysisPipeline {
     final valleys = silence.detectValleyCenters(samples, sampleRate);
 
     _report(onProgress, AnalysisStage.detectingScenes);
-    final shotBounds = await scenes.detect(task.sourcePath);
+    final shotBounds = await _detectShotBoundaries(task, info.fps);
 
     _report(onProgress, AnalysisStage.transcribing);
     final sentences = await asr.transcribe(pcmPath);
@@ -125,6 +132,20 @@ class AnalysisPipeline {
     );
     await repository.save(updated);
     return updated;
+  }
+
+  /// 求视觉镜头切点。新链路（双判据 + 画面复核）失败时退回旧的单一阈值
+  /// 检测——切分结果本身仍有价值，为了「切得更准」把整条分析废掉不划算。
+  Future<List<int>> _detectShotBoundaries(RenewTask task, double fps) async {
+    final finder = shotBoundaries;
+    if (finder == null) return scenes.detect(task.sourcePath);
+    try {
+      return await finder.find(
+          videoPath: task.sourcePath, taskId: task.id, fps: fps);
+    } catch (e) {
+      AppLog.warn('镜头切点检测失败，退回基础场景检测：$e');
+      return scenes.detect(task.sourcePath);
+    }
   }
 
   /// 两层打标：台词语义单元（文本）+ 视觉镜头（代表帧）。

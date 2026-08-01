@@ -14,7 +14,10 @@ import 'core/analysis/analysis_pipeline.dart';
 import 'core/analysis/audio_extractor.dart';
 import 'core/analysis/boundary_snapper.dart';
 import 'core/analysis/scene_detector.dart';
+import 'core/analysis/boundary_reviewer.dart';
+import 'core/analysis/frame_signal_extractor.dart';
 import 'core/analysis/segmentation_builder.dart';
+import 'core/analysis/shot_boundary_finder.dart';
 import 'core/analysis/silence_detector.dart';
 import 'core/analysis/tag_vocabulary.dart';
 import 'core/ffmpeg/ffprobe_service.dart';
@@ -95,6 +98,15 @@ AnalysisPipeline? _buildAnalysisPipeline(
     audio: AudioExtractor(),
     silence: const SilenceDetector(),
     scenes: SceneDetector(),
+    // 视觉镜头切点：双判据（画面差分 + 颜色直方图）+ 灰区画面复核。
+    // 复核用与视觉打标同一个 Ark 客户端，只看拿不准的那些、且有次数上限。
+    shotBoundaries: ShotBoundaryFinder(
+      extractor: FrameSignalExtractor(
+          workDir: Directory(p.join(dataDir.path, 'analysis_work'))),
+      reviewer: BoundaryReviewer(
+          chat: chat,
+          workDir: Directory(p.join(dataDir.path, 'analysis_work'))),
+    ),
     asr: VolcanoAsrProvider(
       appId: credentials.speechAppId,
       accessToken: credentials.speechAccessToken,
