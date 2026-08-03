@@ -24,8 +24,8 @@ void main() {
   );
 
   test('copyWith 返回新对象且不改原对象（不可变）', () {
-    final updated = task.copyWith(status: RenewTaskStatus.awaitingCut);
-    expect(updated.status, RenewTaskStatus.awaitingCut);
+    final updated = task.copyWith(status: RenewTaskStatus.editing);
+    expect(updated.status, RenewTaskStatus.editing);
     expect(task.status, RenewTaskStatus.analyzing);
     expect(updated.id, task.id);
     expect(identical(updated, task), false);
@@ -44,23 +44,33 @@ void main() {
 
   test('status 序列化为稳定字符串（存储契约，不许改名）', () {
     expect(RenewTaskStatus.analyzing.name, 'analyzing');
-    expect(RenewTaskStatus.awaitingCut.name, 'awaitingCut');
-    expect(RenewTaskStatus.picking.name, 'picking');
+    expect(RenewTaskStatus.editing.name, 'editing');
     expect(RenewTaskStatus.exported.name, 'exported');
+  });
+
+  test('旧库里的 awaitingCut / picking 一律读成 editing，不是让任务消失', () {
+    for (final legacy in ['awaitingCut', 'picking']) {
+      final json = task.toJson()..['status'] = legacy;
+      final parsed = RenewTask.fromJson(json);
+      expect(parsed.status, RenewTaskStatus.editing,
+          reason: '这两个状态对应的是已经合并掉的两个页面，'
+              '但用户硬盘上的任务不该因此打不开');
+      expect(parsed.units, task.units);
+    }
   });
 
   test('未知 status（新版本写入的状态）回退到安全值而不是让整条任务消失', () {
     final json = task.toJson()..['status'] = 'exporting';
     final parsed = RenewTask.fromJson(json);
-    expect(parsed.status, RenewTaskStatus.picking);
+    expect(parsed.status, RenewTaskStatus.editing);
     expect(parsed.id, task.id);
   });
 
   test('status 字段缺失或类型不对时同样回退，不抛异常', () {
     final missing = task.toJson()..remove('status');
-    expect(RenewTask.fromJson(missing).status, RenewTaskStatus.picking);
+    expect(RenewTask.fromJson(missing).status, RenewTaskStatus.editing);
     final wrongType = task.toJson()..['status'] = 42;
-    expect(RenewTask.fromJson(wrongType).status, RenewTaskStatus.picking);
+    expect(RenewTask.fromJson(wrongType).status, RenewTaskStatus.editing);
   });
 
   test('旧 JSON（无 units 键）解析为 units == null（向后兼容）', () {

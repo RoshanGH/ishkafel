@@ -172,7 +172,7 @@ void main() {
 
       final result = await _pipeline(repo).analyze(_task());
 
-      expect(result.status, RenewTaskStatus.awaitingCut);
+      expect(result.status, RenewTaskStatus.editing);
     });
   });
 
@@ -236,7 +236,7 @@ void main() {
         throw StateError('界面已销毁');
       });
 
-      expect(result.status, RenewTaskStatus.awaitingCut,
+      expect(result.status, RenewTaskStatus.editing,
           reason: '进度只是「说一声」；因为没人听就把整条分析废掉，'
               '等于让十几分钟的计算白跑');
     });

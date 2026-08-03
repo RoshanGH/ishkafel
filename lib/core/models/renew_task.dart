@@ -6,8 +6,14 @@ import 'tag_group_ref.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
 
-/// 任务状态：分析中 / 待切分确认 / 选材中 / 已导出
-enum RenewTaskStatus { analyzing, awaitingCut, picking, exported }
+/// 任务状态：分析中 / 编辑中 / 已导出
+///
+/// 曾经有 awaitingCut（待切分确认）与 picking（选材中）两个状态，对应
+/// 「先确认切分、再进入替换选材」两个页面。两个页面合并成一个工作台后，
+/// 这两个状态之间已没有任何行为差异——切分与选材在同一个页面里交替进行，
+/// 再分成两个状态只会让任务卡显示一个用户无法据以行动的假区分。
+/// 旧记录里的这两个名字由 [parseStatus] 兜底落到 [editing]。
+enum RenewTaskStatus { analyzing, editing, exported }
 
 /// 翻新任务实体（不可变）
 class RenewTask {
@@ -211,7 +217,7 @@ class RenewTask {
     return fallbackStatus;
   }
 
-  static const fallbackStatus = RenewTaskStatus.picking;
+  static const fallbackStatus = RenewTaskStatus.editing;
 
   @override
   bool operator ==(Object other) =>

@@ -15,8 +15,8 @@ RenewTask _task(String id, String name, RenewTaskStatus status,
     );
 
 final _tasks = [
-  _task('hkv1', '滴露_植源喷雾_XCT', RenewTaskStatus.awaitingCut),
-  _task('hkv2', '卫仕洗衣液_ZJD', RenewTaskStatus.picking),
+  _task('hkv1', '滴露_植源喷雾_XCT', RenewTaskStatus.editing),
+  _task('hkv2', '卫仕洗衣液_ZJD', RenewTaskStatus.editing),
   _task('hkv3', '舒肤佳_内核', RenewTaskStatus.exported),
   _task('hkv4', '滴露_消毒液', RenewTaskStatus.analyzing),
   _task('hkv5', '立白_卫仕', RenewTaskStatus.analyzing, error: '网络超时'),

@@ -79,48 +79,59 @@ void main() {
     });
   });
 
-  group('底部栏不留无解释的死按钮（CLAUDE.md：主操作要有明确反馈）', () {
-    testWidgets('「重新 AI 切分」禁用时必须说明原因，而不是一个点不动的灰按钮',
-        (tester) async {
-      await _pump(
-        tester,
-        const WorkbenchBottomBar(
-          summaryText: '共 1 个台词语义单元',
-          confirmed: false,
-          onConfirm: null,
-        ),
-      );
-
-      final button = find.byKey(const Key('workbench-reanalyze-btn'));
-      expect(button, findsOneWidget);
-      expect(tester.widget<OutlinedButton>(button).onPressed, isNull,
-          reason: '前提：这个按钮当前确实是禁用的');
-
-      final tooltip = find.ancestor(of: button, matching: find.byType(Tooltip));
-      expect(tooltip, findsOneWidget,
-          reason: '永久禁用且无任何解释的按钮，用户只会反复点它并怀疑软件坏了');
-
-      // 只断言「有 tooltip」不够：把 message 改成空串，"说明原因"就完全消失了，
-      // 断言却照样绿。要验它真的说了「为什么不能用」。
-      final message = tester.widget<Tooltip>(tooltip).message ?? '';
-      expect(message.trim(), isNotEmpty);
-      expect(message, contains('尚未'),
-          reason: 'tooltip 要说清是"还没开放"而不是"出错了"');
-      expect(message, contains('人工调整'),
-          reason: '还要说清重新切分的代价，否则用户不知道为什么要设确认流程');
-    });
-
+  group('底部栏只剩「当前事实」与「下一步出口」', () {
     testWidgets('摘要文案用术语表全称', (tester) async {
       await _pump(
         tester,
         const WorkbenchBottomBar(
           summaryText: '共 3 个台词语义单元 · 12 个视觉镜头 · 时长 96.2s',
-          confirmed: false,
-          onConfirm: null,
         ),
       );
+
       expect(find.textContaining('台词语义单元'), findsOneWidget);
       expect(find.textContaining('视觉镜头'), findsOneWidget);
+    });
+
+    testWidgets('不再有「确认切分」——切分与选材在同一个工作台里交替进行',
+        (tester) async {
+      await _pump(
+        tester,
+        const WorkbenchBottomBar(summaryText: '共 3 个台词语义单元'),
+      );
+
+      expect(find.textContaining('确认切分'), findsNothing,
+          reason: '这道闸门把两件本来交替进行的事硬拆成两个阶段：'
+              '挑着素材发现这刀切得不对，该直接在时间线上拖一下');
+      expect(find.byKey(const Key('workbench-export-btn')), findsOneWidget);
+    });
+
+    testWidgets('不能导出时按钮禁用，并把原因写出来', (tester) async {
+      await _pump(
+        tester,
+        const WorkbenchBottomBar(
+          summaryText: '共 3 个台词语义单元',
+          blockedReason: '当前组合 128 条，超过上限 100，请减少 U2 的候选',
+        ),
+      );
+
+      final btn = tester.widget<FilledButton>(
+          find.byKey(const Key('workbench-export-btn')));
+      expect(btn.onPressed, isNull);
+      expect(find.textContaining('超过上限'), findsOneWidget,
+          reason: '点不动又不说为什么，用户只会反复点它并怀疑软件坏了');
+    });
+
+    testWidgets('可以导出时显示组合数', (tester) async {
+      await _pump(
+        tester,
+        WorkbenchBottomBar(
+          summaryText: '共 3 个台词语义单元',
+          combinationText: '当前组合 2 × 3 = 6 条',
+          onExport: () {},
+        ),
+      );
+
+      expect(find.textContaining('6 条'), findsOneWidget);
     });
   });
 }

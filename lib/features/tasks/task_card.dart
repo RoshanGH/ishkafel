@@ -14,8 +14,7 @@ import 'source_availability.dart';
 ({String label, Color color}) statusBadge(RenewTaskStatus status) =>
     switch (status) {
       RenewTaskStatus.analyzing => (label: '分析中', color: AppColors.accentBlue),
-      RenewTaskStatus.awaitingCut => (label: '待切分确认', color: AppColors.orange),
-      RenewTaskStatus.picking => (label: '选材中', color: AppColors.purple),
+      RenewTaskStatus.editing => (label: '编辑中', color: AppColors.orange),
       RenewTaskStatus.exported => (label: '已导出', color: AppColors.green),
     };
 

@@ -10,7 +10,7 @@ RenewTask makeTask({String? coverPath}) => RenewTask(
       name: '滴露_植源喷雾',
       sourcePath: '/v/c1.mp4',
       coverPath: coverPath,
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime.utc(2026, 7, 29),
       updatedAt: DateTime.utc(2026, 7, 29),
     );

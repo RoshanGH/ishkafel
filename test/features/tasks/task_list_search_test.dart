@@ -37,8 +37,8 @@ RenewTask _task(String id, String name, RenewTaskStatus status,
 
 Future<void> _pump(WidgetTester tester) async {
   final repo = _Repo();
-  await repo.save(_task('hkv1', '滴露_植源喷雾', RenewTaskStatus.awaitingCut));
-  await repo.save(_task('hkv2', '卫仕洗衣液', RenewTaskStatus.picking));
+  await repo.save(_task('hkv1', '滴露_植源喷雾', RenewTaskStatus.editing));
+  await repo.save(_task('hkv2', '卫仕洗衣液', RenewTaskStatus.editing));
   await repo.save(_task('hkv3', '舒肤佳', RenewTaskStatus.exported));
 
   await tester.pumpWidget(ProviderScope(

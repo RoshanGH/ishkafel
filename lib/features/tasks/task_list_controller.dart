@@ -407,19 +407,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     return RetryOutcome.started;
   }
 
-  /// 审片台「确认切分」：保存编辑后的 units 并流转到「选材中」状态，随后刷新列表
-  Future<void> confirmSegmentation(
-      RenewTask task, List<SemanticUnit> units) async {
-    final updated = task.copyWith(
-      units: units,
-      status: RenewTaskStatus.picking,
-      updatedAt: DateTime.now(),
-    );
-    await ref.read(taskRepositoryProvider).save(updated);
-    await _refreshAfterSave(updated);
-  }
-
-  /// 阶段②「替换选材」：保存各台词语义单元的替换方案。
+  /// 「替换选材」：保存各台词语义单元的替换方案。
   ///
   /// 不改变任务状态——状态要等阶段③真正导出后才该流转到 exported，
   /// 提前改会让任务在列表里显示成已导出却拿不到成片。
@@ -433,7 +421,10 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await _refreshAfterSave(updated);
   }
 
-  /// 审片台「保存草稿」：仅保存编辑后的 units，不改变任务状态
+  /// 工作台落库：保存编辑后的 units。
+  ///
+  /// 工作台里的每次改动都直接落库（防抖 800ms），不需要用户点「保存」或
+  /// 「确认」——他改完就该当作已经存下了。状态不变：editing 一直到导出。
   Future<void> saveSegmentationDraft(
       RenewTask task, List<SemanticUnit> units) async {
     final updated = task.copyWith(units: units, updatedAt: DateTime.now());

@@ -24,9 +24,7 @@ enum TaskFilter {
       TaskFilter.all => true,
       TaskFilter.failed => failed,
       TaskFilter.running => !failed && task.status == RenewTaskStatus.analyzing,
-      TaskFilter.todo => !failed &&
-          (task.status == RenewTaskStatus.awaitingCut ||
-              task.status == RenewTaskStatus.picking),
+      TaskFilter.todo => !failed && task.status == RenewTaskStatus.editing,
       TaskFilter.done => !failed && task.status == RenewTaskStatus.exported,
     };
   }

@@ -12,7 +12,6 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
-import 'package:ishkafel/features/picking/picking_page.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/inspector_panel.dart';
 import 'package:ishkafel/features/workbench/player_panel.dart';
@@ -90,7 +89,7 @@ List<SemanticUnit> _unitsWithSliverTail() => const [
       ),
     ];
 
-RenewTask _fixtureTask({RenewTaskStatus status = RenewTaskStatus.awaitingCut}) =>
+RenewTask _fixtureTask({RenewTaskStatus status = RenewTaskStatus.editing}) =>
     RenewTask(
       id: 'wb-1',
       name: '滴露_植源喷雾',
@@ -148,6 +147,14 @@ Future<void> _pressUndoShortcut(WidgetTester tester, {bool redo = false}) async 
   await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
 }
 
+/// 等自动落库的 800ms 防抖窗口走完。
+///
+/// 工作台里没有「保存」这个动作：改完就该已经存下了，测试只需要等它写完。
+Future<void> _settleAutosave(WidgetTester tester) async {
+  await tester.pump(const Duration(seconds: 1));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   late InMemoryTaskRepository repo;
   late FakePlaybackController playback;
@@ -170,10 +177,12 @@ void main() {
     expect(find.byType(InspectorPanel), findsOneWidget);
     expect(find.byType(TimelineView), findsOneWidget);
     expect(find.text('第一句台词'), findsOneWidget);
-    expect(find.text('确认切分，进入替换选材'), findsOneWidget);
+    expect(find.byKey(const Key('workbench-export-btn')), findsOneWidget);
+    expect(find.text('确认切分，进入替换选材'), findsNothing,
+        reason: '切分与选材已经合并到这一个页面，没有「进入」哪里可去');
   });
 
-  testWidgets('②点击确认：仓库任务 status=picking 且 units 为编辑后值，页面进入阶段②', (tester) async {
+  testWidgets('②改完不点任何按钮就已落库，且没有「确认切分」这道闸门', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
     await tester.tap(find.byKey(const Key('open-workbench')));
@@ -185,21 +194,22 @@ void main() {
     await tester.tap(find.byKey(const Key('inspector-start-minus')));
     await tester.pump();
 
-    await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
+    // 「确认切分」这道闸门已经删掉：改动是随手落库的，不需要一个动作来
+    // 「提交」，也不需要跳到另一个页面去选材——右栏的 tab 就在旁边。
+    expect(find.byKey(const Key('workbench-confirm-btn')), findsNothing);
+    expect(find.byKey(const Key('workbench-export-btn')), findsOneWidget);
+
+    // 自动落库有 800ms 防抖，等它写完
+    await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
 
-    // 按钮上写的是「确认切分，进入替换选材」，就必须真的进到阶段②，
-    // 而不是丢回任务列表让用户自己再点一次
-    expect(find.byType(PickingPage), findsOneWidget);
-    expect(find.text('列表页占位'), findsNothing);
-
     final saved = await repo.findById('wb-1');
-    expect(saved!.status, RenewTaskStatus.picking);
-    expect(saved.units, isNot(equals(task.units)));
+    expect(saved!.units, isNot(equals(task.units)),
+        reason: '改完不用点任何按钮就该已经存下来了');
     expect(saved.units![1].startMs, lessThan(2000));
   });
 
-  testWidgets('③编辑后返回弹出确认对话框（取消/放弃修改）', (tester) async {
+  testWidgets('③编辑后立刻返回：不拦路，且防抖窗口里那次改动不会丢', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
     await tester.tap(find.byKey(const Key('open-workbench')));
@@ -210,31 +220,37 @@ void main() {
     await tester.tap(find.byKey(const Key('inspector-start-minus')));
     await tester.pump();
 
+    // 不等防抖窗口，改完立刻返回——最容易丢改动的那一刻
     await tester.tap(find.byKey(const Key('workbench-back-btn')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('leave-dialog-cancel')), findsOneWidget);
-    expect(find.byKey(const Key('leave-dialog-discard')), findsOneWidget);
-    expect(find.byKey(const Key('leave-dialog-draft')), findsOneWidget);
+    expect(find.byKey(const Key('leave-dialog-cancel')), findsNothing,
+        reason: '没有「未保存」这回事了，就不该再拿一个对话框拦住用户');
+    expect(find.text('列表页占位'), findsOneWidget);
 
-    // 取消：对话框关闭，仍停留在审片台
-    await tester.tap(find.byKey(const Key('leave-dialog-cancel')));
+    final leftAt = await repo.findById('wb-1');
+    expect(leftAt!.units![1].startMs, lessThan(2000),
+        reason: '返回前必须把还压在防抖窗口里的那次改动补写掉');
+  });
+
+  testWidgets('④已导出的任务返回不写回仓库', (tester) async {
+    final exported = _fixtureTask(status: RenewTaskStatus.exported);
+    await repo.save(exported);
+    await tester.pumpWidget(
+        _wrapWithNavigator(task: exported, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
     await tester.pumpAndSettle();
-    expect(find.byType(WorkbenchPage), findsOneWidget);
 
-    // 再次返回并放弃修改：pop 且仓库未落库编辑
     await tester.tap(find.byKey(const Key('workbench-back-btn')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('leave-dialog-discard')));
     await tester.pumpAndSettle();
 
     expect(find.text('列表页占位'), findsOneWidget);
     final saved = await repo.findById('wb-1');
-    expect(saved!.status, RenewTaskStatus.awaitingCut);
-    expect(saved.units, task.units);
+    expect(saved!.status, RenewTaskStatus.exported);
+    expect(saved.units, exported.units);
   });
 
-  testWidgets('④空格键切换播放/暂停', (tester) async {
+  testWidgets('⑤空格键切换播放/暂停', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
     await tester.tap(find.byKey(const Key('open-workbench')));
@@ -363,7 +379,7 @@ void main() {
       id: 'wb-broken',
       name: '未分析任务',
       sourcePath: '/videos/wb-broken.mp4',
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime.utc(2026, 7, 29),
       updatedAt: DateTime.utc(2026, 7, 29),
     );
@@ -391,8 +407,7 @@ void main() {
       await _pressUndoShortcut(tester);
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
-      await tester.pumpAndSettle();
+      await _settleAutosave(tester);
 
       final saved = await repo.findById('wb-1');
       expect(saved!.units, task.units, reason: '⌘Z 应已把编辑撤销回原始状态');
@@ -428,8 +443,7 @@ void main() {
       await _pressUndoShortcut(tester);
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
-      await tester.pumpAndSettle();
+      await _settleAutosave(tester);
 
       final saved = await repo.findById('wb-1');
       expect(saved!.units, isNot(equals(task.units)),
@@ -464,17 +478,16 @@ void main() {
       expect(undoBtn().onPressed, isNull, reason: '撤销到底后按钮应重新禁用');
       expect(redoBtn().onPressed, isNotNull, reason: '撤销后重做按钮应可用');
 
-      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
-      await tester.pumpAndSettle();
+      await _settleAutosave(tester);
 
       final saved = await repo.findById('wb-1');
       expect(saved!.units, task.units, reason: '按钮撤销应与快捷键撤销效果一致');
     });
   });
 
-  group('只读回看模式（评审 Important 1：picking 状态不可再编辑已确认数据）', () {
-    testWidgets('检查器步进/台词/拆分/合并按钮禁用，直接返回不弹保存草稿确认框', (tester) async {
-      final pickingTask = _fixtureTask(status: RenewTaskStatus.picking);
+  group('只读回看模式（已导出的任务不能再改）', () {
+    testWidgets('检查器步进/台词/拆分/合并按钮禁用', (tester) async {
+      final pickingTask = _fixtureTask(status: RenewTaskStatus.exported);
       await repo.save(pickingTask);
       await tester.pumpWidget(
           _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
@@ -496,7 +509,6 @@ void main() {
           tester.widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
       expect(splitBtn.onTap, isNull, reason: '只读模式下拆分按钮应禁用');
 
-      // 无 dirty 可言，返回应直接 pop，不弹「保存草稿」确认框
       await tester.tap(find.byKey(const Key('workbench-back-btn')));
       await tester.pumpAndSettle();
       expect(find.text('列表页占位'), findsOneWidget);
@@ -508,7 +520,7 @@ void main() {
     // 覆盖在 timeline_view_test.dart 的 readOnly 分组（4 条用例），此处
     // 不重复。
     testWidgets('只读模式下浏览（点选列表行）不写回仓库 units', (tester) async {
-      final pickingTask = _fixtureTask(status: RenewTaskStatus.picking);
+      final pickingTask = _fixtureTask(status: RenewTaskStatus.exported);
       await repo.save(pickingTask);
       await tester.pumpWidget(
           _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
@@ -532,7 +544,7 @@ void main() {
   // AssertionError，本帧后续所有绘制指令（镜头/抽帧/波形轨，以及 Scaffold 在
   // body 之后才绘制的顶栏与底部栏）全部丢失——控件在树里、布局正确、命中测试
   // 也正常，但屏幕上什么都看不到。这里断言"这一帧没有绘制异常"。
-  for (final status in [RenewTaskStatus.awaitingCut, RenewTaskStatus.picking]) {
+  for (final status in [RenewTaskStatus.editing, RenewTaskStatus.exported]) {
     testWidgets('存在亚像素宽单元时绘制不抛异常（status=${status.name}）', (tester) async {
       final sliverTask = _fixtureTask(status: status).copyWith(
         units: _unitsWithSliverTail(),
@@ -553,7 +565,7 @@ void main() {
       expect(tester.takeException(), isNull);
       // 顶栏与底部栏在 Scaffold 里晚于 body 绘制，是最先被"吞掉"的两处
       expect(find.byKey(const Key('workbench-back-btn')), findsOneWidget);
-      expect(find.byKey(const Key('workbench-confirm-btn')), findsOneWidget);
+      expect(find.byKey(const Key('workbench-export-btn')), findsOneWidget);
     });
   }
 

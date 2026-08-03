@@ -89,7 +89,7 @@ void main() {
 
     final result = await makePipeline(repo).analyze(task);
 
-    expect(result.status, RenewTaskStatus.awaitingCut);
+    expect(result.status, RenewTaskStatus.editing);
     expect(result.units, isNotNull);
     expect(result.units!.length, 2);
     // 内部边界 4100 吸附到镜头边界 4000（fixture 的 pts_time:4.0）
@@ -325,7 +325,7 @@ void main() {
               vocabulary: _ThrowingVocabularySource())
           .analyze(task);
 
-      expect(result.status, RenewTaskStatus.awaitingCut);
+      expect(result.status, RenewTaskStatus.editing);
       for (final u in result.units!) {
         expect(u.tags, isEmpty);
       }

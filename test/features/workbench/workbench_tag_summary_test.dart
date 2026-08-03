@@ -12,7 +12,7 @@ RenewTask _task({TagGroupRef? unitGroup, TagGroupRef? shotGroup}) => RenewTask(
       id: 't1',
       name: '滴露_自然消毒液',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime.utc(2026, 7, 30),
       updatedAt: DateTime.utc(2026, 7, 30),
       videoInfo: const VideoInfo(

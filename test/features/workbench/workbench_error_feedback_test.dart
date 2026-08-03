@@ -56,7 +56,7 @@ RenewTask _task() => RenewTask(
         fps: 30,
         fileSizeBytes: 1,
       ),
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime(2026, 7, 31),
       updatedAt: DateTime(2026, 7, 31),
       units: [
@@ -79,7 +79,7 @@ RenewTask _task() => RenewTask(
 
 void main() {
   group('落库失败必须让用户看得见（否则表现为「按钮点了没反应」）', () {
-    testWidgets('确认切分失败时给出可见提示，且不假装成功离开页面', (tester) async {
+    testWidgets('自动落库失败时给出可见提示，不让用户以为改动已经留住', (tester) async {
       final repo = _FailingRepo();
       await tester.pumpWidget(ProviderScope(
         overrides: [taskRepositoryProvider.overrideWithValue(repo)],
@@ -93,16 +93,20 @@ void main() {
       ));
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('workbench-confirm-btn')));
+      // 改一次边界，等自动落库的防抖窗口走完
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('unit-row-0')));
       await tester.pump();
+      await tester.tap(find.byKey(const Key('inspector-end-minus')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byType(SnackBar), findsOneWidget,
-          reason: '保存失败却毫无提示，用户只会看到「点了没反应」');
+          reason: '自动保存悄悄失败最危险：用户以为改动已经留住，'
+              '下次进来发现全没了');
       expect(find.textContaining('保存失败'), findsOneWidget,
           reason: '提示要说清是保存失败，而不是抛原始异常文本给用户');
-      expect(find.byType(WorkbenchPage), findsOneWidget,
-          reason: '保存没成功就不能离开页面，否则用户的调整会凭空消失');
     });
   });
 }

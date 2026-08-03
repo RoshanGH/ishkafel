@@ -14,8 +14,7 @@ String taskCardHint(RenewTask task, {bool sourceMissing = false}) {
   final scale = _scale(task);
   return switch (task.status) {
     RenewTaskStatus.analyzing => '正在自动分析，完成后会自动进入下一步',
-    RenewTaskStatus.awaitingCut => '$scale点击确认切分',
-    RenewTaskStatus.picking => '$scale点击继续替换选材',
+    RenewTaskStatus.editing => '$scale点击进入工作台，调整切分并替换素材',
     RenewTaskStatus.exported => '已完成导出，不再修改',
   };
 }

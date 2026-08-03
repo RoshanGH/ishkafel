@@ -195,3 +195,30 @@ class PickingHint extends StatelessWidget {
     );
   }
 }
+
+/// 切换替换方式会丢弃已选候选时的二次确认。
+///
+/// 选材是体力活——一个单元挑十来条候选是常事，点错一次就得重挑一遍，
+/// 因此这一步不能静默执行。
+Future<bool?> showDiscardSelectionDialog(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: AppColors.surfaceRaised,
+      title: const Text('切换替换方式会清空已选候选'),
+      content: const Text('这个台词语义单元当前已经选好的候选素材会被清空，需要重新挑选。'),
+      actions: [
+        TextButton(
+          key: const Key('picking-discard-cancel'),
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('picking-discard-confirm'),
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('清空并切换'),
+        ),
+      ],
+    ),
+  );
+}

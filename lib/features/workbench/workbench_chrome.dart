@@ -141,7 +141,6 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
               ],
             ),
           ),
-          const _StepIndicator(),
         ],
       ),
     );
@@ -149,71 +148,30 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
 }
 
 /// 三步流程指示：①切分确认（当前激活）②替换选材 ③导出
-class _StepIndicator extends StatelessWidget {
-  const _StepIndicator();
 
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: const [
-        _StepChip(label: '① 切分确认', active: true),
-        SizedBox(width: 6),
-        _StepChip(label: '② 替换选材', active: false),
-        SizedBox(width: 6),
-        _StepChip(label: '③ 导出', active: false),
-      ],
-    );
-  }
-}
-
-class _StepChip extends StatelessWidget {
-  final String label;
-  final bool active;
-
-  const _StepChip({required this.label, required this.active});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: active
-            ? AppColors.accentBlue.withValues(alpha: 0.18)
-            : AppColors.surfaceCard,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: AppFontSize.caption,
-          fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-          color: active ? AppColors.accentBlueLight : AppColors.textTertiary,
-        ),
-      ),
-    );
-  }
-}
-
-/// 审片台底部栏：状态摘要 + 「重新 AI 切分」占位（禁用）+ 主按钮。
+/// 工作台底部栏。
 ///
-/// 主按钮在两种状态下语义不同：待确认时是「确认切分，进入替换选材」，已确认
-/// （只读回看）时是「进入替换选材」——此前这里是一个灰着的「已确认」，用户
-/// 回看时找不到下一步在哪。
+/// 这里曾经有一个「确认切分，进入替换选材」——它把切分和选材硬拆成两个阶段，
+/// 而这两件事本来就是交替进行的（挑着素材发现这刀切得不对，就该直接在时间线
+/// 上拖一下）。现在只剩两样东西：**当前事实**与**下一步出口**。
 class WorkbenchBottomBar extends StatelessWidget {
+  /// 「共 6 个台词语义单元 · 57 个视觉镜头 · 时长 96.2s」这类事实陈述
   final String summaryText;
-  final bool confirmed;
-  final VoidCallback? onConfirm;
 
-  /// 已确认状态下进入阶段②；为 null 时按钮禁用（如已导出的任务）
-  final VoidCallback? onEnterPicking;
+  /// 当前替换方案能导出多少条；null 表示还没设置任何替换
+  final String? combinationText;
+
+  /// 超限等原因导致不能导出时的说明；为 null 表示可以导出
+  final String? blockedReason;
+
+  final VoidCallback? onExport;
 
   const WorkbenchBottomBar({
     super.key,
     required this.summaryText,
-    required this.confirmed,
-    required this.onConfirm,
-    this.onEnterPicking,
+    this.combinationText,
+    this.blockedReason,
+    this.onExport,
   });
 
   @override
@@ -228,27 +186,34 @@ class WorkbenchBottomBar extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              summaryText,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: AppFontSize.body),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(summaryText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: AppFontSize.body)),
+                if (combinationText != null || blockedReason != null)
+                  Text(
+                    blockedReason ?? combinationText!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: blockedReason != null
+                            ? AppColors.orange
+                            : AppColors.textTertiary,
+                        fontSize: AppFontSize.caption),
+                  ),
+              ],
             ),
           ),
-          // 该能力尚未接通（重新分析会丢弃当前所有人工调整，需先设计二次确认
-          // 与进度反馈）。在接通前也不能留一个点不动、没有任何解释的灰按钮——
-          // 用户只会反复点它并怀疑软件坏了，违反「主操作有明确反馈」的标准。
-          Tooltip(
-            message: '此功能尚未开放。重新切分会丢弃当前所有人工调整，正在设计确认流程',
-            child: OutlinedButton(
-              key: const Key('workbench-reanalyze-btn'),
-              onPressed: null,
-              child: const Text('重新 AI 切分'),
-            ),
-          ),
-          const SizedBox(width: 12),
           FilledButton(
-            key: const Key('workbench-confirm-btn'),
-            onPressed: confirmed ? onEnterPicking : onConfirm,
-            child: Text(confirmed ? '进入替换选材' : '确认切分，进入替换选材'),
+            key: const Key('workbench-export-btn'),
+            onPressed: blockedReason == null ? onExport : null,
+            child: const Text('进入矩阵导出'),
           ),
         ],
       ),

@@ -134,7 +134,7 @@ class AnalysisPipeline {
 
     final updated = task.copyWith(
       units: taggedUnits,
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       updatedAt: clock(),
       asrSentences: sentences,
     );

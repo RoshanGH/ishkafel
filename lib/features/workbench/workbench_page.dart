@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -8,16 +9,21 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
-import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/miaoa/candidate_probe.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
-import '../picking/picking_page.dart';
+import '../../core/replacement/replacement_plan.dart';
+import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
+import 'candidate_tab.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
@@ -51,11 +57,19 @@ class WorkbenchPage extends ConsumerStatefulWidget {
   final PlaybackController Function()? playbackFactory;
   final TimelineMediaBuilder? mediaBuilder;
 
+  /// 右栏「替换素材」的依赖，缺省走真实 miaoa CLI；测试注入假实现
+  final MiaoaContentService? contentService;
+  final CandidateProbe? candidateProbe;
+  final MiaoaTagService? tagService;
+
   const WorkbenchPage({
     super.key,
     required this.task,
     this.playbackFactory,
     this.mediaBuilder,
+    this.contentService,
+    this.candidateProbe,
+    this.tagService,
   });
 
   @override
@@ -84,24 +98,35 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
   bool _lastDirty = false;
 
-  /// 本次会话是否已通过「确认切分」成功保存；true 时返回不再弹草稿确认框
-  bool _confirmed = false;
+  /// 自动落库的防抖计时器。拖一次边界会触发几十次编辑，逐次写盘既浪费
+  /// 又会在连续拖动时排成一长串写入。
+  Timer? _autosaveTimer;
+
+  /// 最近一次已落库的 units。真的变了才写——undo 回到原样、或只是切换选中，
+  /// 都不该产生一次写盘。
+  List<SemanticUnit>? _savedUnits;
+
+  /// 当前替换方案。右栏改一次就落库一次，与切分改动同一条自动保存通路。
+  List<UnitReplacement>? _replacements;
+
+  /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
+  /// 而离开页面时那次补写恰恰发生在 dispose 里。
+  TaskListController? _tasks;
 
   /// 播放后端是否已降级为 [NoopPlaybackController]（构造真实播放器失败）；
   /// true 时页面顶部常驻一条用户可见的提示条，而不是静默显示占位图标
   bool _playbackDegraded = false;
 
-  bool get _isEditable => widget.task.status == RenewTaskStatus.awaitingCut;
-
-  /// 只读回看模式（picking/exported）下没有 dirty 可言——所有会改数据的
-  /// 手势/输入在 [WorkbenchBody] 内已被禁用，直接允许返回，不弹「保存
-  /// 草稿」确认框（评审 Important 1）。
-  bool get _needsLeaveConfirm =>
-      _isEditable && _editor != null && _editor!.dirty && !_confirmed;
+  /// 只有已导出的任务才只读。
+  ///
+  /// 切分与选材合并成一个工作台后，「确认切分」这道闸门连同它带来的只读态
+  /// 一起取消了——挑着素材发现这刀切得不对，就该直接回来拖一下。
+  bool get _isEditable => widget.task.status != RenewTaskStatus.exported;
 
   @override
   void initState() {
     super.initState();
+    _tasks = ref.read(taskListProvider.notifier);
     final task = widget.task;
     final units = task.units;
     final videoInfo = task.videoInfo;
@@ -117,6 +142,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     editor.addListener(_onEditorChanged);
     _editor = editor;
+    _replacements = task.replacements;
 
     final playback = _resolvePlayback();
     _playback = playback;
@@ -163,12 +189,42 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
+    _flushAutosaveOnDispose();
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
     _editor?.dispose();
     _playhead.dispose();
     unawaited(_playback?.dispose());
     super.dispose();
+  }
+
+  /// 页面销毁时把还压在防抖窗口里的那次改动补写掉。
+  ///
+  /// 两件事都要做：定时器必须取消（否则它会在页面没了之后开火，拿着一个已经
+  /// 失效的 ref 去写盘），而它本来要写的那次改动也不能就这么丢——用户刚拖完
+  /// 边界就关窗口，改动理应已经留住。写盘走 [_tasks]（initState 里就抓住的
+  /// notifier）——dispose 里 `ref` 已经失效，用它取会直接抛 StateError。
+  void _flushAutosaveOnDispose() {
+    final pending = _autosaveTimer?.isActive ?? false;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
+    final editor = _editor;
+    if (!pending || editor == null || !_isEditable) return;
+    final units = editor.units;
+    if (_savedUnits != null &&
+        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+      return;
+    }
+    final notifier = _tasks;
+    if (notifier == null) return;
+    unawaited(() async {
+      try {
+        await notifier.saveSegmentationDraft(widget.task, units);
+      } catch (e) {
+        // 页面已经没了，弹不出提示，只能进日志
+        AppLog.warn('离开时的自动保存失败（taskId=${widget.task.id}）：$e');
+      }
+    }());
   }
 
   /// 时间线辅助素材的就绪状态
@@ -186,9 +242,40 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 不需要页面代劳。改造前这里无条件 `setState`，于是拖拽边界时每个
   /// DragUpdate（macOS 触控板约 90~125Hz）都重建整页。
   void _onEditorChanged() {
+    _scheduleAutosave();
     final dirty = _editor?.dirty ?? false;
     if (dirty == _lastDirty) return;
     setState(() => _lastDirty = dirty);
+  }
+
+  /// 每次改动都自动落库：只要不按 ⌘Z，下次进来就是上次的状态。
+  ///
+  /// 因此没有「保存草稿」也没有「确认切分」——那两个动作存在的前提是
+  /// 「有未保存状态」，而现在没有。
+  void _scheduleAutosave() {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(
+        const Duration(milliseconds: 800), () => unawaited(_flushAutosave()));
+  }
+
+  Future<void> _flushAutosave() async {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
+    final editor = _editor;
+    if (editor == null || !_isEditable) return;
+    final units = editor.units;
+    if (_savedUnits != null &&
+        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+      return;
+    }
+    try {
+      await _tasks!.saveSegmentationDraft(widget.task, units);
+      _savedUnits = units;
+    } catch (e) {
+      // 存不上必须让用户知道，否则他以为改动已经留住了
+      AppLog.warn('自动保存失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('自动保存');
+    }
   }
 
   /// 解析媒体构建器与其工作目录：注入假 builder（测试）时用一次性临时目录，
@@ -231,42 +318,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
-  Future<void> _onConfirm() async {
-    final editor = _editor;
-    if (editor == null) return;
-    final valid = SegmentationEditOps.holdsInvariants(
-        editor.units, editor.durationMs, editor.fps);
-    if (!valid) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('有片段短于一帧，无法确认。请调整过窄的台词语义单元或视觉镜头')));
-      return;
-    }
-    // 落库失败必须让用户看见：此前这个 Future 无人接管，磁盘写满/权限问题时
-    // 既不提示也不返回，用户看到的就是「点了确认没反应」。
-    try {
-      await ref
-          .read(taskListProvider.notifier)
-          .confirmSegmentation(widget.task, editor.units);
-    } catch (e) {
-      AppLog.warn('确认切分落库失败（taskId=${widget.task.id}）：$e');
-      if (!mounted) return;
-      _showSaveFailure('确认切分');
-      return;
-    }
-    _confirmed = true;
-    if (!mounted) return;
-    // 按钮上写的就是「进入替换选材」，那就真的把用户送进阶段②，而不是丢回
-    // 任务列表让他自己再点一次
-    _openPicking(widget.task.copyWith(
-        units: editor.units, status: RenewTaskStatus.picking));
-  }
-
-  /// 进入阶段②「替换选材」。任务对象取当前最新的一份（刚确认过切分时用刚
-  /// 落库的那份），避免阶段②拿到过期的 units。
-  void _openPicking(RenewTask task) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PickingPage(task: task)),
-    );
+  /// 进入矩阵导出。
+  ///
+  /// 这里曾经是「确认切分，进入替换选材」——切分和选材已经合并在本工作台里
+  /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
+  void _openExport() {
+    ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('矩阵导出尚未开放，正在开发中')));
   }
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
@@ -280,31 +338,35 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
   }
 
+  /// 返回。改动是随手落库的，没有「未保存」这回事，因此不再拦截——
+  /// 只把还在防抖窗口里的那次改动补写掉，否则改完立刻返回会丢。
   Future<void> _handleBackRequest() async {
-    if (!_needsLeaveConfirm) {
-      Navigator.of(context).maybePop();
-      return;
-    }
-    final action = await showLeaveConfirmDialog(context);
-    // 弹窗期间 State 可能已被卸载（如用户经其他途径离开）；在触碰
-    // ref/context 之前先检查，避免对已 dispose 的 State 取用 ref
+    await _flushAutosave();
     if (!mounted) return;
-    if (action == null || action == LeaveAction.cancel) return;
-    if (action == LeaveAction.saveDraft) {
-      try {
-        await ref
-            .read(taskListProvider.notifier)
-            .saveSegmentationDraft(widget.task, _editor!.units);
-      } catch (e) {
-        // 草稿没存上还照常离开，用户的调整就凭空消失了：提示并留在页面
-        AppLog.warn('保存草稿失败（taskId=${widget.task.id}）：$e');
-        if (!mounted) return;
-        _showSaveFailure('草稿');
-        return;
-      }
-      if (!mounted) return;
+    Navigator.of(context).maybePop();
+  }
+
+  /// 右栏改了替换方案：立刻落库，并让底部栏的组合数与 tab 角标跟着更新
+  Future<void> _onReplacementsChanged(List<UnitReplacement> next) async {
+    if (!_isEditable) return;
+    setState(() => _replacements = next);
+    try {
+      await _tasks!.savePickingPlan(widget.task, next);
+    } catch (e) {
+      AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('替换方案');
     }
-    Navigator.of(context).pop();
+  }
+
+  ReplacementPlan get _plan => ReplacementPlan(_replacements ?? const []);
+
+  /// 「替换素材」tab 上的角标：已经设了替换的单元数。
+  /// 一个都没设时不显示——写个 0 会被读成「有 0 条可用素材」。
+  String? _pickedCountText() {
+    final n = _plan.units
+        .where((u) => u.mode != ReplacementMode.keepOriginal)
+        .length;
+    return n == 0 ? null : '$n';
   }
 
   String _summaryText(SegmentationEditorController editor) =>
@@ -335,10 +397,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
 
     return PopScope(
-      canPop: !_needsLeaveConfirm,
+      canPop: true,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        unawaited(_handleBackRequest());
+        // 已经 pop 了也要把防抖窗口里的改动补写掉
+        unawaited(_flushAutosave());
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
@@ -355,6 +417,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,
                 readOnly: !_isEditable,
+                candidateBadge: _pickedCountText(),
+                candidatePanel: CandidateTab(
+                  editor: editor,
+                  shotTagGroups: widget.task.shotTagGroups,
+                  initialReplacements: _replacements,
+                  onReplacementsChanged: _onReplacementsChanged,
+                  readOnly: !_isEditable,
+                  contentService: widget.contentService,
+                  candidateProbe: widget.candidateProbe,
+                  tagService: widget.tagService,
+                ),
               ),
             ),
           ],
@@ -362,15 +435,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         // 摘要含单元数/镜头数/dirty 标记，只随编辑器变化重建，不随播放位置重建
         bottomNavigationBar: AnimatedBuilder(
           animation: editor,
-          builder: (context, _) => WorkbenchBottomBar(
-            summaryText: _summaryText(editor),
-            confirmed: !_isEditable,
-            onConfirm: _onConfirm,
-            // 已导出的任务不再回到选材（路由层同样不放行）
-            onEnterPicking: widget.task.status == RenewTaskStatus.picking
-                ? () => _openPicking(widget.task)
-                : null,
-          ),
+          builder: (context, _) {
+            final blocked = exportBlockedReason(_plan);
+            return WorkbenchBottomBar(
+              summaryText: _summaryText(editor),
+              combinationText: _plan.isEmpty ? null : combinationSummaryText(_plan),
+              blockedReason: blocked,
+              onExport: blocked == null ? _openExport : null,
+            );
+          },
         ),
       ),
     );

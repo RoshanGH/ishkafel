@@ -32,19 +32,15 @@ RenewTask _task({
 
 void main() {
   group('卡片要告诉用户「接下来该干什么」', () {
-    test('待切分确认：点进去确认切分', () {
+    test('编辑中：点进工作台，切分与选材都在里面', () {
       final hint = taskCardHint(
-          _task(status: RenewTaskStatus.awaitingCut, unitCount: 12));
+          _task(status: RenewTaskStatus.editing, unitCount: 12));
 
-      expect(hint, contains('确认切分'));
+      expect(hint, contains('工作台'));
       expect(hint, contains('12'), reason: '顺带交代规模，用户好判断要花多久');
-    });
-
-    test('选材中：去挑候选素材', () {
-      final hint =
-          taskCardHint(_task(status: RenewTaskStatus.picking, unitCount: 8));
-
-      expect(hint, contains('选材'));
+      expect(hint, isNot(contains('确认切分')),
+          reason: '「确认切分」这道闸门已经不存在，还写在卡片上就是在指路到一个'
+              '找不到的按钮');
     });
 
     test('已导出：说清它已经走完流程', () {
@@ -73,7 +69,7 @@ void main() {
 
     test('源文件缺失：优先于一切，先让人把文件放回去', () {
       final hint = taskCardHint(
-          _task(status: RenewTaskStatus.awaitingCut, unitCount: 12),
+          _task(status: RenewTaskStatus.editing, unitCount: 12),
           sourceMissing: true);
 
       expect(hint, contains('文件'));
@@ -85,7 +81,7 @@ void main() {
   group('规模信息缺失时不编造', () {
     test('还没有切分结果时不写「共 0 个单元」', () {
       final hint =
-          taskCardHint(_task(status: RenewTaskStatus.awaitingCut));
+          taskCardHint(_task(status: RenewTaskStatus.editing));
 
       expect(hint, isNot(contains('0 个')),
           reason: '「共 0 个台词语义单元」会被读成分析出来是空的');

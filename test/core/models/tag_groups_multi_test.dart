@@ -14,7 +14,7 @@ RenewTask _task({
       id: 't1',
       name: '片',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime.utc(2026, 8, 1),
       updatedAt: DateTime.utc(2026, 8, 1),
       unitTagGroups: unit,

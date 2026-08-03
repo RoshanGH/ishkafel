@@ -52,7 +52,7 @@ RenewTask _task() => RenewTask(
           duration: Duration(milliseconds: 4000),
           fps: 30,
           fileSizeBytes: 1),
-      status: RenewTaskStatus.awaitingCut,
+      status: RenewTaskStatus.editing,
       createdAt: DateTime(2026, 7, 31),
       updatedAt: DateTime(2026, 7, 31),
       units: [

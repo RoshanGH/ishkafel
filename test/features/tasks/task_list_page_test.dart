@@ -113,12 +113,12 @@ void main() {
 
   testWidgets('有任务时按卡片渲染名称与状态徽标', (tester) async {
     final repo = InMemoryTaskRepository();
-    await repo.save(makeTask('a', '滴露_植源喷雾', RenewTaskStatus.picking));
+    await repo.save(makeTask('a', '滴露_植源喷雾', RenewTaskStatus.editing));
     await repo.save(makeTask('b', '卫仕洗衣液', RenewTaskStatus.exported));
     await tester.pumpWidget(wrap(repo));
     await tester.pumpAndSettle();
     expect(find.text('滴露_植源喷雾'), findsOneWidget);
-    expect(find.text('选材中'), findsOneWidget);
+    expect(find.text('编辑中'), findsOneWidget);
     expect(find.text('卫仕洗衣液'), findsOneWidget);
     expect(find.text('已导出'), findsOneWidget);
   });
@@ -151,7 +151,7 @@ void main() {
   group('重新加载不闪白（保存后整页 spinner）', () {
     testWidgets('重新加载期间旧列表仍然可见，且不出现整页 spinner', (tester) async {
       final repo = _BlockingRepository();
-      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
       expect(find.text('已有任务'), findsOneWidget);
@@ -246,7 +246,7 @@ void main() {
 
     testWidgets('awaitingCut 且有 units 时点击进入审片台', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeCuttableTask(RenewTaskStatus.awaitingCut));
+      await repo.save(makeCuttableTask(RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -258,7 +258,7 @@ void main() {
 
     testWidgets('picking 状态点击也可进入审片台（允许回看）', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeCuttableTask(RenewTaskStatus.picking));
+      await repo.save(makeCuttableTask(RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -285,7 +285,7 @@ void main() {
     testWidgets('历史遗留的非法帧率任务点击不进入审片台（否则按帧计算会红屏）',
         (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeCuttableTask(RenewTaskStatus.awaitingCut).copyWith(
+      await repo.save(makeCuttableTask(RenewTaskStatus.editing).copyWith(
         videoInfo: const VideoInfo(
           width: 1080,
           height: 1920,
@@ -359,7 +359,7 @@ void main() {
 
       // 点「重试」应真的重新装载，恢复正常后列表出得来
       repo.failFindAll = false;
-      await repo.save(makeTask('ok', '恢复的任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('ok', '恢复的任务', RenewTaskStatus.editing));
       await tester.tap(find.widgetWithText(FilledButton, '重试'));
       await tester.pumpAndSettle();
 
@@ -368,7 +368,7 @@ void main() {
 
     testWidgets('已有列表时刷新失败：列表继续显示，顶部横幅给可重试的提示', (tester) async {
       final repo = _FailingRepository();
-      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('k1', '已有任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -387,7 +387,7 @@ void main() {
   group('损坏任务文件的可见提示', () {
     testWidgets('跳过无法读取的任务文件时列表页顶部给出提示', (tester) async {
       final repo = _SkippingRepository(skipped: 2);
-      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -397,7 +397,7 @@ void main() {
 
     testWidgets('没有跳过时不显示提示', (tester) async {
       final repo = _SkippingRepository(skipped: 0);
-      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('ok', '正常任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -410,7 +410,7 @@ void main() {
           id: 's1',
           name: '素材已被删除的任务',
           sourcePath: '/v/已删除.mp4',
-          status: RenewTaskStatus.awaitingCut,
+          status: RenewTaskStatus.editing,
           createdAt: DateTime.utc(2026, 7, 29),
           updatedAt: DateTime.utc(2026, 7, 29),
           units: [
@@ -551,7 +551,7 @@ void main() {
 
     testWidgets('「更多」按钮弹出三项菜单', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeTask('m1', '待办任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('m1', '待办任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -564,7 +564,7 @@ void main() {
 
     testWidgets('删除需要二次确认，确认后任务消失', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeTask('m2', '要删的任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('m2', '要删的任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -585,7 +585,7 @@ void main() {
 
     testWidgets('删除确认框点「取消」则任务保留', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeTask('m3', '保留任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('m3', '保留任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -601,7 +601,7 @@ void main() {
 
     testWidgets('重命名对话框保存后卡片显示新名称', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeTask('m4', '旧名字', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('m4', '旧名字', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
@@ -624,7 +624,7 @@ void main() {
 
     testWidgets('点「重新分析」不崩溃（分析管线未配置场景）', (tester) async {
       final repo = InMemoryTaskRepository();
-      await repo.save(makeTask('m5', '重跑任务', RenewTaskStatus.awaitingCut));
+      await repo.save(makeTask('m5', '重跑任务', RenewTaskStatus.editing));
       await tester.pumpWidget(wrap(repo));
       await tester.pumpAndSettle();
 
