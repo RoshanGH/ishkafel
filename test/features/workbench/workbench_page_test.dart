@@ -265,6 +265,27 @@ void main() {
     expect(playback.calls, contains('pause()'));
   });
 
+  testWidgets('⑤回车同样切换播放/暂停（双击播了一段之后，手会去按回车）',
+      (tester) async {
+    await repo.save(task);
+    await tester.pumpWidget(
+        _wrapWithNavigator(task: task, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
+    await tester.pumpAndSettle();
+
+    // 双击 U1 播这一段
+    await tester.tap(find.byKey(const Key('unit-row-0')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pump();
+    expect(playback.calls, contains('play()'));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(playback.calls, contains('pause()'),
+        reason: '播着的时候按回车停不下来，用户只会以为播放器卡死了');
+  });
+
   testWidgets('⑤ −1帧/+1帧 按钮调用 stepFrames', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));

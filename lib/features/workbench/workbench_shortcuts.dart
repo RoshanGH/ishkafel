@@ -186,6 +186,11 @@ const int _coarseStepFrames = 10;
 const Map<ShortcutActivator, Intent> workbenchPlaybackShortcuts =
     <ShortcutActivator, Intent>{
   SingleActivator(LogicalKeyboardKey.space): PageTogglePlayIntent(),
+  // 回车同样切换播放/暂停。空格是视频工具的通行键位，但双击一段刚播起来时
+  // 手往往落在回车上——按下去没反应，用户只会以为播放器卡死了。这个作用域
+  // 里回车没有别的含义（对话框是独立路由；焦点在台词框时整套快捷键都放行）。
+  SingleActivator(LogicalKeyboardKey.enter): PageTogglePlayIntent(),
+  SingleActivator(LogicalKeyboardKey.numpadEnter): PageTogglePlayIntent(),
   SingleActivator(LogicalKeyboardKey.arrowLeft): PageStepFrameIntent(-1),
   SingleActivator(LogicalKeyboardKey.arrowRight): PageStepFrameIntent(1),
   // ⇧+方向键粗调：只有 ±1 帧时跨过一秒要按 30 次
