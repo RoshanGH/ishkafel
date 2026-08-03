@@ -10,6 +10,10 @@ class SemanticUnit {
   final String transcript;
   final List<String> tags;
 
+  /// 标签是否已经过期：这个单元被编辑过、标签还是编辑前打的。
+  /// 不直接抹掉标签——重打是异步的，中间抹空会让用户以为标签丢了。
+  final bool tagsStale;
+
   /// 这次打标的过程量（输入台词、词表、模型原样回复）
   final TagTrace? trace;
   final List<Shot> shots;
@@ -20,6 +24,7 @@ class SemanticUnit {
     required this.endMs,
     required this.transcript,
     this.tags = const [],
+    this.tagsStale = false,
     this.trace,
     this.shots = const [],
   });
@@ -36,6 +41,7 @@ class SemanticUnit {
     int? endMs,
     String? transcript,
     List<String>? tags,
+    bool? tagsStale,
     TagTrace? trace,
     List<Shot>? shots,
   }) =>
@@ -45,6 +51,7 @@ class SemanticUnit {
         endMs: endMs ?? this.endMs,
         transcript: transcript ?? this.transcript,
         tags: tags ?? this.tags,
+        tagsStale: tagsStale ?? this.tagsStale,
         trace: trace ?? this.trace,
         shots: shots ?? this.shots,
       );
@@ -55,6 +62,7 @@ class SemanticUnit {
         'endMs': endMs,
         'transcript': transcript,
         'tags': tags,
+        'tagsStale': tagsStale,
         'shots': shots.map((s) => s.toJson()).toList(),
         'trace': trace?.toJson(),
       };
@@ -67,6 +75,7 @@ class SemanticUnit {
         // 缺失/为 null 时兜底为空列表（与 Shot.tags 同款兼容）：
         // 硬转换会让整条任务在 findAll 里被跳过，用户看到的是「任务不见了」
         tags: (json['tags'] as List<dynamic>?)?.cast<String>() ?? const [],
+        tagsStale: json['tagsStale'] == true,
         shots: (json['shots'] as List<dynamic>?)
                 ?.map((e) => Shot.fromJson(e as Map<String, dynamic>))
                 .toList() ??
@@ -84,9 +93,10 @@ class SemanticUnit {
       other.endMs == endMs &&
       other.transcript == transcript &&
       _listEq.equals(other.tags, tags) &&
+      other.tagsStale == tagsStale &&
       _listEq.equals(other.shots, shots);
 
   @override
   int get hashCode => Object.hash(index, startMs, endMs, transcript,
-      Object.hashAll(tags), Object.hashAll(shots));
+      Object.hashAll(tags), tagsStale, Object.hashAll(shots));
 }

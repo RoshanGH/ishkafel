@@ -309,6 +309,16 @@ class SegmentationEditorController extends ChangeNotifier {
     return _apply(SegmentationEditOps.updateTranscript(_units, u, text));
   }
 
+  /// 整体换掉 units，用于「不改切分、只改附属信息」的场景（打标结果回填、
+  /// 标记标签过期）。走 [_apply] 因此照常入 undo 栈——⌘Z 能把它撤回去。
+  ///
+  /// 长度必须一致：这个入口不负责改结构，长度变了说明调用方拿错了数据，
+  /// 让它悄悄生效会把 selection 和替换方案一起搞错位。
+  bool replaceUnits(List<SemanticUnit> next) {
+    if (next.length != _units.length) return false;
+    return _apply(next);
+  }
+
   void undo() {
     if (_undoStack.isEmpty) return;
     final previous = _undoStack.removeLast();

@@ -21,9 +21,11 @@ import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/editing/edit_consequence.dart';
 import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
 import 'candidate_tab.dart';
+import 'edit_consequence_dialog.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
@@ -109,9 +111,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 当前替换方案。右栏改一次就落库一次，与切分改动同一条自动保存通路。
   List<UnitReplacement>? _replacements;
 
+  /// 「改完之后要不要连坐」的询问计时器与结算基线。基线是上一次结算时的
+  /// units：只问这之后的新改动，否则用户每改一次都会被翻旧账。
+  Timer? _consequenceTimer;
+  List<SemanticUnit>? _consequenceBaseline;
+  bool _askingConsequence = false;
+
   /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
   TaskListController? _tasks;
+
+  /// 这条任务的最新状态。
+  ///
+  /// **不能拿 `widget.task` 去存**：切分和替换方案走两条落库通路，两边都
+  /// 从同一个进页面时的旧快照 copyWith，后写的那次就会把前一次的改动整个
+  /// 盖回去——清掉素材再标记重打，素材又活过来了。
+  late RenewTask _task = widget.task;
 
   /// 播放后端是否已降级为 [NoopPlaybackController]（构造真实播放器失败）；
   /// true 时页面顶部常驻一条用户可见的提示条，而不是静默显示占位图标
@@ -143,6 +158,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     editor.addListener(_onEditorChanged);
     _editor = editor;
     _replacements = task.replacements;
+    _consequenceBaseline = units;
 
     final playback = _resolvePlayback();
     _playback = playback;
@@ -189,6 +205,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
+    _consequenceTimer?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
@@ -219,7 +236,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (notifier == null) return;
     unawaited(() async {
       try {
-        await notifier.saveSegmentationDraft(widget.task, units);
+        await notifier.saveSegmentationDraft(_task, units);
       } catch (e) {
         // 页面已经没了，弹不出提示，只能进日志
         AppLog.warn('离开时的自动保存失败（taskId=${widget.task.id}）：$e');
@@ -243,9 +260,60 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// DragUpdate（macOS 触控板约 90~125Hz）都重建整页。
   void _onEditorChanged() {
     _scheduleAutosave();
+    _scheduleConsequenceCheck();
     final dirty = _editor?.dirty ?? false;
     if (dirty == _lastDirty) return;
     setState(() => _lastDirty = dirty);
+  }
+
+  /// 编辑停下来之后再问「要不要清素材/重打标」。
+  ///
+  /// 比自动保存等得久得多：用户往往连着拖好几刀才算改完一处，改一下弹一次
+  /// 会把人逼疯。3 秒是「手停下来了」的信号。
+  void _scheduleConsequenceCheck() {
+    _consequenceTimer?.cancel();
+    _consequenceTimer = Timer(const Duration(seconds: 3), _askConsequence);
+  }
+
+  Future<void> _askConsequence() async {
+    _consequenceTimer = null;
+    final editor = _editor;
+    if (editor == null || !_isEditable || _askingConsequence) return;
+
+    final baseline = _consequenceBaseline ?? widget.task.units ?? const [];
+    final consequence = EditConsequence.evaluate(
+      before: baseline,
+      after: editor.units,
+      replacements: _replacements ?? const [],
+    );
+    // 无论问不问，这一轮都已经结算过了：下次只比这次之后的新改动
+    _consequenceBaseline = editor.units;
+    if (consequence == null || !mounted) return;
+
+    _askingConsequence = true;
+    try {
+      final choice = await showEditConsequenceDialog(context, consequence);
+      if (choice == null || choice.nothingToDo || !mounted) return;
+      if (choice.clearCandidates) {
+        await _onReplacementsChanged(
+            consequence.clearCandidates(_replacements ?? const []));
+      }
+      if (choice.retag) await _retag(consequence);
+    } finally {
+      _askingConsequence = false;
+    }
+  }
+
+  /// 「立刻去打标」：先把受影响单元标记为待重打并落库（这样即便打标中途
+  /// 失败或用户关掉窗口，界面上仍看得出这些标签已经过期），再送去打标。
+  Future<void> _retag(EditConsequence consequence) async {
+    final editor = _editor;
+    if (editor == null) return;
+    editor.replaceUnits(consequence.markForRetag(editor.units));
+    await _flushAutosave();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('已标记为待重打；重新打标接入中，暂时只做标记')));
   }
 
   /// 每次改动都自动落库：只要不按 ⌘Z，下次进来就是上次的状态。
@@ -269,7 +337,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       return;
     }
     try {
-      await _tasks!.saveSegmentationDraft(widget.task, units);
+      await _tasks!.saveSegmentationDraft(_task, units);
+      _task = _task.copyWith(units: units);
       _savedUnits = units;
     } catch (e) {
       // 存不上必须让用户知道，否则他以为改动已经留住了
@@ -351,7 +420,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (!_isEditable) return;
     setState(() => _replacements = next);
     try {
-      await _tasks!.savePickingPlan(widget.task, next);
+      await _tasks!.savePickingPlan(_task, next);
+      _task = _task.copyWith(replacements: next);
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('替换方案');
