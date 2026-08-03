@@ -35,16 +35,28 @@ class ArkChatClient {
     required List<int> jpegBytes,
     int maxTokens = 1024,
   }) =>
+      chatVisionFrames(prompt: prompt, frames: [jpegBytes], maxTokens: maxTokens);
+
+  /// 多帧视觉理解：把一个镜头按时间顺序采样出的若干帧一起送进去。
+  ///
+  /// 为什么要多帧：单帧只能看到一个静止姿态，判不出镜头里在**发生什么**。
+  /// 实测同一个镜头，3 帧给出「主播转动身体依次指向不同方向的货位」，
+  /// 单帧只有「主播在仓库中直播带货」——描述动作的标签组靠单帧根本打不准。
+  /// 代价是 prompt token 约 2.9 倍，因此帧要缩过分辨率、数量要设上限。
+  Future<String> chatVisionFrames({
+    required String prompt,
+    required List<List<int>> frames,
+    int maxTokens = 1024,
+  }) =>
       _chat([
         {
           'role': 'user',
           'content': [
-            {
-              'type': 'image_url',
-              'image_url': {
-                'url': 'data:image/jpeg;base64,${base64Encode(jpegBytes)}'
+            for (final f in frames)
+              {
+                'type': 'image_url',
+                'image_url': {'url': 'data:image/jpeg;base64,${base64Encode(f)}'},
               },
-            },
             {'type': 'text', 'text': prompt},
           ],
         },

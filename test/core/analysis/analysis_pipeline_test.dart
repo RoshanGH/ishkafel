@@ -443,11 +443,12 @@ class _FakeShotTagger extends ShotTagger {
                 post: (_, _, _) async =>
                     const JsonPostResult(statusCode: 200, body: '{}')));
   @override
-  Future<List<String>> tag(
-      {required List<int> frameJpeg, required List<String> vocabulary}) async {
+  Future<ShotUnderstanding> understand(
+      {required List<List<int>> frames,
+      required List<String> vocabulary}) async {
     onTag();
     if (work != null) await work!();
-    return ['开箱'];
+    return const ShotUnderstanding(tags: ['开箱'], description: '开箱画面');
   }
 
 }

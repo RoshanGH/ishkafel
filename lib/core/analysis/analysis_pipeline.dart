@@ -14,6 +14,7 @@ import 'audio_extractor.dart';
 import 'providers.dart';
 import 'scene_detector.dart';
 import 'segmentation_builder.dart';
+import 'shot_frame_sampler.dart';
 import 'shot_boundary_finder.dart';
 import 'silence_detector.dart';
 import 'tag_vocabulary.dart';
@@ -25,6 +26,12 @@ import 'tag_vocabulary.dart';
 /// 连第二次 ffmpeg 都省掉。
 String analysisPcmPath(Directory workDir, String taskId) =>
     p.join(workDir.path, '$taskId.pcm');
+
+/// 送去做视觉理解的帧高度。
+///
+/// 多帧时分辨率是 token 消耗的主因，而判断「画面是什么」不需要原始 1080p；
+/// 竖屏 9:16 下 512 高约合 288 宽，主体与场景仍然清晰可辨。
+const int understandingFrameHeight = 512;
 
 /// 分析管线编排：PCM 提取 → 静音谷 → 场景检测 → ASR → 语义切分 → 吸附构树 → 打标 → 落库
 class AnalysisPipeline {
@@ -278,22 +285,33 @@ class AnalysisPipeline {
     return List.unmodifiable(merged);
   }
 
+  /// 视觉理解一个镜头：按秒采样多帧 → 一次调用同时拿标签与画面描述。
+  ///
+  /// 缩到 512 宽再送：多帧时分辨率是 token 消耗的主因，而判断「画面是什么」
+  /// 不需要原始 1080p。
   Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
       List<String> shotVocabulary) async {
     try {
-      final midSeconds = (shot.startMs + shot.endMs) / 2 / 1000.0;
-      final outPath = p.join(workDir.path, '${task.id}_shot$shotIndex.jpg');
-      await thumbnails!.extractCover(
-        videoPath: task.sourcePath,
-        outPath: outPath,
-        atSeconds: midSeconds,
-      );
-      final frameJpeg = await File(outPath).readAsBytes();
-      final tags = await shotTagger!
-          .tag(frameJpeg: frameJpeg, vocabulary: shotVocabulary);
-      return shot.copyWith(tags: tags);
+      final at = ShotFrameSampler.sampleAt(
+          startMs: shot.startMs, endMs: shot.endMs);
+      final frames = <List<int>>[];
+      for (var i = 0; i < at.length; i++) {
+        final outPath =
+            p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
+        await thumbnails!.extractCover(
+          videoPath: task.sourcePath,
+          outPath: outPath,
+          atSeconds: at[i] / 1000.0,
+          height: understandingFrameHeight,
+        );
+        frames.add(await File(outPath).readAsBytes());
+      }
+      final r = await shotTagger!
+          .understand(frames: frames, vocabulary: shotVocabulary);
+      return shot.copyWith(
+          tags: r.tags, description: r.description, tagsStale: false);
     } catch (e) {
-      AppLog.warn('镜头（${shot.startMs}-${shot.endMs}）打标失败：$e');
+      AppLog.warn('镜头（${shot.startMs}-${shot.endMs}）视觉理解失败：$e');
       return shot;
     }
   }
