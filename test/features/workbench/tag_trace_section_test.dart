@@ -40,6 +40,8 @@ TagTrace _trace() => TagTrace(
     );
 
 void main() {
+  _byDimension();
+
   group('结果', () {
     testWidgets('显示标签', (tester) async {
       await _pump(tester, tags: ['近景', '产品特写']);
@@ -120,5 +122,70 @@ void main() {
       expect(find.textContaining('帧'), findsNothing,
           reason: '台词层没有采样帧，显示「0 帧」会让人以为抽帧失败了');
     });
+  });
+}
+
+/// 分维度展示：一个镜头同时有四个维度的标签时，堆成一排就看不出
+/// 「场景判成了什么、动作判成了什么」
+void _byDimension() {
+  testWidgets('标签按维度分行显示', (tester) async {
+    await _pump(
+      tester,
+      tags: ['厨房情景', '打开电器'],
+      trace: const TagTrace(
+        vocabularyGroups: ['植源场景', '植源动作'],
+        vocabularySize: 40,
+        tagsByDimension: {
+          '植源场景': ['厨房情景'],
+          '植源动作': ['打开电器'],
+        },
+      ),
+    );
+
+    expect(find.text('植源场景'), findsOneWidget);
+    expect(find.text('植源动作'), findsOneWidget);
+    expect(find.text('厨房情景'), findsOneWidget);
+  });
+
+  testWidgets('某个维度一个都没打上时显式写出来', (tester) async {
+    await _pump(
+      tester,
+      tags: ['厨房情景'],
+      trace: const TagTrace(
+        tagsByDimension: {
+          '植源场景': ['厨房情景'],
+          '植源动作': [],
+        },
+      ),
+    );
+
+    expect(find.text('—'), findsOneWidget,
+        reason: '不显示的话用户会以为这个维度压根没送进去');
+  });
+
+  testWidgets('展开过程量能看到每个维度的约束', (tester) async {
+    await _pump(
+      tester,
+      tags: ['厨房情景'],
+      trace: const TagTrace(
+        vocabularyGroups: ['植源场景'],
+        vocabularySize: 20,
+        dimensionPrompts: {'植源场景': '只判断主体所处的空间'},
+        rawReply: '{}',
+      ),
+    );
+
+    await tester.tap(find.byKey(const Key('trace-expand')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('只判断主体所处的空间'), findsOneWidget,
+        reason: '标签不对时，「喂进去的约束是什么」往往才是问题所在');
+  });
+
+  testWidgets('旧数据没有维度信息时退回一排 chips，不崩', (tester) async {
+    await _pump(tester, tags: ['近景', '中景']);
+
+    expect(find.text('近景'), findsOneWidget);
+    expect(find.text('中景'), findsOneWidget);
   });
 }

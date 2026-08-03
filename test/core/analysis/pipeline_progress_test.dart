@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ai/ark_chat_client.dart';
+import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
 import 'package:ishkafel/core/analysis/analysis_progress.dart';
@@ -50,18 +51,19 @@ ArkChatClient _stubChat() => ArkChatClient(
 class _UnitTagger extends UnitTagger {
   _UnitTagger() : super(chat: _stubChat());
   @override
-  Future<List<String>> tag(
-          {required String transcript, required List<String> vocabulary}) async =>
-      const ['甲'];
+  Future<ShotUnderstanding> understand(
+          {required String transcript,
+          required List<TagDimension> dimensions}) async =>
+      const ShotUnderstanding(tags: ['甲']);
 }
 
 class _ShotTagger extends ShotTagger {
   _ShotTagger() : super(chat: _stubChat());
   @override
-  Future<List<String>> tag(
-          {required List<int> frameJpeg,
-          required List<String> vocabulary}) async =>
-      const ['乙'];
+  Future<ShotUnderstanding> understand(
+          {required List<List<int>> frames,
+          required List<TagDimension> dimensions}) async =>
+      const ShotUnderstanding(tags: ['乙']);
 }
 
 const _showinfo =

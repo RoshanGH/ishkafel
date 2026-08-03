@@ -67,12 +67,52 @@ class _TagTraceSectionState extends State<TagTraceSection> {
         ],
       ]);
 
-  /// 没打标就直说。留一片空白，用户分不清是「没打」还是「打了但一个没中」
-  Widget _tags() => widget.tags.isEmpty
-      ? const Text('未打标',
+  /// 标签**按维度分行**显示。
+  ///
+  /// 一个镜头可能同时有场景/镜头类别/动作/外壳四个维度的标签，堆成一排
+  /// chips 就看不出「场景判成了什么、动作判成了什么」——而这恰恰是用户
+  /// 判断标签对不对时要看的。拿不到维度信息（旧数据）时退回一排。
+  Widget _tags() {
+    if (widget.tags.isEmpty) {
+      return const Text('未打标',
           style: TextStyle(
-              color: AppColors.textTertiary, fontSize: AppFontSize.caption))
-      : inspectorTagChips(widget.tags);
+              color: AppColors.textTertiary, fontSize: AppFontSize.caption));
+    }
+    final byDimension = widget.trace?.tagsByDimension ?? const {};
+    if (byDimension.isEmpty) return inspectorTagChips(widget.tags);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final e in byDimension.entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 92,
+                  child: Text(e.key,
+                      style: const TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: AppFontSize.caption)),
+                ),
+                Expanded(
+                  child: e.value.isEmpty
+                      // 这个维度一个都没打上，要说出来——不显示的话用户
+                      // 会以为这个维度压根没送进去
+                      ? const Text('—',
+                          style: TextStyle(
+                              color: AppColors.textTertiary,
+                              fontSize: AppFontSize.caption))
+                      : inspectorTagChips(e.value),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 
   Widget _expandToggle() => InkWell(
         key: const Key('trace-expand'),
@@ -130,6 +170,9 @@ class _TraceDetail extends StatelessWidget {
           if (trace.vocabularyGroups.isNotEmpty)
             _line('受控词表',
                 '${trace.vocabularyGroups.join('、')} · ${trace.vocabularySize} 个词'),
+          // 标签不对时，「喂进去的约束是什么」往往才是问题所在
+          for (final e in trace.dimensionPrompts.entries)
+            _line('「${e.key}」的约束', e.value),
           if (trace.at case final at?) _line('打标时间', _stamp(at)),
           if (trace.rawReply case final r? when r.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),

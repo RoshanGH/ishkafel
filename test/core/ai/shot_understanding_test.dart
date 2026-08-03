@@ -34,7 +34,7 @@ const _vocab = [
 /// 分维度的回复：把老用例里的 {"tags":[...]} 换成按维度分格的形状
 String _reply(List<String> tags, {String? description}) => jsonEncode({
       '画面类型': tags,
-      if (description != null) 'description': description,
+      'description': ?description,
     });
 
 List<List<int>> _frames(int n) =>
