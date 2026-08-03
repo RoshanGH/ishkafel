@@ -156,6 +156,8 @@ Future<void> _settleAutosave(WidgetTester tester) async {
 }
 
 void main() {
+  _spaceStopsSegmentPlayback();
+
   late InMemoryTaskRepository repo;
   late FakePlaybackController playback;
   late RenewTask task;
@@ -607,5 +609,41 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     expect(find.textContaining('播放头不在所选范围内'), findsOneWidget);
+  });
+}
+
+/// 真机缺陷复现：双击时间线上的一段播起来之后，空格按不停。
+///
+/// 与「⑤空格键切换播放/暂停」的区别是这条走的是**区间播放**路径
+/// （playRange + mpv 的 end），那条走的是普通 play()。
+void _spaceStopsSegmentPlayback() {
+  testWidgets('双击一段播起来后，空格要能停', (tester) async {
+    final repo = InMemoryTaskRepository();
+    final playback = FakePlaybackController();
+    final task = _fixtureTask();
+    await repo.save(task);
+    await tester.pumpWidget(
+        _wrapWithNavigator(task: task, repo: repo, playback: playback));
+    await tester.tap(find.byKey(const Key('open-workbench')));
+    await tester.pumpAndSettle();
+
+    // 双击时间线上的 U1 → 只播这一段
+    final timeline = find.byType(TimelineView);
+    final at = tester.getCenter(timeline) +
+        Offset(-tester.getSize(timeline).width / 2 + 40, -20);
+    await tester.tapAt(at);
+    await tester.pump(const Duration(milliseconds: 50));
+    await tester.tapAt(at);
+    await tester.pumpAndSettle();
+
+    expect(playback.calls.where((c) => c.startsWith('playRange')), isNotEmpty,
+        reason: '前提：双击确实走了区间播放这条路径');
+    expect(playback.isPlaying, isTrue, reason: '前提：这一段确实播起来了');
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+
+    expect(playback.isPlaying, isFalse,
+        reason: '播着的时候按空格停不下来，用户只会以为播放器失控了');
   });
 }
