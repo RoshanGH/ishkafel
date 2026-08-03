@@ -24,7 +24,7 @@ void main() {
     await File('${tempDir.path}/ark_api_key').writeAsString('file-key\n');
     final creds = CredentialsLoader.load(
       env: {'ARK_API_KEY': 'env-key'},
-      devSecretsDir: tempDir,
+      secretsDirs: [tempDir],
     );
     expect(creds.arkApiKey, 'env-key');
   });
@@ -32,7 +32,7 @@ void main() {
   test('.secrets 文件兜底且去除首尾空白', () async {
     await File('${tempDir.path}/ark_api_key').writeAsString('  file-key \n');
     await File('${tempDir.path}/speech_app_id').writeAsString('123');
-    final creds = CredentialsLoader.load(env: const {}, devSecretsDir: tempDir);
+    final creds = CredentialsLoader.load(env: const {}, secretsDirs: [tempDir]);
     expect(creds.arkApiKey, 'file-key');
     expect(creds.speechAppId, '123');
     expect(creds.speechAccessToken, '');
@@ -40,7 +40,7 @@ void main() {
   });
 
   test('三处皆无时字段为空串', () {
-    final creds = CredentialsLoader.load(env: const {}, devSecretsDir: null);
+    final creds = CredentialsLoader.load(env: const {}, secretsDirs: const []);
     expect(creds.arkApiKey, anyOf('', isNotEmpty)); // dart-define 注入时非空
   });
 }

@@ -48,7 +48,7 @@ final _dataDir = Directory('${Platform.environment['HOME']}/Library/'
 }
 
 void main() {
-  final creds = CredentialsLoader.load(devSecretsDir: Directory('.secrets'));
+  final creds = CredentialsLoader.load(secretsDirs: [Directory('.secrets')]);
   final skipReason = !creds.isComplete
       ? '真实凭据不完整（.secrets）'
       : !_dataDir.existsSync()

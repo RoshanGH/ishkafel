@@ -55,8 +55,13 @@ Future<void> main() async {
     coversDir: coversDir,
   );
 
-  final credentials = CredentialsLoader.load(
-      devSecretsDir: Directory('${Directory.current.path}/.secrets'));
+  // 两个位置都找：开发期从项目目录跑 `flutter run` 用前者；双击启动的
+  // app 工作目录是 `/`，只能靠后者（打包版更常见的是 --dart-define 注入，
+  // 见 scripts/build_macos.sh，那条路径优先级最高）
+  final credentials = CredentialsLoader.load(secretsDirs: [
+    Directory('${Directory.current.path}/.secrets'),
+    Directory('${dataDir.path}/credentials'),
+  ]);
   final analysisPipeline = _buildAnalysisPipeline(credentials, dataDir);
 
   // 启动期预检 ffmpeg/ffprobe：GUI 进程 PATH 不含 Homebrew 目录，

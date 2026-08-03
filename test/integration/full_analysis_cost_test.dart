@@ -52,7 +52,7 @@ const _pricePerMillionInput = 0.15;
 const _pricePerMillionOutput = 1.50;
 
 void main() {
-  final creds = CredentialsLoader.load(devSecretsDir: Directory('.secrets'));
+  final creds = CredentialsLoader.load(secretsDirs: [Directory('.secrets')]);
   final skip = !creds.isComplete
       ? '凭据不完整'
       : !File(_video).existsSync()

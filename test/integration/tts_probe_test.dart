@@ -54,7 +54,7 @@ Future<(int, Map<String, dynamic>)> _synth(
 }
 
 void main() {
-  final creds = CredentialsLoader.load(devSecretsDir: Directory('.secrets'));
+  final creds = CredentialsLoader.load(secretsDirs: [Directory('.secrets')]);
   final skip = creds.isComplete ? null : '语音凭据不完整';
 
   test('火山 TTS 可用性与音色', () async {

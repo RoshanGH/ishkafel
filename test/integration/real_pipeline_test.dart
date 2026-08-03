@@ -40,7 +40,7 @@ const _videoPath = '/Users/menggang/Documents/滴露视频/'
     'JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427.mp4';
 
 void main() {
-  final creds = CredentialsLoader.load(devSecretsDir: Directory('.secrets'));
+  final creds = CredentialsLoader.load(secretsDirs: [Directory('.secrets')]);
   final videoExists = File(_videoPath).existsSync();
   final ffmpegReady = _checkExecutable('ffmpeg') && _checkExecutable('ffprobe');
 
