@@ -24,6 +24,7 @@ import '../../core/replacement/replacement_plan.dart';
 import '../../core/editing/edit_consequence.dart';
 import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
+import 'candidate_badge.dart';
 import 'candidate_tab.dart';
 import 'edit_consequence_dialog.dart';
 import 'task_tag_groups_dialog.dart';
@@ -499,15 +500,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   ReplacementPlan get _plan => ReplacementPlan(_replacements ?? const []);
 
-  /// 「替换素材」tab 上的角标：已经设了替换的单元数。
-  /// 一个都没设时不显示——写个 0 会被读成「有 0 条可用素材」。
-  String? _pickedCountText() {
-    final n = _plan.units
-        .where((u) => u.mode != ReplacementMode.keepOriginal)
-        .length;
-    return n == 0 ? null : '$n';
-  }
-
   String _summaryText(SegmentationEditorController editor) =>
       workbenchSummaryText(
         units: editor.units,
@@ -561,7 +553,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,
                 readOnly: !_isEditable,
-                candidateBadge: _pickedCountText(),
+                candidateBadge: candidateBadgeText(_replacements ?? const []),
                 candidatePanel: CandidateTab(
                   editor: editor,
                   shotTagGroups: _task.shotTagGroups,
