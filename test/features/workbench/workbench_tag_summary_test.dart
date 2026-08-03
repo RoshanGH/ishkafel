@@ -47,6 +47,26 @@ List<SemanticUnit> _units({
       ),
     ];
 
+/// 两层都打满标签
+List<SemanticUnit> _allTagged() => const [
+      SemanticUnit(
+        index: 0,
+        startMs: 0,
+        endMs: 2000,
+        transcript: '第一句',
+        tags: ['功效演示'],
+        shots: [Shot(startMs: 0, endMs: 2000, tags: ['产品特写'])],
+      ),
+      SemanticUnit(
+        index: 1,
+        startMs: 2000,
+        endMs: 4000,
+        transcript: '第二句',
+        tags: ['促销'],
+        shots: [Shot(startMs: 2000, endMs: 4000, tags: ['近景'])],
+      ),
+    ];
+
 Future<void> _pump(WidgetTester tester, Widget child) async {
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: child)));
   await tester.pumpAndSettle();
@@ -93,7 +113,34 @@ void main() {
   });
 
   group('底部摘要补两层打标情况', () {
-    test('有标签时给出两层的打标覆盖情况', () {
+    test('两层都打满了才叫「打标完成」', () {
+      final text = workbenchSummaryText(
+        units: _allTagged(),
+        durationMs: 96200,
+        dirty: false,
+        hasTagGroups: true,
+      );
+
+      expect(text, contains('两层打标完成'));
+      expect(text, contains('单元 2/2'));
+      expect(text, contains('镜头 2/2'));
+    });
+
+    test('镜头一个都没打时不能写「打标完成」', () {
+      final text = workbenchSummaryText(
+        units: _units(unitTags: const ['功效演示']),
+        durationMs: 96200,
+        dirty: false,
+        hasTagGroups: true,
+      );
+
+      expect(text, isNot(contains('完成')),
+          reason: '真机上出现过「两层打标完成（单元 6/6 · 镜头 0/52）」——'
+              '括号里明明白白写着一个都没打，前面却说完成了');
+      expect(text, contains('镜头 0/2'));
+    });
+
+    test('部分打上（打标中途失败）时如实说覆盖了多少', () {
       final text = workbenchSummaryText(
         units: _units(unitTags: const ['功效演示'], shotTags: const ['产品特写']),
         durationMs: 96200,
@@ -101,9 +148,9 @@ void main() {
         hasTagGroups: true,
       );
 
-      expect(text, contains('两层打标完成'));
       expect(text, contains('单元 1/2'));
       expect(text, contains('镜头 1/2'));
+      expect(text, isNot(contains('完成')));
     });
 
     test('选了标签组却一个标签都没有时如实说明，而不是假装打标完成', () {
@@ -129,7 +176,7 @@ void main() {
       expect(text, '共 2 个台词语义单元 · 2 个视觉镜头 · 时长 96.2s');
     });
 
-    test('有未保存修改时仍然带上提示', () {
+    test('改过之后不再谎称「有未保存的修改」——改动是随手落库的', () {
       final text = workbenchSummaryText(
         units: _units(),
         durationMs: 96200,
@@ -137,7 +184,10 @@ void main() {
         hasTagGroups: false,
       );
 
-      expect(text, endsWith('有未保存的修改'));
+      expect(text, isNot(contains('未保存')),
+          reason: '工作台里每次改动都直接落库，还挂着「有未保存的修改」'
+              '只会让用户去找一个不存在的保存按钮');
+      expect(text, contains('已自动保存'));
     });
   });
 }

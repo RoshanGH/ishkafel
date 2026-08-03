@@ -16,7 +16,9 @@ String workbenchSummaryText({
   final base = '共 ${units.length} 个台词语义单元 · $totalShots 个视觉镜头 · '
       '时长 ${durationSec}s';
   return '$base${_taggingPart(units, totalShots, hasTagGroups)}'
-      '${dirty ? ' · 有未保存的修改' : ''}';
+      // 工作台里每次改动都直接落库，没有「未保存」这回事。这里曾经写
+      // 「有未保存的修改」，会让用户去找一个不存在的保存按钮。
+      '${dirty ? ' · 已自动保存' : ''}';
 }
 
 String _taggingPart(
@@ -24,9 +26,14 @@ String _taggingPart(
   final taggedUnits = units.where((u) => u.tags.isNotEmpty).length;
   final taggedShots = units.fold<int>(
       0, (sum, u) => sum + u.shots.where((s) => s.tags.isNotEmpty).length);
-  if (taggedUnits > 0 || taggedShots > 0) {
-    return ' · 两层打标完成（单元 $taggedUnits/${units.length} · '
-        '镜头 $taggedShots/$totalShots）';
+  if (taggedUnits == 0 && taggedShots == 0) {
+    return hasTagGroups ? ' · 未获得标签（打标未完成，可重新分析）' : '';
   }
-  return hasTagGroups ? ' · 未获得标签（打标未完成，可重新分析）' : '';
+  final coverage = '单元 $taggedUnits/${units.length} · '
+      '镜头 $taggedShots/$totalShots';
+  // 只有两层都打满才叫「完成」。曾经只要任一层有标签就写「两层打标完成」，
+  // 于是真机上出现过「两层打标完成（单元 6/6 · 镜头 0/52）」——括号里明明
+  // 白白写着一个都没打，前面却说完成了。
+  final done = taggedUnits == units.length && taggedShots == totalShots;
+  return done ? ' · 两层打标完成（$coverage）' : ' · 打标覆盖 $coverage';
 }
