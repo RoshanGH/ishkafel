@@ -5,10 +5,12 @@ import 'package:flutter/foundation.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
+import 'side_panel_tabs.dart';
 import 'segment_playback.dart';
 import 'timeline/timeline_geometry.dart';
 import 'timeline/timeline_painter.dart';
@@ -44,6 +46,13 @@ class WorkbenchBody extends StatefulWidget {
   /// 切分结构不允许再被静默改写，下发到 [TimelineView]/[InspectorPanel]。
   final bool readOnly;
 
+  /// 右栏「替换素材」视图的内容。由页面装配后传入——工作台本身不关心
+  /// 素材是怎么检索来的。
+  final Widget? candidatePanel;
+
+  /// 「替换素材」tab 上的角标（已选素材数之类）
+  final String? candidateBadge;
+
   const WorkbenchBody({
     super.key,
     required this.editor,
@@ -53,6 +62,8 @@ class WorkbenchBody extends StatefulWidget {
     required this.playhead,
     this.mediaStatus = TimelineMediaStatus.ready,
     this.readOnly = false,
+    this.candidatePanel,
+    this.candidateBadge,
   });
 
   @override
@@ -60,6 +71,9 @@ class WorkbenchBody extends StatefulWidget {
 }
 
 class _WorkbenchBodyState extends State<WorkbenchBody> {
+  /// 右栏当前视图。切分与选材在同一个工作台里交替进行，不再是两个页面。
+  SidePanelTab _sideTab = SidePanelTab.inspector;
+
   /// 「只播这一段」（双击时间线上的单元/镜头）
   late final SegmentPlayback _segment = SegmentPlayback(widget.playback);
 
@@ -166,13 +180,31 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
                   SizedBox(
+                    // 保持 300：加宽会挤窄播放器，窄窗口下控制条按钮点不到
                     width: 300,
-                    child: InspectorPanel(
-                      controller: editor,
-                      fps: editor.fps,
-                      onSplitAtPlayhead: () =>
-                          _splitAtPlayhead(context, editor, playback),
-                      readOnly: widget.readOnly,
+                    child: Column(
+                      children: [
+                        SidePanelTabBar(
+                          current: _sideTab,
+                          badges: {
+                            SidePanelTab.candidates: widget.candidateBadge,
+                          },
+                          onChanged: (t) => setState(() => _sideTab = t),
+                        ),
+                        Expanded(
+                          child: switch (_sideTab) {
+                            SidePanelTab.inspector => InspectorPanel(
+                                controller: editor,
+                                fps: editor.fps,
+                                onSplitAtPlayhead: () =>
+                                    _splitAtPlayhead(context, editor, playback),
+                                readOnly: widget.readOnly,
+                              ),
+                            SidePanelTab.candidates =>
+                              widget.candidatePanel ?? const _NoCandidatePanel(),
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -379,5 +411,20 @@ class _ToolbarDivider extends StatelessWidget {
         width: AppStroke.hairline,
         height: 16,
         color: AppColors.border,
+      );
+}
+
+/// 「替换素材」视图尚未接入时的占位。
+///
+/// 如实说明为什么空着，而不是留一片空白让用户以为坏了。
+class _NoCandidatePanel extends StatelessWidget {
+  const _NoCandidatePanel();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.all(AppSpacing.lg),
+        child: Text('这条任务还没有可挑选的替换素材。',
+            style: TextStyle(
+                fontSize: AppFontSize.body, color: AppColors.textSecondary)),
       );
 }
