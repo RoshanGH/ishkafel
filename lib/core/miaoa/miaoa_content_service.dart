@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
+import 'miaoa_errors.dart';
 import 'miaoa_tag_service.dart' show MiaoaException;
 
 /// 候选素材（miaoa 分镜库的一条记录）
@@ -194,7 +195,7 @@ class MiaoaContentService {
     final result = await run(binary, args);
 
     if (result.exitCode != 0) {
-      throw MiaoaException(_friendlyError(result.exitCode, _text(result.stderr)));
+      throw MiaoaException(miaoaFriendlyError(result.exitCode, _text(result.stderr)));
     }
 
     final decoded = _decode(_text(result.stdout));
@@ -243,21 +244,4 @@ class MiaoaContentService {
   }
 
   /// 把 CLI 的退出码与 stderr 翻译成用户能照做的中文提示
-  static String _friendlyError(int exitCode, String stderr) {
-    final lower = stderr.toLowerCase();
-    if (lower.contains('401') || lower.contains('unauthorized')) {
-      return '素材库登录已失效，请在终端执行 miaoa auth login 后重试';
-    }
-    if (lower.contains('403') || lower.contains('forbidden')) {
-      return '没有访问该素材库的权限，请联系素材库管理员';
-    }
-    if (lower.contains('not found') || lower.contains('no such file')) {
-      return '未检测到 miaoa 命令行工具，请先安装后重试';
-    }
-    if (lower.contains('timed out') || lower.contains('timeout')) {
-      return '连接素材库超时，请检查网络后重试';
-    }
-    AppLog.warn('miaoa 检索失败（exit=$exitCode）：$stderr');
-    return '素材库检索失败，请稍后重试';
-  }
 }
