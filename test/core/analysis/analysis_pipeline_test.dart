@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
@@ -195,6 +196,20 @@ void main() {
       var peak = 0;
       var calls = 0;
 
+      // 用闸门而不是 sleep：靠「睡 5 毫秒」制造重叠，在机器负载高时会退化成
+      // 一个接一个跑完，peak 变成 1，测试无缘无故地红。闸门在攒够 4 个在飞
+      // 的调用时自己放行，因此并发是确定的；若实现退回串行，闸门永远攒不满，
+      // 由兜底定时器放行，断言照常报「峰值恒为 1」而不是把测试挂死。
+      const cap = 4;
+      final gate = Completer<void>();
+      void releaseIfSaturated() {
+        if (!gate.isCompleted && inFlight >= cap) gate.complete();
+      }
+
+      unawaited(Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!gate.isCompleted) gate.complete();
+      }));
+
       await taggingPipeline(
         repo,
         shotTagger: _FakeShotTagger(
@@ -202,9 +217,10 @@ void main() {
             calls++;
             inFlight++;
             if (inFlight > peak) peak = inFlight;
+            releaseIfSaturated();
           },
           work: () async {
-            await Future<void>.delayed(const Duration(milliseconds: 5));
+            await gate.future;
             inFlight--;
           },
         ),
@@ -218,7 +234,7 @@ void main() {
       expect(peak, greaterThan(1),
           reason: '串行打标下峰值并发恒为 1。真机实测单个镜头的视觉打标约 18 秒，'
               '32 个镜头串行就是近十分钟，用户只能对着「分析中」干等');
-      expect(peak, lessThanOrEqualTo(4),
+      expect(peak, lessThanOrEqualTo(cap),
           reason: '云端 API 有并发与配额限制，不能无上限地打出去');
     });
 
