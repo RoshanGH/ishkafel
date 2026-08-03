@@ -11,6 +11,7 @@ import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
 import 'side_panel_tabs.dart';
+import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
 import 'timeline/timeline_geometry.dart';
 import 'timeline/timeline_painter.dart';
@@ -159,10 +160,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           children: [
             Expanded(
               flex: 3,
-              child: Row(
+              child: LayoutBuilder(builder: (context, box) {
+                final widths = workbenchPanelWidths(box.maxWidth);
+                return Row(
                 children: [
                   SizedBox(
-                    width: 320,
+                    width: widths.left,
                     child: UnitListPanel(
                       controller: editor,
                       onUnitTap: (unit) => playback.seekMs(unit.startMs),
@@ -180,8 +183,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
                   SizedBox(
-                    // 保持 300：加宽会挤窄播放器，窄窗口下控制条按钮点不到
-                    width: 300,
+                    // 随窗口伸缩：窄窗口收到 300（再宽就会把播放控制条挤到
+                    // 点不中），宽窗口把播放器两侧的死黑还给检查器
+                    width: widths.right,
                     child: Column(
                       children: [
                         SidePanelTabBar(
@@ -208,7 +212,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     ),
                   ),
                 ],
-              ),
+                );
+              }),
             ),
             const Divider(height: 1, color: AppColors.border),
             Expanded(
