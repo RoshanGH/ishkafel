@@ -188,7 +188,9 @@ class _DialogState extends ConsumerState<_Dialog> {
                 _groups == null && _loadError == null
                     ? '正在读取标签组…'
                     : selected.isEmpty
-                        ? '未选择（这一层不打标）'
+                        // 这行是「现在是什么状态」，不是一个开关。写「不打标」
+                        // 会被读成设置项，用户以为得去别处才能打开
+                        ? '未选择，因此这一层不会打标；选一个组就会打'
                         : selected.map((g) => g.name).join('、'),
                 style: TextStyle(
                     color: selected.isEmpty
