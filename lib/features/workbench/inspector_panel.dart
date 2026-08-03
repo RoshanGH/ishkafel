@@ -5,6 +5,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
 import 'inspector_widgets.dart';
+import 'tag_trace_section.dart';
 
 /// 把毫秒时间戳格式化为 `mm:ss.ff`（ff 为两位帧号，前补 0）。
 ///
@@ -202,11 +203,12 @@ class _InspectorPanelState extends State<InspectorPanel> {
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
           ]),
           const SizedBox(height: 10),
-          inspectorCard([
-            inspectorLabel('标签'),
-            const SizedBox(height: 6),
-            inspectorTagChips(unit.tags),
-          ]),
+          TagTraceSection(
+            title: '台词语义单元标签',
+            tags: unit.tags,
+            tagsStale: unit.tagsStale,
+            trace: unit.trace,
+          ),
           const SizedBox(height: 10),
           inspectorCard([
             // 回看模式下台词框是禁用的，标题必须如实反映，不能继续声称可编辑
@@ -279,11 +281,13 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 '时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),
           ]),
           const SizedBox(height: 10),
-          inspectorCard([
-            inspectorLabel('镜头标签'),
-            const SizedBox(height: 6),
-            inspectorTagChips(shot.tags),
-          ]),
+          TagTraceSection(
+            title: '视觉镜头标签',
+            tags: shot.tags,
+            tagsStale: shot.tagsStale,
+            description: shot.description,
+            trace: shot.trace,
+          ),
           const SizedBox(height: 10),
           inspectorActionsRow(
             splitLabel: '✂ 在游标处拆分镜头',
