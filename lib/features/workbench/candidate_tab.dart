@@ -85,6 +85,9 @@ class CandidateTabState extends State<CandidateTab> {
     _tagResolver = TagIdResolver(widget.tagService ?? MiaoaTagService());
 
     widget.editor.addListener(_onEditorChanged);
+    // 挂载时先对齐一次当前选中。右栏切回「替换素材」时这个面板是重新挂载的，
+    // 只订阅「之后的变化」会让它停在 U1——而用户早就在时间线上走到别处了。
+    _syncSelectionFromEditor();
     _syncSearchMode();
     unawaited(_loadTagVocabulary());
   }

@@ -105,7 +105,7 @@ Future<(SegmentationEditorController, _FakeContentService)> _pump(
           onReplacementsChanged: (r) => onSave?.call(r),
           contentService: content,
           tagService: tags,
-          candidateProbe: CandidateProbe(run: (_, __) async => throw 'no probe'),
+          candidateProbe: CandidateProbe(run: (_, _) async => throw 'no probe'),
         ),
       ),
     ),
@@ -154,6 +154,39 @@ void main() {
               '用整个单元的并集会检出一堆和这个镜头无关的素材');
     });
 
+    testWidgets('挂载时就读当前选中，而不是从 U1 开始', (tester) async {
+      // 右栏切回「替换素材」时面板是重新挂载的。只订阅「之后的变化」，
+      // 就会显示成用户在别处早已经离开的那个单元。
+      final editor = SegmentationEditorController(
+        initialUnits: _units(),
+        durationMs: 4000,
+        fps: 30,
+        sentences: const [],
+      );
+      editor.select(const EditorSelection.unit(1));
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 700,
+            child: CandidateTab(
+              editor: editor,
+              shotTagGroups: const [],
+              onReplacementsChanged: (_) {},
+              contentService: _FakeContentService(),
+              tagService: _FakeTagService(const {}),
+              candidateProbe:
+                  CandidateProbe(run: (_, _) async => throw 'no probe'),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.text('U2 · 候选素材'), findsOneWidget);
+    });
+
     testWidgets('保持原片时不打网络', (tester) async {
       final (editor, content) = await _pump(tester);
 
@@ -197,4 +230,71 @@ void main() {
       expect(saved.last[0].mode, ReplacementMode.whole);
     });
   });
+
+  _workbenchIntegration();
+}
+
+/// 真机回归：在完整的工作台里（右栏是 tab、候选面板由页面装配后传下来），
+/// 点左栏单元行换选中，候选面板必须跟着换。
+/// 单独 pump CandidateTab 的用例覆盖不到「页面装配」这一层。
+void _workbenchIntegration() {
+  testWidgets('装进工作台右栏后，点单元行候选面板跟着换', (tester) async {
+    final editor = SegmentationEditorController(
+      initialUnits: _units(),
+      durationMs: 4000,
+      fps: 30,
+      sentences: const [],
+    );
+    final content = _FakeContentService();
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 1200,
+          height: 800,
+          child: _TabHost(
+            editor: editor,
+            child: CandidateTab(
+              editor: editor,
+              shotTagGroups: const [],
+              onReplacementsChanged: (_) {},
+              contentService: content,
+              tagService: _FakeTagService(const {}),
+              candidateProbe:
+                  CandidateProbe(run: (_, _) async => throw 'no probe'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('U1 · 候选素材'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('host-select-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('U2 · 候选素材'), findsOneWidget,
+        reason: '右栏是同一个工作台的另一个视图，选中权在时间线/单元列表');
+  });
+}
+
+/// 复刻工作台的装配方式：候选面板由外层构造一次后传进来，
+/// 外层本身不因选中变化而重建（选中变化只走编辑器的监听）
+class _TabHost extends StatelessWidget {
+  final SegmentationEditorController editor;
+  final Widget child;
+  const _TabHost({required this.editor, required this.child});
+
+  @override
+  Widget build(BuildContext context) => Column(
+        children: [
+          TextButton(
+            key: const Key('host-select-1'),
+            onPressed: () => editor.select(const EditorSelection.unit(1)),
+            child: const Text('选中 U2'),
+          ),
+          Expanded(child: SizedBox(width: 300, child: child)),
+        ],
+      );
 }
