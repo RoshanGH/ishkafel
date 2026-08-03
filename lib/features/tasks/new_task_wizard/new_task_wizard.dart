@@ -12,16 +12,34 @@ import 'tag_group_field.dart';
 import 'wizard_body.dart';
 import 'wizard_providers.dart';
 
-/// 弹出新建任务向导；用户取消返回 null
-Future<NewTaskWizardResult?> showNewTaskWizard(BuildContext context) =>
+/// 弹出新建任务向导；用户取消返回 null。
+///
+/// [prefillUnitGroups]/[prefillShotGroups] 用上一条任务的配置预填（**连同
+/// 各组的打标约束一起**）：同一个项目里连着建好几条任务是常态，每次重选
+/// 四个组、重贴四段约束纯属折磨。预填只是起点，用户照样能改。
+Future<NewTaskWizardResult?> showNewTaskWizard(
+  BuildContext context, {
+  List<TagGroupRef> prefillUnitGroups = const [],
+  List<TagGroupRef> prefillShotGroups = const [],
+}) =>
     showDialog<NewTaskWizardResult>(
       context: context,
-      builder: (_) => const NewTaskWizard(),
+      builder: (_) => NewTaskWizard(
+        prefillUnitGroups: prefillUnitGroups,
+        prefillShotGroups: prefillShotGroups,
+      ),
     );
 
 /// 新建任务向导（模态）：① 选成片来源 ② 选两个标签组 → 开始分析
 class NewTaskWizard extends ConsumerStatefulWidget {
-  const NewTaskWizard({super.key});
+  final List<TagGroupRef> prefillUnitGroups;
+  final List<TagGroupRef> prefillShotGroups;
+
+  const NewTaskWizard({
+    super.key,
+    this.prefillUnitGroups = const [],
+    this.prefillShotGroups = const [],
+  });
 
   @override
   ConsumerState<NewTaskWizard> createState() => _NewTaskWizardState();
@@ -31,8 +49,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   String? _filePath;
   List<TagGroup>? _groups;
   String? _groupsError;
-  final List<TagGroupRef> _unitGroups = [];
-  final List<TagGroupRef> _shotGroups = [];
+  late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
+  late final List<TagGroupRef> _shotGroups = [...widget.prefillShotGroups];
   TagPreview? _unitPreview;
   TagPreview? _shotPreview;
 

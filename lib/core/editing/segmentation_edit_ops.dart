@@ -299,7 +299,14 @@ abstract final class SegmentationEditOps {
     return result;
   }
 
-  /// 单元 u 内镜头 s 并入前一镜头（tags 取并集）
+  /// 单元 u 内镜头 s 并入前一镜头。
+  ///
+  /// 标签与画面描述**用被并入方（前一个镜头）的**，与单元层合并同一条规则
+  /// （见 `EditConsequence.mergeTags`）。曾经取并集，结果是「近景」和「远景」
+  /// 这类本来互斥的描述混在一起，比只保留一组更没法用。
+  ///
+  /// 合并出来的镜头标为待重打：画面变长了，原来那组标签未必还成立——但也
+  /// 不抹掉，重打是异步的，中间抹空会让用户以为标签丢了。
   static List<SemanticUnit>? mergeShotWithPrevious(
       List<SemanticUnit> units, int u, int s) {
     if (u < 0 || u >= units.length) return null;
@@ -310,7 +317,10 @@ abstract final class SegmentationEditOps {
     final merged = Shot(
       startMs: prevShot.startMs,
       endMs: currShot.endMs,
-      tags: {...prevShot.tags, ...currShot.tags}.toList(),
+      tags: prevShot.tags,
+      description: prevShot.description,
+      trace: prevShot.trace,
+      tagsStale: true,
     );
     final newShots = [
       ...unit.shots.sublist(0, s - 1),

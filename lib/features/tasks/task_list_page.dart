@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
@@ -65,7 +66,18 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 标签组必须在建任务时定下来——它既是两层打标的受控词表来源，也是后续
   /// 阶段②「按相同标签检索候选素材」的检索键。
   Future<void> _startNewTask(WidgetRef ref, BuildContext context) async {
-    final result = await showNewTaskWizard(context);
+    // 用最近一条任务的标签组配置预填（含各组的打标约束）：同一个项目里
+    // 连着建好几条任务是常态，每次重选四个组、重贴四段约束纯属折磨
+    final recent = ref
+        .read(taskListProvider)
+        .value
+        ?.firstWhereOrNull((t) =>
+            t.unitTagGroups.isNotEmpty || t.shotTagGroups.isNotEmpty);
+    final result = await showNewTaskWizard(
+      context,
+      prefillUnitGroups: recent?.unitTagGroups ?? const [],
+      prefillShotGroups: recent?.shotTagGroups ?? const [],
+    );
     if (result == null) return;
     try {
       await ref.read(taskListProvider.notifier).importFile(

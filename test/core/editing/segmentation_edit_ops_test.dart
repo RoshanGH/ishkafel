@@ -223,18 +223,37 @@ void main() {
       });
     });
 
-    test('镜头合并保留标签并集', () {
+    test('镜头合并用被并入方的标签，不取并集', () {
       final tagged = [
         fixture()[0].copyWith(shots: const [
-          Shot(startMs: 0, endMs: 3000, tags: ['A']),
-          Shot(startMs: 3000, endMs: 6000, tags: ['B']),
+          Shot(startMs: 0, endMs: 3000, tags: ['近景'], description: '前一个镜头'),
+          Shot(startMs: 3000, endMs: 6000, tags: ['远景'], description: '后一个镜头'),
         ]),
         fixture()[1],
       ];
+
       final out = SegmentationEditOps.mergeShotWithPrevious(tagged, 0, 1)!;
-      expect(out[0].shots.single.tags.toSet(), {'A', 'B'});
+
+      expect(out[0].shots.single.tags, ['近景'],
+          reason: 'A 并入 B 就用 B 的（这里 B 是前一个镜头）——取并集会把两组'
+              '本来互斥的描述混在一起（近景+远景），比只保留一组更没法用');
+      expect(out[0].shots.single.description, '前一个镜头');
       expect(out[0].shots.single.startMs, 0);
       expect(out[0].shots.single.endMs, 6000);
+    });
+
+    test('合并出来的镜头标为待重打——画面变长了，原来的标签未必还成立', () {
+      final tagged = [
+        fixture()[0].copyWith(shots: const [
+          Shot(startMs: 0, endMs: 3000, tags: ['近景']),
+          Shot(startMs: 3000, endMs: 6000, tags: ['远景']),
+        ]),
+        fixture()[1],
+      ];
+
+      final out = SegmentationEditOps.mergeShotWithPrevious(tagged, 0, 1)!;
+
+      expect(out[0].shots.single.tagsStale, isTrue);
     });
 
     test('合并单元内首镜头返回 null', () {
