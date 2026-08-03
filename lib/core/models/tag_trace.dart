@@ -21,6 +21,14 @@ class TagTrace {
   /// 合并去重后的词表大小
   final int vocabularySize;
 
+  /// 每个维度（标签组）用户写的打标约束。标签不对时，「喂进去的约束是
+  /// 什么」往往才是问题所在，因此和词表一起留痕。
+  final Map<String, String> dimensionPrompts;
+
+  /// 这次打标按维度分开的结果。界面上分维度显示，用户才看得出「场景判成了
+  /// 什么、动作判成了什么」，而不是一堆混在一起的词。
+  final Map<String, List<String>> tagsByDimension;
+
   /// 模型**原样**返回的内容，不做任何加工——解析出错时全靠它定位
   final String? rawReply;
 
@@ -33,6 +41,8 @@ class TagTrace {
     this.textInput,
     this.vocabularyGroups = const [],
     this.vocabularySize = 0,
+    this.dimensionPrompts = const {},
+    this.tagsByDimension = const {},
     this.rawReply,
     this.at,
   });
@@ -43,6 +53,8 @@ class TagTrace {
         'textInput': textInput,
         'vocabularyGroups': vocabularyGroups,
         'vocabularySize': vocabularySize,
+        'dimensionPrompts': dimensionPrompts,
+        'tagsByDimension': tagsByDimension,
         'rawReply': rawReply,
         'at': at?.toIso8601String(),
       };
@@ -57,6 +69,8 @@ class TagTrace {
       textInput: raw['textInput'] is String ? raw['textInput'] as String : null,
       vocabularyGroups: _strings(raw['vocabularyGroups']),
       vocabularySize: raw['vocabularySize'] is int ? raw['vocabularySize'] as int : 0,
+      dimensionPrompts: _stringMap(raw['dimensionPrompts']),
+      tagsByDimension: _stringListMap(raw['tagsByDimension']),
       rawReply: raw['rawReply'] is String ? raw['rawReply'] as String : null,
       at: raw['at'] is String ? DateTime.tryParse(raw['at'] as String) : null,
     );
@@ -75,6 +89,21 @@ class TagTrace {
           for (final e in v)
             if (e is String) e,
         ]);
+
+  static Map<String, String> _stringMap(Object? v) => v is! Map
+      ? const {}
+      : Map.unmodifiable({
+          for (final e in v.entries)
+            if (e.key is String && e.value is String)
+              e.key as String: e.value as String,
+        });
+
+  static Map<String, List<String>> _stringListMap(Object? v) => v is! Map
+      ? const {}
+      : Map.unmodifiable({
+          for (final e in v.entries)
+            if (e.key is String) e.key as String: _strings(e.value),
+        });
 }
 
 /// 一个镜头切点是怎么定出来的（切分层的过程量）

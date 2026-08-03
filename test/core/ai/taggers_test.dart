@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ai/ark_chat_client.dart';
+import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/net/json_poster.dart';
 
@@ -20,45 +21,22 @@ ArkChatClient fakeChat(String reply, {void Function(String body)? onBody}) =>
     );
 
 void main() {
-  test('parseVocabTags 过滤词表外标签', () {
-    expect(
-      parseVocabTags('{"tags":["功效演示","自由发挥的标签"]}', ['功效演示', '价格机制']),
-      ['功效演示'],
-    );
-  });
-
-  test('parseVocabTags 容忍 code fence 与非 JSON', () {
-    expect(parseVocabTags('```json\n{"tags":["价格机制"]}\n```', ['价格机制']),
-        ['价格机制']);
-    expect(parseVocabTags('说不清', ['价格机制']), isEmpty);
-  });
-
-  test('UnitTagger 提交台词与词表并返回过滤后标签', () async {
-    late String sentBody;
-    final tagger = UnitTagger(
-        chat: fakeChat('{"tags":["功效演示"]}', onBody: (b) => sentBody = b));
-    final tags = await tagger.tag(
-        transcript: '能把衣服洗干净', vocabulary: ['功效演示', '价格机制']);
-    expect(tags, ['功效演示']);
-    expect(sentBody, contains('能把衣服洗干净'));
-    expect(sentBody, contains('功效演示'));
-  });
-
-  test('词表为空时不调用 LLM 返回空', () async {
-    var called = false;
-    final tagger = UnitTagger(
-        chat: fakeChat('{"tags":[]}', onBody: (_) => called = true));
-    expect(await tagger.tag(transcript: 'x', vocabulary: const []), isEmpty);
-    expect(called, false);
-  });
-
-  test('ShotTagger 走 vision 通道传帧', () async {
+  // 「提交台词与词表」「词表为空不调用」等用例随扁平词表一起搬到了
+  // taggers_dimension_test.dart（按维度问、按维度收）。这里只留 vision
+  // 通道的传输形态——那是这一层独有的、跟维度无关的契约。
+  test('ShotTagger 走 vision 通道，帧以 base64 传出去', () async {
     late String sentBody;
     final tagger = ShotTagger(
-        chat: fakeChat('{"tags":["产品特写"]}', onBody: (b) => sentBody = b));
-    final tags = await tagger
-        .tag(frameJpeg: [9, 9, 9], vocabulary: ['产品特写', '人物口播']);
-    expect(tags, ['产品特写']);
+        chat: fakeChat('{"画面类型":["产品特写"]}', onBody: (b) => sentBody = b));
+
+    final r = await tagger.understand(frames: [
+      [9, 9, 9]
+    ], dimensions: const [
+      TagDimension(
+          name: '画面类型', vocabulary: ['产品特写', '人物口播'], prompt: null),
+    ]);
+
+    expect(r.tags, ['产品特写']);
     expect(sentBody, contains('image_url'));
     expect(sentBody, contains(base64Encode([9, 9, 9])));
   });

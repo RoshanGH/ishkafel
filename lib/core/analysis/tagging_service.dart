@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
 
+import '../ai/tag_dimension.dart';
 import '../ai/taggers.dart';
 import '../log/app_log.dart';
 import '../models/renew_task.dart';
@@ -77,11 +78,11 @@ class TaggingService {
       List<SemanticUnit> units, AnalysisProgressSink? onProgress,
       Set<int>? only) async {
     final unitVocabulary = unitTagger == null
-        ? const <String>[]
-        : await _vocabularyFor(task.unitTagGroups, '台词语义单元');
+        ? const <TagDimension>[]
+        : await _dimensionsFor(task.unitTagGroups, '台词语义单元');
     final shotVocabulary = (shotTagger == null || thumbnails == null)
-        ? const <String>[]
-        : await _vocabularyFor(task.shotTagGroups, '视觉镜头');
+        ? const <TagDimension>[]
+        : await _dimensionsFor(task.shotTagGroups, '视觉镜头');
 
     final tagUnits = unitVocabulary.isNotEmpty;
     final tagShots = shotVocabulary.isNotEmpty;
@@ -97,17 +98,11 @@ class TaggingService {
       if (tagUnits && wanted(i)) {
         try {
           final r = await unitTagger!.understand(
-              transcript: unit.transcript, vocabulary: unitVocabulary);
+              transcript: unit.transcript, dimensions: unitVocabulary);
           updatedUnit = updatedUnit.copyWith(
             tags: r.tags,
             tagsStale: false,
-            trace: TagTrace(
-              textInput: unit.transcript,
-              vocabularyGroups: [for (final g in task.unitTagGroups) g.name],
-              vocabularySize: unitVocabulary.length,
-              rawReply: r.rawReply,
-              at: clock(),
-            ),
+            trace: _traceOf(r, unitVocabulary, textInput: unit.transcript),
           );
         } catch (e) {
           AppLog.warn('单元 ${unit.index} 打标失败：$e');
@@ -138,7 +133,7 @@ class TaggingService {
   Future<List<SemanticUnit>> _tagAllShotsConcurrently(
       RenewTask task,
       List<SemanticUnit> units,
-      List<String> vocabulary,
+      List<TagDimension> vocabulary,
       AnalysisProgressSink? onProgress,
       Set<int>? only) async {
     final flat = <({int unit, int shot})>[
@@ -191,36 +186,66 @@ class TaggingService {
   /// 去重按标签名——不同组里出现同名标签是常事，重复词只会稀释提示词。
   ///
   /// 单个组拉失败只跳过它，其余组照常用：为一个组把整层打标废掉不划算。
-  Future<List<String>> _vocabularyFor(
+  Future<List<TagDimension>> _dimensionsFor(
       List<TagGroupRef> groups, String layer) async {
     final source = vocabulary;
     if (groups.isEmpty || source == null) return const [];
-    final merged = <String>[];
+    final dimensions = <TagDimension>[];
     for (final group in groups) {
       try {
         final words = await source.vocabularyOf(group.id);
         if (words.isEmpty) {
           AppLog.warn('$layer 标签组「${group.name}」内没有任何标签');
+          continue;
         }
-        for (final w in words) {
-          if (!merged.contains(w)) merged.add(w);
-        }
+        dimensions.add(TagDimension(
+          name: group.name,
+          vocabulary: words,
+          prompt: group.prompt,
+        ));
       } catch (e) {
         AppLog.warn('$layer 标签组「${group.name}」的词表拉取失败，跳过这个组：$e');
       }
     }
-    if (merged.isEmpty) {
+    if (dimensions.isEmpty) {
       AppLog.warn('$layer 没有可用的受控词表，跳过该层打标');
     }
-    return List.unmodifiable(merged);
+    return List.unmodifiable(dimensions);
   }
+
+  /// 把这次调用的过程量记下来。
+  ///
+  /// 维度、每个维度的词表大小、以及用户为它写的约束都要留痕——标签不对时，
+  /// 「喂进去的约束是什么」往往才是问题所在。
+  TagTrace _traceOf(
+    ShotUnderstanding r,
+    List<TagDimension> dimensions, {
+    String? textInput,
+    List<int> sampledAtMs = const [],
+    List<String> framePaths = const [],
+  }) =>
+      TagTrace(
+        textInput: textInput,
+        sampledAtMs: sampledAtMs,
+        framePaths: framePaths,
+        vocabularyGroups: [for (final d in dimensions) d.name],
+        vocabularySize:
+            dimensions.fold<int>(0, (n, d) => n + d.vocabulary.length),
+        dimensionPrompts: {
+          for (final d in dimensions)
+            if (d.prompt case final p? when p.trim().isNotEmpty) d.name: p,
+        },
+        tagsByDimension: r.tagsByDimension,
+        rawReply: r.rawReply,
+        at: clock(),
+      );
 
   /// 视觉理解一个镜头：按秒采样多帧 → 一次调用同时拿标签与画面描述。
   ///
   /// 缩到 512 宽再送：多帧时分辨率是 token 消耗的主因，而判断「画面是什么」
   /// 不需要原始 1080p。
   Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
-      List<String> shotVocabulary) async {
+      List<TagDimension> shotVocabulary) async {
     try {
       final at = ShotFrameSampler.sampleAt(
           startMs: shot.startMs, endMs: shot.endMs);
@@ -239,19 +264,12 @@ class TaggingService {
         frames.add(await File(outPath).readAsBytes());
       }
       final r = await shotTagger!
-          .understand(frames: frames, vocabulary: shotVocabulary);
+          .understand(frames: frames, dimensions: shotVocabulary);
       return shot.copyWith(
         tags: r.tags,
         description: r.description,
         tagsStale: false,
-        trace: TagTrace(
-          sampledAtMs: at,
-          framePaths: paths,
-          vocabularyGroups: [for (final g in task.shotTagGroups) g.name],
-          vocabularySize: shotVocabulary.length,
-          rawReply: r.rawReply,
-          at: clock(),
-        ),
+        trace: _traceOf(r, shotVocabulary, sampledAtMs: at, framePaths: paths),
       );
     } catch (e) {
       AppLog.warn('镜头（${shot.startMs}-${shot.endMs}）视觉理解失败：$e');

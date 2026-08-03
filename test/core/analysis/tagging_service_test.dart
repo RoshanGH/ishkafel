@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
 import 'package:ishkafel/core/analysis/tagging_service.dart';
@@ -16,7 +17,7 @@ class _FakeUnitTagger implements UnitTagger {
   @override
   Future<ShotUnderstanding> understand({
     required String transcript,
-    required List<String> vocabulary,
+    required List<TagDimension> dimensions,
   }) async {
     asked.add(transcript);
     return ShotUnderstanding(tags: ['新单元标签'], rawReply: '{}');
@@ -31,7 +32,7 @@ class _FakeShotTagger implements ShotTagger {
   @override
   Future<ShotUnderstanding> understand({
     required List<List<int>> frames,
-    required List<String> vocabulary,
+    required List<TagDimension> dimensions,
   }) async {
     calls++;
     return ShotUnderstanding(

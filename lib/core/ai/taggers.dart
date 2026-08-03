@@ -1,55 +1,43 @@
 import 'dart:convert';
+
 import 'ark_chat_client.dart';
-
-/// 解析打标输出并按受控词表过滤（两个 Tagger 共用）
-List<String> parseVocabTags(String content, List<String> vocabulary) {
-  var text = content.trim();
-  final fence = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```$');
-  final m = fence.firstMatch(text);
-  if (m != null) text = m.group(1)!;
-  try {
-    final json = jsonDecode(text) as Map<String, dynamic>;
-    final tags = (json['tags'] as List<dynamic>).cast<String>();
-    return List.unmodifiable(tags.where(vocabulary.contains));
-  } catch (_) {
-    return const [];
-  }
-}
-
-String _vocabPrompt(List<String> vocabulary) => '''
-候选标签（受控词表，只能从中选择，禁止自造）：${jsonEncode(vocabulary)}
-从候选中选出最贴切的 0-3 个标签。只输出 JSON：{"tags":["标签名"]}''';
+import 'tag_dimension.dart';
 
 /// 台词语义单元打标（文本）
 class UnitTagger {
   final ArkChatClient chat;
   UnitTagger({required this.chat});
 
-  Future<List<String>> tag({
-    required String transcript,
-    required List<String> vocabulary,
-  }) async =>
-      (await understand(transcript: transcript, vocabulary: vocabulary)).tags;
-
-  /// 带出模型原始回复，供过程量留痕
+  /// 按维度打标，并带出模型原始回复供过程量留痕。
+  ///
+  /// 一个标签组 = 一个维度，各带各的词表与各自的约束（见 [TagDimension]）。
   Future<ShotUnderstanding> understand({
     required String transcript,
-    required List<String> vocabulary,
+    required List<TagDimension> dimensions,
   }) async {
-    if (vocabulary.isEmpty) return const ShotUnderstanding();
+    if (dimensions.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatText(
-      system: '你是短视频广告素材打标员。${_vocabPrompt(vocabulary)}',
+      system: '你是短视频广告素材打标员。\n${buildDimensionPrompt(dimensions)}',
       user: '台词：$transcript',
-      maxTokens: 256,
+      maxTokens: 512,
     );
+    final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(
-        tags: parseVocabTags(content, vocabulary), rawReply: content);
+      tags: parsed.flatTags,
+      tagsByDimension: parsed.byDimension,
+      rawReply: content,
+    );
   }
 }
 
 /// 一个视觉镜头的理解结果
 class ShotUnderstanding {
+  /// 按维度顺序拼平、去重的标签。落在 `Shot.tags` 上供检索与展示。
   final List<String> tags;
+
+  /// 维度名 → 该维度选中的标签。展示时按维度分开显示，用户才看得出
+  /// 「场景判成了什么、动作判成了什么」，而不是一堆混在一起的词。
+  final Map<String, List<String>> tagsByDimension;
 
   /// 模型**原样**返回的内容。解析出错时全靠它定位问题，因此原封不动带出来。
   final String? rawReply;
@@ -58,8 +46,12 @@ class ShotUnderstanding {
   /// 检索，编一句不如没有。
   final String? description;
 
-  const ShotUnderstanding(
-      {this.tags = const [], this.description, this.rawReply});
+  const ShotUnderstanding({
+    this.tags = const [],
+    this.tagsByDimension = const {},
+    this.description,
+    this.rawReply,
+  });
 }
 
 /// 视觉镜头理解（多帧走 vision 通道）
@@ -77,46 +69,38 @@ class ShotTagger {
   /// 视觉推理做两遍，而它正是整条管线最贵最慢的一步。
   Future<ShotUnderstanding> understand({
     required List<List<int>> frames,
-    required List<String> vocabulary,
+    required List<TagDimension> dimensions,
   }) async {
+    // 没帧就没什么可看的；但**没有维度仍然要问**——画面描述不依赖词表，
+    // 而它正是「按画面描述检索素材」的检索键。没选标签组就连描述也不给，
+    // 等于把这条路一起堵死。
     if (frames.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatVisionFrames(
-      prompt: _shotPrompt(frames.length, vocabulary),
+      prompt: _shotPrompt(frames.length, dimensions),
       frames: frames,
-      maxTokens: 512,
+      maxTokens: 768,
     );
+    final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(
-      tags: parseVocabTags(content, vocabulary),
+      tags: parsed.flatTags,
+      tagsByDimension: parsed.byDimension,
       description: _parseDescription(content),
       rawReply: content,
     );
-  }
-
-  /// 兼容旧签名（单帧、只要标签）
-  Future<List<String>> tag({
-    required List<int> frameJpeg,
-    required List<String> vocabulary,
-  }) async {
-    if (vocabulary.isEmpty) return const [];
-    final r = await understand(frames: [frameJpeg], vocabulary: vocabulary);
-    return r.tags;
   }
 }
 
 /// 提示词必须说明「这几张是同一镜头的连续采样」——不说的话模型会把它们
 /// 当成几张无关的图分别描述
-String _shotPrompt(int frameCount, List<String> vocabulary) {
+String _shotPrompt(int frameCount, List<TagDimension> dimensions) {
   final head = frameCount > 1
-      ? '这 $frameCount 张图是同一个短视频镜头按时间先后连续采样的画面。'
+      ? '这 $frameCount 张图是同一个短视频镜头按时间先后连续采样的画面'
+          '（依次为镜头的开头、中间、结尾）。'
       : '这是同一个短视频镜头的一张画面。';
-  final tagPart = vocabulary.isEmpty
-      ? '标签留空数组。'
-      : '候选标签（受控词表，只能从中选择，禁止自造）：'
-          '${jsonEncode(vocabulary)}\n从候选中选出最贴切的标签，宁缺毋滥。';
-  return '$head\n$tagPart\n'
-      '同时用一句话描述这个镜头在拍什么（主体、场景、动作），'
-      '这句话会被拿去检索画面相近的素材，所以要具体、不要复述台词。\n'
-      '只输出 JSON：{"tags":["标签名"],"description":"一句话"}';
+  return '$head\n${buildDimensionPrompt(dimensions)}\n'
+      '另外用一句话描述这个镜头在拍什么（主体、场景、动作），放在 '
+      '"description" 键下。这句话会被拿去检索画面相近的素材，'
+      '所以要具体、不要复述台词。';
 }
 
 String? _parseDescription(String content) {

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
@@ -91,7 +92,7 @@ class _RecordingUnitTagger implements UnitTagger {
   @override
   Future<ShotUnderstanding> understand({
     required String transcript,
-    required List<String> vocabulary,
+    required List<TagDimension> dimensions,
   }) async {
     asked.add(transcript);
     return const ShotUnderstanding(tags: ['重打出来的'], rawReply: '{}');
