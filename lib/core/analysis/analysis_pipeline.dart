@@ -6,6 +6,7 @@ import '../ffmpeg/thumbnail_service.dart';
 import '../log/app_log.dart';
 import '../models/renew_task.dart';
 import '../models/tag_group_ref.dart';
+import '../models/tag_trace.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
 import '../storage/task_repository.dart';
@@ -129,7 +130,7 @@ class AnalysisPipeline {
       fps: info.fps,
     );
 
-    final taggedUnits = await _tagUnits(task, units, onProgress);
+    final taggedUnits = await _tagUnits(task, _withBoundaryTrace(units), onProgress);
 
     final updated = task.copyWith(
       units: taggedUnits,
@@ -153,6 +154,30 @@ class AnalysisPipeline {
       AppLog.warn('镜头切点检测失败，退回基础场景检测：$e');
       return scenes.detect(task.sourcePath);
     }
+  }
+
+  /// 把切点判定明细贴到镜头上：每个镜头的**起点**就是那一刀，画面差异分数
+  /// 与「直接确认 / 灰区经画面复核保留」都记在这里，事后能回看这一刀的依据。
+  List<SemanticUnit> _withBoundaryTrace(List<SemanticUnit> units) {
+    final details = ShotBoundaryFinder.lastDetails;
+    if (details.isEmpty) return units;
+    BoundaryTrace? traceAt(int ms) {
+      final c = details[ms];
+      if (c == null) return null;
+      return BoundaryTrace(
+        sceneScore: c.sceneScore,
+        histDistance: c.histDistance,
+        decision: c.isConfirmed ? 'confirmed' : 'reviewed',
+      );
+    }
+
+    return List.unmodifiable([
+      for (final u in units)
+        u.copyWith(shots: [
+          for (final s in u.shots)
+            if (traceAt(s.startMs) case final t?) s.copyWith(boundaryTrace: t) else s,
+        ]),
+    ]);
   }
 
   /// 两层打标：台词语义单元（文本）+ 视觉镜头（代表帧）。
@@ -179,9 +204,18 @@ class AnalysisPipeline {
       var updatedUnit = unit;
       if (tagUnits) {
         try {
-          final tags = await unitTagger!
-              .tag(transcript: unit.transcript, vocabulary: unitVocabulary);
-          updatedUnit = updatedUnit.copyWith(tags: tags);
+          final r = await unitTagger!.understand(
+              transcript: unit.transcript, vocabulary: unitVocabulary);
+          updatedUnit = updatedUnit.copyWith(
+            tags: r.tags,
+            trace: TagTrace(
+              textInput: unit.transcript,
+              vocabularyGroups: [for (final g in task.unitTagGroups) g.name],
+              vocabularySize: unitVocabulary.length,
+              rawReply: r.rawReply,
+              at: clock(),
+            ),
+          );
         } catch (e) {
           AppLog.warn('单元 ${unit.index} 打标失败：$e');
         }
@@ -295,9 +329,11 @@ class AnalysisPipeline {
       final at = ShotFrameSampler.sampleAt(
           startMs: shot.startMs, endMs: shot.endMs);
       final frames = <List<int>>[];
+      final paths = <String>[];
       for (var i = 0; i < at.length; i++) {
         final outPath =
             p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
+        paths.add(outPath);
         await thumbnails!.extractCover(
           videoPath: task.sourcePath,
           outPath: outPath,
@@ -309,7 +345,18 @@ class AnalysisPipeline {
       final r = await shotTagger!
           .understand(frames: frames, vocabulary: shotVocabulary);
       return shot.copyWith(
-          tags: r.tags, description: r.description, tagsStale: false);
+        tags: r.tags,
+        description: r.description,
+        tagsStale: false,
+        trace: TagTrace(
+          sampledAtMs: at,
+          framePaths: paths,
+          vocabularyGroups: [for (final g in task.shotTagGroups) g.name],
+          vocabularySize: shotVocabulary.length,
+          rawReply: r.rawReply,
+          at: clock(),
+        ),
+      );
     } catch (e) {
       AppLog.warn('镜头（${shot.startMs}-${shot.endMs}）视觉理解失败：$e');
       return shot;

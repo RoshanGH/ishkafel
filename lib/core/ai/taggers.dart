@@ -28,14 +28,22 @@ class UnitTagger {
   Future<List<String>> tag({
     required String transcript,
     required List<String> vocabulary,
+  }) async =>
+      (await understand(transcript: transcript, vocabulary: vocabulary)).tags;
+
+  /// 带出模型原始回复，供过程量留痕
+  Future<ShotUnderstanding> understand({
+    required String transcript,
+    required List<String> vocabulary,
   }) async {
-    if (vocabulary.isEmpty) return const [];
+    if (vocabulary.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatText(
       system: '你是短视频广告素材打标员。${_vocabPrompt(vocabulary)}',
       user: '台词：$transcript',
       maxTokens: 256,
     );
-    return parseVocabTags(content, vocabulary);
+    return ShotUnderstanding(
+        tags: parseVocabTags(content, vocabulary), rawReply: content);
   }
 }
 
@@ -43,11 +51,15 @@ class UnitTagger {
 class ShotUnderstanding {
   final List<String> tags;
 
+  /// 模型**原样**返回的内容。解析出错时全靠它定位问题，因此原封不动带出来。
+  final String? rawReply;
+
   /// 这个镜头拍的是什么（一句话）。拿不到时为 null——描述要拿去做语义
   /// 检索，编一句不如没有。
   final String? description;
 
-  const ShotUnderstanding({this.tags = const [], this.description});
+  const ShotUnderstanding(
+      {this.tags = const [], this.description, this.rawReply});
 }
 
 /// 视觉镜头理解（多帧走 vision 通道）
@@ -76,6 +88,7 @@ class ShotTagger {
     return ShotUnderstanding(
       tags: parseVocabTags(content, vocabulary),
       description: _parseDescription(content),
+      rawReply: content,
     );
   }
 

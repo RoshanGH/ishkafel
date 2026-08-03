@@ -409,11 +409,11 @@ class _RecordingUnitTagger extends UnitTagger {
                     const JsonPostResult(statusCode: 200, body: '{}')));
 
   @override
-  Future<List<String>> tag(
+  Future<ShotUnderstanding> understand(
       {required String transcript, required List<String> vocabulary}) async {
     calls++;
     vocabularies.add(vocabulary);
-    return reply;
+    return ShotUnderstanding(tags: reply, rawReply: '{"tags":$reply}');
   }
 }
 
@@ -425,7 +425,7 @@ class _ThrowingUnitTagger extends UnitTagger {
                 post: (_, _, _) async =>
                     const JsonPostResult(statusCode: 200, body: '{}')));
   @override
-  Future<List<String>> tag(
+  Future<ShotUnderstanding> understand(
       {required String transcript, required List<String> vocabulary}) async {
     throw StateError('打标服务不可用');
   }

@@ -4,6 +4,34 @@ import '../net/json_poster.dart';
 /// 火山方舟 chat/completions 封装（文本 + 视觉多模态，同一模型）
 ///
 /// 注意：所选模型为思考模型，响应含 reasoning_content——业务只取 content。
+/// 累计 token 用量（进程内，跨请求累加）
+class ArkUsage {
+  int promptTokens = 0;
+  int completionTokens = 0;
+  int calls = 0;
+
+  int get totalTokens => promptTokens + completionTokens;
+
+  void add(Object? usageJson) {
+    if (usageJson is! Map) return;
+    calls++;
+    promptTokens += _int(usageJson['prompt_tokens']);
+    completionTokens += _int(usageJson['completion_tokens']);
+  }
+
+  void reset() {
+    promptTokens = 0;
+    completionTokens = 0;
+    calls = 0;
+  }
+
+  static int _int(Object? v) => v is int ? v : 0;
+
+  @override
+  String toString() => '$calls 次调用 · 输入 $promptTokens · 输出 '
+      '$completionTokens · 合计 $totalTokens tokens';
+}
+
 class ArkChatClient {
   static final _defaultEndpoint =
       Uri.parse('https://ark.cn-beijing.volces.com/api/v3/chat/completions');
@@ -62,6 +90,10 @@ class ArkChatClient {
         },
       ], maxTokens);
 
+  /// 本进程内累计的 token 用量。分析完一条素材后用它算这次花了多少钱——
+  /// 估算永远说不准，实测才作数。
+  static final ArkUsage usage = ArkUsage();
+
   Future<String> _chat(List<Map<String, dynamic>> messages, int maxTokens) async {
     final result = await post(
       endpoint,
@@ -82,6 +114,7 @@ class ArkChatClient {
       throw AiHttpException('Ark 调用失败 [$code]：$message',
           statusCode: result.statusCode);
     }
+    usage.add(json['usage']);
     final choices = json['choices'];
     if (choices is! List || choices.isEmpty) {
       throw AiHttpException('Ark 响应缺少 choices：${result.body}',

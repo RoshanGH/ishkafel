@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'shot.dart';
+import 'tag_trace.dart';
 
 /// 台词语义单元：以台词语义为准的切分单元，内部包含若干视觉镜头（不可变）
 class SemanticUnit {
@@ -8,6 +9,9 @@ class SemanticUnit {
   final int endMs;
   final String transcript;
   final List<String> tags;
+
+  /// 这次打标的过程量（输入台词、词表、模型原样回复）
+  final TagTrace? trace;
   final List<Shot> shots;
 
   const SemanticUnit({
@@ -16,6 +20,7 @@ class SemanticUnit {
     required this.endMs,
     required this.transcript,
     this.tags = const [],
+    this.trace,
     this.shots = const [],
   });
 
@@ -31,6 +36,7 @@ class SemanticUnit {
     int? endMs,
     String? transcript,
     List<String>? tags,
+    TagTrace? trace,
     List<Shot>? shots,
   }) =>
       SemanticUnit(
@@ -39,6 +45,7 @@ class SemanticUnit {
         endMs: endMs ?? this.endMs,
         transcript: transcript ?? this.transcript,
         tags: tags ?? this.tags,
+        trace: trace ?? this.trace,
         shots: shots ?? this.shots,
       );
 
@@ -49,6 +56,7 @@ class SemanticUnit {
         'transcript': transcript,
         'tags': tags,
         'shots': shots.map((s) => s.toJson()).toList(),
+        'trace': trace?.toJson(),
       };
 
   factory SemanticUnit.fromJson(Map<String, dynamic> json) => SemanticUnit(
@@ -63,6 +71,7 @@ class SemanticUnit {
                 ?.map((e) => Shot.fromJson(e as Map<String, dynamic>))
                 .toList() ??
             const [],
+        trace: TagTrace.tryFromJson(json['trace']),
       );
 
   static const _listEq = ListEquality<Object>();

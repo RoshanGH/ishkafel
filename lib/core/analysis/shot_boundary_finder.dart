@@ -34,8 +34,13 @@ class ShotBoundaryFinder {
     final candidates = detector.detect(signals);
     final reviewed = await _review(
         videoPath: videoPath, taskId: taskId, fps: fps, candidates: candidates);
+    lastDetails = Map.unmodifiable({for (final c in reviewed) c.ms: c});
     return List.unmodifiable([for (final c in reviewed) c.ms]);
   }
+
+  /// 最近一次求解的判定明细（切点毫秒 → 候选）。构树时据此把画面差异分数
+  /// 与判定结论落到镜头上，供事后回看「这一刀是怎么定出来的」。
+  static Map<int, ShotBoundaryCandidate> lastDetails = const {};
 
   Future<List<ShotBoundaryCandidate>> _review({
     required String videoPath,
