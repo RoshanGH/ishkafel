@@ -42,6 +42,41 @@ Future<LeaveAction?> showLeaveConfirmDialog(BuildContext context) {
 /// 用常驻 banner 而非一次性 SnackBar：一是不依赖计时器（widget 测试里更好
 /// 断言，不用担心自动消失的时序问题），二是审片台一旦进入无播放模式会
 /// 持续影响体验，用户应该随时能看到原因，而不是错过一闪而过的提示。
+/// 「正在重新打标」的进行条。
+///
+/// 重打要走两趟云端推理，几秒到几十秒。没有这条，用户点完「是」界面上
+/// 什么都不会变，只会以为软件没反应而反复去点。
+class RetaggingBanner extends StatelessWidget {
+  final int unitCount;
+  const RetaggingBanner({super.key, required this.unitCount});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: const Key('retagging-banner'),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: AppColors.accentBlue.withValues(alpha: 0.16),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.accentBlueLight),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('正在为 $unitCount 个台词语义单元重新打标，可以继续编辑',
+                  style: const TextStyle(
+                      color: AppColors.accentBlueLight,
+                      fontSize: AppFontSize.body,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+}
+
 class PlaybackDegradedBanner extends StatelessWidget {
   const PlaybackDegradedBanner({super.key});
 

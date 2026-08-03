@@ -3,11 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
+import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
+import 'package:ishkafel/core/analysis/tagging_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
@@ -47,6 +51,7 @@ RenewTask _task() => RenewTask(
       status: RenewTaskStatus.editing,
       createdAt: DateTime.utc(2026, 8, 3),
       updatedAt: DateTime.utc(2026, 8, 3),
+      unitTagGroups: const [TagGroupRef(id: 1, name: '台词标签组')],
       units: const [
         SemanticUnit(
           index: 0,
@@ -78,12 +83,36 @@ RenewTask _task() => RenewTask(
       ),
     );
 
-Future<_Repo> _open(WidgetTester tester) async {
+/// 只记录「谁被送去打标了」的假打标器
+class _RecordingUnitTagger implements UnitTagger {
+  final asked = <String>[];
+  @override
+  Future<ShotUnderstanding> understand({
+    required String transcript,
+    required List<String> vocabulary,
+  }) async {
+    asked.add(transcript);
+    return const ShotUnderstanding(tags: ['重打出来的'], rawReply: '{}');
+  }
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class _Vocab implements TagVocabularySource {
+  @override
+  Future<List<String>> vocabularyOf(int groupId) async => ['重打出来的'];
+}
+
+Future<_Repo> _open(WidgetTester tester, {TaggingService? tagging}) async {
   final repo = _Repo();
   final task = _task();
   await repo.save(task);
   await tester.pumpWidget(ProviderScope(
-    overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+    overrides: [
+      taskRepositoryProvider.overrideWithValue(repo),
+      taggingServiceProvider.overrideWithValue(tagging),
+    ],
     child: MaterialApp(
       home: WorkbenchPage(
         task: task,
@@ -159,6 +188,43 @@ void main() {
     final saved = await repo.findById('ec-1');
     expect(saved!.replacements![0].wholeCandidateIds, [101, 102]);
     expect(saved.units![0].tagsStale, isFalse);
+  });
+
+  testWidgets('点了「重新打标」就真的送去打标，且只打改到的那几个单元', (tester) async {
+    final tagger = _RecordingUnitTagger();
+    final repo = await _open(tester,
+        tagging: TaggingService(
+          unitTagger: tagger,
+          vocabulary: _Vocab(),
+          workDir: Directory.systemTemp.createTempSync('ishkafel_retag_'),
+        ));
+
+    await _shrinkFirstUnit(tester, frames: 30);
+    await _settleConsequence(tester);
+    await tester.tap(find.byKey(const Key('consequence-confirm')));
+    await tester.pumpAndSettle();
+
+    // 拖 U1 的结束边界同时改了 U2 的开始（无缝覆盖），两个单元的画面都变了
+    expect(tagger.asked, ['第一句台词', '第二句台词']);
+
+    final saved = await repo.findById('ec-1');
+    expect(saved!.units![0].tags, ['重打出来的']);
+    expect(saved.units![0].tagsStale, isFalse,
+        reason: '打完要把「待重打」标记清掉，否则界面上一直挂着「已过期」');
+  });
+
+  testWidgets('没配 AI 服务时如实说明，而不是假装打过了', (tester) async {
+    final repo = await _open(tester);
+
+    await _shrinkFirstUnit(tester, frames: 30);
+    await _settleConsequence(tester);
+    await tester.tap(find.byKey(const Key('consequence-confirm')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('尚未配置 AI 服务'), findsOneWidget);
+    final saved = await repo.findById('ec-1');
+    expect(saved!.units![0].tagsStale, isTrue,
+        reason: '打不成就得让标记留着，用户才知道这份标签还没更新');
   });
 
   testWidgets('问过一次之后不翻旧账：没有新改动就不再弹', (tester) async {

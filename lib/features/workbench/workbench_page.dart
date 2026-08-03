@@ -117,6 +117,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   List<SemanticUnit>? _consequenceBaseline;
   bool _askingConsequence = false;
 
+  /// 正在重新打标。要走两趟云端推理，几秒到几十秒，界面上必须有个说法，
+  /// 否则用户会以为点了「是」什么都没发生。
+  int _retaggingCount = 0;
+
   /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
   TaskListController? _tasks;
@@ -304,16 +308,45 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
-  /// 「立刻去打标」：先把受影响单元标记为待重打并落库（这样即便打标中途
-  /// 失败或用户关掉窗口，界面上仍看得出这些标签已经过期），再送去打标。
+  /// 「立刻去打标」。
+  ///
+  /// 先把受影响单元标记为待重打并落库，再送去打标：打标要走两趟云端推理，
+  /// 中途失败或用户关掉窗口都是常事，标记留在盘上，界面上才看得出这些标签
+  /// 已经过期，而不是让人拿着一份对不上画面的标签往下走。
   Future<void> _retag(EditConsequence consequence) async {
     final editor = _editor;
     if (editor == null) return;
     editor.replaceUnits(consequence.markForRetag(editor.units));
     await _flushAutosave();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('已标记为待重打；重新打标接入中，暂时只做标记')));
+
+    final tagging = ref.read(taggingServiceProvider);
+    if (tagging == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务，已标记为待重打；补齐凭据后可再次重打')));
+      return;
+    }
+
+    setState(() => _retaggingCount = consequence.unitIndexes.length);
+    try {
+      final tagged = await tagging.tag(_task, editor.units,
+          only: consequence.unitIndexes.toSet());
+      if (!mounted) return;
+      editor.replaceUnits(tagged);
+      await _flushAutosave();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('已重新打标 ${consequence.unitIndexes.length} 个台词语义单元')));
+    } catch (e) {
+      AppLog.warn('重新打标失败（taskId=${widget.task.id}）：$e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('重新打标失败，标签已标记为待重打，可稍后重试'),
+        backgroundColor: AppColors.red,
+      ));
+    } finally {
+      if (mounted) setState(() => _retaggingCount = 0);
+    }
   }
 
   /// 每次改动都自动落库：只要不按 ⌘Z，下次进来就是上次的状态。
@@ -478,6 +511,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         body: Column(
           children: [
             if (_playbackDegraded) const PlaybackDegradedBanner(),
+            if (_retaggingCount > 0) RetaggingBanner(unitCount: _retaggingCount),
             Expanded(
               child: WorkbenchBody(
                 editor: editor,

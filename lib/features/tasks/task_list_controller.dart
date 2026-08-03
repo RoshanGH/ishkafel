@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:characters/characters.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/analysis/analysis_pipeline.dart';
+import '../../core/analysis/tagging_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
@@ -23,6 +24,11 @@ final importServiceProvider = Provider<ImportService>(
 
 /// 分析管线：null 表示凭据未配置，导入后跳过自动分析（main.dart 按凭据完整性 override）
 final analysisPipelineProvider = Provider<AnalysisPipeline?>((ref) => null);
+
+/// 打标服务：工作台里「改完之后重新打标」直接用它，不必把整条分析管线
+/// （抽音频、ASR、语义切分）再拖进来。缺省取自分析管线，凭据未配置时为 null。
+final taggingServiceProvider = Provider<TaggingService?>(
+    (ref) => ref.watch(analysisPipelineProvider)?.tagging);
 
 /// 任务中间产物清理器：null 表示未接线（测试场景），删除任务时只删记录
 final taskArtifactCleanerProvider = Provider<TaskArtifactCleaner?>((ref) => null);
