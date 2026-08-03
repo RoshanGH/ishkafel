@@ -111,20 +111,31 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
   final RenewTask task;
   final VoidCallback onBack;
 
-  const WorkbenchTopBar({super.key, required this.task, required this.onBack});
+  /// 打开「标签组设置」。标签组本来只在新建向导里选一次，选漏了就再也改不
+  /// 了——那条任务从此打不出标签，候选检索的主路径永远用不上。
+  final VoidCallback? onEditTagGroups;
+
+  const WorkbenchTopBar({
+    super.key,
+    required this.task,
+    required this.onBack,
+    this.onEditTagGroups,
+  });
 
   /// 有标签组时多出一行；没有的话不留空行（旧任务不该被撑高）
   @override
   Size get preferredSize => Size.fromHeight(_tagGroupText == null ? 52 : 62);
 
-  /// 「标签组 台词语义单元组 / 视觉镜头组」；两个都没选时返回 null。
-  /// 只显示名字——把标签组 id 摆到界面上是技术黑话。
+  /// 「标签组 台词语义单元组 / 视觉镜头组」。
+  ///
+  /// 一个都没选时也要说出来——什么都不显示，用户只会以为这条任务本来就不用
+  /// 标签，而实际上是打标和标签检索都被悄悄跳过了。
   String? get _tagGroupText {
     final names = [
-      if (task.unitTagGroup != null) task.unitTagGroup!.name,
-      if (task.shotTagGroup != null) task.shotTagGroup!.name,
+      for (final g in task.unitTagGroups) g.name,
+      for (final g in task.shotTagGroups) g.name,
     ];
-    return names.isEmpty ? null : '标签组 ${names.join(' / ')}';
+    return names.isEmpty ? '未设置标签组，不会打标' : '标签组 ${names.join(' / ')}';
   }
 
   @override
@@ -176,13 +187,20 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
               ],
             ),
           ),
+          if (onEditTagGroups != null)
+            TextButton.icon(
+              key: const Key('workbench-tag-groups-btn'),
+              onPressed: onEditTagGroups,
+              icon: const Icon(Icons.sell_outlined, size: 15),
+              label: const Text('标签组'),
+              style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textSecondary),
+            ),
         ],
       ),
     );
   }
 }
-
-/// 三步流程指示：①切分确认（当前激活）②替换选材 ③导出
 
 /// 工作台底部栏。
 ///

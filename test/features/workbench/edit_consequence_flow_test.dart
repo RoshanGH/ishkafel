@@ -11,6 +11,7 @@ import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
@@ -18,6 +19,7 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
+import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
 
 class _Repo implements TaskRepository {
@@ -99,6 +101,21 @@ class _RecordingUnitTagger implements UnitTagger {
   noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _FakeTagService implements MiaoaTagService {
+  @override
+  Future<List<TagGroup>> listGroups() async => const [
+        TagGroup(
+            id: 7,
+            name: '植源分子库',
+            materialType: 'storyboard',
+            tagType: 'public',
+            tags: ['近景', '中景']),
+      ];
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _Vocab implements TagVocabularySource {
   @override
   Future<List<String>> vocabularyOf(int groupId) async => ['重打出来的'];
@@ -112,6 +129,7 @@ Future<_Repo> _open(WidgetTester tester, {TaggingService? tagging}) async {
     overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
       taggingServiceProvider.overrideWithValue(tagging),
+      miaoaTagServiceProvider.overrideWithValue(_FakeTagService()),
     ],
     child: MaterialApp(
       home: WorkbenchPage(
@@ -225,6 +243,60 @@ void main() {
     final saved = await repo.findById('ec-1');
     expect(saved!.units![0].tagsStale, isTrue,
         reason: '打不成就得让标记留着，用户才知道这份标签还没更新');
+  });
+
+  group('标签组设置', () {
+    testWidgets('改完标签组勾着「立即重打」，就用新词表把全片重打一遍',
+        (tester) async {
+      final tagger = _RecordingUnitTagger();
+      final repo = await _open(tester,
+          tagging: TaggingService(
+            unitTagger: tagger,
+            vocabulary: _Vocab(),
+            workDir: Directory.systemTemp.createTempSync('ishkafel_rt_'),
+          ));
+
+      await tester.tap(find.byKey(const Key('workbench-tag-groups-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('task-tag-groups-save')));
+      await tester.pumpAndSettle();
+
+      expect(tagger.asked, ['第一句台词', '第二句台词'],
+          reason: '换词表等于把整份标签作废了，只重打其中几个没有意义');
+      final saved = await repo.findById('ec-1');
+      expect(saved!.units!.every((u) => u.tags.contains('重打出来的')), isTrue);
+    });
+
+    testWidgets('不勾「立即重打」就只存标签组，不去打标', (tester) async {
+      final tagger = _RecordingUnitTagger();
+      await _open(tester,
+          tagging: TaggingService(
+            unitTagger: tagger,
+            vocabulary: _Vocab(),
+            workDir: Directory.systemTemp.createTempSync('ishkafel_rt2_'),
+          ));
+
+      await tester.tap(find.byKey(const Key('workbench-tag-groups-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('task-tag-groups-retag')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('task-tag-groups-save')));
+      await tester.pumpAndSettle();
+
+      expect(tagger.asked, isEmpty);
+    });
+
+    testWidgets('取消不改任何东西', (tester) async {
+      final repo = await _open(tester);
+
+      await tester.tap(find.byKey(const Key('workbench-tag-groups-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('task-tag-groups-cancel')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('ec-1');
+      expect(saved!.unitTagGroups.map((g) => g.id), [1]);
+    });
   });
 
   testWidgets('问过一次之后不翻旧账：没有新改动就不再弹', (tester) async {

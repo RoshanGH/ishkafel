@@ -73,10 +73,22 @@ void main() {
       expect(find.textContaining('1279'), findsNothing, reason: 'id 是技术黑话');
     });
 
-    testWidgets('旧任务没有标签组时不显示这一行（不留空标题）', (tester) async {
+    testWidgets('没有标签组时明说「不会打标」，而不是什么都不显示',
+        (tester) async {
       await _pump(tester, WorkbenchTopBar(task: _task(), onBack: () {}));
 
-      expect(find.textContaining('标签组'), findsNothing);
+      expect(find.textContaining('未设置标签组'), findsOneWidget,
+          reason: '什么都不显示，用户只会以为这条任务本来就不用标签，'
+              '而实际上打标和标签检索都被悄悄跳过了');
+    });
+
+    testWidgets('有「标签组」入口可以点开去改', (tester) async {
+      await _pump(tester,
+          WorkbenchTopBar(task: _task(), onBack: () {}, onEditTagGroups: () {}));
+
+      expect(find.byKey(const Key('workbench-tag-groups-btn')), findsOneWidget,
+          reason: '标签组只在新建向导里选一次、选漏了再也改不了的话，'
+              '那条任务从此打不出标签');
     });
   });
 

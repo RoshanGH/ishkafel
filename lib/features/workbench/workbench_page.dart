@@ -26,6 +26,7 @@ import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
 import 'candidate_tab.dart';
 import 'edit_consequence_dialog.dart';
+import 'task_tag_groups_dialog.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
@@ -308,6 +309,41 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 改这条任务用哪些标签组，并按需立刻用新词表重打全片。
+  ///
+  /// 换了词表却不重打，标签还是按旧词表打的——那份标签既不在新词表里，
+  /// 拿去检索素材也一个都对不上。所以这个对话框默认勾着「立即重打」。
+  Future<void> _editTagGroups() async {
+    final editor = _editor;
+    if (editor == null) return;
+    final picked = await showTaskTagGroupsDialog(
+      context,
+      unit: _task.unitTagGroups,
+      shot: _task.shotTagGroups,
+    );
+    if (picked == null || !mounted) return;
+
+    _task = _task.copyWith(
+        unitTagGroups: picked.unit, shotTagGroups: picked.shot);
+    try {
+      await _tasks!.saveTagGroups(_task, unit: picked.unit, shot: picked.shot);
+    } catch (e) {
+      AppLog.warn('标签组落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('标签组');
+      return;
+    }
+    if (!mounted) return;
+    setState(() {});
+    if (!picked.retagNow) return;
+
+    // 全片重打：换词表就是把整份标签作废了，只重打其中几个没有意义
+    await _retag(EditConsequence(
+      unitIndexes: [for (var i = 0; i < editor.units.length; i++) i],
+      structural: true,
+      maxChangedRatio: 1,
+    ));
+  }
+
   /// 「立刻去打标」。
   ///
   /// 先把受影响单元标记为待重打并落库，再送去打标：打标要走两趟云端推理，
@@ -507,7 +543,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
-        appBar: WorkbenchTopBar(task: widget.task, onBack: _handleBackRequest),
+        appBar: WorkbenchTopBar(
+          task: _task,
+          onBack: _handleBackRequest,
+          onEditTagGroups: _isEditable ? _editTagGroups : null,
+        ),
         body: Column(
           children: [
             if (_playbackDegraded) const PlaybackDegradedBanner(),
@@ -524,7 +564,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 candidateBadge: _pickedCountText(),
                 candidatePanel: CandidateTab(
                   editor: editor,
-                  shotTagGroups: widget.task.shotTagGroups,
+                  shotTagGroups: _task.shotTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
                   readOnly: !_isEditable,

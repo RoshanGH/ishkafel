@@ -427,6 +427,24 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await _refreshAfterSave(updated);
   }
 
+  /// 改这条任务用哪些标签组。
+  ///
+  /// 标签组本来只在新建向导里选一次；选漏了或选错了就再也改不了，那条任务
+  /// 从此打不出标签、候选检索的标签主路径也就永远用不上。
+  Future<void> saveTagGroups(
+    RenewTask task, {
+    required List<TagGroupRef> unit,
+    required List<TagGroupRef> shot,
+  }) async {
+    final updated = task.copyWith(
+      unitTagGroups: unit,
+      shotTagGroups: shot,
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
   /// 工作台落库：保存编辑后的 units。
   ///
   /// 工作台里的每次改动都直接落库（防抖 800ms），不需要用户点「保存」或
