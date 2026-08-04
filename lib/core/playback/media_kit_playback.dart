@@ -6,6 +6,7 @@ import '../log/app_log.dart';
 import '../editing/frame_time.dart';
 import 'frame_stepper.dart';
 import 'playback_controller.dart';
+import 'playback_gate.dart';
 
 /// media_kit 实现（薄封装 [Player]）；`Video` 组件由 player_panel 使用。
 class MediaKitPlaybackController implements PlaybackController {
@@ -23,19 +24,26 @@ class MediaKitPlaybackController implements PlaybackController {
   /// 位置还停在上一次的值，反推出旧帧号就会原地踏步）。
   final FrameStepper _stepper = FrameStepper();
 
+  /// 命令与销毁之间的闸门。见 [PlaybackGate]：视频还没打开完就点返回，
+  /// 旧写法会在 mpv 跑 loadlist 的当口把实例销毁，进程直接 abort。
+  final PlaybackGate _gate = PlaybackGate();
+
   @override
-  Future<void> open(String path) async {
-    await player.open(Media(path), play: false);
-    // 播到文件结尾（或区间终点）时停在最后一帧，而不是卸载文件后黑屏。
-    // 只设一次，之后区间播放只管改 `end`。
-    await _setMpv('keep-open', 'yes');
-  }
+  Future<void> open(String path) => _gate.run(() async {
+        await player.open(Media(path), play: false);
+        // 播到文件结尾（或区间终点）时停在最后一帧，而不是卸载文件后黑屏。
+        // 只设一次，之后区间播放只管改 `end`。
+        await _setMpv('keep-open', 'yes');
+      });
 
   /// 交给 mpv 自己在终点停：设 `end` 后播放器会正常播到该时间点前的最后
   /// 一帧然后暂停。在 Dart 层盯位置流判断「到点了没」做不到这一点——采样
   /// 粒度决定了它必然过头几十毫秒，再 seek 回去就是一次可见的回跳。
   @override
-  Future<bool> playRange(int startMs, int endMs, double fps) async {
+  Future<bool> playRange(int startMs, int endMs, double fps) async =>
+      await _gate.run(() => _playRange(startMs, endMs, fps)) ?? false;
+
+  Future<bool> _playRange(int startMs, int endMs, double fps) async {
     if (endMs <= startMs) return false;
     // 先定位再设终点：反过来的话，当前位置若已在终点之后，mpv 会立刻判 EOF
     final span = FrameSpan.fromMs(startMs, endMs, fps);
@@ -55,10 +63,10 @@ class MediaKitPlaybackController implements PlaybackController {
   /// 此时把 `end` 清掉，它会认为没有终点了而**自己恢复播放**（实测：停在
   /// 2615ms 之后二十秒，位置已经跑到 21 秒）。显式 pause 一次把它钉住。
   @override
-  Future<void> clearRange() async {
-    await player.pause();
-    await _setMpv('end', 'none');
-  }
+  Future<void> clearRange() => _gate.run(() async {
+        await player.pause();
+        await _setMpv('end', 'none');
+      });
 
   Future<String?> _getMpv(String name) async {
     final native = player.platform;
@@ -88,7 +96,9 @@ class MediaKitPlaybackController implements PlaybackController {
   }
 
   @override
-  Future<void> play() async {
+  Future<void> play() => _gate.run(_play);
+
+  Future<void> _play() async {
     // 播到区间终点（或文件末尾）后 mpv 处于 eof-reached 状态，此时 play()
     // 的语义是**重新播放**——用户按空格想接着看，画面却从头开始（实测）。
     // 先原地 seek 一次把 eof 状态清掉，再播。
@@ -106,17 +116,19 @@ class MediaKitPlaybackController implements PlaybackController {
   }
 
   @override
-  Future<void> pause() => player.pause();
+  Future<void> pause() => _gate.run(player.pause);
 
   @override
-  Future<void> seekMs(int ms) {
-    // 不是逐帧步进的定位：锚点作废，下一次步进重新以实际位置为准
-    _stepper.reset();
-    return player.seek(Duration(milliseconds: ms));
-  }
+  Future<void> seekMs(int ms) => _gate.run(() {
+        // 不是逐帧步进的定位：锚点作废，下一次步进重新以实际位置为准
+        _stepper.reset();
+        return player.seek(Duration(milliseconds: ms));
+      });
 
   @override
-  Future<void> stepFrames(int frames, double fps) async {
+  Future<void> stepFrames(int frames, double fps) => _gate.run(() => _step(frames, fps));
+
+  Future<void> _step(int frames, double fps) async {
     await player.pause();
     final targetMs = _stepper.nextMs(
       positionMs: positionMs,
@@ -140,8 +152,10 @@ class MediaKitPlaybackController implements PlaybackController {
   @override
   bool get isPlaying => player.state.playing;
 
+  /// 先等在跑的命令收尾再销毁。直接 dispose 会在 mpv 工作线程跑命令的当口
+  /// 抽掉它的配置，触发一次 `assert` 失败——整个进程 SIGABRT。
   @override
-  Future<void> dispose() => player.dispose();
+  Future<void> dispose() => _gate.close(player.dispose);
 
   /// 构建视频画面组件：不带内置控制条，由外层（player_panel）自绘控制层。
   Widget buildVideoWidget() {

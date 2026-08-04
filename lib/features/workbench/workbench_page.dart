@@ -208,9 +208,20 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted || _playhead.value == ms) return;
       _playhead.value = ms;
     });
-    unawaited(playback.open(task.sourcePath));
+    unawaited(_openSource(playback, task.sourcePath));
     unawaited(_loadMedia());
     _restoreVoiceAudio();
+  }
+
+  /// 打开原片。失败要让用户看见——文件被移走/改名时，静默失败的表现是
+  /// 「点了播放没反应」，用户无从判断是坏了还是没加载完。
+  Future<void> _openSource(PlaybackController playback, String path) async {
+    try {
+      await playback.open(path);
+    } catch (e) {
+      AppLog.warn('打开原片失败（$path）：$e');
+      if (mounted) setState(() => _playbackDegraded = true);
+    }
   }
 
   /// 重开页面时恢复「哪几句已经配好音了」。
