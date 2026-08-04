@@ -158,8 +158,14 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
         ),
         child: Column(
           children: [
+            // 三栏区 : 时间线区 = 5 : 4（时间线约 44%）。
+            //
+            // 原来是 3:2（40%），加上 BGM 轨后五条轨要 290px 而 40% 只给得出
+            // 280，最后一条会整条落在可视区外。抬窗口最小高度会让 1440×900
+            // 的笔记本装不下整个窗口，所以改比例——CLAUDE.md 要的是「时间线
+            // 占比要充足（参考剪映约 40%）」，44% 只多不少。
             Expanded(
-              flex: 3,
+              flex: 5,
               child: LayoutBuilder(builder: (context, box) {
                 final widths = workbenchPanelWidths(box.maxWidth);
                 return Row(
@@ -217,7 +223,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             ),
             const Divider(height: 1, color: AppColors.border),
             Expanded(
-              flex: 2,
+              flex: 4,
               child: _buildTimelineArea(editor, playback),
             ),
           ],

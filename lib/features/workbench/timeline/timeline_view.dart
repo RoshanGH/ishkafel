@@ -8,7 +8,9 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
+import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/log/app_log.dart';
+import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
@@ -63,6 +65,15 @@ class TimelineView extends StatefulWidget {
   /// 逐段试看是审片的主要动作，比「从这里一直播下去」有用得多。
   final void Function(int startMs, int endMs)? onPlaySegment;
 
+  /// 配乐方案（画在配乐轨上）
+  final BgmPlan bgm;
+
+  /// 在配乐轨上框选完一段连续镜头（全片打平下标，含两端）
+  final void Function(int fromShot, int toShot)? onBgmRangeSelected;
+
+  /// 点了配乐轨上已有的一段（用于换曲/移除）
+  final void Function(BgmSegment segment)? onBgmSegmentTap;
+
   /// 判定双击窗口用的时钟。测试注入——`tester.pump(Duration)` 推进的是框架的
   /// 假时钟，`DateTime.now()` 纹丝不动，不注入就没法验证「隔太久不算双击」。
   final DateTime Function() clock;
@@ -84,6 +95,9 @@ class TimelineView extends StatefulWidget {
     this.onScrubStart,
     this.onScrubEnd,
     this.onPlaySegment,
+    this.bgm = BgmPlan.empty,
+    this.onBgmRangeSelected,
+    this.onBgmSegmentTap,
     DateTime Function()? clock,
     this.readOnly = false,
   }) : clock = clock ?? DateTime.now;
@@ -95,6 +109,10 @@ class TimelineView extends StatefulWidget {
 class _TimelineViewState extends State<TimelineView> {
   List<ui.Image?>? _thumbImages;
   TimelineHit? _dragHit;
+
+  /// 正在配乐轨上框选的镜头区间（起点下标 / 当前下标）。
+  /// 非空即表示这次拖拽是在选配乐区间，不是拖边界也不是滚动。
+  ({int from, int to})? _bgmSelecting;
 
   /// 本次拖拽是「拖播放头」而不是「拖时间线」
   bool _scrubbing = false;
@@ -225,9 +243,16 @@ class _TimelineViewState extends State<TimelineView> {
     _lastTapTime = widget.clock();
     _lastTapPosition = position;
 
+    final units = widget.controller.units;
+    if (_isOnBgmTrack(position)) {
+      final at = _shotIndexAtX(position.dx);
+      final segment = at == null ? null : widget.bgm.segmentAt(at);
+      if (segment != null) widget.onBgmSegmentTap?.call(segment);
+      return;
+    }
+
     final hit = TimelineHitTester.hitTest(
         position, widget.controller.units, widget.geometry);
-    final units = widget.controller.units;
     switch (hit) {
       case RulerHit(:final ms):
         widget.onSeek(ms);
@@ -279,6 +304,16 @@ class _TimelineViewState extends State<TimelineView> {
       _seekTo(details.localPosition.dx);
       return;
     }
+    // 配乐轨上横向拖拽 = 框选一段连续镜头。判定放在边界命中之前：配乐轨
+    // 上本来就没有边界手柄，不会打架。
+    if (!widget.readOnly && _isOnBgmTrack(details.localPosition)) {
+      final at = _shotIndexAtX(details.localPosition.dx);
+      if (at != null) {
+        setState(() => _bgmSelecting = (from: at, to: at));
+        _dragHit = null;
+        return;
+      }
+    }
     // 只读模式下不识别边界手柄命中（视为普通滚动手势），从而忽略会改数据
     // 的边界拖拽，同时仍保留滚动能力（见 _handleDragUpdate 的 else 分支）。
     final hit = widget.readOnly
@@ -310,7 +345,21 @@ class _TimelineViewState extends State<TimelineView> {
   /// 拖出两端不会出现负数或超长）
   void _seekTo(double dx) => widget.onSeek(widget.geometry.pxToMs(dx));
 
+  bool _isOnBgmTrack(Offset position) =>
+      position.dy >= TimelineTracks.bgmTop &&
+      position.dy < TimelineTracks.bgmBottom;
+
+  int? _shotIndexAtX(double dx) => shotIndexAtMs(
+      widget.controller.units, widget.geometry.pxToMs(dx));
+
   void _handleDragUpdate(DragUpdateDetails details) {
+    if (_bgmSelecting case final sel?) {
+      final at = _shotIndexAtX(details.localPosition.dx);
+      if (at != null && at != sel.to) {
+        setState(() => _bgmSelecting = (from: sel.from, to: at));
+      }
+      return;
+    }
     if (_scrubbing) {
       // 每次 update 都定位：只在松手时跳一次，等于让用户闭着眼睛拖
       _seekTo(details.localPosition.dx);
@@ -334,6 +383,13 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _endDrag() {
+    if (_bgmSelecting case final sel?) {
+      setState(() => _bgmSelecting = null);
+      widget.onBgmRangeSelected?.call(
+          sel.from < sel.to ? sel.from : sel.to,
+          sel.from < sel.to ? sel.to : sel.from);
+      return;
+    }
     if (_scrubbing) {
       _scrubbing = false;
       // 少发一次 end，调用方那边的播放就永远恢复不回来
@@ -408,6 +464,8 @@ class _TimelineViewState extends State<TimelineView> {
                     waveEnvelope: widget.media?.waveEnvelope,
                     playheadMs: playheadMs,
                     mediaStatus: widget.mediaStatus,
+                    bgm: widget.bgm,
+                    bgmSelecting: _bgmSelecting,
                     textCache: _textCache,
                   ),
                 ),

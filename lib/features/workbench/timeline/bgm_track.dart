@@ -74,3 +74,16 @@ List<BgmSpan> bgmSpans(BgmPlan plan, List<SemanticUnit> units) {
         ),
   ]);
 }
+
+/// 某个时刻落在第几个镜头上（全片打平下标）。
+///
+/// 落在所有镜头之前返回 0、之后返回最后一个：用户框选时手会滑出片尾，
+/// 这时该夹到最后一个镜头，而不是让选区突然消失。没有镜头时返回 null。
+int? shotIndexAtMs(List<SemanticUnit> units, int ms) {
+  final flat = flattenShots(units);
+  if (flat.isEmpty) return null;
+  for (var i = 0; i < flat.length; i++) {
+    if (ms < flat[i].endMs) return i;
+  }
+  return flat.length - 1;
+}

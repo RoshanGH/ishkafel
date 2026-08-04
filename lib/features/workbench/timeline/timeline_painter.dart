@@ -1,6 +1,9 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
 import 'package:ishkafel/app/theme/app_colors.dart';
 import 'package:ishkafel/app/theme/app_spacing.dart';
 import 'package:ishkafel/app/theme/app_typography.dart';
@@ -27,6 +30,13 @@ enum TimelineMediaStatus { loading, ready, failed }
 class TimelinePainter extends CustomPainter {
   final List<SemanticUnit> units;
   final EditorSelection? selection;
+
+  /// 配乐方案；空方案时配乐轨画一条「还没配乐」的空槽而不是干脆不画——
+  /// 不画的话用户根本不知道有这条轨
+  final BgmPlan bgm;
+
+  /// 正在框选的配乐区间（镜头下标，含两端）。拖动过程中画高亮预览。
+  final ({int from, int to})? bgmSelecting;
   final TimelineGeometry geometry;
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
@@ -64,6 +74,8 @@ class TimelinePainter extends CustomPainter {
     required this.units,
     required this.selection,
     required this.geometry,
+    this.bgm = BgmPlan.empty,
+    this.bgmSelecting,
     this.thumbImages,
     this.waveEnvelope,
     required this.playheadMs,
@@ -77,17 +89,19 @@ class TimelinePainter extends CustomPainter {
     _paintTrackLabels(canvas, size);
     _paintUnitsTrack(canvas, size);
     _paintShotsTrack(canvas, size);
+    _paintBgmTrack(canvas, size);
     _paintThumbsTrack(canvas, size);
     _paintWaveTrack(canvas, size);
     _paintPlayhead(canvas, size);
   }
 
-  /// 四条轨的标题条。标题同时是操作说明——「视觉镜头严格嵌套在台词语义
+  /// 五条轨的标题条。标题同时是操作说明——「视觉镜头严格嵌套在台词语义
   /// 单元内」是本产品的核心约束，写在轨道上比藏进帮助文档有效得多。
   void _paintTrackLabels(Canvas canvas, Size size) {
     final entries = <(double, String, String)>[
       (TimelineTracks.unitsLabelTop, '台词语义单元', '拖大边界调整'),
       (TimelineTracks.shotsLabelTop, '视觉镜头', '拖小边界调整，限制在所属单元内'),
+      (TimelineTracks.bgmLabelTop, '配乐', '在镜头轨上框选一段连续镜头来配乐'),
       (TimelineTracks.thumbsLabelTop, '画面', ''),
       (TimelineTracks.waveLabelTop, '音频', ''),
     ];
@@ -281,6 +295,78 @@ class TimelinePainter extends CustomPainter {
     }
   }
 
+  /// 配乐轨：每段配乐一个块体，横跨它覆盖的那串镜头（可以跨台词语义单元）。
+  ///
+  /// 空方案时画一条虚底空槽：干脆不画的话，用户根本不知道有这条轨，
+  /// 也就不会想到可以在这里配乐。
+  void _paintBgmTrack(Canvas canvas, Size size) {
+    final top = TimelineTracks.bgmTop;
+    final bottom = TimelineTracks.bgmBottom;
+
+    canvas.drawRect(
+      Rect.fromLTRB(0, top, size.width, bottom),
+      Paint()..color = AppColors.surfaceCard.withValues(alpha: 0.5),
+    );
+
+    // 正在框选：先画预览，让用户看到自己圈到了哪几个镜头
+    if (bgmSelecting case final sel?) {
+      final flat = flattenShots(units);
+      if (flat.isNotEmpty) {
+        final last = flat.length - 1;
+        final lo = math.min(sel.from, sel.to).clamp(0, last);
+        final hi = math.max(sel.from, sel.to).clamp(0, last);
+        final rect = Rect.fromLTRB(geometry.msToPx(flat[lo].startMs), top,
+            geometry.msToPx(flat[hi].endMs), bottom);
+        canvas.drawRect(
+            rect, Paint()..color = AppColors.accentBlue.withValues(alpha: 0.3));
+        canvas.drawRect(
+          rect,
+          Paint()
+            ..color = AppColors.accentBlue
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2,
+        );
+      }
+    }
+
+    for (final span in bgmSpans(bgm, units)) {
+      final left = geometry.msToPx(span.startMs);
+      final right = geometry.msToPx(span.endMs);
+      if (right < 0 || left > size.width) continue;
+      final rect = Rect.fromLTRB(left + 1, top, right - 1, bottom);
+      if (rect.width <= 0) continue;
+
+      canvas.drawRect(
+          rect, Paint()..color = AppColors.green.withValues(alpha: 0.22));
+      canvas.drawRect(
+        rect,
+        Paint()
+          ..color = AppColors.green.withValues(alpha: 0.6)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+
+      final maxWidth = rect.width - _shotLabelPadding * 2;
+      if (maxWidth <= 0) continue;
+      canvas.save();
+      canvas.clipRect(rect);
+      // 名字后面缀上「裁/循环」：同一首曲子铺在不同长度的区间上，处理方式
+      // 不同而块体长得一样，不写出来用户没法一眼看出哪段会循环
+      final fit = span.segment.fit == BgmFit.exact
+          ? ''
+          : ' · ${span.segment.fit == BgmFit.cut ? "裁" : "循环"}';
+      _drawText(
+        canvas,
+        '${span.segment.material.name}$fit',
+        Offset(rect.left + _shotLabelPadding, rect.top + 5),
+        AppColors.textPrimary,
+        fontSize: AppFontSize.micro,
+        maxWidth: maxWidth,
+      );
+      canvas.restore();
+    }
+  }
+
   void _paintThumbsTrack(Canvas canvas, Size size) {
     final images = thumbImages;
     if (images == null || images.isEmpty) {
@@ -456,6 +542,8 @@ class TimelinePainter extends CustomPainter {
         oldDelegate.mediaStatus != mediaStatus ||
         oldDelegate.thumbImages != thumbImages ||
         oldDelegate.waveEnvelope != waveEnvelope ||
-        oldDelegate.playheadMs != playheadMs;
+        oldDelegate.playheadMs != playheadMs ||
+        oldDelegate.bgm != bgm ||
+        oldDelegate.bgmSelecting != bgmSelecting;
   }
 }

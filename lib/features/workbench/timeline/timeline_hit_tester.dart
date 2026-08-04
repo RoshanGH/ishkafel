@@ -94,6 +94,9 @@ abstract final class TimelineTracks {
   static const rulerH = 20.0;
   static const unitsH = 44.0;
   static const shotsH = 26.0;
+
+  /// 配乐轨。比镜头轨略窄——它上面只有「哪段用了哪首」，没有边界拖拽
+  static const bgmH = 24.0;
   static const thumbsH = 52.0;
   static const waveH = 34.0;
   static const gap = 4.0;
@@ -126,8 +129,17 @@ abstract final class TimelineTracks {
   /// 镜头轨底部
   static double get shotsBottom => shotsTop + shotsH;
 
+  /// 配乐轨标题条顶部
+  static double get bgmLabelTop => shotsBottom + gap;
+
+  /// 配乐轨顶部
+  static double get bgmTop => bgmLabelTop + labelH;
+
+  /// 配乐轨底部
+  static double get bgmBottom => bgmTop + bgmH;
+
   /// 缩图轨标题条顶部
-  static double get thumbsLabelTop => shotsBottom + gap;
+  static double get thumbsLabelTop => bgmBottom + gap;
 
   /// 缩图轨顶部
   static double get thumbsTop => thumbsLabelTop + labelH;
@@ -144,11 +156,11 @@ abstract final class TimelineTracks {
   /// 波形轨底部
   static double get waveBottom => waveTop + waveH;
 
-  /// 四条轨（含各自标题条）的总高。
+  /// 五条轨（含各自标题条）的总高。
   ///
   /// 窗口太矮时最后一条会整条落在可视区外——用户既看不到波形，也看不到
-  /// 为它准备的「生成中/生成失败」占位。窗口最小尺寸由它反推，见
-  /// `macos/Runner/MainFlutterWindow.swift` 与
+  /// 为它准备的「生成中/生成失败」占位。窗口最小尺寸与三栏区/时间线区的
+  /// 分配比例由它反推，见 `macos/Runner/MainFlutterWindow.swift` 与
   /// `test/features/workbench/timeline/timeline_tracks_layout_test.dart`。
   static double get totalHeight => waveBottom;
 }

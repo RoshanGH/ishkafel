@@ -30,6 +30,8 @@ List<SemanticUnit> _units() => const [
     ];
 
 void main() {
+  _shotIndexAt();
+
   group('全片打平的镜头下标 ↔ 单元内位置', () {
     test('按顺序连续编号，跨单元不断档', () {
       final flat = flattenShots(_units());
@@ -122,6 +124,29 @@ void main() {
       final spans = bgmSpans(plan, _units());
 
       expect(spans.single.endMs, 10000);
+    });
+  });
+}
+
+void _shotIndexAt() {
+  group('某个时刻落在第几个镜头上', () {
+    test('落在镜头内部', () {
+      expect(shotIndexAtMs(_units(), 2500), 1);
+      expect(shotIndexAtMs(_units(), 7000), 3);
+    });
+
+    test('边界属于后一个镜头（半开区间 [start, end)）', () {
+      expect(shotIndexAtMs(_units(), 2000), 1);
+      expect(shotIndexAtMs(_units(), 6000), 3);
+    });
+
+    test('滑出片头片尾时夹住，不让选区突然消失', () {
+      expect(shotIndexAtMs(_units(), -500), 0);
+      expect(shotIndexAtMs(_units(), 999999), 4);
+    });
+
+    test('没有镜头时返回 null', () {
+      expect(shotIndexAtMs(const [], 100), isNull);
     });
   });
 }
