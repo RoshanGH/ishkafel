@@ -6,6 +6,7 @@ import '../../../app/theme/app_typography.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
 import '../../../core/models/tag_group_ref.dart';
 import 'tag_group_field.dart';
+import 'tag_prompt_fields.dart';
 import 'wizard_source_step.dart';
 
 /// 向导正文（两步），纯展示：状态与回调由 [NewTaskWizard] 持有
@@ -25,7 +26,11 @@ class WizardBody extends StatelessWidget {
   final TagPreview? unitPreview;
   final TagPreview? shotPreview;
   final ValueChanged<List<TagGroupRef>> onUnitGroupsChanged;
+
+  /// 只改约束、不改选中的组（与上面分开，避免每敲一个字都重算标签预览）
+  final ValueChanged<List<TagGroupRef>> onUnitPromptsChanged;
   final ValueChanged<List<TagGroupRef>> onShotGroupsChanged;
+  final ValueChanged<List<TagGroupRef>> onShotPromptsChanged;
 
   const WizardBody({
     super.key,
@@ -39,7 +44,9 @@ class WizardBody extends StatelessWidget {
     required this.unitPreview,
     required this.shotPreview,
     required this.onUnitGroupsChanged,
+    required this.onUnitPromptsChanged,
     required this.onShotGroupsChanged,
+    required this.onShotPromptsChanged,
   });
 
   @override
@@ -81,6 +88,13 @@ class WizardBody extends StatelessWidget {
           onChanged: onUnitGroupsChanged,
           preview: unitPreview,
         ),
+        // 选完组当场就能写约束，第一次打标就用得上；不然只能等打完一遍、
+        // 进任务再改一遍重打
+        TagPromptFields(
+          layer: 'unit',
+          groups: unitGroups,
+          onChanged: onUnitPromptsChanged,
+        ),
         const SizedBox(height: AppSpacing.md),
         TagGroupField(
           dropdownKey: const Key('wizard-shot-tag-group'),
@@ -90,6 +104,11 @@ class WizardBody extends StatelessWidget {
           selected: shotGroups,
           onChanged: onShotGroupsChanged,
           preview: shotPreview,
+        ),
+        TagPromptFields(
+          layer: 'shot',
+          groups: shotGroups,
+          onChanged: onShotPromptsChanged,
         ),
       ],
     );

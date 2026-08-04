@@ -7,6 +7,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../tasks/new_task_wizard/tag_group_picker.dart';
+import '../tasks/new_task_wizard/tag_prompt_fields.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 
 /// 用户在这个对话框里定下来的两层标签组
@@ -52,31 +53,6 @@ class _DialogState extends ConsumerState<_Dialog> {
   late List<TagGroupRef> _unit = widget.unit;
   late List<TagGroupRef> _shot = widget.shot;
   bool _retag = true;
-
-  /// 每个组的约束输入框。按「层+组 id」建 key，切换选择时复用已有的输入。
-  final _promptControllers = <String, TextEditingController>{};
-
-  @override
-  void dispose() {
-    for (final c in _promptControllers.values) {
-      c.dispose();
-    }
-    super.dispose();
-  }
-
-  TextEditingController _promptController(String layer, TagGroupRef g) =>
-      _promptControllers.putIfAbsent(
-          '$layer-${g.id}', () => TextEditingController(text: g.prompt ?? ''));
-
-  /// 把输入框里的约束收回到标签组上。空白视为「没写」——存一个空串会让
-  /// 提示词里多出一行空的「本维度约束：」，模型只会去猜它省略了什么。
-  List<TagGroupRef> _withPrompts(String layer, List<TagGroupRef> groups) => [
-        for (final g in groups)
-          g.withPrompt(_promptControllers['$layer-${g.id}']?.text.trim().isEmpty
-              ?? true
-              ? null
-              : _promptControllers['$layer-${g.id}']!.text.trim()),
-      ];
 
   /// 标签组列表：拉取中为 null，失败时 [_loadError] 有值
   List<TagGroup>? _groups;
@@ -141,7 +117,11 @@ class _DialogState extends ConsumerState<_Dialog> {
                   selected: _unit,
                   onTap: () => _pick(unitLayer: true),
                 ),
-                ..._prompts('unit', _unit),
+                TagPromptFields(
+                  layer: 'unit',
+                  groups: _unit,
+                  onChanged: (g) => _unit = g,
+                ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
                   key: const Key('task-tag-groups-shot'),
@@ -149,7 +129,11 @@ class _DialogState extends ConsumerState<_Dialog> {
                   selected: _shot,
                   onTap: () => _pick(unitLayer: false),
                 ),
-                ..._prompts('shot', _shot),
+                TagPromptFields(
+                  layer: 'shot',
+                  groups: _shot,
+                  onChanged: (g) => _shot = g,
+                ),
                 const SizedBox(height: AppSpacing.md),
                 CheckboxListTile(
                   key: const Key('task-tag-groups-retag'),
@@ -182,47 +166,11 @@ class _DialogState extends ConsumerState<_Dialog> {
             onPressed: _groups == null
                 ? null
                 : () => Navigator.of(context).pop(TaskTagGroups(
-                    unit: _withPrompts('unit', _unit),
-                    shot: _withPrompts('shot', _shot),
-                    retagNow: _retag)),
+                    unit: _unit, shot: _shot, retagNow: _retag)),
             child: const Text('保存'),
           ),
         ],
       );
-
-  /// 每个已选标签组后面跟一个约束输入框。
-  ///
-  /// 为什么按组而不是按层给一段：一个层可能选了四个组（场景 / 镜头类别 /
-  /// 动作 / 外壳），它们各是一个维度，口径完全不同——合成一段写，模型分不清
-  /// 哪句约束管哪个维度。
-  List<Widget> _prompts(String layer, List<TagGroupRef> groups) => [
-        for (final g in groups)
-          Padding(
-            padding: const EdgeInsets.only(top: AppSpacing.xs),
-            child: TextField(
-              key: Key('tag-prompt-$layer-${g.id}'),
-              controller: _promptController(layer, g),
-              minLines: 1,
-              maxLines: 4,
-              style: const TextStyle(
-                  color: AppColors.textPrimary, fontSize: AppFontSize.caption),
-              decoration: InputDecoration(
-                isDense: true,
-                filled: true,
-                fillColor: AppColors.surface,
-                border: const OutlineInputBorder(),
-                labelText: '「${g.name}」的打标约束（可留空）',
-                labelStyle: const TextStyle(
-                    color: AppColors.textTertiary,
-                    fontSize: AppFontSize.caption),
-                hintText: '例：只判断主体所处的空间，不要判断动作',
-                hintStyle: const TextStyle(
-                    color: AppColors.textTertiary,
-                    fontSize: AppFontSize.caption),
-              ),
-            ),
-          ),
-      ];
 
   Widget _row({
     required Key key,

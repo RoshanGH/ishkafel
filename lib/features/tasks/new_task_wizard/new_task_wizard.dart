@@ -115,6 +115,17 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     });
   }
 
+  /// 只改约束、不改选中的组。
+  ///
+  /// 与 [_selectUnitGroups] 分开：那条路每次都要重算标签预览，而约束是逐字
+  /// 敲进去的——每敲一个字重算一遍预览纯属白费，预览内容也压根没变。
+  void _updatePrompts(List<TagGroupRef> target, List<TagGroupRef> next) =>
+      setState(() {
+        target
+          ..clear()
+          ..addAll(next);
+      });
+
   /// 选中若干组后的标签预览：把它们的标签合并去重——打标用的就是这份合并
   /// 后的受控词表，预览就该长成它实际的样子。
   ///
@@ -183,7 +194,9 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     unitPreview: _unitPreview,
                     shotPreview: _shotPreview,
                     onUnitGroupsChanged: _selectUnitGroups,
+                    onUnitPromptsChanged: (g) => _updatePrompts(_unitGroups, g),
                     onShotGroupsChanged: _selectShotGroups,
+                    onShotPromptsChanged: (g) => _updatePrompts(_shotGroups, g),
                   ),
                 ),
               ),
