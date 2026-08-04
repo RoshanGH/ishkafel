@@ -90,15 +90,44 @@ class ArkChatClient {
         },
       ], maxTokens);
 
+  /// 音频理解：把一段 WAV 直接送给模型听。
+  ///
+  /// [model] 单独传而不是用实例上的那个：能听音频的模型和做视觉打标的不是
+  /// 同一个（本账号下 `doubao-seed-2-0-*-260428` 支持音频，同批次的 260215
+  /// 反而不支持），共用一个实例但按用途选模型，省得为一件事多配一套客户端。
+  Future<String> chatAudio({
+    required String prompt,
+    required List<int> audioWav,
+    String? model,
+    int maxTokens = 600,
+  }) =>
+      _chat([
+        {
+          'role': 'user',
+          'content': [
+            {'type': 'text', 'text': prompt},
+            {
+              'type': 'input_audio',
+              'input_audio': {'data': base64Encode(audioWav), 'format': 'wav'},
+            },
+          ],
+        },
+      ], maxTokens, model: model);
+
   /// 本进程内累计的 token 用量。分析完一条素材后用它算这次花了多少钱——
   /// 估算永远说不准，实测才作数。
   static final ArkUsage usage = ArkUsage();
 
-  Future<String> _chat(List<Map<String, dynamic>> messages, int maxTokens) async {
+  Future<String> _chat(List<Map<String, dynamic>> messages, int maxTokens,
+      {String? model}) async {
     final result = await post(
       endpoint,
       {'Authorization': 'Bearer $apiKey'},
-      jsonEncode({'model': model, 'messages': messages, 'max_tokens': maxTokens}),
+      jsonEncode({
+        'model': model ?? this.model,
+        'messages': messages,
+        'max_tokens': maxTokens,
+      }),
     );
     final Map<String, dynamic> json;
     try {
