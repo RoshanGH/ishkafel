@@ -6,6 +6,12 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import 'picking_messages.dart';
 
+/// 候选怎么看：台词列表 / 画面网格。
+///
+/// 整体替换换的是「一句台词对应的一段画面」，用户先要看的是这条素材原本在
+/// 说什么；镜头替换挑的就是画面，摆台词列表反而绕远。
+enum CandidateView { transcript, gallery }
+
 /// 候选面板的装载状态
 enum CandidateSearchStatus {
   /// 还没检索过（刚进页面 / 刚切到一个新作用域）
@@ -62,6 +68,7 @@ class CandidateSearchController extends ChangeNotifier {
     required this.probe,
     this.probeConcurrency = 4,
     this.projectIds = const [],
+    this.pageSize = 24,
   });
 
   /// 检索限定在哪些项目内；空表示不限项目（我的全部项目聚合）。
@@ -91,24 +98,75 @@ class CandidateSearchController extends ChangeNotifier {
   /// 因返回内容畸形而被跳过的条数（如实带出，不静默丢弃）
   int get skipped => _skipped;
 
+  /// 当前页码（从 1 开始）
+  int get page => _page;
+  int _page = 1;
+
+  /// 每页条数
+  final int pageSize;
+
+  /// 总页数（至少 1 页，免得界面显示「第 1/0 页」）
+  int get pageCount =>
+      _total <= 0 ? 1 : ((_total + pageSize - 1) ~/ pageSize);
+
+  bool get hasPrevPage => _page > 1;
+  bool get hasNextPage => _page < pageCount;
+
+  /// 上一次检索是什么——翻页要拿它换一页重跑。null 表示还没检索过。
+  Future<CandidatePage> Function(int page)? _lastQuery;
+
   Future<void> searchByTags({
     required List<int> tagIds,
     String mode = 'or',
   }) =>
-      _run(() => service.searchByTags(
-          tagIds: tagIds, mode: mode, projectIds: projectIds));
+      _start((page) => service.searchByTags(
+            tagIds: tagIds,
+            mode: mode,
+            projectIds: projectIds,
+            page: page,
+            pageSize: pageSize,
+          ));
 
   Future<void> searchByDescription(String keyword) =>
-      _run(() => service.searchByDescription(
-          keyword: keyword, projectIds: projectIds));
+      _start((page) => service.searchByDescription(
+            keyword: keyword,
+            projectIds: projectIds,
+            page: page,
+            pageSize: pageSize,
+          ));
 
   Future<void> searchByImage(String fileKey) =>
-      _run(() =>
-          service.searchByImage(fileKey: fileKey, projectIds: projectIds));
+      _start((page) => service.searchByImage(
+            fileKey: fileKey,
+            projectIds: projectIds,
+            page: page,
+            pageSize: pageSize,
+          ));
+
+  /// 翻到某一页。越界直接忽略——把「第 0 页」发给服务端只会拿回一个错误。
+  Future<void> goToPage(int page) async {
+    final query = _lastQuery;
+    if (query == null || page < 1 || page > pageCount || page == _page) return;
+    _page = page;
+    await _run(() => query(page));
+  }
+
+  Future<void> nextPage() => goToPage(_page + 1);
+  Future<void> prevPage() => goToPage(_page - 1);
+
+  /// 新的检索：一律从第 1 页开始。换了检索键还停在第 7 页，
+  /// 用户看到的会是一片空白（新结果没那么多页）。
+  Future<void> _start(Future<CandidatePage> Function(int page) query) {
+    _lastQuery = query;
+    _page = 1;
+    return _run(() => query(1));
+  }
 
   /// 清空候选（切到没有可检索键的作用域时用），回到 idle
   void clear() {
     _generation++;
+    _lastQuery = null;
+    _page = 1;
     _entries = const [];
     _total = 0;
     _skipped = 0;

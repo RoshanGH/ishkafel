@@ -7,6 +7,8 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/shot.dart';
 import '../../core/replacement/replacement_plan.dart';
 import 'candidate_card.dart';
+import 'candidate_preview.dart';
+import 'candidate_row.dart';
 import 'candidate_search_controller.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
@@ -29,6 +31,14 @@ class CandidatePanel extends StatelessWidget {
   /// 切模式会丢弃已选候选时由页面弹二次确认，因此这里只上抛意图
   final ValueChanged<ReplacementMode> onModeChanged;
 
+  /// 台词视图 / 画面视图。整体替换默认台词——那一层换的是「一句话对应的一段
+  /// 画面」，先要看的是这条素材原本在说什么。
+  final CandidateView view;
+  final ValueChanged<CandidateView> onViewChanged;
+
+  /// 试看一条素材。注入而不是内建：真实实现要构造 mpv 播放器，单测不能碰。
+  final CandidatePreviewOpener onPreview;
+
   const CandidatePanel({
     super.key,
     required this.picking,
@@ -37,7 +47,17 @@ class CandidatePanel extends StatelessWidget {
     required this.searchMode,
     required this.onSearchModeChanged,
     required this.onModeChanged,
+    this.view = CandidateView.transcript,
+    required this.onViewChanged,
+    this.onPreview = showCandidatePreview,
   });
+
+  /// 镜头替换只有画面视图：那一层挑的就是画面，摆一个台词列表反而绕远
+  bool get _canSwitchView =>
+      picking.currentMode == ReplacementMode.whole;
+
+  CandidateView get _effectiveView =>
+      _canSwitchView ? view : CandidateView.gallery;
 
   @override
   Widget build(BuildContext context) {
@@ -59,7 +79,16 @@ class CandidatePanel extends StatelessWidget {
                 AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.sm),
             child: _searchSegment(),
           ),
-          Expanded(child: _body()),
+          if (_canSwitchView && search.status == CandidateSearchStatus.ready)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
+              child: _viewSegment(),
+            ),
+          Expanded(child: _body(context)),
+          if (search.status == CandidateSearchStatus.ready &&
+              search.entries.isNotEmpty)
+            _pager(),
           _footer(),
         ],
       ),
@@ -266,8 +295,74 @@ class CandidatePanel extends StatelessWidget {
                 height: 1.5)),
       );
 
+  /// 台词 / 画面两种看法
+  Widget _viewSegment() => PickingSegmented(
+        selectedIndex: CandidateView.values.indexOf(_effectiveView),
+        options: [
+          SegmentOption(
+            key: const Key('picking-view-transcript'),
+            label: '台词',
+            onTap: () => onViewChanged(CandidateView.transcript),
+          ),
+          SegmentOption(
+            key: const Key('picking-view-gallery'),
+            label: '画面',
+            onTap: () => onViewChanged(CandidateView.gallery),
+          ),
+        ],
+      );
+
+  /// 分页条。命中几百条时只给第一页，用户根本不知道后面还有——
+  /// 「共 N 条」与页码都要摆出来。
+  Widget _pager() => Container(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _pageButton(
+              key: const Key('picking-prev-page'),
+              icon: Icons.chevron_left,
+              enabled: search.hasPrevPage,
+              onTap: search.prevPage,
+            ),
+            Text(
+              '第 ${search.page}/${search.pageCount} 页 · 共 ${search.total} 条',
+              style: const TextStyle(
+                  color: AppColors.textTertiary, fontSize: AppFontSize.micro),
+            ),
+            _pageButton(
+              key: const Key('picking-next-page'),
+              icon: Icons.chevron_right,
+              enabled: search.hasNextPage,
+              onTap: search.nextPage,
+            ),
+          ],
+        ),
+      );
+
+  Widget _pageButton({
+    required Key key,
+    required IconData icon,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        key: key,
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: 2),
+          child: Icon(icon,
+              size: 18,
+              color:
+                  enabled ? AppColors.textSecondary : AppColors.textTertiary),
+        ),
+      );
+
   /// 候选区：五种状态各有明确呈现，任何一种都不留空白
-  Widget _body() {
+  Widget _body(BuildContext context) {
     if (picking.currentMode == ReplacementMode.keepOriginal) {
       return _hint('这个台词语义单元保留原片。要替换的话，先在上方选择「整体替换」或「镜头替换」');
     }
@@ -286,7 +381,9 @@ class CandidatePanel extends StatelessWidget {
           return _hint(emptyResultGuidance(
               mode: searchMode, queryTagCount: scope.tagIds.length));
         }
-        return _grid();
+        return _effectiveView == CandidateView.transcript
+            ? _transcriptList(context)
+            : _grid(context);
     }
   }
 
@@ -301,14 +398,33 @@ class CandidatePanel extends StatelessWidget {
         ),
       );
 
-  Widget _grid() {
+  /// 台词视图：一行一条，一屏六七条
+  Widget _transcriptList(BuildContext context) => ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        itemCount: search.entries.length,
+        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+        itemBuilder: (context, i) {
+          final entry = search.entries[i];
+          return CandidateRow(
+            entry: entry,
+            selected: picking.isCandidateSelected(entry.material.id),
+            targetMs: scope.targetDurationMs,
+            onTap: () => picking.toggleCandidate(entry.material.id),
+            onPlay: () => onPreview(context, entry.material),
+          );
+        },
+      );
+
+  /// 画面视图：按可用宽度铺格子。此前写死两列、每格 9:13.5，在右栏那点宽度里
+  /// 一屏只能看到两条——挑素材本来就是「扫一眼过一批」的活。
+  Widget _grid(BuildContext context) {
     return GridView.builder(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 112,
         crossAxisSpacing: AppSpacing.sm,
         mainAxisSpacing: AppSpacing.sm,
-        childAspectRatio: 9 / 13.5,
+        childAspectRatio: 9 / 14,
       ),
       itemCount: search.entries.length,
       itemBuilder: (context, i) {
@@ -318,6 +434,7 @@ class CandidatePanel extends StatelessWidget {
           selected: picking.isCandidateSelected(entry.material.id),
           targetMs: scope.targetDurationMs,
           onTap: () => picking.toggleCandidate(entry.material.id),
+          onPlay: () => onPreview(context, entry.material),
         );
       },
     );

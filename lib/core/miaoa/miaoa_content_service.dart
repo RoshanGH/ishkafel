@@ -16,6 +16,12 @@ class CandidateMaterial {
   /// 画面描述（AI 生成，也是「画面描述语义搜」的检索维度）
   final String sceneDescription;
 
+  /// 这条分镜的旁白/台词（miaoa 的 `voiceover`）。
+  ///
+  /// 整体替换换的是「一句台词对应的一段画面」，用户先要看的就是这条素材
+  /// 原本在说什么——只给缩略图，他得一条条点开听。
+  final String voiceover;
+
   /// 首帧缩略图地址（候选卡封面；同时是「首帧以图搜图」的查询帧来源）
   final String? thumbnailUrl;
 
@@ -32,6 +38,7 @@ class CandidateMaterial {
     required this.id,
     required this.name,
     required this.sceneDescription,
+    this.voiceover = '',
     required this.thumbnailUrl,
     required this.previewUrl,
     required this.fileKey,
@@ -51,6 +58,7 @@ class CandidateMaterial {
       name: raw['name'] is String ? raw['name'] as String : '未命名素材',
       sceneDescription:
           raw['sceneDescription'] is String ? raw['sceneDescription'] as String : '',
+      voiceover: raw['voiceover'] is String ? raw['voiceover'] as String : '',
       thumbnailUrl: _stringOrNull(mediaMap['thumbnailUrl']),
       previewUrl: _stringOrNull(mediaMap['previewUrl']),
       fileKey: _stringOrNull(mediaMap['fileKey']),

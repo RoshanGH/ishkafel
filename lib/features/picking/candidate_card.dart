@@ -27,12 +27,17 @@ class CandidateCard extends StatelessWidget {
 
   final VoidCallback onTap;
 
+  /// 试看这条素材。静止的一帧几乎分不出差别，而替换进成片的是这段画面在动
+  /// 的三秒。
+  final VoidCallback onPlay;
+
   const CandidateCard({
     super.key,
     required this.entry,
     required this.selected,
     required this.targetMs,
     required this.onTap,
+    required this.onPlay,
   });
 
   @override
@@ -59,6 +64,7 @@ class CandidateCard extends StatelessWidget {
             _topRow(context, material.id, material.name),
             _bottomBadge(),
             _checkMark(),
+            _playButton(),
           ],
         ),
       ),
@@ -186,6 +192,29 @@ class CandidateCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(999),
           ),
           child: child,
+        ),
+      );
+
+  /// 试看按钮摆在右下角：左下是时长徽标，右上是勾选圈，这里是唯一不打架的位置
+  Widget _playButton() => Positioned(
+        right: AppSpacing.sm,
+        bottom: AppSpacing.sm,
+        child: Tooltip(
+          message: '试看这条素材',
+          child: InkWell(
+            key: Key('picking-play-${entry.material.id}'),
+            onTap: onPlay,
+            borderRadius: BorderRadius.circular(999),
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: AppColors.stageBackground.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.play_arrow,
+                  size: 14, color: AppColors.textPrimary),
+            ),
+          ),
         ),
       );
 

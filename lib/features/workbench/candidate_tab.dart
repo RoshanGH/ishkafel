@@ -10,6 +10,7 @@ import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
+import '../picking/candidate_preview.dart';
 import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
@@ -46,6 +47,13 @@ class CandidateTab extends StatefulWidget {
   /// 在哪个项目里找素材；null 表示不限项目（我的全部项目聚合）
   final ProjectRef? project;
 
+  /// 试看一条素材。缺省弹真实播放浮层；测试注入假实现，免得碰 libmpv。
+  final CandidatePreviewOpener? onPreview;
+
+  /// 每页多少条。默认 24：台词视图一屏约七条、画面视图约十二条，
+  /// 一页翻两三屏是顺手的节奏，再多就变成无尽滚动、找不回刚看过那条了。
+  final int pageSize;
+
   /// 测试注入
   final MiaoaContentService? contentService;
   final CandidateProbe? candidateProbe;
@@ -60,6 +68,8 @@ class CandidateTab extends StatefulWidget {
     this.initialReplacements,
     this.readOnly = false,
     this.project,
+    this.onPreview,
+    this.pageSize = 24,
     this.contentService,
     this.candidateProbe,
     this.tagService,
@@ -76,6 +86,9 @@ class CandidateTabState extends State<CandidateTab> {
 
   CandidateSearchMode _searchMode = CandidateSearchMode.tag;
 
+  /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
+  CandidateView _view = CandidateView.transcript;
+
   /// 上一次检索用的作用域指纹：单元/镜头/检索方式没变就不重复检索
   String? _lastSearchKey;
 
@@ -91,6 +104,7 @@ class CandidateTabState extends State<CandidateTab> {
       service: widget.contentService ?? MiaoaContentService(),
       probe: widget.candidateProbe ?? CandidateProbe(),
       projectIds: _projectIds,
+      pageSize: widget.pageSize,
     );
     _tagResolver = TagIdResolver(widget.tagService ?? MiaoaTagService());
 
@@ -282,6 +296,9 @@ class CandidateTabState extends State<CandidateTab> {
           searchMode: _searchMode,
           onSearchModeChanged: _onSearchModeChanged,
           onModeChanged: _onModeChanged,
+          view: _view,
+          onViewChanged: (v) => setState(() => _view = v),
+          onPreview: widget.onPreview ?? showCandidatePreview,
         ),
       );
 }
