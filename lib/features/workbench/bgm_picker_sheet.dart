@@ -35,6 +35,7 @@ Future<BgmChoice?> showBgmPicker(
   required int rangeMs,
   required String rangeLabel,
   bool canClear = false,
+  List<int> projectIds = const [],
 }) =>
     showDialog<BgmChoice>(
       context: context,
@@ -42,18 +43,23 @@ Future<BgmChoice?> showBgmPicker(
         rangeMs: rangeMs,
         rangeLabel: rangeLabel,
         canClear: canClear,
+        projectIds: projectIds,
       ),
     );
 
 class _BgmPickerDialog extends ConsumerStatefulWidget {
   final int rangeMs;
   final String rangeLabel;
+
+  /// 检索限定在哪些项目内；空表示不限项目
+  final List<int> projectIds;
   final bool canClear;
 
   const _BgmPickerDialog({
     required this.rangeMs,
     required this.rangeLabel,
     required this.canClear,
+    this.projectIds = const [],
   });
 
   @override
@@ -88,7 +94,8 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
     });
     try {
       final items =
-          await ref.read(bgmLibraryProvider).search(keyword: _keyword.text);
+          await ref.read(bgmLibraryProvider)
+              .search(keyword: _keyword.text, projectIds: widget.projectIds);
       if (!mounted || generation != _generation) return;
       setState(() => _items = items);
     } catch (e) {

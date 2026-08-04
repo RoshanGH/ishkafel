@@ -36,6 +36,7 @@ class _Library implements BgmLibrary {
   @override
   Future<List<BgmMaterial>> search({
     String? keyword,
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 30,
   }) async =>

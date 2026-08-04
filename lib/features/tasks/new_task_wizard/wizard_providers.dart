@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/miaoa/miaoa_locator.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
+import '../../../core/models/project_ref.dart';
 import '../../../core/models/tag_group_ref.dart';
 
 /// 新建任务向导的产物：成片来源 + 两层打标各自的标签组。
@@ -19,12 +20,16 @@ class NewTaskWizardResult {
   final String unitTagPrompt;
   final String shotTagPrompt;
 
+  /// 在哪个项目里找素材；null 表示不限项目
+  final ProjectRef? project;
+
   NewTaskWizardResult({
     required this.filePath,
     required List<TagGroupRef> unitTagGroups,
     required List<TagGroupRef> shotTagGroups,
     this.unitTagPrompt = '',
     this.shotTagPrompt = '',
+    this.project,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups);
 }

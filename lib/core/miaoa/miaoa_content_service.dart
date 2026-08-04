@@ -123,10 +123,12 @@ class MiaoaContentService {
 
   MiaoaContentService({this.run = systemProcessRunner, this.binary = 'miaoa'});
 
-  /// 按标签检索。[mode] 为 `and`（全部满足）或 `or`（任一满足）
+  /// 按标签检索。[mode] 为 `and`（全部满足）或 `or`（任一满足）；
+  /// [projectIds] 为空表示不限项目（我的全部项目聚合）
   Future<CandidatePage> searchByTags({
     required List<int> tagIds,
     String mode = 'or',
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
   }) async {
@@ -138,6 +140,7 @@ class MiaoaContentService {
       tagIds.join(','),
       '--public-mode',
       mode,
+      ..._projects(projectIds),
       ..._paging(page, pageSize),
     ]);
   }
@@ -145,6 +148,7 @@ class MiaoaContentService {
   /// 按画面描述语义检索
   Future<CandidatePage> searchByDescription({
     required String keyword,
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
   }) async {
@@ -156,6 +160,7 @@ class MiaoaContentService {
       keyword.trim(),
       '--by',
       'content',
+      ..._projects(projectIds),
       ..._paging(page, pageSize),
     ]);
   }
@@ -163,6 +168,7 @@ class MiaoaContentService {
   /// 首帧以图搜图。[fileKey] 是 OSS key，不是 URL
   Future<CandidatePage> searchByImage({
     required String fileKey,
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
   }) async {
@@ -172,9 +178,15 @@ class MiaoaContentService {
     return await _search([
       '--like-image',
       fileKey.trim(),
+      ..._projects(projectIds),
       ..._paging(page, pageSize),
     ]);
   }
+
+  /// 空列表就整个不传 `--projects`：CLI 把「不传」解释成我的全部项目聚合，
+  /// 而传一个空串会被当成非法值
+  static List<String> _projects(List<int> ids) =>
+      ids.isEmpty ? const [] : ['--projects', ids.join(',')];
 
   static List<String> _paging(int page, int pageSize) => [
         '--page',
@@ -195,7 +207,8 @@ class MiaoaContentService {
     final result = await run(binary, args);
 
     if (result.exitCode != 0) {
-      throw MiaoaException(miaoaFriendlyError(result.exitCode, _text(result.stderr)));
+      throw MiaoaException(miaoaFriendlyError(result.exitCode,
+          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
     }
 
     final decoded = _decode(_text(result.stdout));

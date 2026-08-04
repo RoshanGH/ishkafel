@@ -61,7 +61,12 @@ class CandidateSearchController extends ChangeNotifier {
     required this.service,
     required this.probe,
     this.probeConcurrency = 4,
+    this.projectIds = const [],
   });
+
+  /// 检索限定在哪些项目内；空表示不限项目（我的全部项目聚合）。
+  /// 素材库里四万多条分镜横跨几十个项目，不限项目搜出来的大多用不上。
+  List<int> projectIds;
 
   CandidateSearchStatus _status = CandidateSearchStatus.idle;
   String? _failureMessage;
@@ -90,13 +95,16 @@ class CandidateSearchController extends ChangeNotifier {
     required List<int> tagIds,
     String mode = 'or',
   }) =>
-      _run(() => service.searchByTags(tagIds: tagIds, mode: mode));
+      _run(() => service.searchByTags(
+          tagIds: tagIds, mode: mode, projectIds: projectIds));
 
   Future<void> searchByDescription(String keyword) =>
-      _run(() => service.searchByDescription(keyword: keyword));
+      _run(() => service.searchByDescription(
+          keyword: keyword, projectIds: projectIds));
 
   Future<void> searchByImage(String fileKey) =>
-      _run(() => service.searchByImage(fileKey: fileKey));
+      _run(() =>
+          service.searchByImage(fileKey: fileKey, projectIds: projectIds));
 
   /// 清空候选（切到没有可检索键的作用域时用），回到 idle
   void clear() {

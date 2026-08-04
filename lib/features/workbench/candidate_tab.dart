@@ -6,6 +6,7 @@ import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
+import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
@@ -39,6 +40,9 @@ class CandidateTab extends StatefulWidget {
   /// 只读回看：已导出的任务不能再改方案
   final bool readOnly;
 
+  /// 在哪个项目里找素材；null 表示不限项目（我的全部项目聚合）
+  final ProjectRef? project;
+
   /// 测试注入
   final MiaoaContentService? contentService;
   final CandidateProbe? candidateProbe;
@@ -51,6 +55,7 @@ class CandidateTab extends StatefulWidget {
     required this.onReplacementsChanged,
     this.initialReplacements,
     this.readOnly = false,
+    this.project,
     this.contentService,
     this.candidateProbe,
     this.tagService,
@@ -81,6 +86,7 @@ class CandidateTabState extends State<CandidateTab> {
     _search = CandidateSearchController(
       service: widget.contentService ?? MiaoaContentService(),
       probe: widget.candidateProbe ?? CandidateProbe(),
+      projectIds: _projectIds,
     );
     _tagResolver = TagIdResolver(widget.tagService ?? MiaoaTagService());
 
@@ -90,6 +96,21 @@ class CandidateTabState extends State<CandidateTab> {
     _syncSelectionFromEditor();
     _syncSearchMode();
     unawaited(_loadTagVocabulary());
+  }
+
+  /// 传给 CLI 的 `--projects`；不限项目时为空
+  List<int> get _projectIds =>
+      widget.project == null ? const [] : [widget.project!.id];
+
+  @override
+  void didUpdateWidget(CandidateTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 用户在「标签组设置」里换了项目：检索范围要当场跟着变，
+    // 否则右栏还在按上一个项目的素材给候选
+    if (oldWidget.project?.id != widget.project?.id) {
+      _search.projectIds = _projectIds;
+      unawaited(_refreshSearchIfNeeded());
+    }
   }
 
   PickingController _buildPicking(List<UnitReplacement>? initial) =>
@@ -186,8 +207,10 @@ class CandidateTabState extends State<CandidateTab> {
       _search.clear();
       return;
     }
+    // 项目进指纹：换了项目就得重搜，同一个标签在别的项目下命中的是另一批素材
     final key = '${_picking.selectedUnitIndex}/${_picking.selectedShotIndex}/'
-        '${_searchMode.name}/${_picking.currentMode.name}';
+        '${_searchMode.name}/${_picking.currentMode.name}/'
+        '${widget.project?.id ?? 0}';
     if (key == _lastSearchKey) return;
     _lastSearchKey = key;
     await _runSearch();

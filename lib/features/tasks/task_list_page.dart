@@ -79,6 +79,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       prefillShotGroups: recent?.shotTagGroups ?? const [],
       prefillUnitPrompt: recent?.unitTagPrompt ?? '',
       prefillShotPrompt: recent?.shotTagPrompt ?? '',
+      prefillProject: recent?.project,
     );
     if (result == null) return;
     try {
@@ -88,6 +89,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             shotTagGroups: result.shotTagGroups,
             unitTagPrompt: result.unitTagPrompt,
             shotTagPrompt: result.shotTagPrompt,
+            project: result.project,
           );
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志

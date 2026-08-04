@@ -22,6 +22,7 @@ class BgmLibrary {
   /// 检索音频素材。[keyword] 为空（或只有空白）时列出音频库里的内容。
   Future<List<BgmMaterial>> search({
     String? keyword,
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 30,
   }) async {
@@ -32,6 +33,8 @@ class BgmLibrary {
       '--type',
       'audio',
       if (trimmed.isNotEmpty) ...['--keyword', trimmed],
+      // 空列表整个不传：CLI 把「不传」解释成我的全部项目聚合
+      if (projectIds.isNotEmpty) ...['--projects', projectIds.join(',')],
       '--page',
       '$page',
       '--page-size',
@@ -40,8 +43,8 @@ class BgmLibrary {
     ]);
 
     if (result.exitCode != 0) {
-      throw MiaoaException(
-          miaoaFriendlyError(result.exitCode, _text(result.stderr)));
+      throw MiaoaException(miaoaFriendlyError(result.exitCode,
+          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
     }
 
     final decoded = _decode(_text(result.stdout));

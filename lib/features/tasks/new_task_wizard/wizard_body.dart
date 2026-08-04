@@ -4,7 +4,9 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
+import '../../../core/models/project_ref.dart';
 import '../../../core/models/tag_group_ref.dart';
+import 'project_field.dart';
 import 'tag_group_field.dart';
 import 'tag_prompt_field.dart';
 import 'wizard_source_step.dart';
@@ -35,6 +37,10 @@ class WizardBody extends StatelessWidget {
   final ValueChanged<String> onUnitPromptChanged;
   final ValueChanged<String> onShotPromptChanged;
 
+  /// 在哪个项目里找素材（可不填）
+  final ProjectRef? project;
+  final ValueChanged<ProjectRef?> onProjectChanged;
+
   const WizardBody({
     super.key,
     required this.filePath,
@@ -52,6 +58,8 @@ class WizardBody extends StatelessWidget {
     required this.shotPrompt,
     required this.onUnitPromptChanged,
     required this.onShotPromptChanged,
+    required this.project,
+    required this.onProjectChanged,
   });
 
   @override
@@ -62,7 +70,10 @@ class WizardBody extends StatelessWidget {
         const _StepLabel('第 1 步 · 成片来源'),
         WizardSourceStep(filePath: filePath, onPickFile: onPickFile),
         const SizedBox(height: AppSpacing.lg),
-        const _StepLabel('第 2 步 · 标签组（打标的受控词表，来自 miaoa）'),
+        const _StepLabel('第 2 步 · 项目与标签组（素材从哪儿来、按什么打标）'),
+        // 项目在最上面：先定「上哪儿找素材」，再定「按什么打标」
+        ProjectField(value: project, onChanged: onProjectChanged),
+        const SizedBox(height: AppSpacing.md),
         _tagGroupSection(),
       ],
     );

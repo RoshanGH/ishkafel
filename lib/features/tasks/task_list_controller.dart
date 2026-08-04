@@ -6,6 +6,7 @@ import '../../core/analysis/tagging_service.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
+import '../../core/models/project_ref.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
@@ -302,9 +303,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     List<TagGroupRef> shotTagGroups = const [],
     String unitTagPrompt = '',
     String shotTagPrompt = '',
+    ProjectRef? project,
   }) async {
     final task = await ref.read(importServiceProvider).importLocalFile(
           path,
+          project: project,
           unitTagGroups: unitTagGroups,
           shotTagGroups: shotTagGroups,
           unitTagPrompt: unitTagPrompt,
@@ -443,8 +446,12 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     required List<TagGroupRef> shot,
     String? unitPrompt,
     String? shotPrompt,
+    ProjectRef? project,
   }) async {
     final updated = task.copyWith(
+      project: project,
+      // 显式选了「不限项目」时要真的清掉，不能被 ?? 当成「没传」
+      clearProject: project == null,
       unitTagGroups: unit,
       shotTagGroups: shot,
       unitTagPrompt: unitPrompt,

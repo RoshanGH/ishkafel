@@ -6,6 +6,7 @@ import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/models/project_ref.dart';
 import '../../core/models/video_info.dart';
 import '../../core/storage/task_repository.dart';
 import 'import_exception.dart';
@@ -41,6 +42,7 @@ class ImportService {
     List<TagGroupRef> shotTagGroups = const [],
     String unitTagPrompt = '',
     String shotTagPrompt = '',
+    ProjectRef? project,
   }) async {
     final info = await _probe(filePath);
     final id = idGenerator();
@@ -61,6 +63,7 @@ class ImportService {
       shotTagGroups: shotTagGroups,
       unitTagPrompt: unitTagPrompt,
       shotTagPrompt: shotTagPrompt,
+      project: project,
     );
     await repository.save(task);
     return task;

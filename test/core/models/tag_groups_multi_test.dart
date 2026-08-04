@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 
@@ -23,6 +24,7 @@ RenewTask _task({
 
 void main() {
   _layerPrompt();
+  _projectField();
 
   group('两层各自可以选多个标签组', () {
     test('原样存取', () {
@@ -185,6 +187,37 @@ void _layerPrompt() {
       expect(back.unitTagPrompt, '按话术意图判断',
           reason: '用户写过的东西凭空消失，比字段改名难查得多');
       expect(back.shotTagPrompt, '', reason: '旧数据里没写就是没写');
+    });
+  });
+}
+
+/// 任务在哪个项目下找素材
+void _projectField() {
+  group('任务的项目', () {
+    test('往返 JSON 不丢', () {
+      final t = _task().copyWith(
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+
+      final back = RenewTask.fromJson(t.toJson());
+
+      expect(back.project, const ProjectRef(id: 104, name: '滴露植源喷雾'));
+    });
+
+    test('没选就是 null（= 不限项目，CLI 不传 --projects）', () {
+      expect(RenewTask.fromJson(_task().toJson()).project, isNull);
+    });
+
+    test('改回「不限项目」要真的清掉，不能被 ?? 当成没传', () {
+      final t = _task().copyWith(
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+
+      expect(t.copyWith(clearProject: true).project, isNull);
+    });
+
+    test('项目字段畸形只当没选，不让整条任务读不出来', () {
+      final json = _task().toJson()..['project'] = '一个字符串';
+
+      expect(RenewTask.fromJson(json).project, isNull);
     });
   });
 }

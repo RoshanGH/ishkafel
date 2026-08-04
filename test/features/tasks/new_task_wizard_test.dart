@@ -235,6 +235,8 @@ void main() {
       await tester.pumpAndSettle();
 
       // 视觉镜头层一次勾两个组
+      await tester.ensureVisible(find.byKey(const Key('wizard-shot-tag-group')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('wizard-shot-tag-group')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('画面类型').last);
@@ -256,6 +258,8 @@ void main() {
         (tester) async {
       await openWizard(tester, wrap());
 
+      await tester.ensureVisible(find.byKey(const Key('wizard-shot-tag-group')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('wizard-shot-tag-group')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('画面类型').last);

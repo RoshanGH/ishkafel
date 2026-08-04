@@ -477,6 +477,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       context,
       rangeMs: rangeMs,
       rangeLabel: _shotRangeLabel(fromShot, toShot),
+      projectIds: _projectIds,
     );
     if (choice is! BgmPicked || !mounted) return;
     await _saveBgm(_task.bgm.assign(
@@ -486,6 +487,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       shotRangeMs: rangeMs,
     ));
   }
+
+  /// 传给 miaoa CLI 的 `--projects`；不限项目时为空
+  List<int> get _projectIds =>
+      _task.project == null ? const [] : [_task.project!.id];
 
   /// 点了配乐轨上已有的一段：换一首，或者移除
   Future<void> _editBgmSegment(BgmSegment segment) async {
@@ -539,6 +544,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       shot: _task.shotTagGroups,
       unitPrompt: _task.unitTagPrompt,
       shotPrompt: _task.shotTagPrompt,
+      project: _task.project,
     );
     if (picked == null || !mounted) return;
 
@@ -547,6 +553,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       shotTagGroups: picked.shot,
       unitTagPrompt: picked.unitPrompt,
       shotTagPrompt: picked.shotPrompt,
+      project: picked.project,
+      // 选了「不限项目」要真的清掉
+      clearProject: picked.project == null,
     );
     try {
       await _tasks!.saveTagGroups(
@@ -555,6 +564,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         shot: picked.shot,
         unitPrompt: picked.unitPrompt,
         shotPrompt: picked.shotPrompt,
+        project: picked.project,
       );
     } catch (e) {
       AppLog.warn('标签组落库失败（taskId=${widget.task.id}）：$e');
@@ -798,6 +808,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
                   readOnly: !_isEditable,
+                  project: _task.project,
                   contentService: widget.contentService,
                   candidateProbe: widget.candidateProbe,
                   tagService: widget.tagService,

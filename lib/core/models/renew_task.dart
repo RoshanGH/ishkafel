@@ -4,6 +4,7 @@ import '../log/app_log.dart';
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
+import 'project_ref.dart';
 import 'tag_group_ref.dart';
 import 'video_info.dart';
 import 'semantic_unit.dart';
@@ -39,6 +40,12 @@ class RenewTask {
 
   /// 视觉镜头打标所用的 miaoa 标签组（同样可多选）；空表示该层不打标
   final List<TagGroupRef> shotTagGroups;
+
+  /// 这条任务在哪个 miaoa 项目下找素材；null 表示不限项目（我的全部项目）。
+  ///
+  /// 素材库里四万多条分镜横跨几十个项目，不限项目搜出来的大多不是这条片子
+  /// 能用的。放在标签组旁边一起设：两者都是「这条任务上哪儿找素材」这件事。
+  final ProjectRef? project;
 
   /// 台词语义单元这一层的打标约束（用户写的提示词），空串表示没写。
   ///
@@ -91,6 +98,7 @@ class RenewTask {
     this.asrSentences,
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
+    this.project,
     this.unitTagPrompt = '',
     this.shotTagPrompt = '',
     this.analysisError,
@@ -159,6 +167,8 @@ class RenewTask {
     List<AsrSentence>? asrSentences,
     List<TagGroupRef>? unitTagGroups,
     List<TagGroupRef>? shotTagGroups,
+    ProjectRef? project,
+    bool clearProject = false,
     String? unitTagPrompt,
     String? shotTagPrompt,
     String? analysisError,
@@ -181,6 +191,7 @@ class RenewTask {
         asrSentences: asrSentences ?? this.asrSentences,
         unitTagGroups: unitTagGroups ?? this.unitTagGroups,
         shotTagGroups: shotTagGroups ?? this.shotTagGroups,
+        project: clearProject ? null : (project ?? this.project),
         unitTagPrompt: unitTagPrompt ?? this.unitTagPrompt,
         shotTagPrompt: shotTagPrompt ?? this.shotTagPrompt,
         analysisError:
@@ -208,6 +219,7 @@ class RenewTask {
         // 并存，旧版本只认单个字段，不写它任务在旧版本上就成了「没选标签组」
         'unitTagGroup': unitTagGroup?.toJson(),
         'shotTagGroup': shotTagGroup?.toJson(),
+        'project': project?.toJson(),
         'unitTagPrompt': unitTagPrompt,
         'shotTagPrompt': shotTagPrompt,
         'analysisError': analysisError,
@@ -236,6 +248,7 @@ class RenewTask {
             .toList(),
         unitTagGroups: parseTagGroups(json['unitTagGroups'], json['unitTagGroup']),
         shotTagGroups: parseTagGroups(json['shotTagGroups'], json['shotTagGroup']),
+        project: ProjectRef.tryFromJson(json['project']),
         unitTagPrompt:
             parsePrompt(json['unitTagPrompt'], json['unitTagGroups']),
         shotTagPrompt:
@@ -292,6 +305,7 @@ class RenewTask {
       other.updatedAt == updatedAt &&
       _sameGroups(other.unitTagGroups, unitTagGroups) &&
       _sameGroups(other.shotTagGroups, shotTagGroups) &&
+      other.project == project &&
       other.unitTagPrompt == unitTagPrompt &&
       other.shotTagPrompt == shotTagPrompt &&
       other.analysisError == analysisError &&
@@ -312,6 +326,7 @@ class RenewTask {
       updatedAt,
       Object.hashAll(unitTagGroups),
       Object.hashAll(shotTagGroups),
+      project,
       unitTagPrompt,
       shotTagPrompt,
       analysisError,

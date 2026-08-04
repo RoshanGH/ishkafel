@@ -46,6 +46,62 @@ MiaoaContentService _service(
     });
 
 void main() {
+  group('检索范围限定在一个项目内', () {
+    test('三种模式都带上 --projects', () async {
+      final calls = <List<String>>[];
+      final service = _service(calls);
+
+      await service.searchByTags(tagIds: [1], projectIds: [104]);
+      await service.searchByDescription(keyword: '手持特写', projectIds: [104]);
+      await service.searchByImage(fileKey: 'k', projectIds: [104]);
+
+      for (final args in calls) {
+        expect(args, containsAllInOrder(['--projects', '104']),
+            reason: '素材库四万多条分镜横跨几十个项目，'
+                '不限项目搜出来的大多不是这条片子能用的');
+      }
+    });
+
+    test('多个项目用逗号连起来', () async {
+      final calls = <List<String>>[];
+      await _service(calls).searchByTags(tagIds: [1], projectIds: [104, 139]);
+
+      expect(calls.single, containsAllInOrder(['--projects', '104,139']));
+    });
+
+    test('不限项目时整个不传这个参数', () async {
+      final calls = <List<String>>[];
+      await _service(calls).searchByTags(tagIds: [1]);
+
+      expect(calls.single, isNot(contains('--projects')),
+          reason: 'CLI 把「不传」解释成我的全部项目聚合，'
+              '传空串反而会被当成非法值');
+    });
+
+    test('项目越权时把 CLI 那句话翻译成能据以行动的中文', () async {
+      final calls = <List<String>>[];
+      // 真机实测：这个错误写在 stdout（JSON），退出码 2，stderr 是空的
+      final service = _service(
+        calls,
+        exitCode: 2,
+        stdout: jsonEncode({
+          'error': {
+            'message': '以下项目不属于「我的项目」，不能作为 --projects/--project 值：[999999]。'
+          },
+          'ok': false,
+        }),
+      );
+
+      expect(
+        () => service.searchByTags(tagIds: [1], projectIds: [999999]),
+        throwsA(isA<MiaoaException>().having((e) => e.message, 'message',
+            contains('不在你可用的项目范围内'))),
+        reason: '只看 stderr 会把这条讲清楚了的报错降级成「请稍后重试」，'
+            '用户不知道该换项目',
+      );
+    });
+  });
+
   group('候选素材检索：三种互斥模式对应的 CLI 参数', () {
     test('标签精确筛：--public-tag 与匹配模式', () async {
       final calls = <List<String>>[];

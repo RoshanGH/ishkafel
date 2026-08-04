@@ -5,7 +5,9 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
+import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../tasks/new_task_wizard/project_field.dart';
 import '../tasks/new_task_wizard/tag_group_picker.dart';
 import '../tasks/new_task_wizard/tag_prompt_field.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
@@ -19,6 +21,9 @@ class TaskTagGroups {
   final String unitPrompt;
   final String shotPrompt;
 
+  /// 在哪个项目里找素材；null 表示不限项目
+  final ProjectRef? project;
+
   /// 确认时是否要求立刻重新打标
   final bool retagNow;
 
@@ -27,6 +32,7 @@ class TaskTagGroups {
     required this.shot,
     this.unitPrompt = '',
     this.shotPrompt = '',
+    this.project,
     required this.retagNow,
   });
 }
@@ -42,6 +48,7 @@ Future<TaskTagGroups?> showTaskTagGroupsDialog(
   required List<TagGroupRef> shot,
   String unitPrompt = '',
   String shotPrompt = '',
+  ProjectRef? project,
 }) =>
     showDialog<TaskTagGroups>(
       context: context,
@@ -49,7 +56,8 @@ Future<TaskTagGroups?> showTaskTagGroupsDialog(
           unit: unit,
           shot: shot,
           unitPrompt: unitPrompt,
-          shotPrompt: shotPrompt),
+          shotPrompt: shotPrompt,
+          project: project),
     );
 
 class _Dialog extends ConsumerStatefulWidget {
@@ -57,11 +65,13 @@ class _Dialog extends ConsumerStatefulWidget {
   final List<TagGroupRef> shot;
   final String unitPrompt;
   final String shotPrompt;
+  final ProjectRef? project;
   const _Dialog({
     required this.unit,
     required this.shot,
     required this.unitPrompt,
     required this.shotPrompt,
+    required this.project,
   });
 
   @override
@@ -71,6 +81,7 @@ class _Dialog extends ConsumerStatefulWidget {
 class _DialogState extends ConsumerState<_Dialog> {
   late List<TagGroupRef> _unit = widget.unit;
   late List<TagGroupRef> _shot = widget.shot;
+  late ProjectRef? _project = widget.project;
   late String _unitPrompt = widget.unitPrompt;
   late String _shotPrompt = widget.shotPrompt;
   bool _retag = true;
@@ -132,6 +143,12 @@ class _DialogState extends ConsumerState<_Dialog> {
                     style: const TextStyle(
                         color: AppColors.red, fontSize: AppFontSize.body))
               else ...[
+                // 项目在最上面：先定「上哪儿找」，再定「按什么找」
+                ProjectField(
+                  value: _project,
+                  onChanged: (p) => setState(() => _project = p),
+                ),
+                const SizedBox(height: AppSpacing.sm),
                 _row(
                   key: const Key('task-tag-groups-unit'),
                   label: '台词语义单元标签组',
@@ -195,6 +212,7 @@ class _DialogState extends ConsumerState<_Dialog> {
                       shot: _shot,
                       unitPrompt: _unitPrompt,
                       shotPrompt: _shotPrompt,
+                      project: _project,
                       retagNow: _retag,
                     )),
             child: const Text('保存'),

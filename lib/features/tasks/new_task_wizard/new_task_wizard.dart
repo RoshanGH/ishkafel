@@ -7,6 +7,7 @@ import '../../../app/theme/app_typography.dart';
 import '../../../core/log/app_log.dart';
 import '../../../core/miaoa/miaoa_failure.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
+import '../../../core/models/project_ref.dart';
 import '../../../core/models/tag_group_ref.dart';
 import 'tag_group_field.dart';
 import 'wizard_body.dart';
@@ -23,6 +24,7 @@ Future<NewTaskWizardResult?> showNewTaskWizard(
   List<TagGroupRef> prefillShotGroups = const [],
   String prefillUnitPrompt = '',
   String prefillShotPrompt = '',
+  ProjectRef? prefillProject,
 }) =>
     showDialog<NewTaskWizardResult>(
       context: context,
@@ -31,6 +33,7 @@ Future<NewTaskWizardResult?> showNewTaskWizard(
         prefillShotGroups: prefillShotGroups,
         prefillUnitPrompt: prefillUnitPrompt,
         prefillShotPrompt: prefillShotPrompt,
+        prefillProject: prefillProject,
       ),
     );
 
@@ -40,6 +43,7 @@ class NewTaskWizard extends ConsumerStatefulWidget {
   final List<TagGroupRef> prefillShotGroups;
   final String prefillUnitPrompt;
   final String prefillShotPrompt;
+  final ProjectRef? prefillProject;
 
   const NewTaskWizard({
     super.key,
@@ -47,6 +51,7 @@ class NewTaskWizard extends ConsumerStatefulWidget {
     this.prefillShotGroups = const [],
     this.prefillUnitPrompt = '',
     this.prefillShotPrompt = '',
+    this.prefillProject,
   });
 
   @override
@@ -59,6 +64,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   String? _groupsError;
   late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
   late final List<TagGroupRef> _shotGroups = [...widget.prefillShotGroups];
+  late ProjectRef? _project = widget.prefillProject;
   late String _unitPrompt = widget.prefillUnitPrompt;
   late String _shotPrompt = widget.prefillShotPrompt;
   TagPreview? _unitPreview;
@@ -167,7 +173,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
         unitTagGroups: List.of(_unitGroups),
         shotTagGroups: List.of(_shotGroups),
         unitTagPrompt: _unitPrompt,
-        shotTagPrompt: _shotPrompt));
+        shotTagPrompt: _shotPrompt,
+        project: _project));
   }
 
   @override
@@ -205,6 +212,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     // 不 setState：输入框自己管着文本，重建只会打断输入
                     onUnitPromptChanged: (v) => _unitPrompt = v,
                     onShotPromptChanged: (v) => _shotPrompt = v,
+                    project: _project,
+                    onProjectChanged: (p) => setState(() => _project = p),
                   ),
                 ),
               ),

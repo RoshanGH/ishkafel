@@ -4,6 +4,7 @@ import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/miaoa/candidate_probe.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
+import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
@@ -14,25 +15,30 @@ import 'package:ishkafel/features/workbench/candidate_tab.dart';
 class _FakeContentService implements MiaoaContentService {
   final tagQueries = <List<int>>[];
   final keywordQueries = <String>[];
+  final projectQueries = <List<int>>[];
 
   @override
   Future<CandidatePage> searchByTags({
     required List<int> tagIds,
     String mode = 'or',
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
   }) async {
     tagQueries.add(List.of(tagIds));
+    projectQueries.add(List.of(projectIds));
     return CandidatePage(items: const [], total: 0, skipped: 0);
   }
 
   @override
   Future<CandidatePage> searchByDescription({
     required String keyword,
+    List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
   }) async {
     keywordQueries.add(keyword);
+    projectQueries.add(List.of(projectIds));
     return CandidatePage(items: const [], total: 0, skipped: 0);
   }
 
@@ -81,6 +87,7 @@ Future<(SegmentationEditorController, _FakeContentService)> _pump(
   WidgetTester tester, {
   List<UnitReplacement>? initial,
   List<UnitReplacement>? Function(List<UnitReplacement>)? onSave,
+  ProjectRef? project,
 }) async {
   final editor = SegmentationEditorController(
     initialUnits: _units(),
@@ -102,6 +109,7 @@ Future<(SegmentationEditorController, _FakeContentService)> _pump(
           editor: editor,
           shotTagGroups: const [TagGroupRef(id: 1, name: '视觉镜头标签')],
           initialReplacements: initial,
+          project: project,
           onReplacementsChanged: (r) => onSave?.call(r),
           contentService: content,
           tagService: tags,
@@ -122,6 +130,8 @@ Future<void> _chooseWhole(WidgetTester tester) async {
 }
 
 void main() {
+  _projectScope();
+
   group('候选面板跟着工作台的选中走，不自己维护一份', () {
     testWidgets('在时间线上选中另一个单元，检索键跟着换', (tester) async {
       final (editor, content) = await _pump(tester);
@@ -297,4 +307,43 @@ class _TabHost extends StatelessWidget {
           Expanded(child: SizedBox(width: 300, child: child)),
         ],
       );
+}
+
+/// 项目是「上哪儿找素材」，两种替换方式都要受它限定
+void _projectScope() {
+  group('检索限定在任务选的项目里', () {
+    testWidgets('选了项目，替换素材就只在这个项目里找', (tester) async {
+      final (editor, content) = await _pump(tester,
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+
+      editor.select(const EditorSelection.unit(0));
+      await tester.pumpAndSettle();
+      await _chooseWhole(tester);
+
+      expect(content.projectQueries.last, [104],
+          reason: '不带项目搜出来的是别的片子的素材，用户还得自己认');
+    });
+
+    testWidgets('镜头替换同样带项目——两种替换方式都要限定范围', (tester) async {
+      final (editor, content) = await _pump(tester,
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+
+      editor.select(const EditorSelection.shot(0, 1));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-mode-per-shot')));
+      await tester.pumpAndSettle();
+
+      expect(content.projectQueries.last, [104]);
+    });
+
+    testWidgets('没选项目时不限项目', (tester) async {
+      final (editor, content) = await _pump(tester);
+
+      editor.select(const EditorSelection.unit(0));
+      await tester.pumpAndSettle();
+      await _chooseWhole(tester);
+
+      expect(content.projectQueries.last, isEmpty);
+    });
+  });
 }
