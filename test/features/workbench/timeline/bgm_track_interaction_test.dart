@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/audio/voice_plan.dart';
+import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
@@ -88,6 +90,8 @@ double get _bgmY => TimelineTracks.bgmTop + TimelineTracks.bgmH / 2;
 Offset _at(double x) => Offset(x, _bgmY);
 
 void main() {
+  _voiceMarks();
+
   group('在配乐轨上横向拖选一段连续镜头', () {
     testWidgets('拖过两个镜头就选中这两个', (tester) async {
       await _pump(tester);
@@ -176,5 +180,51 @@ void main() {
 
       expect(tapped, isEmpty);
     });
+  });
+}
+
+/// 换过音色的单元要在时间线上看得出来——不然用户配完一轮就忘了改过哪几句
+void _voiceMarks() {
+  testWidgets('换过音色的单元与没换的画得不一样', (tester) async {
+    final playhead = ValueNotifier<int>(0);
+    addTearDown(playhead.dispose);
+    tester.view.physicalSize = const Size(_viewportWidth, 500);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    Future<TimelinePainter> painterWith(VoicePlan voices) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: _viewportWidth,
+            height: 500,
+            child: TimelineView(
+              controller: _editor(),
+              geometry: const TimelineGeometry(
+                  durationMs: _durationMs, msPerPx: 20, scrollPx: 0),
+              playhead: playhead,
+              onSeek: (_) {},
+              onGeometryChanged: (_) {},
+              voices: voices,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((w) => w.painter)
+          .whereType<TimelinePainter>()
+          .first;
+    }
+
+    const vivi = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi');
+    final plain = await painterWith(VoicePlan.empty);
+    final marked = await painterWith(VoicePlan.empty.assign([0], vivi));
+
+    expect(marked.shouldRepaint(plain), isTrue,
+        reason: '换了音色却不重画，时间线上永远看不到那道标记');
+    expect(plain.shouldRepaint(plain), isFalse,
+        reason: '没变还重画的话，播放时每秒白重画 30 次整条时间线');
   });
 }

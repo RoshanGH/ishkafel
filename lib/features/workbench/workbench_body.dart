@@ -347,6 +347,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       unawaited(_segment.play(start, end, editor.fps)),
                   clock: widget.clock ?? DateTime.now,
                   bgm: widget.bgm,
+                  voices: widget.voices,
                   onBgmRangeSelected: widget.onBgmRangeSelected,
                   onBgmSegmentTap: widget.onBgmSegmentTap,
                   readOnly: widget.readOnly,

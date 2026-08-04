@@ -94,6 +94,25 @@ class VoicePlan {
   List<Map<String, dynamic>> toJson() =>
       [for (final a in assignments) a.toJson()];
 
+  /// 值相等：时间线的 shouldRepaint 靠它判断要不要重画。不实现的话每帧
+  /// 都判定为「变了」，播放时每秒重画 30 次整条时间线。
+  @override
+  bool operator ==(Object other) {
+    if (other is! VoicePlan) return false;
+    if (other.assignments.length != assignments.length) return false;
+    for (var i = 0; i < assignments.length; i++) {
+      if (other.assignments[i].unitIndex != assignments[i].unitIndex ||
+          other.assignments[i].voice != assignments[i].voice) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(
+      [for (final a in assignments) Object.hash(a.unitIndex, a.voice)]);
+
   /// 宽松解析：一条畸形只丢那一条。任务 JSON 里一处解析失败就让整条任务
   /// 从列表消失，用户看到的是「我的任务不见了」。
   static VoicePlan fromJson(Object? raw) {

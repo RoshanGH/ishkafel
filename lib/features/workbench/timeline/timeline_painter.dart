@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
 import 'package:ishkafel/app/theme/app_colors.dart';
 import 'package:ishkafel/app/theme/app_spacing.dart';
@@ -37,6 +38,9 @@ class TimelinePainter extends CustomPainter {
 
   /// 正在框选的配乐区间（镜头下标，含两端）。拖动过程中画高亮预览。
   final ({int from, int to})? bgmSelecting;
+
+  /// 换音色方案。换过的单元在块体底边画一道绿杠。
+  final VoicePlan voices;
   final TimelineGeometry geometry;
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
@@ -60,6 +64,9 @@ class TimelinePainter extends CustomPainter {
   /// （实测 60 单元 fit 视图下每帧 2.1ms 全花在渲染省略号上）
   static const _minLabelWidth = 24.0;
 
+  /// 换过音色的单元底边那道杠的高度
+  static const _voiceMarkH = 3.0;
+
   /// 单元色块 6 色循环
   static const _unitColors = [
     AppColors.accentBlue,
@@ -76,6 +83,7 @@ class TimelinePainter extends CustomPainter {
     required this.geometry,
     this.bgm = BgmPlan.empty,
     this.bgmSelecting,
+    this.voices = VoicePlan.empty,
     this.thumbImages,
     this.waveEnvelope,
     required this.playheadMs,
@@ -185,6 +193,19 @@ class TimelinePainter extends CustomPainter {
           ..style = PaintingStyle.stroke
           ..strokeWidth = selected ? 2 : 1,
       );
+
+      // 换过音色的单元在底边画一道绿杠。
+      //
+      // 为什么不像配乐那样单开一条轨：音色本来就属于单元，标在单元块上比
+      // 另起一条更贴切；而且第六条轨会把轨道总高推到 332px，反推最小窗口高
+      // 972——1440×900 的笔记本就装不下整个窗口了。
+      if (voices.voiceOf(unit.index) != null) {
+        canvas.drawRect(
+          Rect.fromLTRB(rect.left, rect.bottom - _voiceMarkH, rect.right,
+              rect.bottom),
+          Paint()..color = AppColors.green,
+        );
+      }
 
       // 块体窄到放不下左右内边距时（拖边界产生的亚像素单元），标签无处可画，
       // 直接跳过：此时 `rect.width - 内边距*2` 为负，交给 TextPainter 会在
@@ -544,6 +565,7 @@ class TimelinePainter extends CustomPainter {
         oldDelegate.waveEnvelope != waveEnvelope ||
         oldDelegate.playheadMs != playheadMs ||
         oldDelegate.bgm != bgm ||
-        oldDelegate.bgmSelecting != bgmSelecting;
+        oldDelegate.bgmSelecting != bgmSelecting ||
+        oldDelegate.voices != voices;
   }
 }

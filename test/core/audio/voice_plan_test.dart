@@ -5,6 +5,8 @@ const _warm = VoiceRef(id: 'zh_female_wanwanxiaohe_moon_bigtts', name: '湾湾�
 const _man = VoiceRef(id: 'zh_male_yangguangqingnian_moon_bigtts', name: '阳光青年');
 
 void main() {
+  _equality();
+
   group('音色按台词语义单元分配', () {
     test('给几个单元指定同一个音色', () {
       final plan = VoicePlan.empty.assign([0, 2, 3], _warm);
@@ -78,6 +80,34 @@ void main() {
       expect(back.assignedUnits, [0],
           reason: '一条配音记录畸形就让整条任务从列表消失，'
               '用户看到的是「我的任务不见了」');
+    });
+  });
+}
+
+/// 时间线的 shouldRepaint 靠值相等判断要不要重画
+void _equality() {
+  group('值相等', () {
+    test('内容相同的两份方案相等', () {
+      final a = VoicePlan.empty.assign([0, 2], _warm);
+      final b = VoicePlan.empty.assign([0, 2], _warm);
+
+      expect(a, b);
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('音色不同就不等', () {
+      expect(VoicePlan.empty.assign([0], _warm),
+          isNot(VoicePlan.empty.assign([0], _man)));
+    });
+
+    test('单元不同就不等', () {
+      expect(VoicePlan.empty.assign([0], _warm),
+          isNot(VoicePlan.empty.assign([1], _warm)));
+    });
+
+    test('空方案彼此相等——否则每帧都判定为变了，播放时整条时间线每秒重画 30 次',
+        () {
+      expect(VoicePlan.empty, const VoicePlan([]));
     });
   });
 }

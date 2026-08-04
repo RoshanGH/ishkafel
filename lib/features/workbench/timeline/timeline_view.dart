@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
@@ -68,6 +69,9 @@ class TimelineView extends StatefulWidget {
   /// 配乐方案（画在配乐轨上）
   final BgmPlan bgm;
 
+  /// 换音色方案（换过的单元在块体底边画一道绿杠）
+  final VoicePlan voices;
+
   /// 在配乐轨上框选完一段连续镜头（全片打平下标，含两端）
   final void Function(int fromShot, int toShot)? onBgmRangeSelected;
 
@@ -96,6 +100,7 @@ class TimelineView extends StatefulWidget {
     this.onScrubEnd,
     this.onPlaySegment,
     this.bgm = BgmPlan.empty,
+    this.voices = VoicePlan.empty,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
     DateTime Function()? clock,
@@ -466,6 +471,7 @@ class _TimelineViewState extends State<TimelineView> {
                     mediaStatus: widget.mediaStatus,
                     bgm: widget.bgm,
                     bgmSelecting: _bgmSelecting,
+                    voices: widget.voices,
                     textCache: _textCache,
                   ),
                 ),
