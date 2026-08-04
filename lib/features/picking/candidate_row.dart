@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import 'candidate_ranking.dart';
 import 'candidate_search_controller.dart';
 import 'picking_messages.dart';
 
@@ -24,6 +25,10 @@ class CandidateRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onPlay;
 
+  /// 这一层的检索标签，用来标出「命中几个」——排序凭什么把它排前面，
+  /// 得让用户看得见
+  final List<String> queryTags;
+
   const CandidateRow({
     super.key,
     required this.entry,
@@ -31,6 +36,7 @@ class CandidateRow extends StatelessWidget {
     required this.targetMs,
     required this.onTap,
     required this.onPlay,
+    this.queryTags = const [],
   });
 
   static const double height = 88;
@@ -123,9 +129,23 @@ class CandidateRow extends StatelessWidget {
                         fontSize: AppFontSize.micro)),
               ),
             _spec(),
+            _match(),
           ],
         ),
       ],
+    );
+  }
+
+  /// 命中了几个检索标签。写出来排序才解释得通——否则用户只觉得顺序莫名其妙。
+  Widget _match() {
+    if (queryTags.isEmpty) return const SizedBox.shrink();
+    final hit = CandidateRanking.overlap(entry.material.tags, queryTags);
+    if (hit == 0) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(left: AppSpacing.xs),
+      child: Text('命中 $hit/${queryTags.length} 标签',
+          style: const TextStyle(
+              color: AppColors.purple, fontSize: AppFontSize.micro)),
     );
   }
 

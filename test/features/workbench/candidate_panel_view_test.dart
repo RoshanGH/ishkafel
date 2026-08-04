@@ -24,7 +24,9 @@ class _Content implements MiaoaContentService {
         thumbnailUrl: null,
         previewUrl: 'https://cdn/$i.mp4',
         fileKey: null,
-        tags: const [],
+        // 只有第 2 条带着检索标签——素材库按「任一命中」返回，
+        // 顺序大致是入库时间倒序
+        tags: i == 2 ? const ['促单'] : const [],
       ),
     );
     final from = (page - 1) * pageSize;
@@ -233,6 +235,28 @@ void main() {
       await _perShot(tester);
 
       expect(content.pages.last, 1);
+    });
+  });
+
+  group('把最像的排前面', () {
+    testWidgets('命中标签的那条排到第一位，并写明命中几个', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+
+      final rows = tester
+          .widgetList<Text>(find.descendant(
+            of: find.byKey(const Key('picking-candidate-102')),
+            matching: find.byType(Text),
+          ))
+          .map((t) => t.data)
+          .toList();
+
+      expect(rows, contains('命中 1/1 标签'),
+          reason: '排序凭什么把它排前面，得让用户看得见');
+      // 第一行就是它：按重合度重排之后，沾边的那条不再被埋在后面
+      final first = tester.getTopLeft(find.byKey(const Key('picking-candidate-102')));
+      final other = tester.getTopLeft(find.byKey(const Key('picking-candidate-100')));
+      expect(first.dy, lessThan(other.dy));
     });
   });
 }
