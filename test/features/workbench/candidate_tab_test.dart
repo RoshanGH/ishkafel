@@ -64,6 +64,7 @@ List<SemanticUnit> _units() => const [
         startMs: 0,
         endMs: 2000,
         transcript: '第一句台词',
+        tags: ['促单', '辅助卖点'],
         shots: [
           Shot(startMs: 0, endMs: 1000, tags: ['近景']),
           Shot(startMs: 1000, endMs: 2000, tags: ['中景']),
@@ -74,6 +75,7 @@ List<SemanticUnit> _units() => const [
         startMs: 2000,
         endMs: 4000,
         transcript: '第二句台词',
+        tags: ['主卖点解决方案'],
         shots: [
           Shot(startMs: 2000, endMs: 3000, tags: ['远景']),
           Shot(startMs: 3000, endMs: 4000, tags: ['特写']),
@@ -81,7 +83,9 @@ List<SemanticUnit> _units() => const [
       ),
     ];
 
+/// 画面层（视觉镜头标签组 id=1）与台词语义层（标签组 id=2）各一套
 const _tagIds = {'近景': 11, '中景': 12, '远景': 13, '特写': 14};
+const _unitTagIds = {'促单': 21, '辅助卖点': 22, '主卖点解决方案': 23};
 
 Future<(SegmentationEditorController, _FakeContentService)> _pump(
   WidgetTester tester, {
@@ -98,6 +102,9 @@ Future<(SegmentationEditorController, _FakeContentService)> _pump(
   final content = _FakeContentService();
   final tags = _FakeTagService({
     1: [for (final e in _tagIds.entries) TagInfo(id: e.value, name: e.key)],
+    2: [
+      for (final e in _unitTagIds.entries) TagInfo(id: e.value, name: e.key)
+    ],
   });
 
   await tester.pumpWidget(MaterialApp(
@@ -108,6 +115,7 @@ Future<(SegmentationEditorController, _FakeContentService)> _pump(
         child: CandidateTab(
           editor: editor,
           shotTagGroups: const [TagGroupRef(id: 1, name: '视觉镜头标签')],
+          unitTagGroups: const [TagGroupRef(id: 2, name: '台词语义单元标签')],
           initialReplacements: initial,
           project: project,
           onReplacementsChanged: (r) => onSave?.call(r),
@@ -139,14 +147,14 @@ void main() {
       editor.select(const EditorSelection.unit(0));
       await tester.pumpAndSettle();
       await _chooseWhole(tester);
-      // 整体替换取本单元所有镜头标签的并集
-      expect(content.tagQueries.last, unorderedEquals([11, 12]));
+      // 整体替换用这个台词语义单元自己的标签，不是它那几个镜头标签的并集
+      expect(content.tagQueries.last, unorderedEquals([21, 22]));
 
       editor.select(const EditorSelection.unit(1));
       await tester.pumpAndSettle();
       await _chooseWhole(tester);
 
-      expect(content.tagQueries.last, unorderedEquals([13, 14]),
+      expect(content.tagQueries.last, unorderedEquals([23]),
           reason: '右栏是同一个工作台的另一个视图：时间线上选中谁，'
               '就是在给谁挑素材，不该还要在右栏里再选一次');
     });

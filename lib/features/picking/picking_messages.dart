@@ -66,15 +66,16 @@ const String stage3UnavailableNotice = '矩阵导出（阶段③）尚未开放�
 String emptyResultGuidance({
   required CandidateSearchMode mode,
   required int queryTagCount,
+  bool perShot = true,
 }) {
   switch (mode) {
     case CandidateSearchMode.tag:
       if (queryTagCount == 0) {
-        return '这个视觉镜头还没有打上标签，按标签检索没有可用的检索键。'
-            '可以改用「画面描述」或「首帧搜图」，或回到切分阶段为它补上标签';
+        return '这个${perShot ? '视觉镜头' : '台词语义单元'}还没有打上标签，'
+            '按标签检索没有可用的检索键。可以回到时间线上为它补上标签';
       }
-      return '素材库里没有带这些标签的候选素材。可以放宽标签条件（改为「任一满足」），'
-          '或改用「画面描述」「首帧搜图」再找一遍';
+      return '这个项目里没有带这些标签的候选素材。可以换一个项目，'
+          '或回去调整这一层的标签';
     case CandidateSearchMode.description:
       return '素材库里没有画面描述相近的候选素材。换个说法描述这段画面，'
           '或改用「首帧搜图」按画面找';
@@ -91,13 +92,15 @@ String emptyResultGuidance({
 String? tagSearchDisabledReason({
   required bool hasShotTagGroup,
   required int queryTagCount,
+  bool perShot = true,
 }) {
+  final layer = perShot ? '视觉镜头' : '台词语义单元';
   if (!hasShotTagGroup) {
-    return '新建这条任务时没有为视觉镜头选择标签组，画面层没有打标，因此无法按标签检索。'
-        '请改用「画面描述」或「首帧搜图」';
+    return '这条任务没有为$layer选择标签组，这一层没有打标，因此无法按标签检索。'
+        '可在「标签组设置」里补上';
   }
   if (queryTagCount == 0) {
-    return '这个视觉镜头没有标签，无法按标签检索';
+    return '这个$layer没有标签，无法按标签检索';
   }
   return null;
 }
@@ -110,14 +113,15 @@ String? tagSearchDisabledReason({
 String? tagSearchUnavailableText({
   required bool hasShotTagGroup,
   required int queryTagCount,
+  bool perShot = true,
 }) {
   if (!hasShotTagGroup) {
     return tagSearchDisabledReason(
-        hasShotTagGroup: false, queryTagCount: queryTagCount);
+        hasShotTagGroup: false, queryTagCount: queryTagCount, perShot: perShot);
   }
   if (queryTagCount == 0) {
     return emptyResultGuidance(
-        mode: CandidateSearchMode.tag, queryTagCount: 0);
+        mode: CandidateSearchMode.tag, queryTagCount: 0, perShot: perShot);
   }
   return null;
 }

@@ -210,31 +210,46 @@ class CandidatePanel extends StatelessWidget {
   /// 检索方式三选一（互斥）。不可用的方式点不动，原因写在下方而不是留白。
   Widget _searchSegment() {
     final tagReason = scope.tagUnavailableText;
+    // 整体替换只有「标签」一条路，就别摆一排按钮：画面描述是按镜头生成的，
+    // 首帧搜图还没接通——三选一里两个点不动，看着像是坏了
+    final modes = <CandidateSearchMode>[
+      CandidateSearchMode.tag,
+      if (scope.descriptionSupported) ...[
+        CandidateSearchMode.description,
+        CandidateSearchMode.image,
+      ],
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        PickingSegmented(
-          selectedIndex: CandidateSearchMode.values.indexOf(searchMode),
-          options: [
-            SegmentOption(
-              key: const Key('picking-search-tag'),
-              label: '标签',
-              enabled: tagReason == null,
-              onTap: () => onSearchModeChanged(CandidateSearchMode.tag),
-            ),
-            SegmentOption(
-              key: const Key('picking-search-description'),
-              label: '画面描述',
-              onTap: () => onSearchModeChanged(CandidateSearchMode.description),
-            ),
-            SegmentOption(
-              key: const Key('picking-search-image'),
-              label: '首帧搜图',
-              enabled: false,
-              onTap: () => onSearchModeChanged(CandidateSearchMode.image),
-            ),
-          ],
-        ),
+        if (modes.length > 1)
+          PickingSegmented(
+            selectedIndex: modes.indexOf(searchMode).clamp(0, modes.length - 1),
+            options: [
+              for (final mode in modes)
+                switch (mode) {
+                  CandidateSearchMode.tag => SegmentOption(
+                      key: const Key('picking-search-tag'),
+                      label: '标签',
+                      enabled: tagReason == null,
+                      onTap: () => onSearchModeChanged(CandidateSearchMode.tag),
+                    ),
+                  CandidateSearchMode.description => SegmentOption(
+                      key: const Key('picking-search-description'),
+                      label: '画面描述',
+                      onTap: () =>
+                          onSearchModeChanged(CandidateSearchMode.description),
+                    ),
+                  CandidateSearchMode.image => SegmentOption(
+                      key: const Key('picking-search-image'),
+                      label: '首帧搜图',
+                      enabled: false,
+                      onTap: () =>
+                          onSearchModeChanged(CandidateSearchMode.image),
+                    ),
+                },
+            ],
+          ),
         if (tagReason != null) _reasonText(tagReason),
         if (searchMode == CandidateSearchMode.image)
           _reasonText(imageSearchUnavailableReason),

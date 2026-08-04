@@ -17,6 +17,7 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/models/tag_group_ref.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
@@ -488,6 +489,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     ));
   }
 
+  static bool _sameGroups(List<TagGroupRef> a, List<TagGroupRef> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   /// 传给 miaoa CLI 的 `--projects`；不限项目时为空
   List<int> get _projectIds =>
       _task.project == null ? const [] : [_task.project!.id];
@@ -503,6 +512,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       rangeMs: rangeMs,
       rangeLabel: _shotRangeLabel(segment.startShot, segment.endShot),
       canClear: true,
+      projectIds: _projectIds,
     );
     if (choice == null || !mounted) return;
     await _saveBgm(switch (choice) {
@@ -548,6 +558,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     if (picked == null || !mounted) return;
 
+    // 打标的输入变没变：词表（标签组）与约束。项目不在其中
+    final taggingChanged = !_sameGroups(_task.unitTagGroups, picked.unit) ||
+        !_sameGroups(_task.shotTagGroups, picked.shot) ||
+        _task.unitTagPrompt != picked.unitPrompt ||
+        _task.shotTagPrompt != picked.shotPrompt;
+
     _task = _task.copyWith(
       unitTagGroups: picked.unit,
       shotTagGroups: picked.shot,
@@ -573,7 +589,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
     if (!mounted) return;
     setState(() {});
-    if (!picked.retagNow) return;
+    // 只改了项目就别重打：项目决定的是「上哪儿找替换素材」，
+    // 跟怎么打标毫无关系，白跑一遍几分钟的云端推理
+    if (!picked.retagNow || !taggingChanged) return;
 
     // 全片重打：换词表就是把整份标签作废了，只重打其中几个没有意义
     await _retag(EditConsequence(
@@ -805,6 +823,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 candidatePanel: CandidateTab(
                   editor: editor,
                   shotTagGroups: _task.shotTagGroups,
+                  unitTagGroups: _task.unitTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
                   readOnly: !_isEditable,

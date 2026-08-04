@@ -12,6 +12,7 @@ import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/miaoa/miaoa_project_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/video_info.dart';
@@ -103,6 +104,15 @@ class _RecordingUnitTagger implements UnitTagger {
   noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _FakeProjectService implements MiaoaProjectService {
+  @override
+  Future<List<MiaoaProject>> listProjects() async =>
+      const [MiaoaProject(id: 104, name: '滴露植源喷雾')];
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class _FakeTagService implements MiaoaTagService {
   @override
   Future<List<TagGroup>> listGroups() async => const [
@@ -132,6 +142,7 @@ Future<_Repo> _open(WidgetTester tester, {TaggingService? tagging}) async {
       taskRepositoryProvider.overrideWithValue(repo),
       taggingServiceProvider.overrideWithValue(tagging),
       miaoaTagServiceProvider.overrideWithValue(_FakeTagService()),
+      miaoaProjectServiceProvider.overrideWithValue(_FakeProjectService()),
     ],
     child: MaterialApp(
       home: WorkbenchPage(
@@ -260,6 +271,10 @@ void main() {
 
       await tester.tap(find.byKey(const Key('workbench-tag-groups-btn')));
       await tester.pumpAndSettle();
+      // 改了打标约束——和换词表一样，是打标的输入变了
+      await tester.enterText(
+          find.byKey(const Key('tag-prompt-unit')), '按话术意图判断');
+      await tester.pump();
       await tester.tap(find.byKey(const Key('task-tag-groups-save')));
       await tester.pumpAndSettle();
 
@@ -267,6 +282,32 @@ void main() {
           reason: '换词表等于把整份标签作废了，只重打其中几个没有意义');
       final saved = await repo.findById('ec-1');
       expect(saved!.units!.every((u) => u.tags.contains('重打出来的')), isTrue);
+    });
+
+    testWidgets('只改了项目就不重打——项目跟怎么打标毫无关系', (tester) async {
+      final tagger = _RecordingUnitTagger();
+      final repo = await _open(tester,
+          tagging: TaggingService(
+            unitTagger: tagger,
+            vocabulary: _Vocab(),
+            workDir: Directory.systemTemp.createTempSync('ishkafel_rt3_'),
+          ));
+
+      await tester.tap(find.byKey(const Key('workbench-tag-groups-btn')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('project-field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('project-104')));
+      await tester.pumpAndSettle();
+      // 「立即重打」是勾着的，但打标的输入并没有变
+      await tester.tap(find.byKey(const Key('task-tag-groups-save')));
+      await tester.pumpAndSettle();
+
+      expect(tagger.asked, isEmpty,
+          reason: '项目决定的是「上哪儿找替换素材」，'
+              '白跑一遍几分钟的云端推理还把标签重写一遍');
+      expect((await repo.findById('ec-1'))!.project?.id, 104,
+          reason: '项目本身要存下来');
     });
 
     testWidgets('不勾「立即重打」就只存标签组，不去打标', (tester) async {

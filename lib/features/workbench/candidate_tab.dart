@@ -31,6 +31,9 @@ class CandidateTab extends StatefulWidget {
   final SegmentationEditorController editor;
   final List<TagGroupRef> shotTagGroups;
 
+  /// 台词语义单元标签组：整体替换用这一层的标签当检索键
+  final List<TagGroupRef> unitTagGroups;
+
   /// 已保存的替换方案
   final List<UnitReplacement>? initialReplacements;
 
@@ -52,6 +55,7 @@ class CandidateTab extends StatefulWidget {
     super.key,
     required this.editor,
     required this.shotTagGroups,
+    this.unitTagGroups = const [],
     required this.onReplacementsChanged,
     this.initialReplacements,
     this.readOnly = false,
@@ -120,8 +124,13 @@ class CandidateTabState extends State<CandidateTab> {
   /// 标签表拉取失败不阻断：候选面板会把标签检索标为不可用并说明原因，
   /// 画面描述检索照常可用。
   Future<void> _loadTagVocabulary() async {
-    if (widget.shotTagGroups.isEmpty) return;
-    await _tagResolver.loadAll([for (final g in widget.shotTagGroups) g.id]);
+    // 两层的标签表都要：整体替换按台词语义层的标签搜，镜头替换按画面层的
+    final groupIds = {
+      for (final g in widget.unitTagGroups) g.id,
+      for (final g in widget.shotTagGroups) g.id,
+    };
+    if (groupIds.isEmpty) return;
+    await _tagResolver.loadAll(groupIds);
     if (!mounted) return;
     // 标签表是异步拉的：刚进来看着可用、拉完（或拉失败）才知道到底行不行，
     // 这一刻同样不能把点不动的段留在选中态
@@ -185,12 +194,19 @@ class CandidateTabState extends State<CandidateTab> {
   /// 标签不可用时自动落到画面描述——把一个用不了的检索方式选中着，
   /// 面板就永远是空的，用户不知道该做什么
   void _syncSearchMode() {
-    if (_searchMode != CandidateSearchMode.tag) return;
     final scope = _scope;
+    // 整体替换没有「画面描述」这条路：画面描述是对单个镜头生成的，
+    // 一整句台词对应一串镜头，没有一句能代表它们的描述
+    if (!scope.descriptionSupported &&
+        _searchMode == CandidateSearchMode.description) {
+      _searchMode = CandidateSearchMode.tag;
+      return;
+    }
+    if (_searchMode != CandidateSearchMode.tag) return;
     // 「还在读标签表」不是「用不了」：这一刻切走是不可逆的（不会再切回来），
     // 拉完一切正常时用户就白白丢了主路径
     if (scope.tagPending) return;
-    if (scope.tagUnavailableText != null) {
+    if (scope.tagUnavailableText != null && scope.descriptionSupported) {
       _searchMode = CandidateSearchMode.description;
     }
   }
@@ -199,6 +215,7 @@ class CandidateTabState extends State<CandidateTab> {
         picking: _picking,
         resolver: _tagResolver,
         shotTagGroups: widget.shotTagGroups,
+        unitTagGroups: widget.unitTagGroups,
       );
 
   Future<void> _refreshSearchIfNeeded() async {

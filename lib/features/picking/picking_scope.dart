@@ -22,8 +22,17 @@ class PickingScope {
   /// 目标片段时长，用于候选卡的时长差徽标
   final int targetDurationMs;
 
-  /// 画面描述检索的默认关键词（取本单元台词——原片这一层没有 AI 画面描述）
+  /// 画面描述检索的关键词：选中那个视觉镜头的 AI 画面描述。
+  /// 台词语义单元层不做画面描述检索（见 [descriptionSupported]）。
   final String descriptionKeyword;
+
+  /// 这个作用域支不支持「画面描述」检索。
+  ///
+  /// 只有镜头层支持：画面描述是打标时对**这一个镜头**生成的一句话，
+  /// 拿它去搜分镜库才对得上。整体替换换的是一整句台词对应的一串镜头，
+  /// 没有一句能代表它们的画面描述——早先拿台词原文去当描述搜，
+  /// 搜的是「话术像不像」，而库里那一栏写的是「画面里有什么」，本就对不上。
+  final bool descriptionSupported;
 
   /// 标签检索不可用的原因；可用时为 null
   final String? tagUnavailableText;
@@ -38,19 +47,26 @@ class PickingScope {
     required this.tagIds,
     required this.targetDurationMs,
     required this.descriptionKeyword,
+    this.descriptionSupported = false,
     required this.tagUnavailableText,
     this.tagPending = false,
   });
 
   /// 从当前状态推导作用域。
   ///
-  /// 整体替换取本单元**所有视觉镜头标签的并集**：候选素材是分镜库素材，能与
-  /// 之比对的只有画面层标签；台词语义层的标签属于另一套词表，拿去检索分镜
-  /// 只会检索出无关素材。
+  /// 两层各用各的标签，不混：
+  /// - **整体替换**用这个台词语义单元自己的标签（促单、主卖点解决方案…），
+  ///   它们来自台词语义单元标签组。这类标签组在 miaoa 里同样挂在分镜上
+  ///   （materialType=STORYBOARD），所以拿去搜分镜是对得上的。
+  /// - **镜头替换**用选中那个视觉镜头自己的标签（场景、动作、镜头类别…）。
+  ///
+  /// 早先整体替换取的是「本单元所有镜头标签的并集」——一个单元七八个镜头
+  /// 就是十几个标签，再按「任一满足」去搜，等于把半个素材库都捞回来。
   factory PickingScope.from({
     required PickingController picking,
     required TagIdResolver resolver,
     required List<TagGroupRef> shotTagGroups,
+    List<TagGroupRef> unitTagGroups = const [],
   }) {
     final unit = picking.currentUnit;
     if (unit == null) {
@@ -68,9 +84,11 @@ class PickingScope {
         shotIndex != null &&
         shotIndex < unit.shots.length;
 
+    // 这一层的标签取自这一层自己的标签组
+    final groups = perShot ? shotTagGroups : unitTagGroups;
     final names = perShot
         ? List<String>.from(unit.shots[shotIndex].tags)
-        : _unionShotTags(picking);
+        : List<String>.from(unit.tags);
     final ids = resolver.idsOf(names);
 
     return PickingScope(
@@ -78,43 +96,36 @@ class PickingScope {
       tagIds: List.unmodifiable(ids),
       targetDurationMs:
           perShot ? unit.shots[shotIndex].durationMs : unit.durationMs,
-      descriptionKeyword: unit.transcript,
+      descriptionKeyword: perShot ? unit.shots[shotIndex].description ?? '' : '',
+      descriptionSupported: perShot,
       tagUnavailableText: _tagUnavailable(
         resolver: resolver,
-        shotTagGroups: shotTagGroups,
+        groups: groups,
+        perShot: perShot,
         names: names,
         ids: ids,
       ),
-      tagPending: _tagPending(resolver, shotTagGroups),
+      tagPending: _tagPending(resolver, groups),
     );
   }
 
-  static List<String> _unionShotTags(PickingController picking) {
-    final seen = <String>[];
-    for (final shot in picking.currentUnit?.shots ?? const []) {
-      for (final tag in shot.tags) {
-        if (!seen.contains(tag)) seen.add(tag);
-      }
-    }
-    return seen;
-  }
-
   /// 有标签组、但表还没拉回来也没失败：结论未知
-  static bool _tagPending(
-          TagIdResolver resolver, List<TagGroupRef> shotTagGroups) =>
-      shotTagGroups.isNotEmpty &&
+  static bool _tagPending(TagIdResolver resolver, List<TagGroupRef> groups) =>
+      groups.isNotEmpty &&
       !resolver.loaded &&
       resolver.loadFailure == null;
 
   /// 五种「标签检索用不了」的处境，各自的下一步完全不同，必须分开说
   static String? _tagUnavailable({
     required TagIdResolver resolver,
-    required List<TagGroupRef> shotTagGroups,
+    required List<TagGroupRef> groups,
+    required bool perShot,
     required List<String> names,
     required List<int> ids,
   }) {
-    if (shotTagGroups.isEmpty) {
-      return tagSearchUnavailableText(hasShotTagGroup: false, queryTagCount: 0);
+    if (groups.isEmpty) {
+      return tagSearchUnavailableText(
+          hasShotTagGroup: false, queryTagCount: 0, perShot: perShot);
     }
     final failure = resolver.loadFailure;
     if (failure != null) return failure;
@@ -122,11 +133,12 @@ class PickingScope {
     // 提前说出来是一条转瞬即逝的假错误
     if (!resolver.loaded) return '正在读取标签表…';
     if (names.isEmpty) {
-      return tagSearchUnavailableText(hasShotTagGroup: true, queryTagCount: 0);
+      return tagSearchUnavailableText(
+          hasShotTagGroup: true, queryTagCount: 0, perShot: perShot);
     }
     if (ids.isEmpty) {
-      return '这个视觉镜头的标签在素材库里找不到对应项（标签可能已被改名或删除），'
-          '无法按标签检索。可以改用「画面描述」';
+      return '${perShot ? '这个视觉镜头' : '这个台词语义单元'}的标签在素材库里'
+          '找不到对应项（标签可能已被改名或删除），无法按标签检索';
     }
     return null;
   }

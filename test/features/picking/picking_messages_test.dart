@@ -67,19 +67,27 @@ void main() {
   });
 
   group('检索返回 0 条的引导（「库里没有」与「标签没打上」是两回事）', () {
-    test('标签检索但这个镜头没有标签：引导去补标签或换检索方式', () {
+    test('标签检索但这个镜头没有标签：引导回去补标签', () {
       final text = emptyResultGuidance(
           mode: CandidateSearchMode.tag, queryTagCount: 0);
       expect(text, contains('还没有'));
       expect(text, contains('标签'));
-      expect(text, contains('画面描述'));
     });
 
-    test('标签检索且带了标签：说明是素材库里确实没有，引导放宽条件', () {
+    test('两层各说各的层名——说错了层，用户会去改另一层的标签', () {
+      expect(
+          emptyResultGuidance(
+              mode: CandidateSearchMode.tag, queryTagCount: 0, perShot: false),
+          contains('台词语义单元'));
+      expect(
+          emptyResultGuidance(mode: CandidateSearchMode.tag, queryTagCount: 0),
+          contains('视觉镜头'));
+    });
+
+    test('标签检索且带了标签：说明是这个项目里没有，引导换项目', () {
       final text = emptyResultGuidance(
           mode: CandidateSearchMode.tag, queryTagCount: 2);
-      expect(text, contains('素材库'));
-      expect(text, contains('放宽'));
+      expect(text, contains('项目'));
     });
 
     test('画面描述与首帧搜图各自给出对应的下一步', () {
@@ -94,11 +102,12 @@ void main() {
   });
 
   group('标签检索不可用的原因（不能给个点不动的灰按钮）', () {
-    test('任务没选视觉镜头标签组：说清是新建任务时没选，并给替代路径', () {
+    test('这一层没选标签组：说清缺的是什么、去哪儿补', () {
       final reason =
           tagSearchDisabledReason(hasShotTagGroup: false, queryTagCount: 0)!;
       expect(reason, contains('标签组'));
-      expect(reason, contains('首帧搜图'));
+      expect(reason, contains('标签组设置'),
+          reason: '这个入口在工作台里就有，不必重建任务');
     });
 
     test('选了标签组但这个镜头没打上标签：只说这一条', () {
