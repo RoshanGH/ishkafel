@@ -13,6 +13,12 @@ import 'package:ishkafel/features/workbench/candidate_tab.dart';
 class _Content implements MiaoaContentService {
   final pages = <int>[];
 
+  /// 置 true 后检索一律返回 0 条（用来看空结果的引导）
+  bool empty = false;
+
+  /// 逐个标签数条数时收到的调用
+  final singleTagCalls = <int>[];
+
   CandidatePage _page(int page, int pageSize) {
     final all = List.generate(
       7,
@@ -45,7 +51,16 @@ class _Content implements MiaoaContentService {
     int page = 1,
     int pageSize = 20,
   }) async {
+    // pageSize 1 = 逐个标签数条数，不是正经检索
+    if (pageSize == 1) {
+      singleTagCalls.add(tagIds.single);
+      return CandidatePage(
+          items: const [], total: tagIds.single == 21 ? 0 : 4, skipped: 0);
+    }
     pages.add(page);
+    if (empty) {
+      return CandidatePage(items: const [], total: 0, skipped: 0);
+    }
     return _page(page, pageSize);
   }
 
@@ -92,9 +107,9 @@ List<SemanticUnit> _units() => const [
 
 late List<CandidateMaterial> played;
 
-Future<_Content> _pump(WidgetTester tester) async {
+Future<_Content> _pump(WidgetTester tester, {bool empty = false}) async {
   played = [];
-  final content = _Content();
+  final content = _Content()..empty = empty;
   tester.view.physicalSize = const Size(360, 900);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
@@ -257,6 +272,37 @@ void main() {
       final first = tester.getTopLeft(find.byKey(const Key('picking-candidate-102')));
       final other = tester.getTopLeft(find.byKey(const Key('picking-candidate-100')));
       expect(first.dy, lessThan(other.dy));
+    });
+  });
+
+  group('搜不到时说清楚是哪个标签没有', () {
+    testWidgets('点一下就把每个标签各有多少条摊开', (tester) async {
+      final content = await _pump(tester, empty: true);
+      await _whole(tester);
+
+      await tester.tap(find.byKey(const Key('picking-probe-tag-hits')));
+      await tester.pumpAndSettle();
+
+      expect(content.singleTagCalls, [21],
+          reason: '这一层只有「促单」一个标签');
+      expect(find.byKey(const Key('picking-tag-hit-21')), findsOneWidget);
+      expect(find.text('0 条'), findsOneWidget,
+          reason: '用户要判断的是「我标签打错了，还是库里这一类没入库」');
+    });
+
+    testWidgets('不点就不去数——每个标签一次子进程', (tester) async {
+      final content = await _pump(tester, empty: true);
+      await _whole(tester);
+
+      expect(content.singleTagCalls, isEmpty);
+      expect(find.byKey(const Key('picking-probe-tag-hits')), findsOneWidget);
+    });
+
+    testWidgets('有结果时不摆这个按钮', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+
+      expect(find.byKey(const Key('picking-probe-tag-hits')), findsNothing);
     });
   });
 }

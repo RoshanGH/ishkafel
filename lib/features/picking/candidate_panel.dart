@@ -10,6 +10,7 @@ import 'candidate_card.dart';
 import 'candidate_preview.dart';
 import 'candidate_row.dart';
 import 'candidate_search_controller.dart';
+import 'tag_hit_probe.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
 import 'picking_scope.dart';
@@ -39,6 +40,11 @@ class CandidatePanel extends StatelessWidget {
   /// 试看一条素材。注入而不是内建：真实实现要构造 mpv 播放器，单测不能碰。
   final CandidatePreviewOpener onPreview;
 
+  /// 逐个标签的命中数（空结果时才有意义）；null 表示还没数过
+  final List<TagHit>? tagHits;
+  final bool tagHitsLoading;
+  final VoidCallback? onProbeTagHits;
+
   const CandidatePanel({
     super.key,
     required this.picking,
@@ -50,6 +56,9 @@ class CandidatePanel extends StatelessWidget {
     this.view = CandidateView.transcript,
     required this.onViewChanged,
     this.onPreview = showCandidatePreview,
+    this.tagHits,
+    this.tagHitsLoading = false,
+    this.onProbeTagHits,
   });
 
   /// 镜头替换只有画面视图：那一层挑的就是画面，摆一个台词列表反而绕远
@@ -378,14 +387,91 @@ class CandidatePanel extends StatelessWidget {
             color: AppColors.red, icon: Icons.error_outline);
       case CandidateSearchStatus.ready:
         if (search.entries.isEmpty) {
-          return _hint(emptyResultGuidance(
-              mode: searchMode, queryTagCount: scope.tagIds.length));
+          return _emptyResult();
         }
         return _effectiveView == CandidateView.transcript
             ? _transcriptList(context)
             : _grid(context);
     }
   }
+
+  /// 空结果不能只说「没有」。用户真正要判断的是「是我标签打错了，还是素材库
+  /// 里这一类本来就没入库」——逐个标签数一遍，下一步该做什么才一目了然。
+  Widget _emptyResult() {
+    final canProbe = searchMode == CandidateSearchMode.tag &&
+        scope.tagIds.isNotEmpty &&
+        onProbeTagHits != null;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PickingHint(
+            text: emptyResultGuidance(
+                mode: searchMode,
+                queryTagCount: scope.tagIds.length,
+                perShot: picking.currentMode == ReplacementMode.perShot),
+            color: AppColors.textSecondary,
+            icon: Icons.info_outline,
+          ),
+          if (canProbe) ...[
+            const SizedBox(height: AppSpacing.md),
+            if (tagHits == null)
+              OutlinedButton(
+                key: const Key('picking-probe-tag-hits'),
+                onPressed: tagHitsLoading ? null : onProbeTagHits,
+                child: Text(tagHitsLoading ? '正在逐个标签查…' : '逐个标签看看有多少'),
+              )
+            else
+              _tagHitList(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _tagHitList() => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('这个项目里，每个标签各有多少条素材：',
+              style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: AppFontSize.caption)),
+          const SizedBox(height: AppSpacing.sm),
+          for (final hit in tagHits!)
+            Padding(
+              key: Key('picking-tag-hit-${hit.tagId}'),
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(hit.name,
+                      style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: AppFontSize.caption)),
+                  Text(
+                    hit.count == null ? '查不到' : '${hit.count} 条',
+                    style: TextStyle(
+                      color: hit.count == null
+                          ? AppColors.textTertiary
+                          : (hit.count == 0
+                              ? AppColors.orange
+                              : AppColors.green),
+                      fontSize: AppFontSize.caption,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: AppSpacing.sm),
+          const Text('0 条的标签说明素材库里这一类还没入库；'
+              '都不是 0 却搜不到，是这几个标签没有同时出现在同一条素材上。',
+              style: TextStyle(
+                  color: AppColors.textTertiary,
+                  fontSize: AppFontSize.micro,
+                  height: 1.5)),
+        ],
+      );
 
   Widget _hint(String text,
           {Color color = AppColors.textSecondary,

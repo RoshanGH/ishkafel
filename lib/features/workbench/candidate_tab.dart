@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../core/editing/segmentation_editor_controller.dart';
@@ -11,6 +13,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
 import '../picking/candidate_preview.dart';
+import '../picking/tag_hit_probe.dart';
 import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
@@ -88,6 +91,12 @@ class CandidateTabState extends State<CandidateTab> {
 
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
+
+  /// 逐个标签的命中数：只在搜不到东西、且用户主动点了的时候才去数
+  late final TagHitProbe _tagHitProbe =
+      TagHitProbe(widget.contentService ?? MiaoaContentService());
+  List<TagHit>? _tagHits;
+  bool _tagHitsLoading = false;
 
   /// 上一次检索用的作用域指纹：单元/镜头/检索方式没变就不重复检索
   String? _lastSearchKey;
@@ -247,11 +256,32 @@ class CandidateTabState extends State<CandidateTab> {
     await _runSearch();
   }
 
+  /// 逐个标签数一遍。每个标签一次子进程，所以只在用户主动点了才跑。
+  Future<void> _probeTagHits() async {
+    final scope = _scope;
+    final tags = <({String name, int id})>[
+      for (final name in scope.tagNames)
+        if (_tagResolver.idsOf([name]).firstOrNull case final id?)
+          (name: name, id: id),
+    ];
+    if (tags.isEmpty) return;
+    setState(() => _tagHitsLoading = true);
+    try {
+      final hits =
+          await _tagHitProbe.probe(tags: tags, projectIds: _projectIds);
+      if (mounted) setState(() => _tagHits = hits);
+    } finally {
+      if (mounted) setState(() => _tagHitsLoading = false);
+    }
+  }
+
   Future<void> _runSearch() async {
     final scope = _scope;
     // 命中得多的排前面。素材库按「任一标签命中」检索，不重排的话第一页
     // 是「最近入库的沾边素材」，而不是「最像的那些」
     _search.rankTags = scope.tagNames;
+    // 换了作用域，上一段的标签清单就不作数了
+    _tagHits = null;
     switch (_searchMode) {
       case CandidateSearchMode.tag:
         await _search.searchByTags(tagIds: scope.tagIds);
@@ -302,6 +332,9 @@ class CandidateTabState extends State<CandidateTab> {
           view: _view,
           onViewChanged: (v) => setState(() => _view = v),
           onPreview: widget.onPreview ?? showCandidatePreview,
+          tagHits: _tagHits,
+          tagHitsLoading: _tagHitsLoading,
+          onProbeTagHits: _probeTagHits,
         ),
       );
 }
