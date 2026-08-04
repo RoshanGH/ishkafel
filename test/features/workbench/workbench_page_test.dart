@@ -112,6 +112,7 @@ Widget _wrapWithNavigator({
   required RenewTask task,
   required TaskRepository repo,
   required FakePlaybackController playback,
+  DateTime Function()? clock,
 }) {
   return ProviderScope(
     overrides: [taskRepositoryProvider.overrideWithValue(repo)],
@@ -126,6 +127,7 @@ Widget _wrapWithNavigator({
                   task: task,
                   playbackFactory: () => playback,
                   mediaBuilder: _fakeMediaBuilder(),
+                  clock: clock,
                 ),
               )),
               child: const Text('列表页占位'),
@@ -622,8 +624,11 @@ void _spaceStopsSegmentPlayback() {
     final playback = FakePlaybackController();
     final task = _fixtureTask();
     await repo.save(task);
-    await tester.pumpWidget(
-        _wrapWithNavigator(task: task, repo: repo, playback: playback));
+    // 可控时钟：双击判定靠的是两次点击的真实间隔，机器一忙 pump 就超过
+    // 300ms 的双击窗口，用例随机变红（实测三次跑红一次）
+    var now = DateTime.utc(2026, 8, 4);
+    await tester.pumpWidget(_wrapWithNavigator(
+        task: task, repo: repo, playback: playback, clock: () => now));
     await tester.tap(find.byKey(const Key('open-workbench')));
     await tester.pumpAndSettle();
 
@@ -632,6 +637,7 @@ void _spaceStopsSegmentPlayback() {
     final at = tester.getCenter(timeline) +
         Offset(-tester.getSize(timeline).width / 2 + 40, -20);
     await tester.tapAt(at);
+    now = now.add(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));
     await tester.tapAt(at);
     await tester.pumpAndSettle();

@@ -55,6 +55,9 @@ class WorkbenchBody extends StatefulWidget {
   /// 「替换素材」tab 上的角标（已选素材数之类）
   final String? candidateBadge;
 
+  /// 时间线判定双击用的时钟（测试注入）
+  final DateTime Function()? clock;
+
   /// 配乐方案与两个入口（框选一段 / 点已有的一段）
   final BgmPlan bgm;
   final void Function(int fromShot, int toShot)? onBgmRangeSelected;
@@ -71,6 +74,7 @@ class WorkbenchBody extends StatefulWidget {
     this.readOnly = false,
     this.candidatePanel,
     this.candidateBadge,
+    this.clock,
     this.bgm = BgmPlan.empty,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
@@ -332,6 +336,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   onScrubEnd: _onScrubEnd,
                   onPlaySegment: (start, end) =>
                       unawaited(_segment.play(start, end, editor.fps)),
+                  clock: widget.clock ?? DateTime.now,
                   bgm: widget.bgm,
                   onBgmRangeSelected: widget.onBgmRangeSelected,
                   onBgmSegmentTap: widget.onBgmSegmentTap,

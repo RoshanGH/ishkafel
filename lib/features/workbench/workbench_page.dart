@@ -64,6 +64,10 @@ class WorkbenchPage extends ConsumerStatefulWidget {
   final PlaybackController Function()? playbackFactory;
   final TimelineMediaBuilder? mediaBuilder;
 
+  /// 时间线判定双击用的时钟。默认真实时间；测试注入可控时钟，否则机器一忙
+  /// 两次点击的间隔就超过双击窗口，用例随机变红。
+  final DateTime Function()? clock;
+
   /// 右栏「替换素材」的依赖，缺省走真实 miaoa CLI；测试注入假实现
   final MiaoaContentService? contentService;
   final CandidateProbe? candidateProbe;
@@ -74,6 +78,7 @@ class WorkbenchPage extends ConsumerStatefulWidget {
     required this.task,
     this.playbackFactory,
     this.mediaBuilder,
+    this.clock,
     this.contentService,
     this.candidateProbe,
     this.tagService,
@@ -615,6 +620,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,
                 readOnly: !_isEditable,
+                clock: widget.clock,
                 candidateBadge: candidateBadgeText(_replacements ?? const []),
                 bgm: _task.bgm,
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,
