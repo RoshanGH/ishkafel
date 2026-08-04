@@ -10,6 +10,7 @@ import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
+import '../../core/audio/bgm_plan.dart';
 import 'side_panel_tabs.dart';
 import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
@@ -54,6 +55,11 @@ class WorkbenchBody extends StatefulWidget {
   /// 「替换素材」tab 上的角标（已选素材数之类）
   final String? candidateBadge;
 
+  /// 配乐方案与两个入口（框选一段 / 点已有的一段）
+  final BgmPlan bgm;
+  final void Function(int fromShot, int toShot)? onBgmRangeSelected;
+  final void Function(BgmSegment segment)? onBgmSegmentTap;
+
   const WorkbenchBody({
     super.key,
     required this.editor,
@@ -65,6 +71,9 @@ class WorkbenchBody extends StatefulWidget {
     this.readOnly = false,
     this.candidatePanel,
     this.candidateBadge,
+    this.bgm = BgmPlan.empty,
+    this.onBgmRangeSelected,
+    this.onBgmSegmentTap,
   });
 
   @override
@@ -323,6 +332,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   onScrubEnd: _onScrubEnd,
                   onPlaySegment: (start, end) =>
                       unawaited(_segment.play(start, end, editor.fps)),
+                  bgm: widget.bgm,
+                  onBgmRangeSelected: widget.onBgmRangeSelected,
+                  onBgmSegmentTap: widget.onBgmSegmentTap,
                   readOnly: widget.readOnly,
                 );
               },

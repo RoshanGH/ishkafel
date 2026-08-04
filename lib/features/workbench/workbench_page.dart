@@ -24,7 +24,10 @@ import '../../core/replacement/replacement_plan.dart';
 import '../../core/editing/edit_consequence.dart';
 import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
+import '../../core/audio/bgm_plan.dart';
+import 'bgm_picker_sheet.dart';
 import 'candidate_badge.dart';
+import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import 'edit_consequence_dialog.dart';
 import 'task_tag_groups_dialog.dart';
@@ -310,6 +313,65 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 在配乐轨上框选完一段镜头：挑一首铺上去。
+  Future<void> _pickBgmForRange(int fromShot, int toShot) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final rangeMs =
+        shotRangeMs(editor.units, from: fromShot, to: toShot);
+    final choice = await showBgmPicker(
+      context,
+      rangeMs: rangeMs,
+      rangeLabel: _shotRangeLabel(fromShot, toShot),
+    );
+    if (choice is! BgmPicked || !mounted) return;
+    await _saveBgm(_task.bgm.assign(
+      startShot: fromShot,
+      endShot: toShot,
+      material: choice.material,
+      shotRangeMs: rangeMs,
+    ));
+  }
+
+  /// 点了配乐轨上已有的一段：换一首，或者移除
+  Future<void> _editBgmSegment(BgmSegment segment) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final rangeMs = shotRangeMs(editor.units,
+        from: segment.startShot, to: segment.endShot);
+    final choice = await showBgmPicker(
+      context,
+      rangeMs: rangeMs,
+      rangeLabel: _shotRangeLabel(segment.startShot, segment.endShot),
+      canClear: true,
+    );
+    if (choice == null || !mounted) return;
+    await _saveBgm(switch (choice) {
+      BgmPicked(:final material) => _task.bgm.assign(
+          startShot: segment.startShot,
+          endShot: segment.endShot,
+          material: material,
+          shotRangeMs: rangeMs,
+        ),
+      BgmCleared() => _task.bgm.removeAt(segment.startShot),
+    });
+  }
+
+  /// 「S3–S7」这样的区间名。用全片打平的镜头序号——配乐区间可以跨单元，
+  /// 写成「U2S1–U4S2」反而更难对上时间线上那一条。
+  String _shotRangeLabel(int from, int to) =>
+      from == to ? 'S${from + 1}' : 'S${from + 1}–S${to + 1}';
+
+  Future<void> _saveBgm(BgmPlan next) async {
+    setState(() => _task = _task.copyWith(bgm: next));
+    try {
+      await _tasks!.saveBgm(_task, next);
+    } catch (e) {
+      AppLog.warn('配乐方案落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('配乐方案');
+    }
+  }
+
   /// 改这条任务用哪些标签组，并按需立刻用新词表重打全片。
   ///
   /// 换了词表却不重打，标签还是按旧词表打的——那份标签既不在新词表里，
@@ -554,6 +616,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 playhead: _playhead,
                 readOnly: !_isEditable,
                 candidateBadge: candidateBadgeText(_replacements ?? const []),
+                bgm: _task.bgm,
+                onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,
+                onBgmSegmentTap: _isEditable ? _editBgmSegment : null,
                 candidatePanel: CandidateTab(
                   editor: editor,
                   shotTagGroups: _task.shotTagGroups,
