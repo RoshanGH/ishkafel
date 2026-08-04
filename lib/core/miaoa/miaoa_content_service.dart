@@ -196,6 +196,27 @@ class MiaoaContentService {
   static List<String> _projects(List<int> ids) =>
       ids.isEmpty ? const [] : ['--projects', ids.join(',')];
 
+  /// 按 id 取单条素材（导出时要拿它的播放地址）。
+  ///
+  /// 一条一次调用：`content search --ids` 服务端目前直接 500（真机实测），
+  /// 不能拿它当批量入口。找不到返回 null，由调用方决定是跳过还是报错。
+  Future<CandidateMaterial?> fetchById(int id) async {
+    final result = await run(binary, [
+      'content',
+      'get',
+      '$id',
+      '--type',
+      'storyboard',
+      '--json',
+    ]);
+    if (result.exitCode != 0) {
+      throw MiaoaException(miaoaFriendlyError(result.exitCode,
+          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
+    }
+    final decoded = _decode(_text(result.stdout));
+    return CandidateMaterial.tryFromJson(decoded);
+  }
+
   static List<String> _paging(int page, int pageSize) => [
         '--page',
         '$page',

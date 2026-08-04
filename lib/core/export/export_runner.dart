@@ -1,0 +1,261 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../audio/bgm_plan.dart';
+import '../ffmpeg/process_runner.dart';
+import '../log/app_log.dart';
+import '../models/semantic_unit.dart';
+import '../replacement/replacement_plan.dart';
+import 'export_commands.dart';
+import 'export_plan.dart';
+
+/// 一条成片的导出结果
+class ExportOutcome {
+  final int index;
+
+  /// 成功时是成片路径；失败时为 null
+  final String? path;
+
+  /// 失败原因（已是中文）；成功时为 null
+  final String? failure;
+
+  const ExportOutcome({required this.index, this.path, this.failure});
+
+  bool get ok => path != null;
+}
+
+/// 导出进度：正在做第几条、总共几条、这一刻在做什么
+typedef ExportProgress = void Function(int done, int total, String what);
+
+/// 矩阵导出：把替换方案摊成若干条成片，逐条用 ffmpeg 合成。
+///
+/// **画面来自候选素材或原片，声音一律来自原片（或换音色后的配音）**：产品要的
+/// 是「结构相同但画面全新」，所以候选素材自带的旁白要丢掉，只取它的画面。
+///
+/// 三处刻意的复用，不然十条成片要跑上一个钟头：
+/// - **声音只做一遍**：所有组合的声音完全相同（画面才是变量）；
+/// - **原片段只切一遍**：同一个单元的原片画面会在多条组合里重复出现；
+/// - **素材只下载一遍**：同一条候选也会在多条组合里重复出现。
+class ExportRunner {
+  final ProcessRunner run;
+
+  /// 中间产物目录（切片、下载的素材、清单文件）
+  final Directory workDir;
+
+  /// 下载一条候选素材到本地，返回落地路径。注入而不是内建 http：
+  /// 这一层要能在不联网的情况下测。
+  final Future<String> Function(int candidateId) fetchMaterial;
+
+  ExportRunner({
+    required this.run,
+    required this.workDir,
+    required this.fetchMaterial,
+  });
+
+  /// 导出全部组合到 [outputDir]。
+  ///
+  /// 一条失败不拖累其余：失败的那条记下原因继续跑下一条——十条里坏一条，
+  /// 重跑那一条就行，没道理整批作废。
+  Future<List<ExportOutcome>> exportAll({
+    required String sourcePath,
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+    required Directory outputDir,
+    BgmPlan bgm = BgmPlan.empty,
+    Map<int, String> voiceAudio = const {},
+    int limit = ReplacementPlan.maxCombinations,
+    ExportProgress? onProgress,
+  }) async {
+    final combos = ExportPlanner.enumerate(
+        units: units, replacements: replacements, limit: limit);
+    if (combos.isEmpty) return const [];
+
+    workDir.createSync(recursive: true);
+    outputDir.createSync(recursive: true);
+    final total = combos.length;
+
+    onProgress?.call(0, total, '准备声音');
+    final String audio;
+    try {
+      audio = await _buildAudio(
+          sourcePath: sourcePath, units: units, voiceAudio: voiceAudio, bgm: bgm);
+    } catch (e) {
+      AppLog.warn('导出：声音合成失败：$e');
+      // 声音是所有组合共用的，它挂了就没有哪条能成——如实把同一条原因给每一条
+      return [
+        for (final c in combos)
+          ExportOutcome(index: c.index, failure: '声音合成失败：$e'),
+      ];
+    }
+
+    final clips = <String, String>{}; // 段落指纹 → 已渲染的画面切片
+    final out = <ExportOutcome>[];
+    for (final combo in combos) {
+      onProgress?.call(out.length, total, '第 ${combo.index} 条');
+      try {
+        final path = await _composeOne(
+          combo: combo,
+          sourcePath: sourcePath,
+          audio: audio,
+          outputDir: outputDir,
+          clips: clips,
+        );
+        out.add(ExportOutcome(index: combo.index, path: path));
+      } catch (e) {
+        AppLog.warn('导出：第 ${combo.index} 条失败：$e');
+        out.add(ExportOutcome(index: combo.index, failure: '$e'));
+      }
+    }
+    onProgress?.call(total, total, '完成');
+    return List.unmodifiable(out);
+  }
+
+  /// 拼一条成片：逐段渲染画面 → concat → 与共用的声音合成
+  Future<String> _composeOne({
+    required ExportCombination combo,
+    required String sourcePath,
+    required String audio,
+    required Directory outputDir,
+    required Map<String, String> clips,
+  }) async {
+    final parts = <String>[];
+    for (final segment in combo.segments) {
+      parts.add(await _renderSegment(segment, sourcePath, clips));
+    }
+
+    final listFile = File(p.join(workDir.path, 'concat_${combo.index}.txt'))
+      ..writeAsStringSync(ExportCommands.concatList(parts));
+    final silent = p.join(workDir.path, 'video_${combo.index}.mp4');
+    await _ffmpeg(
+        ExportCommands.concat(listFile: listFile.path, out: silent), '拼接画面');
+
+    final out = p.join(outputDir.path, '变体${combo.index}.mp4');
+    await _ffmpeg(
+        ExportCommands.mux(video: silent, audio: audio, out: out), '画面与声音合成');
+    return out;
+  }
+
+  /// 渲染一段画面。同一段在多条组合里会重复出现，按指纹缓存，只做一遍。
+  Future<String> _renderSegment(
+    ExportSegment segment,
+    String sourcePath,
+    Map<String, String> clips,
+  ) async {
+    final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}';
+    final hit = clips[key];
+    if (hit != null) return hit;
+
+    final out = p.join(workDir.path, 'clip_$key.mp4');
+    if (segment.isOriginal) {
+      await _ffmpeg(
+        ExportCommands.trimOriginalVideo(
+          source: sourcePath,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+          out: out,
+        ),
+        'U${segment.unitIndex + 1} 的原片画面',
+      );
+    } else {
+      final material = await fetchMaterial(segment.candidateId!);
+      await _ffmpeg(
+        ExportCommands.fitCandidateVideo(
+          input: material,
+          durationMs: segment.durationMs,
+          out: out,
+        ),
+        'U${segment.unitIndex + 1} 的替换画面',
+      );
+    }
+    clips[key] = out;
+    return out;
+  }
+
+  /// 声音：逐个单元取原声或配音，拼成整条，再把配乐混进去。
+  ///
+  /// 按单元切而不是整条直接用：换过音色的单元要拿生成的配音顶替，而配音与
+  /// 原句总有几十毫秒出入，逐单元对齐才不会一路累积错位到片尾。
+  Future<String> _buildAudio({
+    required String sourcePath,
+    required List<SemanticUnit> units,
+    required Map<int, String> voiceAudio,
+    required BgmPlan bgm,
+  }) async {
+    final parts = <String>[];
+    for (final unit in units) {
+      final out = p.join(workDir.path, 'audio_u${unit.index}.wav');
+      final voice = voiceAudio[unit.index];
+      if (voice != null && File(voice).existsSync()) {
+        await _ffmpeg(
+          ExportCommands.fitVoiceAudio(
+              input: voice, durationMs: unit.durationMs, out: out),
+          'U${unit.index + 1} 的配音',
+        );
+      } else {
+        await _ffmpeg(
+          ExportCommands.trimOriginalAudio(
+            source: sourcePath,
+            startMs: unit.startMs,
+            endMs: unit.endMs,
+            out: out,
+          ),
+          'U${unit.index + 1} 的原声',
+        );
+      }
+      parts.add(out);
+    }
+
+    final listFile = File(p.join(workDir.path, 'concat_audio.txt'))
+      ..writeAsStringSync(ExportCommands.concatList(parts));
+    var audio = p.join(workDir.path, 'audio.wav');
+    await _ffmpeg(
+        ExportCommands.concat(listFile: listFile.path, out: audio), '拼接声音');
+
+    // 配乐逐段混入。段与段之间互不重叠，一段一遍，顺序无所谓
+    for (var i = 0; i < bgm.segments.length; i++) {
+      final segment = bgm.segments[i];
+      final url = segment.material.previewUrl;
+      if (url == null || url.isEmpty) {
+        AppLog.warn('配乐「${segment.material.name}」没有可用地址，这一段跳过');
+        continue;
+      }
+      final range = _bgmRangeMs(units, segment);
+      if (range == null) continue;
+      final mixed = p.join(workDir.path, 'audio_bgm_$i.wav');
+      await _ffmpeg(
+        ExportCommands.mixBgm(
+          voice: audio,
+          bgm: url,
+          out: mixed,
+          startMs: range.$1,
+          durationMs: range.$2 - range.$1,
+        ),
+        '配乐「${segment.material.name}」',
+      );
+      audio = mixed;
+    }
+    return audio;
+  }
+
+  /// 配乐段覆盖的镜头对应到全片的哪一段时间
+  static (int, int)? _bgmRangeMs(List<SemanticUnit> units, BgmSegment segment) {
+    final flat = [
+      for (final unit in units)
+        for (final shot in unit.shots) shot,
+    ];
+    if (segment.startShot >= flat.length) return null;
+    final end = segment.endShot.clamp(0, flat.length - 1);
+    return (flat[segment.startShot].startMs, flat[end].endMs);
+  }
+
+  Future<void> _ffmpeg(List<String> args, String what) async {
+    final result = await run('ffmpeg', args);
+    if (result.exitCode != 0) {
+      // ffmpeg 的 stderr 动辄几百行，只留最后几行——真正的原因总在末尾
+      final stderr = '${result.stderr}'.trim().split('\n');
+      final tail = stderr.length > 3 ? stderr.sublist(stderr.length - 3) : stderr;
+      throw Exception('$what 失败：${tail.join(' / ')}');
+    }
+  }
+}
