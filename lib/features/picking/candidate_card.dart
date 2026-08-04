@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -14,6 +15,9 @@ import 'picking_messages.dart';
 /// - 规格（时长/分辨率）是异步探测出来的，未完成时显示「探测中」占位而不是
 ///   空白，探测失败则**不显示**时长差徽标（显示 0 会变成一个"差 100%"的假徽标）；
 /// - 勾选是多选，点一下切换。
+///
+/// 素材名可复制：卡片只有一行位置，名字长了必然截断，而用户要拿这个名字回
+/// miaoa 里查。悬停看全名（Tooltip），点右边那个小图标复制。
 class CandidateCard extends StatelessWidget {
   final CandidateEntry entry;
   final bool selected;
@@ -52,7 +56,7 @@ class CandidateCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             _thumbnail(material.thumbnailUrl),
-            _topRow(material.name),
+            _topRow(context, material.id, material.name),
             _bottomBadge(),
             _checkMark(),
           ],
@@ -80,21 +84,67 @@ class CandidateCard extends StatelessWidget {
             child: Icon(icon, size: 20, color: AppColors.textTertiary)),
       );
 
-  Widget _topRow(String name) => Positioned(
+  Widget _topRow(BuildContext context, int id, String name) => Positioned(
         left: AppSpacing.sm,
         top: AppSpacing.sm,
         right: AppSpacing.xl,
-        child: Text(
-          name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: AppFontSize.micro,
-            shadows: [Shadow(color: AppColors.stageBackground, blurRadius: 3)],
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Flexible(
+              // 名字必然被截断，悬停能看全名——不然只能靠猜
+              child: Tooltip(
+                message: name,
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: AppFontSize.micro,
+                    shadows: [
+                      Shadow(color: AppColors.stageBackground, blurRadius: 3)
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            _copyButton(context, id, name),
+          ],
+        ),
+      );
+
+  /// 复制素材名。用户要拿这个名字回 miaoa 里查，卡片上又必然是截断的。
+  Widget _copyButton(BuildContext context, int id, String name) => Tooltip(
+        message: '复制素材名',
+        child: InkWell(
+          key: Key('picking-copy-name-$id'),
+          onTap: () => _copy(context, name),
+          borderRadius: BorderRadius.circular(4),
+          child: Padding(
+            padding: const EdgeInsets.all(2),
+            child: Icon(
+              Icons.content_copy,
+              size: 11,
+              color: AppColors.textSecondary,
+              shadows: const [
+                Shadow(color: AppColors.stageBackground, blurRadius: 3)
+              ],
+            ),
           ),
         ),
       );
+
+  Future<void> _copy(BuildContext context, String name) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    await Clipboard.setData(ClipboardData(text: name));
+    // 复制这种「什么都没发生」的操作必须有反馈，否则用户会连点好几次
+    messenger?.showSnackBar(SnackBar(
+      content: Text('已复制素材名：$name'),
+      duration: const Duration(seconds: 2),
+    ));
+  }
 
   /// 时长与时长差。探测中显示占位；探测失败则连时长都没有——此时不显示徽标，
   /// 用户仍可凭画面与标签挑选。
