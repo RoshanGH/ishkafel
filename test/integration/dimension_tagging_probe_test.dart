@@ -63,11 +63,7 @@ void main() {
     final shotRefs = [
       for (final name in _shotGroups)
         if (groups.where((g) => g.name == name).firstOrNull case final g?)
-          TagGroupRef(
-            id: g.id,
-            name: g.name,
-            prompt: g.name == '植源场景' ? _scenePrompt : null,
-          ),
+          TagGroupRef(id: g.id, name: g.name),
     ];
     expect(shotRefs, hasLength(_shotGroups.length),
         reason: '这四个组必须都能找到，否则测的就不是用户那套配置');
@@ -83,7 +79,8 @@ void main() {
     );
 
     // 只打头两个单元，够看清各维度是否各归其位，又不必等全片
-    final probed = task.copyWith(shotTagGroups: shotRefs);
+    final probed = task.copyWith(
+        shotTagGroups: shotRefs, shotTagPrompt: _scenePrompt);
     final out = await service.tag(probed, task.units!, only: {0, 1});
 
     var withDimensions = 0;

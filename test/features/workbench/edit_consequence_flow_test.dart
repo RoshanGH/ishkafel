@@ -93,6 +93,7 @@ class _RecordingUnitTagger implements UnitTagger {
   Future<ShotUnderstanding> understand({
     required String transcript,
     required List<TagDimension> dimensions,
+    String? constraint,
   }) async {
     asked.add(transcript);
     return const ShotUnderstanding(tags: ['重打出来的'], rawReply: '{}');

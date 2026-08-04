@@ -8,8 +8,8 @@ import 'package:ishkafel/core/net/json_poster.dart';
 
 const _dims = [
   TagDimension(
-      name: '植源场景', vocabulary: ['厨房情景', '客厅情景'], prompt: '只看主体所处的空间'),
-  TagDimension(name: '植源动作', vocabulary: ['打开电器', '喷洒'], prompt: null),
+      name: '植源场景', vocabulary: ['厨房情景', '客厅情景']),
+  TagDimension(name: '植源动作', vocabulary: ['打开电器', '喷洒']),
 ];
 
 /// 记录发出去的请求体，并按脚本返回内容
@@ -32,7 +32,7 @@ ArkChatClient _client(String reply, {List<String>? sentBodies}) => ArkChatClient
 
 void main() {
   group('视觉镜头打标：分维度问、分维度收', () {
-    test('提示词里带上每个维度的词表与它自己的约束', () async {
+    test('提示词里带上每个维度的词表，以及这一层那一条约束', () async {
       final bodies = <String>[];
       await ShotTagger(chat: _client('{}', sentBodies: bodies)).understand(
         frames: [
@@ -41,6 +41,7 @@ void main() {
           [3]
         ],
         dimensions: _dims,
+        constraint: '只看主体所处的空间',
       );
 
       final sent = bodies.single;
@@ -125,9 +126,9 @@ void main() {
       await UnitTagger(chat: _client('{}', sentBodies: bodies)).understand(
         transcript: '再不买就恢复六十九块九一瓶了',
         dimensions: const [
-          TagDimension(
-              name: '植源分子库', vocabulary: ['促单', '痛点'], prompt: '按话术意图判断'),
+          TagDimension(name: '植源分子库', vocabulary: ['促单', '痛点']),
         ],
+        constraint: '按话术意图判断',
       );
 
       final sent = bodies.single;
@@ -142,7 +143,7 @@ void main() {
         '植源分子库': ['促单', '不在词表里的词'],
       })))
           .understand(transcript: '台词', dimensions: const [
-        TagDimension(name: '植源分子库', vocabulary: ['促单', '痛点'], prompt: null),
+        TagDimension(name: '植源分子库', vocabulary: ['促单', '痛点']),
       ]);
 
       expect(r.tags, ['促单']);

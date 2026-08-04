@@ -427,7 +427,9 @@ class _RecordingUnitTagger extends UnitTagger {
 
   @override
   Future<ShotUnderstanding> understand(
-      {required String transcript, required List<TagDimension> dimensions}) async {
+      {required String transcript,
+      required List<TagDimension> dimensions,
+      String? constraint}) async {
     calls++;
     vocabularies.add([for (final d in dimensions) ...d.vocabulary]);
     return ShotUnderstanding(tags: reply, rawReply: '{"tags":$reply}');
@@ -443,7 +445,9 @@ class _ThrowingUnitTagger extends UnitTagger {
                     const JsonPostResult(statusCode: 200, body: '{}')));
   @override
   Future<ShotUnderstanding> understand(
-      {required String transcript, required List<TagDimension> dimensions}) async {
+      {required String transcript,
+      required List<TagDimension> dimensions,
+      String? constraint}) async {
     throw StateError('打标服务不可用');
   }
 }
@@ -462,7 +466,8 @@ class _FakeShotTagger extends ShotTagger {
   @override
   Future<ShotUnderstanding> understand(
       {required List<List<int>> frames,
-      required List<TagDimension> dimensions}) async {
+      required List<TagDimension> dimensions,
+      String? constraint}) async {
     onTag();
     if (work != null) await work!();
     return const ShotUnderstanding(tags: ['开箱'], description: '开箱画面');

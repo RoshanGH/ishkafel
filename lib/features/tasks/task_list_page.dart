@@ -66,8 +66,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 标签组必须在建任务时定下来——它既是两层打标的受控词表来源，也是后续
   /// 阶段②「按相同标签检索候选素材」的检索键。
   Future<void> _startNewTask(WidgetRef ref, BuildContext context) async {
-    // 用最近一条任务的标签组配置预填（含各组的打标约束）：同一个项目里
-    // 连着建好几条任务是常态，每次重选四个组、重贴四段约束纯属折磨
+    // 用最近一条任务的标签组配置预填（含两层各自的打标约束）：同一个项目里
+    // 连着建好几条任务是常态，每次重选四个组、重贴两段约束纯属折磨
     final recent = ref
         .read(taskListProvider)
         .value
@@ -77,6 +77,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       context,
       prefillUnitGroups: recent?.unitTagGroups ?? const [],
       prefillShotGroups: recent?.shotTagGroups ?? const [],
+      prefillUnitPrompt: recent?.unitTagPrompt ?? '',
+      prefillShotPrompt: recent?.shotTagPrompt ?? '',
     );
     if (result == null) return;
     try {
@@ -84,6 +86,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             result.filePath,
             unitTagGroups: result.unitTagGroups,
             shotTagGroups: result.shotTagGroups,
+            unitTagPrompt: result.unitTagPrompt,
+            shotTagPrompt: result.shotTagPrompt,
           );
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志

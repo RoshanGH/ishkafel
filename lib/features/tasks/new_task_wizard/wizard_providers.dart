@@ -15,10 +15,16 @@ class NewTaskWizardResult {
   final List<TagGroupRef> unitTagGroups;
   final List<TagGroupRef> shotTagGroups;
 
+  /// 两层各自的打标约束（一层一条，不随选了几个组变化）
+  final String unitTagPrompt;
+  final String shotTagPrompt;
+
   NewTaskWizardResult({
     required this.filePath,
     required List<TagGroupRef> unitTagGroups,
     required List<TagGroupRef> shotTagGroups,
+    this.unitTagPrompt = '',
+    this.shotTagPrompt = '',
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups);
 }

@@ -53,7 +53,8 @@ class _UnitTagger extends UnitTagger {
   @override
   Future<ShotUnderstanding> understand(
           {required String transcript,
-          required List<TagDimension> dimensions}) async =>
+          required List<TagDimension> dimensions,
+          String? constraint}) async =>
       const ShotUnderstanding(tags: ['甲']);
 }
 
@@ -62,7 +63,8 @@ class _ShotTagger extends ShotTagger {
   @override
   Future<ShotUnderstanding> understand(
           {required List<List<int>> frames,
-          required List<TagDimension> dimensions}) async =>
+          required List<TagDimension> dimensions,
+          String? constraint}) async =>
       const ShotUnderstanding(tags: ['乙']);
 }
 

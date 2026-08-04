@@ -300,11 +300,15 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     String path, {
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
   }) async {
     final task = await ref.read(importServiceProvider).importLocalFile(
           path,
           unitTagGroups: unitTagGroups,
           shotTagGroups: shotTagGroups,
+          unitTagPrompt: unitTagPrompt,
+          shotTagPrompt: shotTagPrompt,
         );
     await reload();
 
@@ -437,10 +441,14 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     RenewTask task, {
     required List<TagGroupRef> unit,
     required List<TagGroupRef> shot,
+    String? unitPrompt,
+    String? shotPrompt,
   }) async {
     final updated = task.copyWith(
       unitTagGroups: unit,
       shotTagGroups: shot,
+      unitTagPrompt: unitPrompt,
+      shotTagPrompt: shotPrompt,
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);

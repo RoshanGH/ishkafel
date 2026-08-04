@@ -98,11 +98,15 @@ class TaggingService {
       if (tagUnits && wanted(i)) {
         try {
           final r = await unitTagger!.understand(
-              transcript: unit.transcript, dimensions: unitVocabulary);
+            transcript: unit.transcript,
+            dimensions: unitVocabulary,
+            constraint: task.unitTagPrompt,
+          );
           updatedUnit = updatedUnit.copyWith(
             tags: r.tags,
             tagsStale: false,
-            trace: _traceOf(r, unitVocabulary, textInput: unit.transcript),
+            trace: _traceOf(r, unitVocabulary,
+                constraint: task.unitTagPrompt, textInput: unit.transcript),
           );
         } catch (e) {
           AppLog.warn('单元 ${unit.index} 打标失败：$e');
@@ -198,11 +202,7 @@ class TaggingService {
           AppLog.warn('$layer 标签组「${group.name}」内没有任何标签');
           continue;
         }
-        dimensions.add(TagDimension(
-          name: group.name,
-          vocabulary: words,
-          prompt: group.prompt,
-        ));
+        dimensions.add(TagDimension(name: group.name, vocabulary: words));
       } catch (e) {
         AppLog.warn('$layer 标签组「${group.name}」的词表拉取失败，跳过这个组：$e');
       }
@@ -215,11 +215,12 @@ class TaggingService {
 
   /// 把这次调用的过程量记下来。
   ///
-  /// 维度、每个维度的词表大小、以及用户为它写的约束都要留痕——标签不对时，
+  /// 维度、词表大小、以及用户为这一层写的约束都要留痕——标签不对时，
   /// 「喂进去的约束是什么」往往才是问题所在。
   TagTrace _traceOf(
     ShotUnderstanding r,
     List<TagDimension> dimensions, {
+    String? constraint,
     String? textInput,
     List<int> sampledAtMs = const [],
     List<String> framePaths = const [],
@@ -231,10 +232,7 @@ class TaggingService {
         vocabularyGroups: [for (final d in dimensions) d.name],
         vocabularySize:
             dimensions.fold<int>(0, (n, d) => n + d.vocabulary.length),
-        dimensionPrompts: {
-          for (final d in dimensions)
-            if (d.prompt case final p? when p.trim().isNotEmpty) d.name: p,
-        },
+        prompt: constraint?.trim().isNotEmpty == true ? constraint : null,
         tagsByDimension: r.tagsByDimension,
         rawReply: r.rawReply,
         at: clock(),
@@ -263,13 +261,19 @@ class TaggingService {
         );
         frames.add(await File(outPath).readAsBytes());
       }
-      final r = await shotTagger!
-          .understand(frames: frames, dimensions: shotVocabulary);
+      final r = await shotTagger!.understand(
+        frames: frames,
+        dimensions: shotVocabulary,
+        constraint: task.shotTagPrompt,
+      );
       return shot.copyWith(
         tags: r.tags,
         description: r.description,
         tagsStale: false,
-        trace: _traceOf(r, shotVocabulary, sampledAtMs: at, framePaths: paths),
+        trace: _traceOf(r, shotVocabulary,
+            constraint: task.shotTagPrompt,
+            sampledAtMs: at,
+            framePaths: paths),
       );
     } catch (e) {
       AppLog.warn('镜头（${shot.startMs}-${shot.endMs}）视觉理解失败：$e');

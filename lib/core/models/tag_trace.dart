@@ -21,9 +21,9 @@ class TagTrace {
   /// 合并去重后的词表大小
   final int vocabularySize;
 
-  /// 每个维度（标签组）用户写的打标约束。标签不对时，「喂进去的约束是
+  /// 用户为这一层写的打标约束（一层一条）。标签不对时，「喂进去的约束是
   /// 什么」往往才是问题所在，因此和词表一起留痕。
-  final Map<String, String> dimensionPrompts;
+  final String? prompt;
 
   /// 这次打标按维度分开的结果。界面上分维度显示，用户才看得出「场景判成了
   /// 什么、动作判成了什么」，而不是一堆混在一起的词。
@@ -41,7 +41,7 @@ class TagTrace {
     this.textInput,
     this.vocabularyGroups = const [],
     this.vocabularySize = 0,
-    this.dimensionPrompts = const {},
+    this.prompt,
     this.tagsByDimension = const {},
     this.rawReply,
     this.at,
@@ -53,7 +53,7 @@ class TagTrace {
         'textInput': textInput,
         'vocabularyGroups': vocabularyGroups,
         'vocabularySize': vocabularySize,
-        'dimensionPrompts': dimensionPrompts,
+        'prompt': prompt,
         'tagsByDimension': tagsByDimension,
         'rawReply': rawReply,
         'at': at?.toIso8601String(),
@@ -69,11 +69,21 @@ class TagTrace {
       textInput: raw['textInput'] is String ? raw['textInput'] as String : null,
       vocabularyGroups: _strings(raw['vocabularyGroups']),
       vocabularySize: raw['vocabularySize'] is int ? raw['vocabularySize'] as int : 0,
-      dimensionPrompts: _stringMap(raw['dimensionPrompts']),
+      prompt: _prompt(raw),
       tagsByDimension: _stringListMap(raw['tagsByDimension']),
       rawReply: raw['rawReply'] is String ? raw['rawReply'] as String : null,
       at: raw['at'] is String ? DateTime.tryParse(raw['at'] as String) : null,
     );
+  }
+
+  /// 约束一度是**按维度**存的（每个标签组一条）。旧痕迹里那些不该就这么
+  /// 看不见了——把它们接起来，回看时仍然知道当时喂进去的是什么。
+  static String? _prompt(Map raw) {
+    final current = raw['prompt'];
+    if (current is String && current.trim().isNotEmpty) return current;
+    final legacy = _stringMap(raw['dimensionPrompts']);
+    if (legacy.isEmpty) return null;
+    return [for (final e in legacy.entries) '${e.key}：${e.value}'].join('\n');
   }
 
   static List<int> _ints(Object? v) => v is! List

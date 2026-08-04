@@ -163,14 +163,14 @@ void _byDimension() {
         reason: '不显示的话用户会以为这个维度压根没送进去');
   });
 
-  testWidgets('展开过程量能看到每个维度的约束', (tester) async {
+  testWidgets('展开过程量能看到这一层的约束', (tester) async {
     await _pump(
       tester,
       tags: ['厨房情景'],
       trace: const TagTrace(
         vocabularyGroups: ['植源场景'],
         vocabularySize: 20,
-        dimensionPrompts: {'植源场景': '只判断主体所处的空间'},
+        prompt: '只判断主体所处的空间',
         rawReply: '{}',
       ),
     );

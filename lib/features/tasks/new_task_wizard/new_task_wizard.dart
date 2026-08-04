@@ -14,19 +14,23 @@ import 'wizard_providers.dart';
 
 /// 弹出新建任务向导；用户取消返回 null。
 ///
-/// [prefillUnitGroups]/[prefillShotGroups] 用上一条任务的配置预填（**连同
-/// 各组的打标约束一起**）：同一个项目里连着建好几条任务是常态，每次重选
-/// 四个组、重贴四段约束纯属折磨。预填只是起点，用户照样能改。
+/// [prefillUnitGroups]/[prefillShotGroups] 与两层的打标约束都用上一条任务的
+/// 配置预填：同一个项目里连着建好几条任务是常态，每次重选四个组、重贴两段
+/// 约束纯属折磨。预填只是起点，用户照样能改。
 Future<NewTaskWizardResult?> showNewTaskWizard(
   BuildContext context, {
   List<TagGroupRef> prefillUnitGroups = const [],
   List<TagGroupRef> prefillShotGroups = const [],
+  String prefillUnitPrompt = '',
+  String prefillShotPrompt = '',
 }) =>
     showDialog<NewTaskWizardResult>(
       context: context,
       builder: (_) => NewTaskWizard(
         prefillUnitGroups: prefillUnitGroups,
         prefillShotGroups: prefillShotGroups,
+        prefillUnitPrompt: prefillUnitPrompt,
+        prefillShotPrompt: prefillShotPrompt,
       ),
     );
 
@@ -34,11 +38,15 @@ Future<NewTaskWizardResult?> showNewTaskWizard(
 class NewTaskWizard extends ConsumerStatefulWidget {
   final List<TagGroupRef> prefillUnitGroups;
   final List<TagGroupRef> prefillShotGroups;
+  final String prefillUnitPrompt;
+  final String prefillShotPrompt;
 
   const NewTaskWizard({
     super.key,
     this.prefillUnitGroups = const [],
     this.prefillShotGroups = const [],
+    this.prefillUnitPrompt = '',
+    this.prefillShotPrompt = '',
   });
 
   @override
@@ -51,6 +59,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   String? _groupsError;
   late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
   late final List<TagGroupRef> _shotGroups = [...widget.prefillShotGroups];
+  late String _unitPrompt = widget.prefillUnitPrompt;
+  late String _shotPrompt = widget.prefillShotPrompt;
   TagPreview? _unitPreview;
   TagPreview? _shotPreview;
 
@@ -119,13 +129,6 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   ///
   /// 与 [_selectUnitGroups] 分开：那条路每次都要重算标签预览，而约束是逐字
   /// 敲进去的——每敲一个字重算一遍预览纯属白费，预览内容也压根没变。
-  void _updatePrompts(List<TagGroupRef> target, List<TagGroupRef> next) =>
-      setState(() {
-        target
-          ..clear()
-          ..addAll(next);
-      });
-
   /// 选中若干组后的标签预览：把它们的标签合并去重——打标用的就是这份合并
   /// 后的受控词表，预览就该长成它实际的样子。
   ///
@@ -162,7 +165,9 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     Navigator.of(context).pop(NewTaskWizardResult(
         filePath: path,
         unitTagGroups: List.of(_unitGroups),
-        shotTagGroups: List.of(_shotGroups)));
+        shotTagGroups: List.of(_shotGroups),
+        unitTagPrompt: _unitPrompt,
+        shotTagPrompt: _shotPrompt));
   }
 
   @override
@@ -194,9 +199,12 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     unitPreview: _unitPreview,
                     shotPreview: _shotPreview,
                     onUnitGroupsChanged: _selectUnitGroups,
-                    onUnitPromptsChanged: (g) => _updatePrompts(_unitGroups, g),
                     onShotGroupsChanged: _selectShotGroups,
-                    onShotPromptsChanged: (g) => _updatePrompts(_shotGroups, g),
+                    unitPrompt: _unitPrompt,
+                    shotPrompt: _shotPrompt,
+                    // 不 setState：输入框自己管着文本，重建只会打断输入
+                    onUnitPromptChanged: (v) => _unitPrompt = v,
+                    onShotPromptChanged: (v) => _shotPrompt = v,
                   ),
                 ),
               ),

@@ -33,11 +33,14 @@ class ImportService {
       DateTime.now().microsecondsSinceEpoch.toRadixString(36);
 
   /// [unitTagGroups] / [shotTagGroups] 来自新建任务向导；为空表示该层
-  /// 不打标（无受控词表可用）
+  /// 不打标（无受控词表可用）。[unitTagPrompt] / [shotTagPrompt] 是两层各自
+  /// 的打标约束（一层一条）。
   Future<RenewTask> importLocalFile(
     String filePath, {
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
   }) async {
     final info = await _probe(filePath);
     final id = idGenerator();
@@ -56,6 +59,8 @@ class ImportService {
       updatedAt: now,
       unitTagGroups: unitTagGroups,
       shotTagGroups: shotTagGroups,
+      unitTagPrompt: unitTagPrompt,
+      shotTagPrompt: shotTagPrompt,
     );
     await repository.save(task);
     return task;

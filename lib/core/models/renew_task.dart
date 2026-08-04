@@ -40,6 +40,19 @@ class RenewTask {
   /// 视觉镜头打标所用的 miaoa 标签组（同样可多选）；空表示该层不打标
   final List<TagGroupRef> shotTagGroups;
 
+  /// 台词语义单元这一层的打标约束（用户写的提示词），空串表示没写。
+  ///
+  /// **一层一条，不是一组一条**：一层选四个组时，四个组是同一次打标里的四个
+  /// 维度，用户想约束的是「这一层要怎么判」这件事本身；每个组各挂一条约束，
+  /// 界面上会冒出四个输入框，用户得把同一句话抄四遍。
+  ///
+  /// 存在**任务**上而不是全局：换一条片子口径就可能变。新建任务时由上一条
+  /// 任务复制一份带出来，免得反复贴。
+  final String unitTagPrompt;
+
+  /// 视觉镜头这一层的打标约束；空串表示没写
+  final String shotTagPrompt;
+
   /// 兼容读法：只关心「有没有选」或「第一个是哪个」的地方继续用它
   TagGroupRef? get unitTagGroup =>
       unitTagGroups.isEmpty ? null : unitTagGroups.first;
@@ -78,6 +91,8 @@ class RenewTask {
     this.asrSentences,
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
+    this.unitTagPrompt = '',
+    this.shotTagPrompt = '',
     this.analysisError,
     List<UnitReplacement>? replacements,
     this.bgm = BgmPlan.empty,
@@ -99,6 +114,21 @@ class RenewTask {
     }
     final single = TagGroupRef.tryFromJson(legacySingle);
     return single == null ? const [] : List.unmodifiable([single]);
+  }
+
+  /// 打标约束的解析。约束一度是**按组**存的（每个组的 JSON 里一个 prompt），
+  /// 改成一层一条之后，旧任务里那几条不能就这么丢掉——用户写过的东西凭空
+  /// 消失比字段改名难查得多。取旧数据里第一条非空的作为这一层的约束。
+  static String parsePrompt(Object? current, Object? legacyGroups) {
+    if (current is String) return current;
+    if (legacyGroups is! List) return '';
+    for (final g in legacyGroups) {
+      if (g is Map && g['prompt'] is String) {
+        final text = (g['prompt'] as String).trim();
+        if (text.isNotEmpty) return text;
+      }
+    }
+    return '';
   }
 
   static bool _sameGroups(List<TagGroupRef> a, List<TagGroupRef> b) {
@@ -129,6 +159,8 @@ class RenewTask {
     List<AsrSentence>? asrSentences,
     List<TagGroupRef>? unitTagGroups,
     List<TagGroupRef>? shotTagGroups,
+    String? unitTagPrompt,
+    String? shotTagPrompt,
     String? analysisError,
     bool clearAnalysisError = false,
     List<UnitReplacement>? replacements,
@@ -149,6 +181,8 @@ class RenewTask {
         asrSentences: asrSentences ?? this.asrSentences,
         unitTagGroups: unitTagGroups ?? this.unitTagGroups,
         shotTagGroups: shotTagGroups ?? this.shotTagGroups,
+        unitTagPrompt: unitTagPrompt ?? this.unitTagPrompt,
+        shotTagPrompt: shotTagPrompt ?? this.shotTagPrompt,
         analysisError:
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
         replacements: replacements ?? this.replacements,
@@ -174,6 +208,8 @@ class RenewTask {
         // 并存，旧版本只认单个字段，不写它任务在旧版本上就成了「没选标签组」
         'unitTagGroup': unitTagGroup?.toJson(),
         'shotTagGroup': shotTagGroup?.toJson(),
+        'unitTagPrompt': unitTagPrompt,
+        'shotTagPrompt': shotTagPrompt,
         'analysisError': analysisError,
         'replacements': replacements?.map((r) => r.toJson()).toList(),
         'bgm': bgm.toJson(),
@@ -200,6 +236,10 @@ class RenewTask {
             .toList(),
         unitTagGroups: parseTagGroups(json['unitTagGroups'], json['unitTagGroup']),
         shotTagGroups: parseTagGroups(json['shotTagGroups'], json['shotTagGroup']),
+        unitTagPrompt:
+            parsePrompt(json['unitTagPrompt'], json['unitTagGroups']),
+        shotTagPrompt:
+            parsePrompt(json['shotTagPrompt'], json['shotTagGroups']),
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
         bgm: BgmPlan.fromJson(json['bgm']),
@@ -252,6 +292,8 @@ class RenewTask {
       other.updatedAt == updatedAt &&
       _sameGroups(other.unitTagGroups, unitTagGroups) &&
       _sameGroups(other.shotTagGroups, shotTagGroups) &&
+      other.unitTagPrompt == unitTagPrompt &&
+      other.shotTagPrompt == shotTagPrompt &&
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences) &&
@@ -270,6 +312,8 @@ class RenewTask {
       updatedAt,
       Object.hashAll(unitTagGroups),
       Object.hashAll(shotTagGroups),
+      unitTagPrompt,
+      shotTagPrompt,
       analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!),

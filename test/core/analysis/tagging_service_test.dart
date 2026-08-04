@@ -14,12 +14,15 @@ import 'package:ishkafel/core/models/video_info.dart';
 
 class _FakeUnitTagger implements UnitTagger {
   final asked = <String>[];
+  final constraints = <String?>[];
   @override
   Future<ShotUnderstanding> understand({
     required String transcript,
     required List<TagDimension> dimensions,
+    String? constraint,
   }) async {
     asked.add(transcript);
+    constraints.add(constraint);
     return ShotUnderstanding(tags: ['新单元标签'], rawReply: '{}');
   }
 
@@ -29,12 +32,15 @@ class _FakeUnitTagger implements UnitTagger {
 
 class _FakeShotTagger implements ShotTagger {
   var calls = 0;
+  final constraints = <String?>[];
   @override
   Future<ShotUnderstanding> understand({
     required List<List<int>> frames,
     required List<TagDimension> dimensions,
+    String? constraint,
   }) async {
     calls++;
+    constraints.add(constraint);
     return ShotUnderstanding(
         tags: ['新镜头标签'], description: '新画面描述', rawReply: '{}');
   }
@@ -118,6 +124,8 @@ List<SemanticUnit> _units() => const [
 }
 
 void main() {
+  _layerConstraints();
+
   test('不传 only 时全打', () async {
     final b = _build();
 
@@ -153,5 +161,42 @@ void main() {
     expect(out[1].tagsStale, isFalse,
         reason: '标记还留着的话，界面上会一直挂着「标签已过期」');
     expect(out[1].shots.every((s) => !s.tagsStale), isTrue);
+  });
+}
+
+/// 约束是**按层**的：一层选四个组也只有一条，四个组是同一次打标的四个维度
+void _layerConstraints() {
+  test('两层各自的约束原样交给对应的打标器', () async {
+    final unitTagger = _FakeUnitTagger();
+    final shotTagger = _FakeShotTagger();
+    final workDir = Directory.systemTemp.createTempSync('ishkafel_tagc_');
+    addTearDown(() => workDir.deleteSync(recursive: true));
+    final service = TaggingService(
+      unitTagger: unitTagger,
+      shotTagger: shotTagger,
+      thumbnails: ThumbnailService(run: (_, args) async {
+        await File(args.last).writeAsBytes(const [1, 2, 3]);
+        return ProcessResult(1, 0, '', '');
+      }),
+      vocabulary: _FakeVocabulary(),
+      workDir: workDir,
+    );
+
+    final task = _task().copyWith(
+      unitTagGroups: const [
+        TagGroupRef(id: 1, name: '甲组'),
+        TagGroupRef(id: 2, name: '乙组'),
+      ],
+      unitTagPrompt: '按话术意图判断',
+      shotTagPrompt: '只判断具体位置或物体表面',
+    );
+
+    final tagged = await service.tag(task, _units());
+
+    expect(unitTagger.constraints, everyElement('按话术意图判断'));
+    expect(shotTagger.constraints, everyElement('只判断具体位置或物体表面'),
+        reason: '视觉层写的约束跑到台词层去，等于给错了指令');
+    expect(tagged.first.trace?.prompt, '按话术意图判断',
+        reason: '标签不对时，「喂进去的约束是什么」往往才是问题所在，要留痕');
   });
 }

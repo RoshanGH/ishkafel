@@ -7,7 +7,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../tasks/new_task_wizard/tag_group_picker.dart';
-import '../tasks/new_task_wizard/tag_prompt_fields.dart';
+import '../tasks/new_task_wizard/tag_prompt_field.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 
 /// 用户在这个对话框里定下来的两层标签组
@@ -15,12 +15,18 @@ class TaskTagGroups {
   final List<TagGroupRef> unit;
   final List<TagGroupRef> shot;
 
+  /// 两层各自的打标约束（一层一条，不随组数变化）
+  final String unitPrompt;
+  final String shotPrompt;
+
   /// 确认时是否要求立刻重新打标
   final bool retagNow;
 
   const TaskTagGroups({
     required this.unit,
     required this.shot,
+    this.unitPrompt = '',
+    this.shotPrompt = '',
     required this.retagNow,
   });
 }
@@ -34,16 +40,29 @@ Future<TaskTagGroups?> showTaskTagGroupsDialog(
   BuildContext context, {
   required List<TagGroupRef> unit,
   required List<TagGroupRef> shot,
+  String unitPrompt = '',
+  String shotPrompt = '',
 }) =>
     showDialog<TaskTagGroups>(
       context: context,
-      builder: (_) => _Dialog(unit: unit, shot: shot),
+      builder: (_) => _Dialog(
+          unit: unit,
+          shot: shot,
+          unitPrompt: unitPrompt,
+          shotPrompt: shotPrompt),
     );
 
 class _Dialog extends ConsumerStatefulWidget {
   final List<TagGroupRef> unit;
   final List<TagGroupRef> shot;
-  const _Dialog({required this.unit, required this.shot});
+  final String unitPrompt;
+  final String shotPrompt;
+  const _Dialog({
+    required this.unit,
+    required this.shot,
+    required this.unitPrompt,
+    required this.shotPrompt,
+  });
 
   @override
   ConsumerState<_Dialog> createState() => _DialogState();
@@ -52,6 +71,8 @@ class _Dialog extends ConsumerStatefulWidget {
 class _DialogState extends ConsumerState<_Dialog> {
   late List<TagGroupRef> _unit = widget.unit;
   late List<TagGroupRef> _shot = widget.shot;
+  late String _unitPrompt = widget.unitPrompt;
+  late String _shotPrompt = widget.shotPrompt;
   bool _retag = true;
 
   /// 标签组列表：拉取中为 null，失败时 [_loadError] 有值
@@ -117,10 +138,12 @@ class _DialogState extends ConsumerState<_Dialog> {
                   selected: _unit,
                   onTap: () => _pick(unitLayer: true),
                 ),
-                TagPromptFields(
-                  layer: 'unit',
-                  groups: _unit,
-                  onChanged: (g) => _unit = g,
+                if (_unit.isNotEmpty)
+                  TagPromptField(
+                    layer: 'unit',
+                  layerLabel: '台词语义单元',
+                  value: _unitPrompt,
+                  onChanged: (v) => _unitPrompt = v,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 _row(
@@ -129,10 +152,12 @@ class _DialogState extends ConsumerState<_Dialog> {
                   selected: _shot,
                   onTap: () => _pick(unitLayer: false),
                 ),
-                TagPromptFields(
-                  layer: 'shot',
-                  groups: _shot,
-                  onChanged: (g) => _shot = g,
+                if (_shot.isNotEmpty)
+                  TagPromptField(
+                    layer: 'shot',
+                  layerLabel: '视觉镜头',
+                  value: _shotPrompt,
+                  onChanged: (v) => _shotPrompt = v,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 CheckboxListTile(
@@ -166,7 +191,12 @@ class _DialogState extends ConsumerState<_Dialog> {
             onPressed: _groups == null
                 ? null
                 : () => Navigator.of(context).pop(TaskTagGroups(
-                    unit: _unit, shot: _shot, retagNow: _retag)),
+                      unit: _unit,
+                      shot: _shot,
+                      unitPrompt: _unitPrompt,
+                      shotPrompt: _shotPrompt,
+                      retagNow: _retag,
+                    )),
             child: const Text('保存'),
           ),
         ],

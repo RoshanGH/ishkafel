@@ -5,8 +5,8 @@ import 'package:ishkafel/core/ai/tag_dimension.dart';
 
 const _dims = [
   TagDimension(
-      name: '植源场景', vocabulary: ['厨房情景', '客厅情景'], prompt: '只看主体所处的空间'),
-  TagDimension(name: '植源动作', vocabulary: ['打开电器', '喷洒'], prompt: null),
+      name: '植源场景', vocabulary: ['厨房情景', '客厅情景']),
+  TagDimension(name: '植源动作', vocabulary: ['打开电器', '喷洒']),
 ];
 
 void main() {
@@ -22,23 +22,24 @@ void main() {
       expect(text, contains('打开电器'));
     });
 
-    test('维度自带的约束跟在它自己那一段后面', () {
-      final text = buildDimensionPrompt(_dims);
+    test('整层一条约束，摆在所有维度前面统一声明一次', () {
+      final text =
+          buildDimensionPrompt(_dims, constraint: '只看主体所处的空间');
 
-      final sceneAt = text.indexOf('植源场景');
-      final constraintAt = text.indexOf('只看主体所处的空间');
-      final actionAt = text.indexOf('植源动作');
-
-      expect(constraintAt, greaterThan(sceneAt));
-      expect(constraintAt, lessThan(actionAt),
-          reason: '约束落到别的维度下面，等于给错了指令');
+      expect(text.indexOf('只看主体所处的空间'), lessThan(text.indexOf('植源场景')),
+          reason: '约束对这一层所有维度都生效；跟在某个维度后面会被当成只管那一个');
+      expect('只看主体所处的空间'.allMatches(text), hasLength(1),
+          reason: '一层四个组时，同一句约束抄四遍容易被模型当成四条不同指令');
     });
 
-    test('没写约束的维度不留一个空的「约束：」', () {
-      final text = buildDimensionPrompt([_dims[1]]);
-
-      expect(text, isNot(contains('约束：\n')));
-      expect(text, isNot(contains('约束：null')));
+    test('没写约束就不留一个空的「打标约束：」', () {
+      for (final text in [
+        buildDimensionPrompt(_dims),
+        buildDimensionPrompt(_dims, constraint: '   '),
+      ]) {
+        expect(text, isNot(contains('约束：\n')));
+        expect(text, isNot(contains('约束：null')));
+      }
     });
 
     test('要求按维度名分开输出，而不是一个扁平数组', () {
@@ -106,8 +107,8 @@ void main() {
 
     test('同一个词在两个维度都合法时各自都留（不去重成一个）', () {
       const shared = [
-        TagDimension(name: 'A', vocabulary: ['实拍'], prompt: null),
-        TagDimension(name: 'B', vocabulary: ['实拍'], prompt: null),
+        TagDimension(name: 'A', vocabulary: ['实拍']),
+        TagDimension(name: 'B', vocabulary: ['实拍']),
       ];
 
       final parsed = parseDimensionTags(

@@ -22,6 +22,8 @@ RenewTask _task({
     );
 
 void main() {
+  _layerPrompt();
+
   group('两层各自可以选多个标签组', () {
     test('原样存取', () {
       final t = _task(unit: [_a], shot: [_a, _b, _c]);
@@ -146,6 +148,43 @@ void main() {
       final t = _task(shot: [_a]).copyWith(name: '改名');
 
       expect(t.shotTagGroups, [_a]);
+    });
+  });
+}
+
+/// 打标约束一层一条（此前是一组一条）
+void _layerPrompt() {
+  group('打标约束按层存', () {
+    test('两层各存各的，往返 JSON 不丢', () {
+      final t = _task(unit: [_a], shot: [_b, _c]).copyWith(
+        unitTagPrompt: '按话术意图判断',
+        shotTagPrompt: '只判断具体位置或物体表面',
+      );
+
+      final back = RenewTask.fromJson(t.toJson());
+
+      expect(back.unitTagPrompt, '按话术意图判断');
+      expect(back.shotTagPrompt, '只判断具体位置或物体表面');
+    });
+
+    test('没写过就是空串，不是 null——界面上少一层判空', () {
+      expect(RenewTask.fromJson(_task().toJson()).unitTagPrompt, '');
+    });
+
+    test('旧任务里按组存的约束，迁移成这一层的约束', () {
+      final json = _task(unit: [_a], shot: [_b]).toJson()
+        ..['unitTagPrompt'] = null
+        ..['shotTagPrompt'] = null
+        ..['unitTagGroups'] = [
+          {'id': 1, 'name': '画面类型', 'prompt': '  '},
+          {'id': 9, 'name': '另一个组', 'prompt': '按话术意图判断'},
+        ];
+
+      final back = RenewTask.fromJson(json);
+
+      expect(back.unitTagPrompt, '按话术意图判断',
+          reason: '用户写过的东西凭空消失，比字段改名难查得多');
+      expect(back.shotTagPrompt, '', reason: '旧数据里没写就是没写');
     });
   });
 }

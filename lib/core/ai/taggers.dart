@@ -10,14 +10,17 @@ class UnitTagger {
 
   /// 按维度打标，并带出模型原始回复供过程量留痕。
   ///
-  /// 一个标签组 = 一个维度，各带各的词表与各自的约束（见 [TagDimension]）。
+  /// 一个标签组 = 一个维度，各带各的词表（见 [TagDimension]）；用户写的
+  /// [constraint] 是整层一条，对所有维度都生效。
   Future<ShotUnderstanding> understand({
     required String transcript,
     required List<TagDimension> dimensions,
+    String? constraint,
   }) async {
     if (dimensions.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatText(
-      system: '你是短视频广告素材打标员。\n${buildDimensionPrompt(dimensions)}',
+      system: '你是短视频广告素材打标员。\n'
+          '${buildDimensionPrompt(dimensions, constraint: constraint)}',
       user: '台词：$transcript',
       maxTokens: 512,
     );
@@ -70,13 +73,14 @@ class ShotTagger {
   Future<ShotUnderstanding> understand({
     required List<List<int>> frames,
     required List<TagDimension> dimensions,
+    String? constraint,
   }) async {
     // 没帧就没什么可看的；但**没有维度仍然要问**——画面描述不依赖词表，
     // 而它正是「按画面描述检索素材」的检索键。没选标签组就连描述也不给，
     // 等于把这条路一起堵死。
     if (frames.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatVisionFrames(
-      prompt: _shotPrompt(frames.length, dimensions),
+      prompt: _shotPrompt(frames.length, dimensions, constraint),
       frames: frames,
       maxTokens: 768,
     );
@@ -92,12 +96,13 @@ class ShotTagger {
 
 /// 提示词必须说明「这几张是同一镜头的连续采样」——不说的话模型会把它们
 /// 当成几张无关的图分别描述
-String _shotPrompt(int frameCount, List<TagDimension> dimensions) {
+String _shotPrompt(
+    int frameCount, List<TagDimension> dimensions, String? constraint) {
   final head = frameCount > 1
       ? '这 $frameCount 张图是同一个短视频镜头按时间先后连续采样的画面'
           '（依次为镜头的开头、中间、结尾）。'
       : '这是同一个短视频镜头的一张画面。';
-  return '$head\n${buildDimensionPrompt(dimensions)}\n'
+  return '$head\n${buildDimensionPrompt(dimensions, constraint: constraint)}\n'
       '另外用一句话描述这个镜头在拍什么（主体、场景、动作），放在 '
       '"description" 键下。这句话会被拿去检索画面相近的素材，'
       '所以要具体、不要复述台词。';

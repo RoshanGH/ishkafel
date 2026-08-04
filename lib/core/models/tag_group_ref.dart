@@ -11,23 +11,9 @@ class TagGroupRef {
   final int id;
   final String name;
 
-  /// 用户为这个标签组写的打标约束（提示词）。
-  ///
-  /// 每个项目的打标口径不一样，写死在代码里的通用提示词打不出用户要的那套
-  /// 标签。存在**任务**上而不是全局：换一条片子口径就可能变。新建任务时由
-  /// 上一条任务复制一份带出来，免得反复贴。
-  final String? prompt;
+  const TagGroupRef({required this.id, required this.name});
 
-  const TagGroupRef({required this.id, required this.name, this.prompt});
-
-  TagGroupRef withPrompt(String? next) =>
-      TagGroupRef(id: id, name: name, prompt: next);
-
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        if (prompt != null) 'prompt': prompt,
-      };
+  Map<String, dynamic> toJson() => {'id': id, 'name': name};
 
   /// 宽松解析：任务 JSON 是历史数据，字段缺失或类型不符一律返回 null。
   ///
@@ -46,25 +32,16 @@ class TagGroupRef {
       AppLog.warn('任务标签组字段缺失或类型不符（id=$id, name=$name），按未选择处理');
       return null;
     }
-    final prompt = raw['prompt'];
-    return TagGroupRef(
-      id: id,
-      name: name,
-      prompt: prompt is String && prompt.trim().isNotEmpty ? prompt : null,
-    );
+    return TagGroupRef(id: id, name: name);
   }
 
   @override
   bool operator ==(Object other) =>
-      other is TagGroupRef &&
-      other.id == id &&
-      other.name == name &&
-      other.prompt == prompt;
+      other is TagGroupRef && other.id == id && other.name == name;
 
   @override
-  int get hashCode => Object.hash(id, name, prompt);
+  int get hashCode => Object.hash(id, name);
 
   @override
-  String toString() =>
-      'TagGroupRef($id, $name${prompt == null ? '' : ', 有约束'})';
+  String toString() => 'TagGroupRef($id, $name)';
 }

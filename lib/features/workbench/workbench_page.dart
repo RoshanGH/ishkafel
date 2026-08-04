@@ -537,13 +537,25 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       context,
       unit: _task.unitTagGroups,
       shot: _task.shotTagGroups,
+      unitPrompt: _task.unitTagPrompt,
+      shotPrompt: _task.shotTagPrompt,
     );
     if (picked == null || !mounted) return;
 
     _task = _task.copyWith(
-        unitTagGroups: picked.unit, shotTagGroups: picked.shot);
+      unitTagGroups: picked.unit,
+      shotTagGroups: picked.shot,
+      unitTagPrompt: picked.unitPrompt,
+      shotTagPrompt: picked.shotPrompt,
+    );
     try {
-      await _tasks!.saveTagGroups(_task, unit: picked.unit, shot: picked.shot);
+      await _tasks!.saveTagGroups(
+        _task,
+        unit: picked.unit,
+        shot: picked.shot,
+        unitPrompt: picked.unitPrompt,
+        shotPrompt: picked.shotPrompt,
+      );
     } catch (e) {
       AppLog.warn('标签组落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('标签组');

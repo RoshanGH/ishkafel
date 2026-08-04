@@ -31,9 +31,8 @@ void main() {
       child: const MaterialApp(
         home: Scaffold(
           body: NewTaskWizard(
-            prefillShotGroups: [
-              TagGroupRef(id: 7, name: '植源场景', prompt: '只判断空间'),
-            ],
+            prefillShotGroups: [TagGroupRef(id: 7, name: '植源场景')],
+            prefillShotPrompt: '只判断空间',
           ),
         ),
       ),
@@ -42,7 +41,7 @@ void main() {
 
     expect(find.textContaining('植源场景'), findsWidgets,
         reason: '同一个项目里连着建好几条任务是常态，每次重选四个组、'
-            '重贴四段约束纯属折磨');
+            '重贴两段约束纯属折磨');
   });
 
   testWidgets('没有可预填的配置时照常是空的', (tester) async {
@@ -73,7 +72,7 @@ void _promptInWizard() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('tag-prompt-shot-7')), findsOneWidget,
+    expect(find.byKey(const Key('tag-prompt-shot')), findsOneWidget,
         reason: '建任务时选完组当场就能写，第一次打标就用得上');
   });
 
@@ -83,9 +82,8 @@ void _promptInWizard() {
       child: const MaterialApp(
         home: Scaffold(
           body: NewTaskWizard(
-            prefillShotGroups: [
-              TagGroupRef(id: 7, name: '植源场景', prompt: '只判断台面与柜门'),
-            ],
+            prefillShotGroups: [TagGroupRef(id: 7, name: '植源场景')],
+            prefillShotPrompt: '只判断台面与柜门',
           ),
         ),
       ),
@@ -102,7 +100,7 @@ void _promptInWizard() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('tag-prompt-shot-7')), findsNothing);
+    expect(find.byKey(const Key('tag-prompt-shot')), findsNothing);
   });
 }
 
@@ -141,11 +139,11 @@ void _promptSurvivesStart() {
     await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
     await tester.pumpAndSettle();
     await tester.enterText(
-        find.byKey(const Key('tag-prompt-shot-7')), '只判断台面与柜门');
+        find.byKey(const Key('tag-prompt-shot')), '只判断台面与柜门');
     await tester.pump();
     await tester.tap(find.byKey(const Key('wizard-start-btn')));
     await tester.pumpAndSettle();
 
-    expect(result!.shotTagGroups.single.prompt, '只判断台面与柜门');
+    expect(result!.shotTagPrompt, '只判断台面与柜门');
   });
 }

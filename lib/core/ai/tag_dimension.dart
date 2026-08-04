@@ -16,15 +16,7 @@ class TagDimension {
   /// 这个维度的受控词表
   final List<String> vocabulary;
 
-  /// 用户为这个标签组写的打标约束。每个项目的口径不同，写死在代码里的
-  /// 通用提示词打不出用户要的那套标签。
-  final String? prompt;
-
-  const TagDimension({
-    required this.name,
-    required this.vocabulary,
-    required this.prompt,
-  });
+  const TagDimension({required this.name, required this.vocabulary});
 }
 
 /// 一次分维度打标的结果
@@ -41,18 +33,21 @@ class DimensionTags {
 
 /// 拼出分维度的提示词片段。
 ///
-/// 每个维度自成一段：维度名 + 它自己的词表 + 它自己的约束。约束必须紧跟在
-/// 它所属的维度后面——落到别的维度下面等于给错了指令。
-String buildDimensionPrompt(List<TagDimension> dimensions) {
+/// 每个维度自成一段：维度名 + 它自己的词表。用户写的 [constraint] 是**整层
+/// 一条**，所以摆在所有维度前面统一声明一次——一层选四个组时那四个组是同一
+/// 次打标的四个维度，同一句约束抄四遍既啰嗦，又容易被模型当成四条不同指令。
+String buildDimensionPrompt(List<TagDimension> dimensions,
+    {String? constraint}) {
   final buffer = StringBuffer();
+  final trimmed = constraint?.trim() ?? '';
+  // 没写就不留一个空的「打标约束：」——空指令会让模型去猜它省略了什么
+  if (trimmed.isNotEmpty) {
+    buffer.writeln('打标约束（对下面所有维度都生效）：$trimmed');
+    buffer.writeln();
+  }
   for (final d in dimensions) {
     buffer.writeln('【${d.name}】');
     buffer.writeln('候选标签（只能从中选，禁止自造）：${jsonEncode(d.vocabulary)}');
-    final prompt = d.prompt?.trim();
-    // 没写约束就不留一个空的「约束：」——空指令会让模型去猜它省略了什么
-    if (prompt != null && prompt.isNotEmpty) {
-      buffer.writeln('本维度约束：$prompt');
-    }
     buffer.writeln();
   }
   buffer.writeln('逐个维度作答，每个维度只从它自己的候选里选，宁缺毋滥。');

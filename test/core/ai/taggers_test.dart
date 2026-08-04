@@ -33,7 +33,7 @@ void main() {
       [9, 9, 9]
     ], dimensions: const [
       TagDimension(
-          name: '画面类型', vocabulary: ['产品特写', '人物口播'], prompt: null),
+          name: '画面类型', vocabulary: ['产品特写', '人物口播']),
     ]);
 
     expect(r.tags, ['产品特写']);

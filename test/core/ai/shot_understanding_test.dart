@@ -28,7 +28,7 @@ ArkChatClient _chat(String reply) => ArkChatClient(
 
 const _vocab = [
   TagDimension(
-      name: '画面类型', vocabulary: ['厨房情景', '产品特写', '真人口播'], prompt: null),
+      name: '画面类型', vocabulary: ['厨房情景', '产品特写', '真人口播']),
 ];
 
 /// 分维度的回复：把老用例里的 {"tags":[...]} 换成按维度分格的形状

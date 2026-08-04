@@ -171,8 +171,8 @@ class _TraceDetail extends StatelessWidget {
             _line('受控词表',
                 '${trace.vocabularyGroups.join('、')} · ${trace.vocabularySize} 个词'),
           // 标签不对时，「喂进去的约束是什么」往往才是问题所在
-          for (final e in trace.dimensionPrompts.entries)
-            _line('「${e.key}」的约束', e.value),
+          if (trace.prompt case final p? when p.isNotEmpty)
+            _line('打标约束', p),
           if (trace.at case final at?) _line('打标时间', _stamp(at)),
           if (trace.rawReply case final r? when r.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
