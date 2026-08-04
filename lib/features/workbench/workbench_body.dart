@@ -12,6 +12,7 @@ import 'inspector_panel.dart';
 import 'player_panel.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/voice_plan.dart';
+import '../../core/replacement/replacement_plan.dart';
 import 'side_panel_tabs.dart';
 import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
@@ -61,6 +62,9 @@ class WorkbenchBody extends StatefulWidget {
 
   /// 换音色方案与入口
   final VoicePlan voices;
+
+  /// 当前替换方案：时间线上标出「哪几段挑好了素材、各几条」
+  final List<UnitReplacement> replacements;
   final void Function(int unitIndex)? onChangeVoice;
 
   /// 试听某个单元已生成的配音；返回 null 表示这一句还没生成
@@ -84,6 +88,7 @@ class WorkbenchBody extends StatefulWidget {
     this.candidateBadge,
     this.clock,
     this.voices = VoicePlan.empty,
+    this.replacements = const [],
     this.onChangeVoice,
     this.previewVoice,
     this.bgm = BgmPlan.empty,
@@ -98,6 +103,17 @@ class WorkbenchBody extends StatefulWidget {
 class _WorkbenchBodyState extends State<WorkbenchBody> {
   /// 右栏当前视图。切分与选材在同一个工作台里交替进行，不再是两个页面。
   SidePanelTab _sideTab = SidePanelTab.inspector;
+
+  /// 点了时间线上那个数字：选中那一段并把右栏切到「替换素材」。
+  ///
+  /// 徽标只告诉用户「这儿挑了 3 条」，看不到是哪三条；点它直接落到那一段的
+  /// 候选面板，才是一个能闭环的标记。
+  void _jumpToReplacement(int unitIndex, int? shotIndex) {
+    widget.editor.select(shotIndex == null
+        ? EditorSelection.unit(unitIndex)
+        : EditorSelection.shot(unitIndex, shotIndex));
+    setState(() => _sideTab = SidePanelTab.candidates);
+  }
 
   /// 「只播这一段」（双击时间线上的单元/镜头）
   late final SegmentPlayback _segment = SegmentPlayback(widget.playback);
@@ -353,6 +369,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   clock: widget.clock ?? DateTime.now,
                   bgm: widget.bgm,
                   voices: widget.voices,
+                  replacements: widget.replacements,
+                  onReplacementBadgeTap: _jumpToReplacement,
                   onBgmRangeSelected: widget.onBgmRangeSelected,
                   onBgmSegmentTap: widget.onBgmSegmentTap,
                   readOnly: widget.readOnly,

@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
@@ -41,6 +43,10 @@ class TimelinePainter extends CustomPainter {
 
   /// 换音色方案。换过的单元在块体底边画一道绿杠。
   final VoicePlan voices;
+
+  /// 当前替换方案（按单元下标对齐）。时间线上要看得见「哪几段已经挑好了
+  /// 素材、各挑了几条」——此前这件事只在右栏里可见，回到时间线就断片了。
+  final List<UnitReplacement> replacements;
   final TimelineGeometry geometry;
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
@@ -87,6 +93,7 @@ class TimelinePainter extends CustomPainter {
     this.thumbImages,
     this.waveEnvelope,
     required this.playheadMs,
+    this.replacements = const [],
     this.mediaStatus = TimelineMediaStatus.ready,
     required this.textCache,
   });
@@ -199,6 +206,13 @@ class TimelinePainter extends CustomPainter {
       // 为什么不像配乐那样单开一条轨：音色本来就属于单元，标在单元块上比
       // 另起一条更贴切；而且第六条轨会把轨道总高推到 332px，反推最小窗口高
       // 972——1440×900 的笔记本就装不下整个窗口了。
+      // 整体替换挑了几条，就在块体右上角标几——点它直接跳到右栏那一段
+      final wholeCount =
+          ReplacementBadges.wholeCount(replacements, unit.index);
+      if (wholeCount > 0) {
+        _drawBadge(canvas, ReplacementBadges.unitBadgeRect(rect), '$wholeCount');
+      }
+
       if (voices.voiceOf(unit.index) != null) {
         canvas.drawRect(
           Rect.fromLTRB(rect.left, rect.bottom - _voiceMarkH, rect.right,
@@ -236,6 +250,22 @@ class TimelinePainter extends CustomPainter {
       );
       canvas.restore();
     }
+  }
+
+  /// 替换数量徽标：圆角小块 + 数字。放不下就不画——半个徽标比没有更糟。
+  void _drawBadge(Canvas canvas, Rect? rect, String text) {
+    if (rect == null) return;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(4)),
+      Paint()..color = AppColors.purple,
+    );
+    final layout = textCache.acquire(
+        text: text, color: AppColors.textPrimary, fontSize: AppFontSize.micro);
+    layout.paint(
+      canvas,
+      Offset(rect.center.dx - layout.width / 2,
+          rect.center.dy - layout.height / 2),
+    );
   }
 
   /// 单元块首行：编号 + 标签（打标接通后）或时长
@@ -296,6 +326,14 @@ class TimelinePainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = selected ? 2 : 1,
         );
+
+        // 镜头替换挑了几条同样标出来
+        final shotCount =
+            ReplacementBadges.shotCount(replacements, unit.index, s);
+        if (shotCount > 0) {
+          _drawBadge(
+              canvas, ReplacementBadges.shotBadgeRect(rect), '$shotCount');
+        }
 
         // 放不下编号就只留块体（负数 maxWidth 会让整帧绘制中断，见 [_drawText]）
         final labelMaxWidth = rect.width - _shotLabelPadding * 2;
@@ -566,6 +604,48 @@ class TimelinePainter extends CustomPainter {
         oldDelegate.playheadMs != playheadMs ||
         oldDelegate.bgm != bgm ||
         oldDelegate.bgmSelecting != bgmSelecting ||
-        oldDelegate.voices != voices;
+        oldDelegate.voices != voices ||
+        !const DeepCollectionEquality()
+            .equals(oldDelegate.replacements, replacements);
+  }
+}
+
+/// 替换数量徽标画在哪。painter 与命中测试共用同一份几何——两边各算一次，
+/// 迟早会错开，用户点得到的位置和看到的位置不一样。
+class ReplacementBadges {
+  ReplacementBadges._();
+
+  /// 这个单元整体替换挑了几条；没挑或不是整体替换返回 0
+  static int wholeCount(List<UnitReplacement> replacements, int unitIndex) {
+    if (unitIndex < 0 || unitIndex >= replacements.length) return 0;
+    final r = replacements[unitIndex];
+    return r.mode == ReplacementMode.whole ? r.wholeCandidateIds.length : 0;
+  }
+
+  /// 这个镜头挑了几条
+  static int shotCount(
+      List<UnitReplacement> replacements, int unitIndex, int shotIndex) {
+    if (unitIndex < 0 || unitIndex >= replacements.length) return 0;
+    final r = replacements[unitIndex];
+    if (r.mode != ReplacementMode.perShot) return 0;
+    return r.shotCandidateIds[shotIndex]?.length ?? 0;
+  }
+
+  static const double width = 20;
+  static const double height = 14;
+  static const double inset = 4;
+
+  /// 单元块右上角。块体窄到放不下徽标时返回 null（半个徽标比没有更糟）
+  static Rect? unitBadgeRect(Rect block) {
+    if (block.width < width + inset * 2) return null;
+    return Rect.fromLTWH(block.right - width - inset, block.top + inset, width,
+        height);
+  }
+
+  /// 镜头块右上角。镜头块通常更窄，徽标也更小
+  static Rect? shotBadgeRect(Rect block) {
+    if (block.width < width + inset) return null;
+    return Rect.fromLTWH(
+        block.right - width - 2, block.top + 2, width, height);
   }
 }

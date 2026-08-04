@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
@@ -72,6 +73,12 @@ class TimelineView extends StatefulWidget {
   /// 换音色方案（换过的单元在块体底边画一道绿杠）
   final VoicePlan voices;
 
+  /// 当前替换方案：时间线上标出「哪几段挑好了素材、各几条」
+  final List<UnitReplacement> replacements;
+
+  /// 点了那个数字徽标：跳到右栏对应的那一段（shotIndex 为 null 表示整体替换）
+  final void Function(int unitIndex, int? shotIndex)? onReplacementBadgeTap;
+
   /// 在配乐轨上框选完一段连续镜头（全片打平下标，含两端）
   final void Function(int fromShot, int toShot)? onBgmRangeSelected;
 
@@ -101,6 +108,8 @@ class TimelineView extends StatefulWidget {
     this.onPlaySegment,
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
+    this.replacements = const [],
+    this.onReplacementBadgeTap,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
     DateTime Function()? clock,
@@ -249,6 +258,8 @@ class _TimelineViewState extends State<TimelineView> {
     _lastTapPosition = position;
 
     final units = widget.controller.units;
+    // 替换数量徽标优先命中：它压在块体上，先判它才点得到
+    if (_hitReplacementBadge(position)) return;
     if (_isOnBgmTrack(position)) {
       final at = _shotIndexAtX(position.dx);
       final segment = at == null ? null : widget.bgm.segmentAt(at);
@@ -349,6 +360,47 @@ class _TimelineViewState extends State<TimelineView> {
   /// 像素 → 毫秒（[TimelineGeometry.pxToMs] 已夹在 [0, durationMs]，
   /// 拖出两端不会出现负数或超长）
   void _seekTo(double dx) => widget.onSeek(widget.geometry.pxToMs(dx));
+
+  /// 点在某个替换数量徽标上了吗？是的话跳到右栏对应的那一段。
+  bool _hitReplacementBadge(Offset position) {
+    final onBadge = widget.onReplacementBadgeTap;
+    if (onBadge == null) return false;
+
+    for (final unit in widget.controller.units) {
+      final rect = Rect.fromLTRB(
+        widget.geometry.msToPx(unit.startMs),
+        TimelineTracks.unitsTop,
+        widget.geometry.msToPx(unit.endMs),
+        TimelineTracks.unitsBottom,
+      );
+      // 没挑素材的地方压根没画徽标，点下去不该误跳
+      final hasWhole =
+          ReplacementBadges.wholeCount(widget.replacements, unit.index) > 0;
+      if (hasWhole &&
+          (ReplacementBadges.unitBadgeRect(rect)?.contains(position) ?? false)) {
+        onBadge(unit.index, null);
+        return true;
+      }
+      for (var s = 0; s < unit.shots.length; s++) {
+        final shot = unit.shots[s];
+        final shotRect = Rect.fromLTRB(
+          widget.geometry.msToPx(shot.startMs),
+          TimelineTracks.shotsTop,
+          widget.geometry.msToPx(shot.endMs),
+          TimelineTracks.shotsBottom,
+        );
+        final hasShot =
+            ReplacementBadges.shotCount(widget.replacements, unit.index, s) > 0;
+        if (hasShot &&
+            (ReplacementBadges.shotBadgeRect(shotRect)?.contains(position) ??
+                false)) {
+          onBadge(unit.index, s);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   bool _isOnBgmTrack(Offset position) =>
       position.dy >= TimelineTracks.bgmTop &&
@@ -472,6 +524,7 @@ class _TimelineViewState extends State<TimelineView> {
                     bgm: widget.bgm,
                     bgmSelecting: _bgmSelecting,
                     voices: widget.voices,
+                    replacements: widget.replacements,
                     textCache: _textCache,
                   ),
                 ),

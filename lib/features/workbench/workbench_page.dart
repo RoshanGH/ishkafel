@@ -813,6 +813,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 readOnly: !_isEditable,
                 clock: widget.clock,
                 voices: _task.voices,
+                replacements: _replacements ?? const [],
                 onChangeVoice: _isEditable ? _changeVoice : null,
                 previewVoice: (i) =>
                     _voiceAudio.containsKey(i) ? () => _previewVoice(i) : null,
