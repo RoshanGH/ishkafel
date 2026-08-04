@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/tagging_service.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
@@ -449,6 +450,13 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 保存配乐方案。与切分、替换方案同一条「随手落库」通路。
   Future<void> saveBgm(RenewTask task, BgmPlan bgm) async {
     final updated = task.copyWith(bgm: bgm, updatedAt: DateTime.now());
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 保存换音色方案。与切分、替换方案、配乐同一条「随手落库」通路。
+  Future<void> saveVoices(RenewTask task, VoicePlan voices) async {
+    final updated = task.copyWith(voices: voices, updatedAt: DateTime.now());
     await ref.read(taskRepositoryProvider).save(updated);
     await _refreshAfterSave(updated);
   }

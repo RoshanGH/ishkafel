@@ -11,6 +11,7 @@ import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/voice_plan.dart';
 import 'side_panel_tabs.dart';
 import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
@@ -58,6 +59,10 @@ class WorkbenchBody extends StatefulWidget {
   /// 时间线判定双击用的时钟（测试注入）
   final DateTime Function()? clock;
 
+  /// 换音色方案与入口
+  final VoicePlan voices;
+  final void Function(int unitIndex)? onChangeVoice;
+
   /// 配乐方案与两个入口（框选一段 / 点已有的一段）
   final BgmPlan bgm;
   final void Function(int fromShot, int toShot)? onBgmRangeSelected;
@@ -75,6 +80,8 @@ class WorkbenchBody extends StatefulWidget {
     this.candidatePanel,
     this.candidateBadge,
     this.clock,
+    this.voices = VoicePlan.empty,
+    this.onChangeVoice,
     this.bgm = BgmPlan.empty,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
@@ -222,6 +229,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 onSplitAtPlayhead: () =>
                                     _splitAtPlayhead(context, editor, playback),
                                 readOnly: widget.readOnly,
+                                voiceOf: widget.voices.voiceOf,
+                                onChangeVoice: widget.onChangeVoice,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),

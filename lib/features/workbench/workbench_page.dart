@@ -27,6 +27,7 @@ import '../tasks/task_list_controller.dart';
 import '../../core/audio/bgm_plan.dart';
 import 'bgm_picker_sheet.dart';
 import 'candidate_badge.dart';
+import 'voice_picker_sheet.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import 'edit_consequence_dialog.dart';
@@ -315,6 +316,32 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (choice.retag) await _retag(consequence);
     } finally {
       _askingConsequence = false;
+    }
+  }
+
+  /// 给若干台词语义单元换音色。
+  ///
+  /// 只落方案，不立刻合成——合成要走云端、几秒一句，用户往往先把几句都配好
+  /// 再统一生成。真正的合成由「生成配音」触发。
+  Future<void> _changeVoice(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final choice = await showVoicePicker(
+      context,
+      units: editor.units,
+      plan: _task.voices,
+      focusedUnit: unitIndex,
+    );
+    if (choice == null || !mounted) return;
+    final next = choice.voice == null
+        ? _task.voices.clear(choice.unitIndexes)
+        : _task.voices.assign(choice.unitIndexes, choice.voice!);
+    setState(() => _task = _task.copyWith(voices: next));
+    try {
+      await _tasks!.saveVoices(_task, next);
+    } catch (e) {
+      AppLog.warn('换音色方案落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('配音方案');
     }
   }
 
@@ -621,6 +648,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 playhead: _playhead,
                 readOnly: !_isEditable,
                 clock: widget.clock,
+                voices: _task.voices,
+                onChangeVoice: _isEditable ? _changeVoice : null,
                 candidateBadge: candidateBadgeText(_replacements ?? const []),
                 bgm: _task.bgm,
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,

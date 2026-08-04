@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../audio/bgm_plan.dart';
+import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
 import 'tag_group_ref.dart';
 import 'video_info.dart';
@@ -60,6 +61,9 @@ class RenewTask {
   /// 见 [BgmPlan]。
   final BgmPlan bgm;
 
+  /// 换音色方案：哪几个台词语义单元换成哪个音色。见 [VoicePlan]。
+  final VoicePlan voices;
+
   RenewTask({
     required this.id,
     required this.name,
@@ -77,6 +81,7 @@ class RenewTask {
     this.analysisError,
     List<UnitReplacement>? replacements,
     this.bgm = BgmPlan.empty,
+    this.voices = VoicePlan.empty,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
         replacements =
@@ -128,6 +133,7 @@ class RenewTask {
     bool clearAnalysisError = false,
     List<UnitReplacement>? replacements,
     BgmPlan? bgm,
+    VoicePlan? voices,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -147,6 +153,7 @@ class RenewTask {
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
         replacements: replacements ?? this.replacements,
         bgm: bgm ?? this.bgm,
+        voices: voices ?? this.voices,
       );
 
   Map<String, dynamic> toJson() => {
@@ -170,6 +177,7 @@ class RenewTask {
         'analysisError': analysisError,
         'replacements': replacements?.map((r) => r.toJson()).toList(),
         'bgm': bgm.toJson(),
+        'voices': voices.toJson(),
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -195,6 +203,7 @@ class RenewTask {
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
         bgm: BgmPlan.fromJson(json['bgm']),
+        voices: VoicePlan.fromJson(json['voices']),
       );
 
   /// 替换方案的宽松解析：整体畸形按「没进过阶段②」（null）处理，

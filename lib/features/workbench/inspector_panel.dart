@@ -5,7 +5,9 @@ import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
 import 'inspector_widgets.dart';
+import '../../core/audio/voice_plan.dart';
 import 'tag_trace_section.dart';
+import 'voice_card.dart';
 
 /// 把毫秒时间戳格式化为 `mm:ss.ff`（ff 为两位帧号，前补 0）。
 ///
@@ -48,11 +50,19 @@ class InspectorPanel extends StatefulWidget {
   /// 静默改写。默认 false（编辑态，行为与此前一致）。
   final bool readOnly;
 
+  /// 这个单元换成了哪个音色（null 表示保持原声）
+  final VoiceRef? Function(int unitIndex)? voiceOf;
+
+  /// 点「换音色」。由页面弹面板——检查器不该知道音色是从哪来的。
+  final void Function(int unitIndex)? onChangeVoice;
+
   const InspectorPanel({
     super.key,
     required this.controller,
     required this.fps,
     this.onSplitAtPlayhead,
+    this.voiceOf,
+    this.onChangeVoice,
     this.readOnly = false,
   });
 
@@ -208,6 +218,11 @@ class _InspectorPanelState extends State<InspectorPanel> {
             tags: unit.tags,
             tagsStale: unit.tagsStale,
             trace: unit.trace,
+          ),
+          const SizedBox(height: 10),
+          VoiceCard(
+            voice: widget.voiceOf?.call(unitIndex),
+            onTap: widget.readOnly ? null : () => widget.onChangeVoice?.call(unitIndex),
           ),
           const SizedBox(height: 10),
           inspectorCard([
