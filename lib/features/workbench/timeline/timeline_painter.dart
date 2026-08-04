@@ -101,7 +101,7 @@ class TimelinePainter extends CustomPainter {
     final entries = <(double, String, String)>[
       (TimelineTracks.unitsLabelTop, '台词语义单元', '拖大边界调整'),
       (TimelineTracks.shotsLabelTop, '视觉镜头', '拖小边界调整，限制在所属单元内'),
-      (TimelineTracks.bgmLabelTop, '配乐', '在镜头轨上框选一段连续镜头来配乐'),
+      (TimelineTracks.bgmLabelTop, '配乐', '在这条轨上横向拖选一段连续镜头'),
       (TimelineTracks.thumbsLabelTop, '画面', ''),
       (TimelineTracks.waveLabelTop, '音频', ''),
     ];
