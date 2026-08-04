@@ -1,8 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
-import '../../core/log/app_log.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -118,12 +116,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       1.0;
 
   /// 页面级快捷键转发：与 PlayerPanel 内部按钮走同一份播放状态
-  void _togglePlaybackFromShortcut() {
-    AppLog.info('[DIAG] 空格到达页面级快捷键；'
-        'playerState=${_playerPanelKey.currentState == null ? "null" : "ok"} '
-        'focus=${FocusManager.instance.primaryFocus?.debugLabel}');
-    _playerPanelKey.currentState?.togglePlay();
-  }
+  void _togglePlaybackFromShortcut() =>
+      _playerPanelKey.currentState?.togglePlay();
 
   void _stepPlaybackFromShortcut(int frames) =>
       _playerPanelKey.currentState?.stepFrame(frames);

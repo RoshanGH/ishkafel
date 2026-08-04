@@ -1,8 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
-import '../../core/log/app_log.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -117,14 +115,11 @@ class PlayerPanelState extends State<PlayerPanel> {
   /// [PlaybackController.playingStream]（见 [initState]）进一步保证外部
   /// 状态变化也能同步图标。
   Future<void> _togglePlay() async {
-    AppLog.info('[DIAG] togglePlay 进来时 isPlaying=${widget.playback.isPlaying} '
-        'pos=${widget.playback.positionMs}');
     if (widget.playback.isPlaying) {
       await widget.playback.pause();
     } else {
       await widget.playback.play();
     }
-    AppLog.info('[DIAG] togglePlay 出来时 isPlaying=${widget.playback.isPlaying}');
     if (!mounted) return;
     setState(() => _isPlaying = widget.playback.isPlaying);
   }

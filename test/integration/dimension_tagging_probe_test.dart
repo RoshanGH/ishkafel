@@ -17,9 +17,7 @@ import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_locator.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
-import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
-import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 /// 用户定下的固定测试配置
