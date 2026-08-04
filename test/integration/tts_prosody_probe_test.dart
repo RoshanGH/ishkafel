@@ -45,7 +45,7 @@ Future<({int status, dynamic code, String? message, int bytes})> _synth({
         'voice_type': voice,
         'encoding': 'mp3',
         'speed_ratio': speed,
-        if (emotion != null) 'emotion': emotion,
+        'emotion': ?emotion,
       },
       'request': {
         'reqid': '${DateTime.now().microsecondsSinceEpoch}',
