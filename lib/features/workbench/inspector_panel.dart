@@ -56,6 +56,9 @@ class InspectorPanel extends StatefulWidget {
   /// 点「换音色」。由页面弹面板——检查器不该知道音色是从哪来的。
   final void Function(int unitIndex)? onChangeVoice;
 
+  /// 试听这个单元已生成的配音；返回 null 表示还没生成过
+  final VoidCallback? Function(int unitIndex)? previewVoice;
+
   const InspectorPanel({
     super.key,
     required this.controller,
@@ -63,6 +66,7 @@ class InspectorPanel extends StatefulWidget {
     this.onSplitAtPlayhead,
     this.voiceOf,
     this.onChangeVoice,
+    this.previewVoice,
     this.readOnly = false,
   });
 
@@ -223,6 +227,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           VoiceCard(
             voice: widget.voiceOf?.call(unitIndex),
             onTap: widget.readOnly ? null : () => widget.onChangeVoice?.call(unitIndex),
+            onPreview: widget.previewVoice?.call(unitIndex),
           ),
           const SizedBox(height: 10),
           inspectorCard([

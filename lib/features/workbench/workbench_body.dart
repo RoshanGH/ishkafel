@@ -63,6 +63,9 @@ class WorkbenchBody extends StatefulWidget {
   final VoicePlan voices;
   final void Function(int unitIndex)? onChangeVoice;
 
+  /// 试听某个单元已生成的配音；返回 null 表示这一句还没生成
+  final VoidCallback? Function(int unitIndex)? previewVoice;
+
   /// 配乐方案与两个入口（框选一段 / 点已有的一段）
   final BgmPlan bgm;
   final void Function(int fromShot, int toShot)? onBgmRangeSelected;
@@ -82,6 +85,7 @@ class WorkbenchBody extends StatefulWidget {
     this.clock,
     this.voices = VoicePlan.empty,
     this.onChangeVoice,
+    this.previewVoice,
     this.bgm = BgmPlan.empty,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
@@ -231,6 +235,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 readOnly: widget.readOnly,
                                 voiceOf: widget.voices.voiceOf,
                                 onChangeVoice: widget.onChangeVoice,
+                                previewVoice: widget.previewVoice,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),

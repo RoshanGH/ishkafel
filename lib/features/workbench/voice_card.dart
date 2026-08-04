@@ -16,7 +16,12 @@ class VoiceCard extends StatelessWidget {
   /// 为 null 表示只读（已导出的任务不该还能改配音）
   final VoidCallback? onTap;
 
-  const VoiceCard({super.key, required this.voice, this.onTap});
+  /// 试听已生成的配音。为 null 表示这一句还没生成过——
+  /// 给一个点了没声音的按钮比不给还糟。
+  final VoidCallback? onPreview;
+
+  const VoiceCard(
+      {super.key, required this.voice, this.onTap, this.onPreview});
 
   @override
   Widget build(BuildContext context) => inspectorCard([
@@ -24,6 +29,17 @@ class VoiceCard extends StatelessWidget {
           children: [
             inspectorLabel('配音'),
             const Spacer(),
+            if (onPreview != null)
+              IconButton(
+                key: const Key('inspector-preview-voice'),
+                onPressed: onPreview,
+                icon: const Icon(Icons.play_circle_outline, size: 16),
+                color: AppColors.green,
+                tooltip: '试听这一句的配音',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                visualDensity: VisualDensity.compact,
+              ),
             if (onTap != null)
               TextButton(
                 key: const Key('inspector-change-voice'),
@@ -41,7 +57,10 @@ class VoiceCard extends StatelessWidget {
         // 「保持原片配音」要写出来，不能留空——留空的话用户分不清是
         // 「没换」还是「这个功能没生效」
         Text(
-          voice?.name ?? '保持原片配音',
+          voice == null
+              ? '保持原片配音'
+              // 生成没生成是两回事：只选了音色还没跑，导出时不会有新声音
+              : (onPreview == null ? '${voice!.name}（待生成）' : voice!.name),
           style: TextStyle(
             color: voice == null ? AppColors.textTertiary : AppColors.green,
             fontSize: AppFontSize.body,

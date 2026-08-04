@@ -24,10 +24,12 @@ import '../../core/replacement/replacement_plan.dart';
 import '../../core/editing/edit_consequence.dart';
 import '../picking/picking_messages.dart';
 import '../tasks/task_list_controller.dart';
+import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
 import 'bgm_picker_sheet.dart';
 import 'candidate_badge.dart';
 import 'voice_picker_sheet.dart';
+import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import 'edit_consequence_dialog.dart';
@@ -74,6 +76,14 @@ class WorkbenchPage extends ConsumerStatefulWidget {
   final CandidateProbe? candidateProbe;
   final MiaoaTagService? tagService;
 
+  /// 「生成配音」的装配点。缺省读 [voiceSwapFactoryProvider]（凭据齐才有）；
+  /// 测试注入假实现，避免单测真去跑云端合成。
+  final VoiceSwapFactory? voiceSwapFactory;
+
+  /// 试听配音用的播放器。缺省懒创建真实的；测试注入假实现，
+  /// 免得单测去碰 libmpv。
+  final AudioPreview? audioPreview;
+
   const WorkbenchPage({
     super.key,
     required this.task,
@@ -83,6 +93,8 @@ class WorkbenchPage extends ConsumerStatefulWidget {
     this.contentService,
     this.candidateProbe,
     this.tagService,
+    this.voiceSwapFactory,
+    this.audioPreview,
   });
 
   @override
@@ -131,6 +143,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 正在重新打标。要走两趟云端推理，几秒到几十秒，界面上必须有个说法，
   /// 否则用户会以为点了「是」什么都没发生。
   int _retaggingCount = 0;
+
+  /// 配音生成进度。每句要走一次音频理解 + 一到两次合成，十句就是一分多钟，
+  /// 没有进度用户只会以为卡死了。
+  (int done, int total)? _voiceProgress;
+
+  /// 已经生成好的配音文件，按台词语义单元下标。有文件才给试听按钮——
+  /// 给一个点了没声音的按钮比不给还糟。
+  Map<int, String> _voiceAudio = const {};
+
+  /// 试听用的独立播放器：时间线那个正播着原片，不能把它的位置弄丢
+  AudioPreview? _preview;
 
   /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
@@ -187,6 +210,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     });
     unawaited(playback.open(task.sourcePath));
     unawaited(_loadMedia());
+    _restoreVoiceAudio();
+  }
+
+  /// 重开页面时恢复「哪几句已经配好音了」。
+  ///
+  /// 不恢复的话，用户昨天生成过的配音今天点不到试听，只会以为白跑了一轮。
+  void _restoreVoiceAudio() {
+    final factory = widget.voiceSwapFactory ?? ref.read(voiceSwapFactoryProvider);
+    if (factory == null) return;
+    try {
+      _voiceAudio = factory(widget.task)
+          .existingAudio(widget.task.voices.assignedUnits);
+    } catch (e) {
+      // 目录读不出来只影响试听按钮，不该拦住整个页面
+      AppLog.warn('恢复已生成配音失败（taskId=${widget.task.id}）：$e');
+    }
   }
 
   /// 解析播放后端：优先用测试/调用方注入的 [WorkbenchPage.playbackFactory]，
@@ -227,6 +266,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _editor?.dispose();
     _playhead.dispose();
     unawaited(_playback?.dispose());
+    unawaited(_preview?.dispose());
     super.dispose();
   }
 
@@ -342,6 +382,77 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     } catch (e) {
       AppLog.warn('换音色方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('配音方案');
+    }
+  }
+
+  /// 「生成配音」：把已经定好的换音色方案真正跑成音频。
+  ///
+  /// 与「选音色」分开是刻意的：选音色是即时的，生成要走云端、每句几秒，
+  /// 用户往往先把几句都配好再统一生成。
+  Future<void> _generateVoices() async {
+    final editor = _editor;
+    final factory = widget.voiceSwapFactory ?? ref.read(voiceSwapFactoryProvider);
+    if (editor == null || _task.voices.isEmpty) return;
+    if (factory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务，无法生成配音；补齐凭据后重启应用再试')));
+      return;
+    }
+
+    final job = factory(_task);
+    setState(() => _voiceProgress = (0, _task.voices.assignedUnits.length));
+    try {
+      final results = await job.service.run(
+        units: editor.units,
+        sentences: widget.task.asrSentences ?? const [],
+        plan: _task.voices,
+        onProgress: (done, total) {
+          if (mounted) setState(() => _voiceProgress = (done, total));
+        },
+      );
+      // 落盘：跑一轮要几十秒到几分钟，只留在内存里的话关掉页面就得重跑
+      final written = <int, String>{};
+      job.outputDir.createSync(recursive: true);
+      for (final entry in results.entries) {
+        final file = job.audioFor(entry.key)
+          ..writeAsBytesSync(entry.value.audio);
+        written[entry.key] = file.path;
+      }
+      if (!mounted) return;
+      final failed = job.service.failures;
+      setState(() => _voiceAudio = {..._voiceAudio, ...written});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(failed.isEmpty
+            ? '已生成 ${written.length} 句配音，可在检查器里试听'
+            // 失败的那几句要点名，用户才知道去重跑哪几句
+            : '已生成 ${written.length} 句；'
+                '${failed.keys.map((i) => 'U${i + 1}').join('、')} 失败，可再点一次只补这几句'),
+        backgroundColor: failed.isEmpty ? null : AppColors.red,
+      ));
+    } catch (e) {
+      AppLog.warn('生成配音失败（taskId=${widget.task.id}）：$e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('生成配音失败：$e'),
+          backgroundColor: AppColors.red,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _voiceProgress = null);
+    }
+  }
+
+  /// 试听某个单元已生成的配音
+  Future<void> _previewVoice(int unitIndex) async {
+    final path = _voiceAudio[unitIndex];
+    if (path == null) return;
+    try {
+      await (_preview ??= widget.audioPreview ?? AudioPreview()).play(path);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('试听失败，音频文件可能已被清理')));
+      }
     }
   }
 
@@ -638,6 +749,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           children: [
             if (_playbackDegraded) const PlaybackDegradedBanner(),
             if (_retaggingCount > 0) RetaggingBanner(unitCount: _retaggingCount),
+            if (_voiceProgress case final p?)
+              VoiceGeneratingBanner(done: p.$1, total: p.$2),
             Expanded(
               child: WorkbenchBody(
                 editor: editor,
@@ -650,6 +763,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 clock: widget.clock,
                 voices: _task.voices,
                 onChangeVoice: _isEditable ? _changeVoice : null,
+                previewVoice: (i) =>
+                    _voiceAudio.containsKey(i) ? () => _previewVoice(i) : null,
                 candidateBadge: candidateBadgeText(_replacements ?? const []),
                 bgm: _task.bgm,
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,
@@ -675,6 +790,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             final blocked = exportBlockedReason(_plan);
             return WorkbenchBottomBar(
               summaryText: _summaryText(editor),
+              voiceCount: _task.voices.assignedUnits.length,
+              onGenerateVoices:
+                  _isEditable && _voiceProgress == null ? _generateVoices : null,
               combinationText: _plan.isEmpty ? null : combinationSummaryText(_plan),
               blockedReason: blocked,
               onExport: blocked == null ? _openExport : null,

@@ -77,6 +77,43 @@ class RetaggingBanner extends StatelessWidget {
       );
 }
 
+/// 「正在生成配音」的进度条。
+///
+/// 每句要走一次音频理解 + 一到两次合成，十句就是一分多钟。没有进度条，
+/// 用户只会以为点了没反应。
+class VoiceGeneratingBanner extends StatelessWidget {
+  final int done;
+  final int total;
+  const VoiceGeneratingBanner(
+      {super.key, required this.done, required this.total});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: const Key('voice-generating-banner'),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: AppColors.green.withValues(alpha: 0.16),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.green),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('正在生成配音 $done / $total 句，可以继续编辑',
+                  style: const TextStyle(
+                      color: AppColors.green,
+                      fontSize: AppFontSize.body,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+}
+
 class PlaybackDegradedBanner extends StatelessWidget {
   const PlaybackDegradedBanner({super.key});
 
@@ -219,12 +256,21 @@ class WorkbenchBottomBar extends StatelessWidget {
 
   final VoidCallback? onExport;
 
+  /// 有几句指定了新音色。为 0 时不显示「生成配音」——没选音色的片子
+  /// 生成个什么
+  final int voiceCount;
+
+  /// 点「生成配音」。为 null 表示正在生成、或这条任务已只读。
+  final VoidCallback? onGenerateVoices;
+
   const WorkbenchBottomBar({
     super.key,
     required this.summaryText,
     this.combinationText,
     this.blockedReason,
     this.onExport,
+    this.voiceCount = 0,
+    this.onGenerateVoices,
   });
 
   @override
@@ -263,6 +309,15 @@ class WorkbenchBottomBar extends StatelessWidget {
               ],
             ),
           ),
+          if (voiceCount > 0) ...[
+            OutlinedButton.icon(
+              key: const Key('workbench-generate-voices-btn'),
+              onPressed: onGenerateVoices,
+              icon: const Icon(Icons.graphic_eq, size: 16),
+              label: Text('生成配音（$voiceCount 句）'),
+            ),
+            const SizedBox(width: 8),
+          ],
           FilledButton(
             key: const Key('workbench-export-btn'),
             onPressed: blockedReason == null ? onExport : null,

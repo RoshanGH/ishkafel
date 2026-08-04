@@ -3,7 +3,16 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:typed_data';
+
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
+import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/audio/audio_preview.dart';
+import 'package:ishkafel/core/audio/delivery_analyzer.dart';
+import 'package:ishkafel/core/audio/prosody_profile.dart';
+import 'package:ishkafel/core/audio/tts_client.dart';
+import 'package:ishkafel/core/audio/voice_swap_service.dart';
+import 'package:ishkafel/features/workbench/voice_swap_runner.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
@@ -60,6 +69,65 @@ RenewTask _task({VoicePlan voices = VoicePlan.empty}) => RenewTask(
         duration: Duration(milliseconds: 4000), fps: 30, fileSizeBytes: 1),
     );
 
+/// 假的换音色服务：不碰云端，直接产出几个字节，让流程能被端到端验证
+class _FakeSwap extends VoiceSwapService {
+  final Set<int> failOn;
+  final progress = <(int, int)>[];
+
+  _FakeSwap({this.failOn = const {}})
+      : super(
+          tts: const TtsClient(appId: 'a', accessToken: 'b'),
+          analyzer: _FakeAnalyzer(),
+          sliceOriginal: (_, _) async => const [],
+          measureMs: (_) async => 0,
+        );
+
+  @override
+  Future<Map<int, VoiceSwapResult>> run({
+    required List<SemanticUnit> units,
+    required List<AsrSentence> sentences,
+    required VoicePlan plan,
+    void Function(int done, int total)? onProgress,
+  }) async {
+    failures.clear();
+    final targets = plan.assignedUnits;
+    final out = <int, VoiceSwapResult>{};
+    for (final i in targets) {
+      if (failOn.contains(i)) {
+        failures[i] = '合成超时';
+      } else {
+        out[i] = VoiceSwapResult(
+          audio: Uint8List.fromList([1, 2, 3]),
+          analysis: const DeliveryAnalysis(description: '', instruction: ''),
+          synthesizedMs: 2000,
+          targetMs: 2000,
+        );
+      }
+      onProgress?.call(out.length + failures.length, targets.length);
+      progress.add((out.length + failures.length, targets.length));
+    }
+    return out;
+  }
+}
+
+class _FakeAnalyzer implements DeliveryAnalyzer {
+  @override
+  Future<DeliveryAnalysis> analyze({
+    required List<int> audioWav,
+    required String transcript,
+    ProsodyProfile? prosody,
+  }) async =>
+      const DeliveryAnalysis(description: '', instruction: '');
+}
+
+class _FakePreview extends AudioPreview {
+  final played = <String>[];
+  @override
+  Future<void> play(String path) async => played.add(path);
+  @override
+  Future<void> dispose() async {}
+}
+
 Future<_Repo> _open(WidgetTester tester,
     {VoicePlan voices = VoicePlan.empty}) async {
   final repo = _Repo();
@@ -107,7 +175,10 @@ void main() {
     expect(saved!.voices.assignedUnits, [0, 1],
         reason: '面板里勾了两句，就该两句都换');
     expect(saved.voices.voiceOf(0)!.name, 'vivi 2.0');
-    expect(find.text('vivi 2.0'), findsWidgets, reason: '检查器上要立刻反映出来');
+    expect(find.textContaining('vivi 2.0'), findsWidgets,
+        reason: '检查器上要立刻反映出来');
+    expect(find.text('vivi 2.0（待生成）'), findsOneWidget,
+        reason: '只选了音色还没跑，导出时不会有新声音——这两件事要分清');
   });
 
   testWidgets('改回原声后卡片写回「保持原片配音」', (tester) async {
@@ -124,5 +195,99 @@ void main() {
     final saved = await repo.findById('v-1');
     expect(saved!.voices.voiceOf(0), isNull);
     expect(find.text('保持原片配音'), findsOneWidget);
+  });
+
+  group('生成配音', () {
+    const vivi = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi 2.0');
+
+    /// 打开一个已经选好音色的工作台，注入假服务与假试听
+    Future<(_FakeSwap, _FakePreview, Directory)> openWithSwap(
+      WidgetTester tester, {
+      Set<int> failOn = const {},
+    }) async {
+      final repo = _Repo();
+      final task = _task(voices: VoicePlan.empty.assign([0], vivi));
+      await repo.save(task);
+      final dir = Directory.systemTemp.createTempSync('ishkafel_voice_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final swap = _FakeSwap(failOn: failOn);
+      final preview = _FakePreview();
+
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+        child: MaterialApp(
+          home: WorkbenchPage(
+            task: task,
+            playbackFactory: FakePlaybackController.new,
+            mediaBuilder: _fakeMediaBuilder(),
+            audioPreview: preview,
+            voiceSwapFactory: (_) =>
+                VoiceSwapJob(service: swap, outputDir: dir),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      return (swap, preview, dir);
+    }
+
+    testWidgets('点一下就跑完，产物落盘且能试听', (tester) async {
+      final (swap, preview, dir) = await openWithSwap(tester);
+
+      expect(find.byKey(const Key('workbench-generate-voices-btn')),
+          findsOneWidget,
+          reason: '选了音色就该有生成入口');
+
+      await tester.tap(find.byKey(const Key('workbench-generate-voices-btn')));
+      await tester.pumpAndSettle();
+
+      expect(swap.progress, isNotEmpty, reason: '按钮要真的把服务跑起来');
+      final file = File('${dir.path}/unit_0.mp3');
+      expect(file.existsSync(), isTrue,
+          reason: '只留在内存里的话，关掉页面这一轮几十秒就白跑了');
+      expect(file.readAsBytesSync(), [1, 2, 3]);
+
+      await tester.tap(find.byKey(const Key('unit-row-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('inspector-preview-voice')));
+      await tester.pumpAndSettle();
+
+      expect(preview.played, [file.path]);
+      expect(find.text('vivi 2.0'), findsWidgets,
+          reason: '生成完就不该再写「待生成」');
+    });
+
+    testWidgets('没生成过的单元不给试听按钮——点了没声音比没有还糟',
+        (tester) async {
+      await openWithSwap(tester);
+
+      await tester.tap(find.byKey(const Key('unit-row-0')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('inspector-preview-voice')), findsNothing);
+    });
+
+    testWidgets('失败的那几句要点名，用户才知道去补哪几句', (tester) async {
+      await openWithSwap(tester, failOn: {0});
+
+      await tester.tap(find.byKey(const Key('workbench-generate-voices-btn')));
+      await tester.pumpAndSettle();
+
+      // 只找提示条上的那一句：'U1' 在左栏单元列表里也会出现
+      expect(find.descendant(
+        of: find.byType(SnackBar),
+        matching: find.textContaining('U1 失败'),
+      ), findsOneWidget);
+    });
+
+    testWidgets('一句都没换音色时不显示生成入口', (tester) async {
+      await _open(tester);
+
+      expect(find.byKey(const Key('workbench-generate-voices-btn')),
+          findsNothing);
+    });
   });
 }

@@ -35,6 +35,7 @@ import 'features/settings/settings_providers.dart';
 import 'features/tasks/environment_banner.dart';
 import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
+import 'features/workbench/voice_swap_runner.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -82,6 +83,10 @@ Future<void> main() async {
           mediaTools: mediaTools, credentials: credentials)),
       miaoaAccountServiceProvider.overrideWithValue(MiaoaAccountService()),
       dataDirProvider.overrideWithValue(dataDir),
+      // 「生成配音」：凭据齐了才给工厂，否则工作台把按钮禁用并说明原因，
+      // 而不是让用户点了之后撞一个网络错误
+      voiceSwapFactoryProvider.overrideWithValue(defaultVoiceSwapFactory(
+          credentials: credentials, dataDir: dataDir)),
     ],
     child: const IshkafelApp(),
   ));

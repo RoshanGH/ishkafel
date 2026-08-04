@@ -3,18 +3,66 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
+import '../../core/ai/ai_credentials.dart';
 import '../../core/ai/ark_chat_client.dart';
 import '../../core/audio/delivery_analyzer.dart';
 import '../../core/audio/tts_client.dart';
 import '../../core/audio/voice_swap_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/log/app_log.dart';
+import '../../core/models/renew_task.dart';
+
+/// 一次配音生成要用的东西：服务本身 + 产物落在哪。
+///
+/// 产物必须落成文件而不是只在内存里：生成一轮要几十秒到几分钟，
+/// 关掉页面就没了的话用户得重跑一遍。
+class VoiceSwapJob {
+  final VoiceSwapService service;
+  final Directory outputDir;
+
+  const VoiceSwapJob({required this.service, required this.outputDir});
+
+  /// 某个台词语义单元的配音文件（不保证存在）
+  File audioFor(int unitIndex) =>
+      File(p.join(outputDir.path, 'unit_$unitIndex.mp3'));
+
+  /// 已经生成过的那些——重开页面时据此恢复「可试听」状态
+  Map<int, String> existingAudio(Iterable<int> unitIndexes) => {
+        for (final i in unitIndexes)
+          if (audioFor(i).existsSync()) i: audioFor(i).path,
+      };
+}
+
+/// 按任务造一个配音作业。任务不同，原片与产物目录都不同，所以是工厂而不是
+/// 单例服务。
+typedef VoiceSwapFactory = VoiceSwapJob Function(RenewTask task);
 
 /// 换音色服务的装配点：把真实的 ffmpeg 切片、ffprobe 量时长、云端客户端接起来。
 ///
 /// null 表示凭据未配置——界面据此把「生成配音」禁用并说明原因，
-/// 而不是让用户点了之后撞一个网络错误。
-final voiceSwapServiceProvider = Provider<VoiceSwapService?>((ref) => null);
+/// 而不是让用户点了之后撞一个网络错误。缺省就是 null，真实实现在 main.dart
+/// 里按凭据覆盖。
+final voiceSwapFactoryProvider = Provider<VoiceSwapFactory?>((ref) => null);
+
+/// 生产装配：凭据齐了才给工厂，否则返回 null（界面据此禁用按钮）
+VoiceSwapFactory? defaultVoiceSwapFactory({
+  required AiCredentials credentials,
+  required Directory dataDir,
+}) {
+  if (!credentials.isComplete) return null;
+  return (task) => VoiceSwapJob(
+        service: buildVoiceSwapService(
+          arkApiKey: credentials.arkApiKey,
+          speechAppId: credentials.speechAppId,
+          speechAccessToken: credentials.speechAccessToken,
+          sourcePath: task.sourcePath,
+          // 切片是中间产物，跟分析的临时文件放一块，清理缓存时一并带走
+          workDir: Directory(p.join(dataDir.path, 'analysis_work')),
+        ),
+        // 产物按任务分目录：任务删掉时整个目录一并删，不会留下孤儿音频
+        outputDir: Directory(p.join(dataDir.path, 'voices', task.id)),
+      );
+}
 
 /// 用真实工具链造一个可用的服务
 VoiceSwapService buildVoiceSwapService({
