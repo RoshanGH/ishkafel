@@ -36,6 +36,10 @@ import 'features/tasks/environment_banner.dart';
 import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
 import 'features/workbench/voice_swap_runner.dart';
+import 'features/export/export_dialog.dart';
+import 'features/export/material_downloader.dart';
+import 'core/export/export_runner.dart';
+import 'core/miaoa/miaoa_content_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -87,6 +91,16 @@ Future<void> main() async {
       // 而不是让用户点了之后撞一个网络错误
       voiceSwapFactoryProvider.overrideWithValue(defaultVoiceSwapFactory(
           credentials: credentials, dataDir: dataDir)),
+      // 矩阵导出：真实 ffmpeg + 真实下载。素材缓存按任务分目录，
+      // 清理缓存时能整目录带走
+      exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
+            run: const ResolvingProcessRunner().call,
+            workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
+            fetchMaterial: MaterialDownloader(
+              content: MiaoaContentService(binary: resolveMiaoaBinary()),
+              cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+            ).fetch,
+          )),
     ],
     child: const IshkafelApp(),
   ));

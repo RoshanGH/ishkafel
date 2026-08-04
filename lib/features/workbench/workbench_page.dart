@@ -40,6 +40,7 @@ import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
+import '../export/export_dialog.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
 ///
@@ -717,10 +718,30 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   ///
   /// 这里曾经是「确认切分，进入替换选材」——切分和选材已经合并在本工作台里
   /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
-  void _openExport() {
-    ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('矩阵导出尚未开放，正在开发中')));
+  Future<void> _openExport() async {
+    final editor = _editor;
+    if (editor == null) return;
+    // 成片放到「影片」目录下按任务分文件夹：跟原片、跟缓存都分开，
+    // 用户拿完就走，不必在应用数据目录里翻
+    final home = Platform.environment['HOME'] ?? '.';
+    final outputDir = Directory(p.join(home, 'Movies', 'ishkafel',
+        _safeName('${_task.name}_${_task.id}')));
+    await showExportDialog(
+      context,
+      taskId: _task.id,
+      taskName: _task.name,
+      sourcePath: _task.sourcePath,
+      units: editor.units,
+      replacements: _replacements ?? const [],
+      bgm: _task.bgm,
+      voiceAudio: _voiceAudio,
+      outputDir: outputDir,
+    );
   }
+
+  /// 任务名会进文件路径，斜杠与冒号在 macOS 上都是雷
+  static String _safeName(String name) =>
+      name.replaceAll(RegExp(r'[/:\\]'), '_');
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
   /// 不把原始异常文本摊给用户（详情已进日志）。
