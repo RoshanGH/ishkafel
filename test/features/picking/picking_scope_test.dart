@@ -3,6 +3,7 @@ import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'package:ishkafel/core/models/tag_trace.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/features/picking/picking_controller.dart';
 import 'package:ishkafel/features/picking/picking_scope.dart';
@@ -59,6 +60,8 @@ Future<PickingScope> _scope({
 }
 
 void main() {
+  _groupPrecise();
+
   group('整体替换：用这个台词语义单元自己的标签', () {
     test('检索键是单元的标签，不是它那几个镜头标签的并集', () async {
       final scope = await _scope(mode: ReplacementMode.whole);
@@ -125,4 +128,72 @@ void main() {
       expect(scope.descriptionKeyword, '手持产品特写');
     });
   });
+}
+
+/// 「促单」这个名字可以同时存在于好几个标签组里，而 id 是按组分配的
+void _groupPrecise() {
+  group('标签要精确到它所属的那个标签组', () {
+    /// 两个组里都有「促单」：分子库（组 2）里是 21，另一个组（组 3）里是 31
+    final tags = _CollidingTags();
+
+    Future<PickingScope> scopeWith(TagTrace? trace) async {
+      final picking = PickingController(units: [
+        SemanticUnit(
+          index: 0,
+          startMs: 0,
+          endMs: 4000,
+          transcript: '台词',
+          tags: const ['促单'],
+          trace: trace,
+          shots: const [Shot(startMs: 0, endMs: 4000)],
+        ),
+      ]);
+      picking.selectUnit(0);
+      picking.setMode(ReplacementMode.whole);
+      final resolver = TagIdResolver(tags);
+      await resolver.loadAll([3, 2]);
+      return PickingScope.from(
+        picking: picking,
+        resolver: resolver,
+        shotTagGroups: const [],
+        // 这一层同时选了两个组，两个组里都有「促单」
+        unitTagGroups: const [
+          TagGroupRef(id: 2, name: '植源分子库'),
+          TagGroupRef(id: 3, name: '话术意图'),
+        ],
+      );
+    }
+
+    test('打标痕迹记着标签出自哪个维度，就用那个组里的 id', () async {
+      final scope = await scopeWith(const TagTrace(
+        vocabularyGroups: ['植源分子库', '话术意图'],
+        tagsByDimension: {'话术意图': ['促单']},
+      ));
+
+      expect(scope.tagIds, [31],
+          reason: '这个「促单」是在话术意图维度下打出来的；'
+              '拿分子库里那个同名标签去搜，搜出来的素材看着沾边，'
+              '其实压根不是这个维度的');
+    });
+
+    test('维度里没提到的标签退回按组顺序找，不至于整条检索键丢掉', () async {
+      final scope = await scopeWith(null);
+
+      expect(scope.tagIds, [21],
+          reason: '旧任务的痕迹里没有维度信息，只能按这一层选组的先后来定');
+    });
+  });
+}
+
+/// 组 2、组 3 里都有「促单」，id 不同——现实里同名标签跨组是常事
+class _CollidingTags implements MiaoaTagService {
+  @override
+  Future<List<TagInfo>> listTags(int groupId) async => switch (groupId) {
+        2 => const [TagInfo(id: 21, name: '促单')],
+        3 => const [TagInfo(id: 31, name: '促单')],
+        _ => const [],
+      };
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

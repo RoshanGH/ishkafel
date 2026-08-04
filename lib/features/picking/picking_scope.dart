@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../core/models/tag_group_ref.dart';
+import '../../core/models/tag_trace.dart';
 import '../../core/replacement/replacement_plan.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
@@ -89,7 +90,9 @@ class PickingScope {
     final names = perShot
         ? List<String>.from(unit.shots[shotIndex].tags)
         : List<String>.from(unit.tags);
-    final ids = resolver.idsOf(names);
+    final trace = perShot ? unit.shots[shotIndex].trace : unit.trace;
+    final ids = _resolveIds(
+        resolver: resolver, groups: groups, names: names, trace: trace);
 
     return PickingScope(
       tagNames: List.unmodifiable(names),
@@ -107,6 +110,41 @@ class PickingScope {
       ),
       tagPending: _tagPending(resolver, groups),
     );
+  }
+
+  /// 标签名 → 标签 id，**认组**。
+  ///
+  /// 「促单」这个名字可以同时存在于好几个标签组里，而 id 是按组分配的。打标
+  /// 时是分维度进行的（一个标签组 = 一个维度），痕迹里记着每个标签出自哪个
+  /// 维度，所以这里能精确到「分子库里的那个促单」，而不是随便一个同名标签。
+  ///
+  /// 旧任务的痕迹里没有维度信息，退回「在这一层选的那几个组里按顺序找」。
+  static List<int> _resolveIds({
+    required TagIdResolver resolver,
+    required List<TagGroupRef> groups,
+    required List<String> names,
+    required TagTrace? trace,
+  }) {
+    final groupIdByName = {for (final g in groups) g.name: g.id};
+    // 标签名 → 它是在哪个组（维度）下打出来的
+    final sourceGroup = <String, int>{};
+    for (final entry in trace?.tagsByDimension.entries ?? const <MapEntry<String, List<String>>>[]) {
+      final groupId = groupIdByName[entry.key];
+      if (groupId == null) continue; // 这个维度的组已经从任务里去掉了
+      for (final tag in entry.value) {
+        sourceGroup[tag] = groupId;
+      }
+    }
+
+    final ids = <int>[];
+    for (final name in names) {
+      final groupId = sourceGroup[name];
+      final id = groupId != null
+          ? resolver.idIn(name, groupId)
+          : resolver.idAmong(name, [for (final g in groups) g.id]);
+      if (id != null && !ids.contains(id)) ids.add(id);
+    }
+    return ids;
   }
 
   /// 有标签组、但表还没拉回来也没失败：结论未知
