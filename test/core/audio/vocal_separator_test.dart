@@ -27,8 +27,9 @@ String? valueAfter(List<String> args, String flag) {
         calls.add(args);
         if (exitCode == 0 && produceFiles) {
           out.createSync(recursive: true);
-          File('${out.path}/a-人声.wav').writeAsStringSync('v');
-          File('${out.path}/a-背景.wav').writeAsStringSync('b');
+          final stem = 'a-${VocalSeparator.modelTag}';
+          File('${out.path}/$stem-人声.wav').writeAsStringSync('v');
+          File('${out.path}/$stem-背景.wav').writeAsStringSync('b');
         }
         return ProcessResult(1, exitCode, '', stderr);
       },
@@ -45,8 +46,8 @@ void main() {
     final stems =
         await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
 
-    expect(stems.vocalsPath, endsWith('a-人声.wav'));
-    expect(stems.backgroundPath, endsWith('a-背景.wav'));
+    expect(stems.vocalsPath, endsWith('人声.wav'));
+    expect(stems.backgroundPath, endsWith('背景.wav'));
   });
 
   test('用 BS-Roformer：模型是用耳朵选的，指标测不出这种差别', () async {
@@ -89,7 +90,7 @@ void main() {
     await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
 
     expect(valueAfter(b.calls.single, '--custom_output_names'),
-        contains('a-人声'));
+        contains('人声'));
   });
 
   test('已经分离过就直接复用，不再跑一遍十几秒', () async {
@@ -118,5 +119,14 @@ void main() {
       () => b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out),
       throwsA(isA<VocalSeparationException>()),
     );
+  });
+
+  test('产物文件名带模型标记：换了模型要重新分离，不能接着用旧产物', () async {
+    final b = _build();
+
+    await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+
+    expect(b.calls.single.join(' '), contains(VocalSeparator.modelTag),
+        reason: '这次正是被旧模型的产物坑到——分不干净却当成新结果用');
   });
 }

@@ -59,6 +59,10 @@ class VocalSeparator {
   /// 也试过 Mel-Band Roformer（961MB / 94 秒）：更大更慢，没有理由选它。
   static const String model = 'model_bs_roformer_ep_368_sdr_12.9628.ckpt';
 
+  /// 模型的短标记，进产物文件名——换模型后能自动重算，不会复用旧产物
+  static String get modelTag =>
+      model.contains('roformer') ? 'roformer' : 'mdx';
+
   /// 攒批与分段。MDX 与 MDXC（Roformer 走这一支）各有各的参数名，两套都给：
   /// 不认的那套会被忽略，换模型时不必跟着改调用点。
   ///
@@ -77,7 +81,9 @@ class VocalSeparator {
     outputDir.createSync(recursive: true);
     modelDir.createSync(recursive: true);
 
-    final stem = p.basenameWithoutExtension(audioPath);
+    // 文件名带上模型标记：换了模型就该重新分离，而不是把上一个模型的产物
+    // 当成新结果接着用——那正是这次踩到的问题（旧模型分不干净）
+    final stem = '${p.basenameWithoutExtension(audioPath)}-$modelTag';
     final vocals = File(p.join(outputDir.path, '$stem-人声.wav'));
     final background = File(p.join(outputDir.path, '$stem-背景.wav'));
     if (vocals.existsSync() &&
