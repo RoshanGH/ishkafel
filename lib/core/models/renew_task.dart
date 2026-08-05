@@ -47,6 +47,14 @@ class RenewTask {
   /// 能用的。放在标签组旁边一起设：两者都是「这条任务上哪儿找素材」这件事。
   final ProjectRef? project;
 
+  /// 分离出来的纯人声（口播）轨与纯背景音轨。分析时产出一次，之后一直用。
+  ///
+  /// 为什么要留着：换配乐时得把原片自带的背景音去掉，只留口播——不分离的话
+  /// 新配乐只能叠在原声上，两首曲子一起响。为 null 表示没分离成功（机器上
+  /// 没装分离工具，或那一步失败了），此时只能沿用原混音。
+  final String? vocalsPath;
+  final String? backgroundPath;
+
   /// 台词语义单元这一层的打标约束（用户写的提示词），空串表示没写。
   ///
   /// **一层一条，不是一组一条**：一层选四个组时，四个组是同一次打标里的四个
@@ -99,6 +107,8 @@ class RenewTask {
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
     this.project,
+    this.vocalsPath,
+    this.backgroundPath,
     this.unitTagPrompt = '',
     this.shotTagPrompt = '',
     this.analysisError,
@@ -169,6 +179,8 @@ class RenewTask {
     List<TagGroupRef>? shotTagGroups,
     ProjectRef? project,
     bool clearProject = false,
+    String? vocalsPath,
+    String? backgroundPath,
     String? unitTagPrompt,
     String? shotTagPrompt,
     String? analysisError,
@@ -192,6 +204,8 @@ class RenewTask {
         unitTagGroups: unitTagGroups ?? this.unitTagGroups,
         shotTagGroups: shotTagGroups ?? this.shotTagGroups,
         project: clearProject ? null : (project ?? this.project),
+        vocalsPath: vocalsPath ?? this.vocalsPath,
+        backgroundPath: backgroundPath ?? this.backgroundPath,
         unitTagPrompt: unitTagPrompt ?? this.unitTagPrompt,
         shotTagPrompt: shotTagPrompt ?? this.shotTagPrompt,
         analysisError:
@@ -220,6 +234,8 @@ class RenewTask {
         'unitTagGroup': unitTagGroup?.toJson(),
         'shotTagGroup': shotTagGroup?.toJson(),
         'project': project?.toJson(),
+        'vocalsPath': vocalsPath,
+        'backgroundPath': backgroundPath,
         'unitTagPrompt': unitTagPrompt,
         'shotTagPrompt': shotTagPrompt,
         'analysisError': analysisError,
@@ -249,6 +265,8 @@ class RenewTask {
         unitTagGroups: parseTagGroups(json['unitTagGroups'], json['unitTagGroup']),
         shotTagGroups: parseTagGroups(json['shotTagGroups'], json['shotTagGroup']),
         project: ProjectRef.tryFromJson(json['project']),
+        vocalsPath: json['vocalsPath'] as String?,
+        backgroundPath: json['backgroundPath'] as String?,
         unitTagPrompt:
             parsePrompt(json['unitTagPrompt'], json['unitTagGroups']),
         shotTagPrompt:

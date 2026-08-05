@@ -40,6 +40,7 @@ import 'features/export/export_dialog.dart';
 import 'features/export/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
+import 'core/audio/vocal_separator.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -120,6 +121,12 @@ AnalysisPipeline? _buildAnalysisPipeline(
   final chat = ArkChatClient(apiKey: credentials.arkApiKey);
   return AnalysisPipeline(
     audio: AudioExtractor(),
+    // 口播/背景音分离：模型落到数据目录（工具默认放 /tmp，系统一清就要重下
+    // 几百兆）。没装分离工具时这一步会失败，分析照常完成，只影响换配乐
+    separator: VocalSeparator(
+      binary: resolveVocalSeparatorBinary(),
+      modelDir: Directory(p.join(dataDir.path, 'separator_models')),
+    ),
     silence: const SilenceDetector(),
     scenes: SceneDetector(),
     // 视觉镜头切点：双判据（画面差分 + 颜色直方图）+ 灰区画面复核。

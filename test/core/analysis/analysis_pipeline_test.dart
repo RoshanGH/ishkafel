@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ai/ark_chat_client.dart';
+import 'package:ishkafel/core/audio/vocal_separator.dart';
 import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
@@ -51,7 +52,26 @@ void main() {
 
   tearDown(() async => tempDir.delete(recursive: true));
 
-  AnalysisPipeline makePipeline(FileTaskRepository repo) => AnalysisPipeline(
+  /// 假分离器：按真实工具的行为造出两条 stem
+  VocalSeparator fakeSeparator({bool fail = false, List<int>? calls}) =>
+      VocalSeparator(
+        modelDir: Directory('${tempDir.path}/models'),
+        run: (bin, args) async {
+          calls?.add(1);
+          if (fail) return ProcessResult(1, 1, '', '模型下载失败');
+          final outDir = args[args.indexOf('--output_dir') + 1];
+          Directory(outDir).createSync(recursive: true);
+          final stem = args.first.split('/').last.split('.').first;
+          File('$outDir/$stem-人声.wav').writeAsStringSync('v');
+          File('$outDir/$stem-背景.wav').writeAsStringSync('b');
+          return ProcessResult(1, 0, '', '');
+        },
+      );
+
+  AnalysisPipeline makePipeline(FileTaskRepository repo,
+          {VocalSeparator? separator}) =>
+      AnalysisPipeline(
+        separator: separator,
         audio: AudioExtractor(run: (_, args) async {
           // 假 ffmpeg 音频提取：写入 0.5 秒 16kHz 静音采样
           await File(args[args.length - 1])
@@ -391,6 +411,46 @@ void main() {
   });
 
   _multiGroupVocabulary();
+
+  group('口播与背景音分离', () {
+    test('分离出来的两条轨记在任务上，之后一直用', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask();
+      await repo.save(task);
+
+      final done = await makePipeline(repo, separator: fakeSeparator())
+          .analyze(task);
+
+      expect(done.vocalsPath, endsWith('-人声.wav'));
+      expect(done.backgroundPath, endsWith('-背景.wav'));
+      expect(File(done.vocalsPath!).existsSync(), isTrue);
+    });
+
+    test('分离失败不中断整条分析——切分与打标本身仍然有价值', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask();
+      await repo.save(task);
+
+      final done =
+          await makePipeline(repo, separator: fakeSeparator(fail: true))
+              .analyze(task);
+
+      expect(done.units, isNotNull, reason: '为了一条音轨把几分钟的分析废掉不划算');
+      expect(done.vocalsPath, isNull, reason: '没成功就得是 null，不能给个不存在的路径');
+    });
+
+    test('没装分离工具时照常分析', () async {
+      final repo = FileTaskRepository(tempDir);
+      final task = makeTask();
+      await repo.save(task);
+
+      final done = await makePipeline(repo).analyze(task);
+
+      expect(done.units, isNotNull);
+      expect(done.vocalsPath, isNull);
+    });
+  });
+
 }
 
 /// 假词表源：按组 id 给不同词表，并记录被问过的组 id
@@ -472,8 +532,8 @@ class _FakeShotTagger extends ShotTagger {
     if (work != null) await work!();
     return const ShotUnderstanding(tags: ['开箱'], description: '开箱画面');
   }
-
 }
+
 void _multiGroupVocabulary() {
   group('多个标签组的词表合并成一份', () {
     test('两个组的标签都进了受控词表，重复词只留一个', () async {

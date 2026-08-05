@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import '../ai/taggers.dart';
 import '../ffmpeg/thumbnail_service.dart';
 import '../log/app_log.dart';
+import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
 import '../models/tag_trace.dart';
 import '../models/semantic_unit.dart';
@@ -57,8 +58,13 @@ class AnalysisPipeline {
   /// 的词表——后者等于所有任务共用一份，受控词表也就名存实亡。
   final TagVocabularySource? vocabulary;
 
+  /// 口播/背景音分离。为 null 表示这台机器上没装分离工具——照常分析，
+  /// 只是「替换配乐」时没有干净的人声轨可用（那一步会自己说明原因）。
+  final VocalSeparator? separator;
+
   AnalysisPipeline({
     required this.audio,
+    this.separator,
     required this.silence,
     required this.scenes,
     this.shotBoundaries,
@@ -122,6 +128,9 @@ class AnalysisPipeline {
         sampleRate: sampleRate);
     final valleys = silence.detectValleyCenters(samples, sampleRate);
 
+    _report(onProgress, AnalysisStage.separatingVocals);
+    final stems = await _separate(task);
+
     _report(onProgress, AnalysisStage.detectingScenes);
     final shotBounds = await _detectShotBoundaries(task, info.fps);
 
@@ -148,9 +157,28 @@ class AnalysisPipeline {
       status: RenewTaskStatus.editing,
       updatedAt: clock(),
       asrSentences: sentences,
+      vocalsPath: stems?.vocalsPath,
+      backgroundPath: stems?.backgroundPath,
     );
     await repository.save(updated);
     return updated;
+  }
+
+  /// 分离口播与背景音。**失败不中断整条分析**：切分与打标本身仍然有价值，
+  /// 为了一条音轨把几分钟的分析结果整个废掉不划算。缺了它只影响「替换配乐」，
+  /// 那一步会自己说明原因。
+  Future<SeparatedAudio?> _separate(RenewTask task) async {
+    final tool = separator;
+    if (tool == null) return null;
+    try {
+      return await tool.separate(
+        audioPath: task.sourcePath,
+        outputDir: Directory(p.join(workDir.path, 'stems', task.id)),
+      );
+    } catch (e) {
+      AppLog.warn('任务 ${task.id} 的口播/背景音分离失败（不影响其余分析）：$e');
+      return null;
+    }
   }
 
   /// 求视觉镜头切点。新链路（双判据 + 画面复核）失败时退回旧的单一阈值

@@ -1,6 +1,7 @@
 /// 分析管线的阶段。顺序即执行顺序，界面按 index 显示「第 n 步 / 共 m 步」。
 enum AnalysisStage {
   extractingAudio,
+  separatingVocals,
   detectingScenes,
   transcribing,
   splitting,
@@ -14,7 +15,8 @@ enum AnalysisStage {
 /// 用户等的是自己的素材处理完，不是一份管线日志——PCM / ASR / ffmpeg
 /// 这些词出现在进度条上只会制造困惑。
 const _labels = <AnalysisStage, String>{
-  AnalysisStage.extractingAudio: '正在分离音频',
+  AnalysisStage.extractingAudio: '正在提取音频',
+  AnalysisStage.separatingVocals: '正在分离口播与背景音',
   AnalysisStage.detectingScenes: '正在识别画面切换',
   AnalysisStage.transcribing: '正在识别台词',
   AnalysisStage.splitting: '正在按语义切分台词',
