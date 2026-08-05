@@ -1,10 +1,15 @@
 /// 分析管线的阶段。顺序即执行顺序，界面按 index 显示「第 n 步 / 共 m 步」。
+/// 顺序 = **等待顺序**，不是"开工顺序"。
+///
+/// 抽完音频之后三条支线是同时开跑的（分离 / 画面切换 / ASR→语义切分），
+/// 这里报的是"当前在等谁"。顺序必须与代码里 await 的先后一致——否则进度条
+/// 会从「识别台词」倒回「识别画面切换」，用户以为出错重来了。
 enum AnalysisStage {
   extractingAudio,
   separatingVocals,
-  detectingScenes,
   transcribing,
   splitting,
+  detectingScenes,
   building,
   taggingUnits,
   taggingShots,
@@ -16,6 +21,7 @@ enum AnalysisStage {
 /// 这些词出现在进度条上只会制造困惑。
 const _labels = <AnalysisStage, String>{
   AnalysisStage.extractingAudio: '正在提取音频',
+  // 这三条是并行的，文案上不必强调，用户只关心"在做什么"
   AnalysisStage.separatingVocals: '正在分离口播与背景音',
   AnalysisStage.detectingScenes: '正在识别画面切换',
   AnalysisStage.transcribing: '正在识别台词',

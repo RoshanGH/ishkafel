@@ -94,6 +94,12 @@ class AnalysisPipeline {
   /// （抽音频、ASR、语义切分）都不该再跑一遍。对外可见就是为了那条路径。
   final TaggingService tagging;
 
+  /// 每一步"等了多久"。
+  ///
+  /// **并行之后这不再等于该步骤的实际耗时**：三条支线同时跑，先 await 的那条
+  /// 把时间都记在自己头上，后 await 的往往已经做完、只记很小的数。这个口径
+  /// 反而更有用——它衡量的是"这一步让人多等了多久"。
+  ///
   /// 每一步真正花了多久。
   ///
   /// **为什么要留在代码里**：这条链路有八步、跨本地与云端，"到底慢在哪儿"
@@ -154,17 +160,24 @@ class AnalysisPipeline {
         sampleRate: sampleRate);
     final valleys = silence.detectValleyCenters(samples, sampleRate);
 
+    // 音频到手之后，三条支线互不依赖，同时跑：
+    //   分离（本地 GPU）｜画面切换（本地解码 + 云端复核）｜ASR → 语义切分（云端）
+    // 串行跑它们纯属浪费——实测串行 229 秒里，这三条加起来占 120 秒，
+    // 而并起来只花最长那条的时间。进度按「最慢的那条」报，不然进度条会跳。
     _report(onProgress, AnalysisStage.separatingVocals);
-    final stems = await _separate(task);
-
-    _report(onProgress, AnalysisStage.detectingScenes);
-    final shotBounds = await _detectShotBoundaries(task, info.fps);
+    final stemsFuture = _separate(task);
+    final boundsFuture = _detectShotBoundaries(task, info.fps);
+    final sentencesFuture = asr.transcribe(pcmPath);
 
     _report(onProgress, AnalysisStage.transcribing);
-    final sentences = await asr.transcribe(pcmPath);
+    final sentences = await sentencesFuture;
 
     _report(onProgress, AnalysisStage.splitting);
     final drafts = await splitter.split(sentences);
+
+    _report(onProgress, AnalysisStage.detectingScenes);
+    final shotBounds = await boundsFuture;
+    final stems = await stemsFuture;
 
     _report(onProgress, AnalysisStage.building);
     final units = builder.build(

@@ -35,6 +35,19 @@ typedef SemanticSplitDegradationCallback = void Function(
 class VolcanoSemanticSplitter implements SemanticSplitter {
   final ArkChatClient chat;
 
+  /// 用 mini 而不是默认的 lite。
+  ///
+  /// 同一批 27 句 ASR 实测：lite-260215 要 **39.4 秒**、mini-260428 只要
+  /// **9.0 秒**（4.4 倍），而切分结果 mini 反而更贴——那一次 lite 漏了两刀，
+  /// mini 切出的 7 个单元起点几乎与人工认可的结果重合。
+  ///
+  /// 这一步在关键路径上（打标必须等它），39 秒是等待时间里的第二大头。
+  ///
+  /// **注意**：大模型不是确定性的，同一个模型同样的输入两次结果都可能不同
+  /// （基准那次 lite 切 7 个，复测切 5 个）。所以这里不能用「与基准逐字一致」
+  /// 当验收标准，只能看切得合不合理。
+  static const String model = 'doubao-seed-2-0-mini-260428';
+
   /// 可选：降级通知出口，不接则只写日志（行为与接之前一致）
   final SemanticSplitDegradationCallback? onDegraded;
 
@@ -61,6 +74,7 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
     final content = await chat.chatText(
       system: _systemPrompt,
       user: '句子列表：\n${jsonEncode(numbered)}',
+      model: model,
     );
     return parseGrouping(content, sentences, onDegraded: onDegraded);
   }

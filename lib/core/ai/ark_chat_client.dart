@@ -52,11 +52,12 @@ class ArkChatClient {
     String? system,
     required String user,
     int maxTokens = 4096,
+    String? model,
   }) =>
       _chat([
         if (system != null) {'role': 'system', 'content': system},
         {'role': 'user', 'content': user},
-      ], maxTokens);
+      ], maxTokens, model: model);
 
   Future<String> chatVision({
     required String prompt,
