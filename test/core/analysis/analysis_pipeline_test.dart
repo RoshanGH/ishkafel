@@ -61,7 +61,9 @@ void main() {
           if (fail) return ProcessResult(1, 1, '', '模型下载失败');
           final outDir = args[args.indexOf('--output_dir') + 1];
           Directory(outDir).createSync(recursive: true);
-          final stem = args.first.split('/').last.split('.').first;
+          // 产物名带模型标记（换模型要重算，见 VocalSeparator）
+          final stem =
+              '${args.first.split('/').last.split('.').first}-${VocalSeparator.modelTag}';
           File('$outDir/$stem-人声.wav').writeAsStringSync('v');
           File('$outDir/$stem-背景.wav').writeAsStringSync('b');
           return ProcessResult(1, 0, '', '');
