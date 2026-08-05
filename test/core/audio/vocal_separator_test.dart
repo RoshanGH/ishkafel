@@ -49,7 +49,18 @@ void main() {
     expect(stems.backgroundPath, endsWith('a-背景.wav'));
   });
 
-  test('用实测最快的那套参数——默认参数要 2 分 09 秒，这套只要 15 秒', () async {
+  test('用 BS-Roformer：模型是用耳朵选的，指标测不出这种差别', () async {
+    final b = _build();
+
+    await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+
+    expect(valueAfter(b.calls.single, '--model_filename'),
+        contains('bs_roformer'),
+        reason: 'MDX 系列的人声轨里明显留着背景音乐，而 RMS 与频段能量'
+            '在几个模型之间的差异都在 -30dB 以下，根本测不出来');
+  });
+
+  test('两套架构的参数都给，换模型时不必跟着改调用点', () async {
     final b = _build();
 
     await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
@@ -57,7 +68,7 @@ void main() {
     final args = b.calls.single;
     expect(valueAfter(args, '--mdx_batch_size'), '8');
     expect(valueAfter(args, '--mdx_segment_size'), '512');
-    expect(valueAfter(args, '--model_filename'), VocalSeparator.model);
+    expect(valueAfter(args, '--mdxc_batch_size'), '8');
   });
 
   test('模型目录必须显式指定：工具默认放 /tmp，系统一清就要重下几百兆',

@@ -26,7 +26,7 @@ class SeparatedAudio {
 /// -27dB（听得出来）。所以只有**真的换了配乐的段落**才用分离结果，其余段落
 /// 一律用原混音，一个字节都不动。这条策略在混音那一层实现，本类只管分离。
 ///
-/// 走 `audio-separator` 命令行（UVR MDX-Net 模型，onnxruntime）。
+/// 走 `audio-separator` 命令行（BS-Roformer 模型，见 [model]）。
 class VocalSeparator {
   final ProcessRunner run;
 
@@ -43,19 +43,33 @@ class VocalSeparator {
     this.binary = 'audio-separator',
   });
 
-  /// 用的模型。UVR-MDX-NET-Inst_HQ_3 在口播 + 背景音这种素材上分离得干净，
-  /// 是 UVR 社区里这一类任务的常用选择。
-  static const String model = 'UVR-MDX-NET-Inst_HQ_3.onnx';
+  /// 用的模型：BS-Roformer。
+  ///
+  /// **这个选择是用耳朵定的，不是用指标定的**。先用的是 MDX 系列
+  /// （UVR-MDX-NET-Inst_HQ_3 / Voc_FT / Kim_Vocal_2），人声轨里明显留着背景
+  /// 音乐。而 RMS、频段能量、包络相关性这些指标在几个模型之间的差异都在
+  /// -30dB 以下——**根本测不出来**：压在人声下面 20~30dB 的音乐在总能量里
+  /// 只占千分之几，人耳却一听一个准。
+  ///
+  /// 代价（M1 Pro、96 秒素材实测）：模型 610MB（MDX 是 64MB），分离 83 秒
+  /// （MDX 是 15 秒）。都是一次性的：模型只下一次，分离跑在导入后本来就要
+  /// 几分钟的分析流程里。质量在这件事上省不得——分不干净，换配乐就等于两首
+  /// 曲子一起响。
+  ///
+  /// 也试过 Mel-Band Roformer（961MB / 94 秒）：更大更慢，没有理由选它。
+  static const String model = 'model_bs_roformer_ep_368_sdr_12.9628.ckpt';
 
-  /// 攒批与分段大小。真机实测（M1 Pro，96 秒素材）：
-  /// 默认的 batch=1 / segment=256 要 2 分 09 秒，改成 8 / 512 只要 15 秒，
-  /// 而两次输出逐样本相减的残差只有 -40dB（听不出差别）。
+  /// 攒批与分段。MDX 与 MDXC（Roformer 走这一支）各有各的参数名，两套都给：
+  /// 不认的那套会被忽略，换模型时不必跟着改调用点。
+  ///
+  /// 实测加大 batch 对 Roformer 没有帮助（1:22 vs 1:23，Apple GPU 已经吃满），
+  /// 但对 MDX 有决定性影响（2 分 09 秒 → 15 秒），所以这两个值仍然要给。
   static const int batchSize = 8;
   static const int segmentSize = 512;
 
   /// 分离 [audioPath]，两条轨落到 [outputDir]。
   ///
-  /// 已经分离过就直接复用（分离一次十几秒，重进任务不该再等一遍）。
+  /// 已经分离过就直接复用（一次要一分多钟，重进任务不该再等一遍）。
   Future<SeparatedAudio> separate({
     required String audioPath,
     required Directory outputDir,
@@ -82,6 +96,7 @@ class VocalSeparator {
       '--output_format', 'WAV',
       '--mdx_batch_size', '$batchSize',
       '--mdx_segment_size', '$segmentSize',
+      '--mdxc_batch_size', '$batchSize',
       // 输出文件名固定，省得去猜工具按模型名拼出来的那一长串
       '--custom_output_names',
       '{"Vocals": "$stem-人声", "Instrumental": "$stem-背景"}',
