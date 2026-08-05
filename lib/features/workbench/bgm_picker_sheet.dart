@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,6 +8,7 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/audio/bgm_library.dart';
 import '../../core/audio/bgm_plan.dart';
+import 'bgm_audition.dart';
 
 /// 音频库检索入口（缺省走真实 miaoa CLI；测试注入假实现）
 final bgmLibraryProvider = Provider<BgmLibrary>((ref) => BgmLibrary());
@@ -70,6 +73,9 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   final _keyword = TextEditingController();
   BgmSearchPage? _page;
   String? _error;
+  // 在 initState 里就建好：`late final` 会拖到第一次用才初始化，而搜索出错
+  // 或库里为空时压根不会走到列表，等 dispose 再去 ref.read 已经太晚了
+  late final BgmAudition _audition;
 
   /// 每次检索领一个代次号：用户敲得快时慢到的旧结果不能覆盖新的
   int _generation = 0;
@@ -77,11 +83,15 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   @override
   void initState() {
     super.initState();
+    _audition = BgmAudition(createPlayer: ref.read(auditionPlayerFactoryProvider));
     _search();
   }
 
   @override
   void dispose() {
+    // 先收播放器再拆自己：反过来的话浮层已经关了，那条歌还在响
+    unawaited(_audition.shutdown());
+    _audition.dispose();
     _keyword.dispose();
     super.dispose();
   }
@@ -196,6 +206,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
       itemBuilder: (_, i) => _Row(
         material: items[i],
         rangeMs: widget.rangeMs,
+        audition: _audition,
         onTap: () => Navigator.of(context).pop(BgmPicked(items[i])),
       ),
     );
@@ -221,15 +232,25 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
 class _Row extends StatelessWidget {
   final BgmMaterial material;
   final int rangeMs;
+  final BgmAudition audition;
   final VoidCallback onTap;
 
   const _Row(
-      {required this.material, required this.rangeMs, required this.onTap});
+      {required this.material,
+      required this.rangeMs,
+      required this.audition,
+      required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => AnimatedBuilder(
+        animation: audition,
+        builder: (context, _) => _row(context),
+      );
+
+  Widget _row(BuildContext context) {
     final fit = BgmPlan.fitFor(
         materialDurationMs: material.durationMs, rangeMs: rangeMs);
+    final playing = audition.playingId == material.id;
     return InkWell(
       key: Key('bgm-item-${material.id}'),
       onTap: onTap,
@@ -287,6 +308,17 @@ class _Row extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+            // 光看名字和时长挑不出配乐：轻快到什么程度、压在口播下面吵不吵，
+            // 只能听
+            IconButton(
+              key: Key('bgm-play-${material.id}'),
+              tooltip: playing ? '停止试听' : '试听',
+              onPressed: () => audition.toggle(material),
+              icon: Icon(
+                  playing ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+                  size: 22),
+              color: playing ? AppColors.accentBlue : AppColors.textSecondary,
             ),
           ],
         ),

@@ -4,7 +4,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
+import 'package:ishkafel/features/workbench/bgm_audition.dart';
 import 'package:ishkafel/features/workbench/bgm_picker_sheet.dart';
+
+/// 试听用的假播放器：只记下放过什么，不碰 libmpv
+class _FakePlayer implements AuditionPlayer {
+  final List<String> opened;
+  bool disposed = false;
+
+  _FakePlayer(this.opened);
+
+  @override
+  Future<void> open(String url) async => opened.add(url);
+
+  @override
+  Future<void> dispose() async => disposed = true;
+}
 
 class _FakeLibrary implements BgmLibrary {
   final List<BgmMaterial> items;
@@ -34,6 +49,11 @@ const _long = BgmMaterial(
     id: 1, name: '三十秒垫乐', durationMs: 30000, previewUrl: null);
 const _short = BgmMaterial(
     id: 2, name: '五秒音效', durationMs: 5000, previewUrl: null);
+const _withUrl = BgmMaterial(
+    id: 9,
+    name: '尤克里里',
+    durationMs: 122000,
+    previewUrl: 'https://o/a.mp3');
 const _voice = BgmMaterial(
     id: 3,
     name: '口播配音',
@@ -46,10 +66,15 @@ Future<BgmChoice?> _open(
   required _FakeLibrary library,
   int rangeMs = 12000,
   bool canClear = false,
+  List<String>? played,
 }) async {
   BgmChoice? result;
   await tester.pumpWidget(ProviderScope(
-    overrides: [bgmLibraryProvider.overrideWithValue(library)],
+    overrides: [
+      bgmLibraryProvider.overrideWithValue(library),
+      auditionPlayerFactoryProvider
+          .overrideWithValue(() => _FakePlayer(played ?? <String>[])),
+    ],
     child: MaterialApp(
       home: Builder(
         builder: (context) => Scaffold(
@@ -190,6 +215,38 @@ void main() {
       await _open(tester, library: _FakeLibrary(items: const [_long]));
 
       expect(find.byKey(const Key('bgm-widened')), findsNothing);
+    });
+  });
+
+  group('试听', () {
+    testWidgets('每条都能点着听，点了变成「停止」', (tester) async {
+      final played = <String>[];
+      await _open(tester,
+          library: _FakeLibrary(items: const [_withUrl]), played: played);
+
+      final button = find.byKey(const Key('bgm-play-9'));
+      expect(button, findsOneWidget, reason: '光看名字和时长挑不出配乐');
+
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+
+      expect(played, ['https://o/a.mp3']);
+      expect(
+          tester
+              .widget<IconButton>(button)
+              .tooltip,
+          '停止试听',
+          reason: '按钮要如实反映现在是在放还是没放');
+    });
+
+    testWidgets('点试听不会顺手把这条选中——那是两回事', (tester) async {
+      final result = await _open(tester,
+          library: _FakeLibrary(items: const [_withUrl]));
+
+      await tester.tap(find.byKey(const Key('bgm-play-9')));
+      await tester.pumpAndSettle();
+
+      expect(result, isNull, reason: '浮层还开着，用户只是在试听');
     });
   });
 }
