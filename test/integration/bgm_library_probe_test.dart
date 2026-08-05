@@ -12,7 +12,7 @@ void main() {
   test('音频库能列出内容，且时长/人声解析得对', () async {
     final library = BgmLibrary(binary: resolveMiaoaBinary());
 
-    final items = await library.search(pageSize: 30);
+    final items = (await library.search(pageSize: 30)).items;
 
     expect(items, isNotEmpty);
     for (final m in items) {
@@ -32,5 +32,16 @@ void main() {
           '${m.tags.isEmpty ? '(无标签)' : m.tags.join('/')} '
           '${m.name}');
     }
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
+  test('拿成片的项目去筛会筛空，这时要自动放开到全库', () async {
+    final library = BgmLibrary(binary: resolveMiaoaBinary());
+
+    // 104 = 滴露植源喷雾。音频库不按成片项目归档，硬筛回来是 0 条
+    final page = await library.search(projectIds: const [104], pageSize: 10);
+
+    expect(page.items, isNotEmpty, reason: '放开之后必须有东西，否则选配乐是一片空白');
+    expect(page.widenedFromProject, isTrue,
+        reason: '哪天音频库真的按项目归档了，这条会红——那时该去掉兜底');
   }, timeout: const Timeout(Duration(minutes: 2)));
 }

@@ -9,12 +9,13 @@ import 'package:ishkafel/features/workbench/bgm_picker_sheet.dart';
 class _FakeLibrary implements BgmLibrary {
   final List<BgmMaterial> items;
   final Object? error;
+  final bool widened;
   final asked = <String?>[];
 
-  _FakeLibrary({this.items = const [], this.error});
+  _FakeLibrary({this.items = const [], this.error, this.widened = false});
 
   @override
-  Future<List<BgmMaterial>> search({
+  Future<BgmSearchPage> search({
     String? keyword,
     List<int> projectIds = const [],
     int page = 1,
@@ -22,7 +23,7 @@ class _FakeLibrary implements BgmLibrary {
   }) async {
     asked.add(keyword);
     if (error != null) throw error!;
-    return items;
+    return BgmSearchPage(items: items, widenedFromProject: widened);
   }
 
   @override
@@ -174,6 +175,21 @@ void main() {
       await _open(tester, library: _FakeLibrary(items: const []));
 
       expect(find.textContaining('没有匹配'), findsOneWidget);
+    });
+
+    testWidgets('放开到全库时挑明，不让用户以为这些是本项目的', (tester) async {
+      await _open(tester,
+          library: _FakeLibrary(items: const [_long], widened: true));
+
+      expect(find.byKey(const Key('bgm-widened')), findsOneWidget);
+      expect(find.textContaining('已展开到全部音频库'), findsOneWidget);
+      expect(find.text('三十秒垫乐'), findsOneWidget, reason: '说明归说明，列表照常给');
+    });
+
+    testWidgets('本项目内有货时不出这行说明', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      expect(find.byKey(const Key('bgm-widened')), findsNothing);
     });
   });
 }

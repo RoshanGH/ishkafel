@@ -68,7 +68,7 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
 
 class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   final _keyword = TextEditingController();
-  List<BgmMaterial>? _items;
+  BgmSearchPage? _page;
   String? _error;
 
   /// 每次检索领一个代次号：用户敲得快时慢到的旧结果不能覆盖新的
@@ -89,15 +89,15 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   Future<void> _search() async {
     final generation = ++_generation;
     setState(() {
-      _items = null;
+      _page = null;
       _error = null;
     });
     try {
-      final items =
+      final page =
           await ref.read(bgmLibraryProvider)
               .search(keyword: _keyword.text, projectIds: widget.projectIds);
       if (!mounted || generation != _generation) return;
-      setState(() => _items = items);
+      setState(() => _page = page);
     } catch (e) {
       if (!mounted || generation != _generation) return;
       // e 已是人话（BgmLibrary 走 miaoaFriendlyError 翻译过）
@@ -177,10 +177,11 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         ),
       );
     }
-    final items = _items;
-    if (items == null) {
+    final page = _page;
+    if (page == null) {
       return const Center(child: CircularProgressIndicator());
     }
+    final items = page.items;
     if (items.isEmpty) {
       return const Center(
         child: Text('音频库里没有匹配的内容',
@@ -188,7 +189,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                 color: AppColors.textTertiary, fontSize: AppFontSize.body)),
       );
     }
-    return ListView.separated(
+    final list = ListView.separated(
       itemCount: items.length,
       separatorBuilder: (_, _) =>
           const Divider(height: 1, color: AppColors.border),
@@ -197,6 +198,22 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         rangeMs: widget.rangeMs,
         onTap: () => Navigator.of(context).pop(BgmPicked(items[i])),
       ),
+    );
+    if (!page.widenedFromProject) return list;
+    // 不说明的话，用户会把这些曲子当成本项目的
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Padding(
+          key: Key('bgm-widened'),
+          padding: EdgeInsets.only(bottom: AppSpacing.xs),
+          child: Text('本项目下没有音频素材，已展开到全部音频库',
+              style: TextStyle(
+                  color: AppColors.textTertiary,
+                  fontSize: AppFontSize.caption)),
+        ),
+        Expanded(child: list),
+      ],
     );
   }
 }

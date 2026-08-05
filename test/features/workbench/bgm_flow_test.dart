@@ -34,15 +34,14 @@ class _Repo implements TaskRepository {
 
 class _Library implements BgmLibrary {
   @override
-  Future<List<BgmMaterial>> search({
+  Future<BgmSearchPage> search({
     String? keyword,
     List<int> projectIds = const [],
     int page = 1,
     int pageSize = 30,
-  }) async =>
-      const [
+  }) async => const BgmSearchPage(items: [
         BgmMaterial(id: 1, name: '轻快垫乐', durationMs: 30000, previewUrl: null),
-      ];
+      ]);
 
   @override
   noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

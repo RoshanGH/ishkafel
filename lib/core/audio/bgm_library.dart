@@ -13,6 +13,17 @@ import 'bgm_plan.dart';
 /// `--type storyboard`、结果要做规格探测与时长差比对。硬塞进一个类只会让
 /// 两边的参数互相污染——打成 storyboard 会返回一堆画面素材，用户拿去当 BGM
 /// 一首都放不出来。
+/// 一页检索结果，外加「这页是怎么来的」。
+class BgmSearchPage {
+  final List<BgmMaterial> items;
+
+  /// 本项目下一条音频都没有，已放开到全库。界面据此给一行说明——否则用户
+  /// 会以为这些曲子就是本项目的。
+  final bool widenedFromProject;
+
+  const BgmSearchPage({required this.items, this.widenedFromProject = false});
+}
+
 class BgmLibrary {
   final ProcessRunner run;
   final String binary;
@@ -20,11 +31,40 @@ class BgmLibrary {
   BgmLibrary({this.run = systemProcessRunner, this.binary = 'miaoa'});
 
   /// 检索音频素材。[keyword] 为空（或只有空白）时列出音频库里的内容。
-  Future<List<BgmMaterial>> search({
+  ///
+  /// **项目条件是软的**：音频库并不按成片所属项目归档——真机上拿滴露的项目
+  /// 去筛，`total` 直接是 0，而不带项目能列出一堆可用的曲子。硬筛的结果就是
+  /// 用户一打开「选配乐」看到一片空白，还以为是 CLI 坏了。所以先按项目找，
+  /// 项目内一条都没有就自动放开到全库，并让界面把这件事说清楚
+  /// （[BgmSearchPage.widenedFromProject]）。
+  ///
+  /// 画面素材那边不这么做——分镜库确实按项目归档，筛出来是有东西的。
+  Future<BgmSearchPage> search({
     String? keyword,
     List<int> projectIds = const [],
     int page = 1,
     int pageSize = 30,
+  }) async {
+    final scoped = await _searchOnce(
+        keyword: keyword,
+        projectIds: projectIds,
+        page: page,
+        pageSize: pageSize);
+    if (projectIds.isEmpty || scoped.isNotEmpty) {
+      return BgmSearchPage(items: scoped);
+    }
+
+    final all = await _searchOnce(
+        keyword: keyword, projectIds: const [], page: page, pageSize: pageSize);
+    // 全库也空，那就是真没搜到；这时说「已放开」只会误导
+    return BgmSearchPage(items: all, widenedFromProject: all.isNotEmpty);
+  }
+
+  Future<List<BgmMaterial>> _searchOnce({
+    required String? keyword,
+    required List<int> projectIds,
+    required int page,
+    required int pageSize,
   }) async {
     final trimmed = keyword?.trim() ?? '';
     final result = await run(binary, [
