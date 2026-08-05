@@ -48,23 +48,33 @@ class ArkChatClient {
     Uri? endpoint,
   }) : endpoint = endpoint ?? _defaultEndpoint;
 
+  /// [temperature] 不传就用服务端默认（多半是 1.0）。**需要可复现的结果时
+  /// 必须显式给 0**：语义分组、打标这类活是判断题不是创作题，让模型「有创意」
+  /// 地答，同一份输入两次能给出完全不同的结果——实测同一条片子的语义切分
+  /// 在 5~14 个单元之间跳。
   Future<String> chatText({
     String? system,
     required String user,
     int maxTokens = 4096,
     String? model,
+    double? temperature,
   }) =>
       _chat([
         if (system != null) {'role': 'system', 'content': system},
         {'role': 'user', 'content': user},
-      ], maxTokens, model: model);
+      ], maxTokens, model: model, temperature: temperature);
 
   Future<String> chatVision({
     required String prompt,
     required List<int> jpegBytes,
     int maxTokens = 1024,
+    double? temperature,
   }) =>
-      chatVisionFrames(prompt: prompt, frames: [jpegBytes], maxTokens: maxTokens);
+      chatVisionFrames(
+          prompt: prompt,
+          frames: [jpegBytes],
+          maxTokens: maxTokens,
+          temperature: temperature);
 
   /// 多帧视觉理解：把一个镜头按时间顺序采样出的若干帧一起送进去。
   ///
@@ -76,6 +86,7 @@ class ArkChatClient {
     required String prompt,
     required List<List<int>> frames,
     int maxTokens = 1024,
+    double? temperature,
   }) =>
       _chat([
         {
@@ -89,7 +100,7 @@ class ArkChatClient {
             {'type': 'text', 'text': prompt},
           ],
         },
-      ], maxTokens);
+      ], maxTokens, temperature: temperature);
 
   /// 音频理解：把一段 WAV 直接送给模型听。
   ///
@@ -120,16 +131,17 @@ class ArkChatClient {
   static final ArkUsage usage = ArkUsage();
 
   Future<String> _chat(List<Map<String, dynamic>> messages, int maxTokens,
-      {String? model}) async {
+      {String? model, double? temperature}) async {
+    final body = <String, dynamic>{
+      'model': model ?? this.model,
+      'messages': messages,
+      'max_tokens': maxTokens,
+    };
+    // 不传就用服务端默认（多半 1.0）；显式给 0 才有可复现的结果
+    if (temperature != null) body['temperature'] = temperature;
+
     final result = await post(
-      endpoint,
-      {'Authorization': 'Bearer $apiKey'},
-      jsonEncode({
-        'model': model ?? this.model,
-        'messages': messages,
-        'max_tokens': maxTokens,
-      }),
-    );
+        endpoint, {'Authorization': 'Bearer $apiKey'}, jsonEncode(body));
     final Map<String, dynamic> json;
     try {
       json = jsonDecode(result.body) as Map<String, dynamic>;

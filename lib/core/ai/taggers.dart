@@ -23,6 +23,8 @@ class UnitTagger {
           '${buildDimensionPrompt(dimensions, constraint: constraint)}',
       user: '台词：$transcript',
       maxTokens: 512,
+      // 打标是判断题：同一段素材重跑一次不该给出另一套标签
+      temperature: 0,
     );
     final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(
@@ -83,6 +85,7 @@ class ShotTagger {
       prompt: _shotPrompt(frames.length, dimensions, constraint),
       frames: frames,
       maxTokens: 768,
+      temperature: 0,
     );
     final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(

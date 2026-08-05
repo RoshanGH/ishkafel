@@ -51,7 +51,13 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
   /// 可选：降级通知出口，不接则只写日志（行为与接之前一致）
   final SemanticSplitDegradationCallback? onDegraded;
 
-  VolcanoSemanticSplitter({required this.chat, this.onDegraded});
+  /// 采样温度。**默认 0**：把一段台词分成几组是判断题，不是创作题。
+  /// 不给这个值时用服务端默认（多半 1.0），实测同一条片子的切分结果
+  /// 在 5~14 个单元之间跳——用户重跑一次分析，切分就变一个样。
+  final double temperature;
+
+  VolcanoSemanticSplitter(
+      {required this.chat, this.onDegraded, this.temperature = 0});
 
   static const _systemPrompt = '''
 你是短视频广告的台词语义切分专家。台词语义单元的定义：一段表达完整语义的台词（可能一句或多句），
@@ -59,8 +65,10 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
 
 规则：
 1. 只能按给出的句子顺序分组，不得跳句、不得重排、不得遗漏任何句子索引
-2. 相邻的同语义句子合为一个单元；语义转折处切开
-3. 只输出 JSON，不要任何解释或 markdown 标记
+2. **按脚本的大结构分组，不要按小意群拆**：整条片子通常只有 5~8 个单元。
+   宁可粗不可细——一个卖点讲三句话，那三句就是一个单元，不要拆成三个
+3. 相邻的同语义句子合为一个单元；只在讲述目的真正转换时才切开
+4. 只输出 JSON，不要任何解释或 markdown 标记
 
 输出格式：{"units":[{"sentenceIndexes":[0,1]},{"sentenceIndexes":[2]}]}''';
 
@@ -75,6 +83,7 @@ class VolcanoSemanticSplitter implements SemanticSplitter {
       system: _systemPrompt,
       user: '句子列表：\n${jsonEncode(numbered)}',
       model: model,
+      temperature: temperature,
     );
     return parseGrouping(content, sentences, onDegraded: onDegraded);
   }

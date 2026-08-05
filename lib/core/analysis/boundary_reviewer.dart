@@ -36,6 +36,17 @@ class BoundaryReviewer {
   final Directory workDir;
 
   /// 一条素材最多送检多少个切点。超出的一律保留，不是丢弃。
+///
+/// **为什么这一步换不成纯算法**（2026-08-05 拿两条真实素材验过，别再试了）：
+/// 灰区候选里「真切换」与「剧烈运动」在**画面变化量**这个维度上完全重叠——
+/// 视频一的 23 个灰区候选中 10 真 13 假，真的那组比值中位数 4.94、假的 4.63，
+/// 范围也几乎一样。取任何一条界线：保住全部真切点就只能挡掉 13 个假的里的 1 个。
+///
+/// 换滑动平均、方差、邻域比值都一样——它们都是同一个信号的不同算法。要分开
+/// 这两类，必须看**画面内容**（前后拍的是不是同一个东西），那正是这一步在做的事。
+///
+/// 也试过用关键帧位置代替：这类素材是平台转码产物，GOP 固定 0.93 秒，
+/// I 帧位置与镜头切换毫无关系。
   final int maxReviews;
 
   const BoundaryReviewer({
@@ -104,8 +115,10 @@ class BoundaryReviewer {
               outPath: outPath));
       if (result.exitCode != 0) return BoundaryVerdict.unknown;
       final bytes = await File(outPath).readAsBytes();
+      // 判断题，不是创作题：不给 0 的话同一个切点两次能给出不同结论，
+      // 而视觉镜头层本该是「程序切的、可复现的」
       final reply = await chat.chatVision(
-          prompt: prompt, jpegBytes: bytes, maxTokens: 32);
+          prompt: prompt, jpegBytes: bytes, maxTokens: 32, temperature: 0);
       return parseVerdict(reply);
     } catch (e) {
       AppLog.warn('切点 ${candidate.ms}ms 画面复核失败（按保留处理）：$e');
