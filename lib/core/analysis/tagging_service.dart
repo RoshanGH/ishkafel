@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:path/path.dart' as p;
 
@@ -13,6 +12,7 @@ import '../models/tag_group_ref.dart';
 import '../models/tag_trace.dart';
 import '../ffmpeg/thumbnail_service.dart';
 import 'analysis_progress.dart';
+import 'local_work_gate.dart';
 import 'shot_frame_sampler.dart';
 import 'tag_vocabulary.dart';
 
@@ -90,44 +90,50 @@ class TaggingService {
 
     bool wanted(int i) => only == null || only.contains(i);
 
-    final result = <SemanticUnit>[];
-    if (tagUnits) _report(onProgress, AnalysisStage.taggingUnits, done: 0, total: units.length);
-    for (var i = 0; i < units.length; i++) {
-      final unit = units[i];
-      var updatedUnit = unit;
-      if (tagUnits && wanted(i)) {
-        try {
-          final r = await unitTagger!.understand(
-            transcript: unit.transcript,
-            dimensions: unitVocabulary,
-            constraint: task.unitTagPrompt,
-          );
-          updatedUnit = updatedUnit.copyWith(
-            tags: r.tags,
-            tagsStale: false,
-            trace: _traceOf(r, unitVocabulary,
-                constraint: task.unitTagPrompt, textInput: unit.transcript),
-          );
-        } catch (e) {
-          AppLog.warn('单元 ${unit.index} 打标失败：$e');
-        }
-      }
-      result.add(updatedUnit);
-      if (tagUnits) {
-        _report(onProgress, AnalysisStage.taggingUnits,
-            done: result.length, total: units.length);
-      }
+    // 单元打标全并发。此前是一个一个跑：7 个单元 143 秒，每个 20 秒都在等
+    // 网络往返——而云端并发是免费的
+    final result = List<SemanticUnit>.of(units);
+    if (tagUnits) {
+      _report(onProgress, AnalysisStage.taggingUnits, done: 0, total: units.length);
+      var done = 0;
+      await Future.wait([
+        for (var i = 0; i < units.length; i++)
+          if (wanted(i))
+            () async {
+              final unit = units[i];
+              try {
+                final r = await unitTagger!.understand(
+                  transcript: unit.transcript,
+                  dimensions: unitVocabulary,
+                  constraint: task.unitTagPrompt,
+                );
+                result[i] = unit.copyWith(
+                  tags: r.tags,
+                  tagsStale: false,
+                  trace: _traceOf(r, unitVocabulary,
+                      constraint: task.unitTagPrompt,
+                      textInput: unit.transcript),
+                );
+              } catch (e) {
+                AppLog.warn('单元 ${unit.index} 打标失败：$e');
+              }
+              _report(onProgress, AnalysisStage.taggingUnits,
+                  done: ++done, total: units.length);
+            }(),
+      ]);
     }
     if (!tagShots) return result;
     return _tagAllShotsConcurrently(task, result, shotVocabulary, onProgress, only);
   }
 
-  /// 视觉镜头打标的并发上限。
+  /// 云端调用**不限并发**。
   ///
-  /// 真机实测单个镜头的视觉打标约 18 秒（抽代表帧 + 云端多模态推理），
-  /// 32 个镜头串行就是近十分钟，用户只能对着「分析中」干等。并发上限取 4：
-  /// 云端 API 有并发与配额限制，不能无上限地打出去。
-  static const int _shotTaggingConcurrency = 4;
+  /// 实测本账号并发 24 的视觉调用零限流，而且并发越高单次均摊越低
+  /// （并发 4 时 4.7s/次，并发 24 时 1.1s/次）——之前那个「并发 4」的上限
+  /// 是凭空设的，白白把 58 个镜头的打标拖成 5 分半。
+  ///
+  /// 本地那一头仍然要拦（见 [LocalWorkGate]）：58 个镜头各抽 3 帧，
+  /// 一次性放出 174 个 ffmpeg 进程抢 8 个核，只会互相拖慢。
 
   /// 给全片的视觉镜头并发打标。
   ///
@@ -148,26 +154,21 @@ class TaggingService {
     if (flat.isEmpty) return units;
 
     final tagged = List<Shot?>.filled(flat.length, null);
-    var next = 0;
     // 完成计数与回填下标是两回事：并发下第 5 个开工的可能第 1 个结束，
     // 用下标当进度会让数字来回跳
     var completed = 0;
     _report(onProgress, AnalysisStage.taggingShots, done: 0, total: flat.length);
 
-    Future<void> worker() async {
-      while (true) {
-        final i = next++;
-        if (i >= flat.length) return;
-        final at = flat[i];
-        tagged[i] = await _tagShot(
-            task, units[at.unit].shots[at.shot], i, vocabulary);
-        _report(onProgress, AnalysisStage.taggingShots,
-            done: ++completed, total: flat.length);
-      }
-    }
-
-    await Future.wait(List.generate(
-        math.min(_shotTaggingConcurrency, flat.length), (_) => worker()));
+    await Future.wait([
+      for (var i = 0; i < flat.length; i++)
+        () async {
+          final at = flat[i];
+          tagged[i] = await _tagShot(
+              task, units[at.unit].shots[at.shot], i, vocabulary);
+          _report(onProgress, AnalysisStage.taggingShots,
+              done: ++completed, total: flat.length);
+        }(),
+    ]);
 
     final byUnit = <int, List<Shot>>{};
     for (var i = 0; i < flat.length; i++) {
@@ -253,12 +254,12 @@ class TaggingService {
         final outPath =
             p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
         paths.add(outPath);
-        await thumbnails!.extractCover(
-          videoPath: task.sourcePath,
-          outPath: outPath,
-          atSeconds: at[i] / 1000.0,
-          height: understandingFrameHeight,
-        );
+        await LocalWorkGate.shared.run(() => thumbnails!.extractCover(
+              videoPath: task.sourcePath,
+              outPath: outPath,
+              atSeconds: at[i] / 1000.0,
+              height: understandingFrameHeight,
+            ));
         frames.add(await File(outPath).readAsBytes());
       }
       final r = await shotTagger!.understand(

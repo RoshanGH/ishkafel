@@ -45,7 +45,14 @@ class BoundaryThresholds {
   /// 直方图距离高线：过了就直接确认
   final double histHigh;
 
-  /// 直方图距离低线：低于它连候选都不算
+  /// 直方图距离低线：低于它连候选都不算。
+  ///
+  /// 0.20 是拿两条真实素材扫出来的上限：再高就开始把 **AI 复核认可过的真切点**
+  /// 挡在候选之外（0.22 时视频一漏 1 个、视频二把唯一那个漏光）。
+  /// 从 0.16 提到 0.20 能少送检 14~26%，且不影响任何已知真切点。
+  ///
+  /// 顺带记一笔：这一版扫描证明「送检多」不是阈值设松了——**真切点确实分布
+  /// 在灰区里**，砍不动。压缩复核时间只能靠并发。
   final double histLow;
 
   /// scene 分数高线：画面结构剧烈突变，同样直接确认
@@ -60,7 +67,7 @@ class BoundaryThresholds {
 
   const BoundaryThresholds({
     this.histHigh = 0.44,
-    this.histLow = 0.16,
+    this.histLow = 0.20,
     this.sceneHigh = 0.42,
     this.sceneLow = 0.10,
     this.minShotMs = 400,

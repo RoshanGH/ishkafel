@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 
 import '../log/app_log.dart';
 import 'boundary_reviewer.dart';
@@ -16,13 +15,10 @@ class ShotBoundaryFinder {
   /// null 表示不做画面复核（凭据未配置时）——此时灰区切点**全部保留**
   final BoundaryReviewer? reviewer;
 
-  final int reviewConcurrency;
-
   const ShotBoundaryFinder({
     required this.extractor,
     this.detector = const ShotBoundaryDetector(),
     this.reviewer,
-    this.reviewConcurrency = 4,
   });
 
   Future<List<int>> find({
@@ -46,7 +42,7 @@ class ShotBoundaryFinder {
         '灰区复核 '
         '${(reviewWatch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s'
         '（送检 ${reviewer == null ? 0 : reviewer!.pick(candidates).length} 个，'
-        '并发 $reviewConcurrency）');
+        '全并发）');
     lastDetails = Map.unmodifiable({for (final c in reviewed) c.ms: c});
     return List.unmodifiable([for (final c in reviewed) c.ms]);
   }
@@ -66,20 +62,16 @@ class ShotBoundaryFinder {
     final pending = r.pick(candidates);
     if (pending.isEmpty) return candidates;
 
+    // 全并发送检。此前限 4 路，21 个候选要 84 秒——而实测本账号并发 24 的
+    // 视觉调用零限流，那 84 秒纯粹是自己给自己排的队
     final verdicts = <int, BoundaryVerdict>{};
-    var next = 0;
-    Future<void> worker() async {
-      while (true) {
-        final i = next++;
-        if (i >= pending.length) return;
-        final c = pending[i];
-        verdicts[c.ms] = await r.reviewOne(
-            videoPath: videoPath, candidate: c, fps: fps, taskId: taskId);
-      }
-    }
-
-    await Future.wait(List.generate(
-        math.min(reviewConcurrency, pending.length), (_) => worker()));
+    await Future.wait([
+      for (final c in pending)
+        r
+            .reviewOne(
+                videoPath: videoPath, candidate: c, fps: fps, taskId: taskId)
+            .then((v) => verdicts[c.ms] = v),
+    ]);
 
     final dropped =
         verdicts.values.where((v) => v == BoundaryVerdict.same).length;

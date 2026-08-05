@@ -38,15 +38,11 @@ class BoundaryReviewer {
   /// 一条素材最多送检多少个切点。超出的一律保留，不是丢弃。
   final int maxReviews;
 
-  /// 并发路数（与视觉打标同口径：云端有并发与配额限制）
-  final int concurrency;
-
   const BoundaryReviewer({
     required this.chat,
     required this.workDir,
     this.run = systemProcessRunner,
     this.maxReviews = 24,
-    this.concurrency = 4,
   });
 
   static const String prompt = '这张图是同一条视频里前后相邻的两帧，左边在前、右边在后。'
