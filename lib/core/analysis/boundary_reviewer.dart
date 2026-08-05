@@ -35,6 +35,10 @@ class BoundaryReviewer {
   final ProcessRunner run;
   final Directory workDir;
 
+  /// 复核用的模型。见 [reviewOne] 里的说明：这是全片最简单的一问，
+  /// 用最小的模型，延迟差 5~7 倍。
+  static const String model = 'doubao-seed-2-0-mini-260428';
+
   /// 一条素材最多送检多少个切点。超出的一律保留，不是丢弃。
 ///
 /// **为什么这一步换不成纯算法**（2026-08-05 拿两条真实素材验过，别再试了）：
@@ -116,9 +120,18 @@ class BoundaryReviewer {
       if (result.exitCode != 0) return BoundaryVerdict.unknown;
       final bytes = await File(outPath).readAsBytes();
       // 判断题，不是创作题：不给 0 的话同一个切点两次能给出不同结论，
-      // 而视觉镜头层本该是「程序切的、可复现的」
+      // 而视觉镜头层本该是「程序切的、可复现的」。
+      //
+      // 用 mini 而不是默认的 lite：这是全片最简单的一问（两帧是不是同一个
+      // 镜头），实测同一张真实复核图 lite 要 6~12 秒、mini 只要 1.2~1.7 秒，
+      // 答案一模一样。**这一步的时间下限就是单次调用的延迟**——18 个候选
+      // 全并发，等的是最慢那一个，并发再高也压不到延迟以下。
       final reply = await chat.chatVision(
-          prompt: prompt, jpegBytes: bytes, maxTokens: 32, temperature: 0);
+          prompt: prompt,
+          jpegBytes: bytes,
+          maxTokens: 32,
+          temperature: 0,
+          model: model);
       return parseVerdict(reply);
     } catch (e) {
       AppLog.warn('切点 ${candidate.ms}ms 画面复核失败（按保留处理）：$e');

@@ -69,10 +69,12 @@ class ArkChatClient {
     required List<int> jpegBytes,
     int maxTokens = 1024,
     double? temperature,
+    String? model,
   }) =>
       chatVisionFrames(
           prompt: prompt,
           frames: [jpegBytes],
+          model: model,
           maxTokens: maxTokens,
           temperature: temperature);
 
@@ -87,6 +89,7 @@ class ArkChatClient {
     required List<List<int>> frames,
     int maxTokens = 1024,
     double? temperature,
+    String? model,
   }) =>
       _chat([
         {
@@ -100,7 +103,7 @@ class ArkChatClient {
             {'type': 'text', 'text': prompt},
           ],
         },
-      ], maxTokens, temperature: temperature);
+      ], maxTokens, temperature: temperature, model: model);
 
   /// 音频理解：把一段 WAV 直接送给模型听。
   ///
