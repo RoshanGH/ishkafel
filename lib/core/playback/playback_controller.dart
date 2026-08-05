@@ -45,6 +45,18 @@ abstract class PlaybackController {
   /// 是否正在播放。
   bool get isPlaying;
 
+  /// 挂一条**外挂音轨**：画面照播原片，声音改用这个文件。
+  ///
+  /// 预览要听到的是「配音替换 + 配乐叠加」之后的成品声音，而它与原片自带的
+  /// 那条音轨不是一回事。外挂音轨由播放器自己与画面对齐，比另起一个播放器
+  /// 去追同步可靠得多。
+  ///
+  /// 返回 false 表示这个实现做不到，调用方据此降级（照常播原声，不假装换了）。
+  Future<bool> setExternalAudio(String path);
+
+  /// 换回原片自带的音轨
+  Future<void> clearExternalAudio();
+
   /// 释放底层资源。
   Future<void> dispose();
 }
@@ -60,6 +72,22 @@ class FakePlaybackController implements PlaybackController {
 
   int _positionMs = 0;
   bool _isPlaying = false;
+
+  @override
+  Future<bool> setExternalAudio(String path) async {
+    calls.add('setExternalAudio:$path');
+    externalAudio = path;
+    return true;
+  }
+
+  @override
+  Future<void> clearExternalAudio() async {
+    calls.add('clearExternalAudio');
+    externalAudio = null;
+  }
+
+  /// 当前挂着的外挂音轨（测试断言用）
+  String? externalAudio;
 
   @override
   Future<void> open(String path) async {

@@ -152,6 +152,20 @@ class MediaKitPlaybackController implements PlaybackController {
   @override
   bool get isPlaying => player.state.playing;
 
+  /// media_kit 原生支持外挂音轨（`AudioTrack.uri`），所以预览不必另起一个
+  /// 播放器去追同步——画面与声音由同一个 mpv 对齐。
+  @override
+  Future<bool> setExternalAudio(String path) async =>
+      await _gate.run(() async {
+        await player.setAudioTrack(AudioTrack.uri(path));
+        return true;
+      }) ??
+      false;
+
+  @override
+  Future<void> clearExternalAudio() =>
+      _gate.run(() => player.setAudioTrack(AudioTrack.auto()));
+
   /// 先等在跑的命令收尾再销毁。直接 dispose 会在 mpv 工作线程跑命令的当口
   /// 抽掉它的配置，触发一次 `assert` 失败——整个进程 SIGABRT。
   @override

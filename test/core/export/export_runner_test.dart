@@ -106,7 +106,8 @@ void main() {
     );
 
     // 每个单元一段原声，共两段；三条组合不该把它们各做三遍
-    expect(b.ffmpeg.countWhere((a) => a.contains('audio_u')), 2,
+    // （声音由共用的 AudioTrackBuilder 合成，产物叫 mix_u*）
+    expect(b.ffmpeg.countWhere((a) => a.contains('mix_u')), 2,
         reason: '声音是变量之外的东西，三条组合各做一遍纯属浪费');
   });
 
@@ -148,7 +149,7 @@ void main() {
   });
 
   test('声音挂了就没有哪条能成，如实给每一条同一个原因', () async {
-    final b = _build(failOn: 'audio_u0');
+    final b = _build(failOn: 'mix_u0');
 
     final results = await b.runner.exportAll(
       sourcePath: '/v/a.mp4',

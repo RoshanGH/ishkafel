@@ -40,6 +40,7 @@ import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
+import 'preview_audio.dart';
 import '../export/export_dialog.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
@@ -157,6 +158,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 试听用的独立播放器：时间线那个正播着原片，不能把它的位置弄丢
   AudioPreview? _preview;
 
+  /// 预览音轨：让工作台里听到的就是导出后的声音（配音替换 + 配乐叠加）
+  PreviewAudioController? _previewAudio;
+
   /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
   TaskListController? _tasks;
@@ -213,6 +217,27 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     unawaited(_openSource(playback, task.sourcePath));
     unawaited(_loadMedia());
     _restoreVoiceAudio();
+
+    _previewAudio = PreviewAudioController(
+      playback: playback,
+      factory: ref.read(audioTrackBuilderFactoryProvider),
+    )..addListener(_onPreviewAudioChanged);
+    _syncPreviewAudio();
+  }
+
+  void _onPreviewAudioChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 方案变了就重算预览音轨。与声音无关的改动会被它自己的指纹挡掉。
+  void _syncPreviewAudio() {
+    final editor = _editor;
+    if (editor == null) return;
+    _previewAudio?.update(
+      task: _task,
+      units: editor.units,
+      voiceAudio: _voiceAudio,
+    );
   }
 
   /// 打开原片。失败要让用户看见——文件被移走/改名时，静默失败的表现是
@@ -280,6 +305,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _playhead.dispose();
     unawaited(_playback?.dispose());
     unawaited(_preview?.dispose());
+    _previewAudio?.removeListener(_onPreviewAudioChanged);
+    _previewAudio?.dispose();
     super.dispose();
   }
 
@@ -327,6 +354,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 不需要页面代劳。改造前这里无条件 `setState`，于是拖拽边界时每个
   /// DragUpdate（macOS 触控板约 90~125Hz）都重建整页。
   void _onEditorChanged() {
+    // 边界动过，每一段的时长就变了，预览音轨要重合（它自己带防抖）
+    _syncPreviewAudio();
     _scheduleAutosave();
     _scheduleConsequenceCheck();
     final dirty = _editor?.dirty ?? false;
@@ -390,6 +419,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         ? _task.voices.clear(choice.unitIndexes)
         : _task.voices.assign(choice.unitIndexes, choice.voice!);
     setState(() => _task = _task.copyWith(voices: next));
+    _syncPreviewAudio();
     try {
       await _tasks!.saveVoices(_task, next);
     } catch (e) {
@@ -434,6 +464,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted) return;
       final failed = job.service.failures;
       setState(() => _voiceAudio = {..._voiceAudio, ...written});
+      _syncPreviewAudio();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(failed.isEmpty
             ? '已生成 ${written.length} 句配音，可在检查器里试听'
@@ -534,6 +565,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   Future<void> _saveBgm(BgmPlan next) async {
     setState(() => _task = _task.copyWith(bgm: next));
+    // 配乐变了，预览音轨要跟着重合——否则加完配乐播放还是原声
+    _syncPreviewAudio();
     try {
       await _tasks!.saveBgm(_task, next);
     } catch (e) {
@@ -735,6 +768,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       replacements: _replacements ?? const [],
       bgm: _task.bgm,
       voiceAudio: _voiceAudio,
+      vocalsPath: _task.vocalsPath,
       outputDir: outputDir,
     );
   }
@@ -821,6 +855,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           children: [
             if (_playbackDegraded) const PlaybackDegradedBanner(),
             if (_retaggingCount > 0) RetaggingBanner(unitCount: _retaggingCount),
+            if (previewAudioNotice(
+                    _previewAudio?.state ?? PreviewAudioState.original,
+                    _previewAudio?.failure)
+                case final notice?)
+              PreviewAudioBanner(
+                  text: notice,
+                  building:
+                      _previewAudio?.state == PreviewAudioState.building),
+            if (missingVocalsNotice(
+                    _task.bgm, _task.voices, _task.vocalsPath)
+                case final notice?)
+              PreviewAudioBanner(text: notice, building: false),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
             Expanded(

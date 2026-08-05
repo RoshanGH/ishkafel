@@ -7,6 +7,7 @@ import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
+import '../audio/audio_track_builder.dart';
 import 'export_commands.dart';
 import 'export_plan.dart';
 
@@ -64,6 +65,9 @@ class ExportRunner {
     required Directory outputDir,
     BgmPlan bgm = BgmPlan.empty,
     Map<int, String> voiceAudio = const {},
+
+    /// 分离出来的纯人声轨；被配乐覆盖的段落要用它，否则新旧背景一起响
+    String? vocalsPath,
     int limit = ReplacementPlan.maxCombinations,
     ExportProgress? onProgress,
   }) async {
@@ -78,8 +82,13 @@ class ExportRunner {
     onProgress?.call(0, total, '准备声音');
     final String audio;
     try {
-      audio = await _buildAudio(
-          sourcePath: sourcePath, units: units, voiceAudio: voiceAudio, bgm: bgm);
+      audio = await AudioTrackBuilder(run: run, workDir: workDir).build(
+        sourcePath: sourcePath,
+        units: units,
+        vocalsPath: vocalsPath,
+        bgm: bgm,
+        voiceAudio: voiceAudio,
+      );
     } catch (e) {
       AppLog.warn('导出：声音合成失败：$e');
       // 声音是所有组合共用的，它挂了就没有哪条能成——如实把同一条原因给每一条
@@ -170,83 +179,6 @@ class ExportRunner {
     }
     clips[key] = out;
     return out;
-  }
-
-  /// 声音：逐个单元取原声或配音，拼成整条，再把配乐混进去。
-  ///
-  /// 按单元切而不是整条直接用：换过音色的单元要拿生成的配音顶替，而配音与
-  /// 原句总有几十毫秒出入，逐单元对齐才不会一路累积错位到片尾。
-  Future<String> _buildAudio({
-    required String sourcePath,
-    required List<SemanticUnit> units,
-    required Map<int, String> voiceAudio,
-    required BgmPlan bgm,
-  }) async {
-    final parts = <String>[];
-    for (final unit in units) {
-      final out = p.join(workDir.path, 'audio_u${unit.index}.wav');
-      final voice = voiceAudio[unit.index];
-      if (voice != null && File(voice).existsSync()) {
-        await _ffmpeg(
-          ExportCommands.fitVoiceAudio(
-              input: voice, durationMs: unit.durationMs, out: out),
-          'U${unit.index + 1} 的配音',
-        );
-      } else {
-        await _ffmpeg(
-          ExportCommands.trimOriginalAudio(
-            source: sourcePath,
-            startMs: unit.startMs,
-            endMs: unit.endMs,
-            out: out,
-          ),
-          'U${unit.index + 1} 的原声',
-        );
-      }
-      parts.add(out);
-    }
-
-    final listFile = File(p.join(workDir.path, 'concat_audio.txt'))
-      ..writeAsStringSync(ExportCommands.concatList(parts));
-    var audio = p.join(workDir.path, 'audio.wav');
-    await _ffmpeg(
-        ExportCommands.concat(listFile: listFile.path, out: audio), '拼接声音');
-
-    // 配乐逐段混入。段与段之间互不重叠，一段一遍，顺序无所谓
-    for (var i = 0; i < bgm.segments.length; i++) {
-      final segment = bgm.segments[i];
-      final url = segment.material.previewUrl;
-      if (url == null || url.isEmpty) {
-        AppLog.warn('配乐「${segment.material.name}」没有可用地址，这一段跳过');
-        continue;
-      }
-      final range = _bgmRangeMs(units, segment);
-      if (range == null) continue;
-      final mixed = p.join(workDir.path, 'audio_bgm_$i.wav');
-      await _ffmpeg(
-        ExportCommands.mixBgm(
-          voice: audio,
-          bgm: url,
-          out: mixed,
-          startMs: range.$1,
-          durationMs: range.$2 - range.$1,
-        ),
-        '配乐「${segment.material.name}」',
-      );
-      audio = mixed;
-    }
-    return audio;
-  }
-
-  /// 配乐段覆盖的镜头对应到全片的哪一段时间
-  static (int, int)? _bgmRangeMs(List<SemanticUnit> units, BgmSegment segment) {
-    final flat = [
-      for (final unit in units)
-        for (final shot in unit.shots) shot,
-    ];
-    if (segment.startShot >= flat.length) return null;
-    final end = segment.endShot.clamp(0, flat.length - 1);
-    return (flat[segment.startShot].startMs, flat[end].endMs);
   }
 
   Future<void> _ffmpeg(List<String> args, String what) async {

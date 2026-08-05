@@ -29,6 +29,9 @@ Future<void> showExportDialog(
   required List<UnitReplacement> replacements,
   BgmPlan bgm = BgmPlan.empty,
   Map<int, String> voiceAudio = const {},
+
+  /// 分离出来的纯人声轨：被配乐覆盖的段落要用它
+  String? vocalsPath,
   required Directory outputDir,
 }) =>
     showDialog<void>(
@@ -42,6 +45,7 @@ Future<void> showExportDialog(
         replacements: replacements,
         bgm: bgm,
         voiceAudio: voiceAudio,
+        vocalsPath: vocalsPath,
         outputDir: outputDir,
       ),
     );
@@ -54,6 +58,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final List<UnitReplacement> replacements;
   final BgmPlan bgm;
   final Map<int, String> voiceAudio;
+  final String? vocalsPath;
   final Directory outputDir;
 
   const _ExportDialog({
@@ -64,6 +69,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.replacements,
     required this.bgm,
     required this.voiceAudio,
+    required this.vocalsPath,
     required this.outputDir,
   });
 
@@ -99,6 +105,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         outputDir: widget.outputDir,
         bgm: widget.bgm,
         voiceAudio: widget.voiceAudio,
+        vocalsPath: widget.vocalsPath,
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
         },

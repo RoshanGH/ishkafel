@@ -114,6 +114,47 @@ class VoiceGeneratingBanner extends StatelessWidget {
       );
 }
 
+/// 预览音轨的状态条：正在合成 / 合不出来。
+///
+/// 不写出来的话，用户不知道自己听到的到底是原声还是成品——而这正是预览
+/// 要回答的唯一问题。
+class PreviewAudioBanner extends StatelessWidget {
+  final String text;
+  final bool building;
+
+  const PreviewAudioBanner(
+      {super.key, required this.text, required this.building});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        key: const Key('preview-audio-banner'),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: (building ? AppColors.accentBlue : AppColors.orange)
+            .withValues(alpha: 0.16),
+        child: Row(
+          children: [
+            if (building) ...[
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.accentBlue),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(text,
+                  style: TextStyle(
+                      color: building ? AppColors.accentBlue : AppColors.orange,
+                      fontSize: AppFontSize.body,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+}
+
 class PlaybackDegradedBanner extends StatelessWidget {
   const PlaybackDegradedBanner({super.key});
 

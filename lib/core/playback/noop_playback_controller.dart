@@ -41,6 +41,14 @@ class NoopPlaybackController implements PlaybackController {
   @override
   bool get isPlaying => false;
 
+  /// 没有播放器可挂：如实返回 false，让上层照常显示「预览音轨用不了」，
+  /// 而不是假装换了轨
+  @override
+  Future<bool> setExternalAudio(String path) async => false;
+
+  @override
+  Future<void> clearExternalAudio() async {}
+
   @override
   Future<void> dispose() async {}
 }

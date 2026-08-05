@@ -41,6 +41,8 @@ import 'features/export/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
 import 'core/audio/vocal_separator.dart';
+import 'core/audio/audio_track_builder.dart';
+import 'features/workbench/preview_audio.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -94,6 +96,13 @@ Future<void> main() async {
           credentials: credentials, dataDir: dataDir)),
       // 矩阵导出：真实 ffmpeg + 真实下载。素材缓存按任务分目录，
       // 清理缓存时能整目录带走
+      // 预览音轨：与导出共用同一个混音器，听到的就是要交付的
+      audioTrackBuilderFactoryProvider
+          .overrideWithValue((taskId) => AudioTrackBuilder(
+                run: const ResolvingProcessRunner().call,
+                workDir:
+                    Directory(p.join(dataDir.path, 'preview_audio', taskId)),
+              )),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),

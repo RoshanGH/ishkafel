@@ -1,0 +1,223 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/audio/audio_track_builder.dart';
+import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/audio/voice_plan.dart';
+import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/playback/playback_controller.dart';
+import 'package:ishkafel/features/workbench/preview_audio.dart';
+
+const _track = BgmMaterial(
+    id: 9, name: '垫乐', durationMs: 30000, previewUrl: 'https://cdn/b.mp3');
+const _voice = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi');
+
+List<SemanticUnit> _units({int endMs = 4000}) => [
+      SemanticUnit(
+        index: 0,
+        startMs: 0,
+        endMs: endMs,
+        transcript: 'U1',
+        shots: [Shot(startMs: 0, endMs: endMs)],
+      ),
+    ];
+
+RenewTask _task({
+  BgmPlan bgm = BgmPlan.empty,
+  VoicePlan voices = VoicePlan.empty,
+  String? vocalsPath,
+}) =>
+    RenewTask(
+      id: 't1',
+      name: '片',
+      sourcePath: '/v/a.mp4',
+      status: RenewTaskStatus.editing,
+      createdAt: DateTime.utc(2026, 8, 5),
+      updatedAt: DateTime.utc(2026, 8, 5),
+      bgm: bgm,
+      voices: voices,
+      vocalsPath: vocalsPath,
+    );
+
+/// 假混音器：不起进程，产出一个真实存在的文件
+({AudioTrackBuilderFactory factory, List<int> builds, Directory dir}) _mixer({
+  bool fail = false,
+}) {
+  final dir = Directory.systemTemp.createTempSync('ishkafel_pa_');
+  addTearDown(() => dir.deleteSync(recursive: true));
+  final builds = <int>[];
+  return (
+    factory: (taskId) => AudioTrackBuilder(
+          workDir: dir,
+          run: (bin, args) async {
+            builds.add(1);
+            if (fail) return ProcessResult(1, 1, '', '合不出来');
+            File(args.last).writeAsStringSync('x');
+            return ProcessResult(1, 0, '', '');
+          },
+        ),
+    builds: builds,
+    dir: dir,
+  );
+}
+
+const _noDebounce = Duration.zero;
+
+void main() {
+  group('没配乐也没换音色', () {
+    test('什么都不做，用原片自带的声音', () async {
+      final playback = FakePlaybackController();
+      final mixer = _mixer();
+      final c = PreviewAudioController(
+          playback: playback, factory: mixer.factory, debounce: _noDebounce);
+
+      c.update(task: _task(), units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(mixer.builds, isEmpty, reason: '原片那条音轨就是正确答案，零开销');
+      expect(c.state, PreviewAudioState.original);
+      expect(playback.externalAudio, isNull);
+    });
+  });
+
+  group('有配乐或配音时合一条挂上去', () {
+    Future<PreviewAudioController> run({
+      required RenewTask task,
+      required AudioTrackBuilderFactory factory,
+      FakePlaybackController? playback,
+      Map<int, String> voiceAudio = const {},
+    }) async {
+      final c = PreviewAudioController(
+          playback: playback ?? FakePlaybackController(),
+          factory: factory,
+          debounce: _noDebounce);
+      c.update(task: task, units: _units(), voiceAudio: voiceAudio);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      return c;
+    }
+
+    test('加了配乐就合成并挂上外挂音轨', () async {
+      final playback = FakePlaybackController();
+      final mixer = _mixer();
+
+      final c = await run(
+        task: _task(
+            bgm: const BgmPlan([
+              BgmSegment(
+                  startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+            ]),
+            vocalsPath: '/v/vocals.wav'),
+        factory: mixer.factory,
+        playback: playback,
+      );
+
+      expect(c.state, PreviewAudioState.ready);
+      expect(playback.externalAudio, isNotNull,
+          reason: '预览要听到的是成品声音，不是原片那条');
+    });
+
+    test('换过音色同样要合——配音是替换原声，不合就听不到', () async {
+      final mixer = _mixer();
+
+      final c = await run(
+        task: _task(voices: VoicePlan.empty.assign([0], _voice)),
+        factory: mixer.factory,
+      );
+
+      expect(c.state, PreviewAudioState.ready);
+      expect(mixer.builds, isNotEmpty);
+    });
+
+    test('与声音无关的改动不触发重合', () async {
+      final mixer = _mixer();
+      final task = _task(
+          bgm: const BgmPlan([
+        BgmSegment(startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+      ]));
+      final c = PreviewAudioController(
+          playback: FakePlaybackController(),
+          factory: mixer.factory,
+          debounce: _noDebounce);
+
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final first = mixer.builds.length;
+      // 同一份方案再来一次（例如换了选中、改了标签）
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mixer.builds, hasLength(first),
+          reason: '改标签、切选中都与声音无关，不该跑几秒的重合');
+    });
+
+    test('边界拖动过就要重合——每段的时长变了', () async {
+      final mixer = _mixer();
+      final task = _task(
+          bgm: const BgmPlan([
+        BgmSegment(startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+      ]));
+      final c = PreviewAudioController(
+          playback: FakePlaybackController(),
+          factory: mixer.factory,
+          debounce: _noDebounce);
+
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final first = mixer.builds.length;
+      c.update(task: task, units: _units(endMs: 5000), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mixer.builds.length, greaterThan(first));
+    });
+
+    test('合成失败时如实说明，并退回原声', () async {
+      final mixer = _mixer(fail: true);
+
+      final c = await run(
+        task: _task(voices: VoicePlan.empty.assign([0], _voice)),
+        factory: mixer.factory,
+      );
+
+      expect(c.state, PreviewAudioState.failed);
+      expect(previewAudioNotice(c.state, c.failure), contains('原片的声音'),
+          reason: '听到的不是成品时必须说清楚，否则用户以为配乐没生效');
+    });
+
+    test('没有 ffmpeg 时说清楚，而不是静默什么都不发生', () async {
+      final c = PreviewAudioController(
+          playback: FakePlaybackController(),
+          factory: null,
+          debounce: _noDebounce);
+
+      c.update(
+          task: _task(voices: VoicePlan.empty.assign([0], _voice)),
+          units: _units(),
+          voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(c.state, PreviewAudioState.failed);
+      expect(c.failure, contains('ffmpeg'));
+    });
+  });
+
+  group('缺纯人声轨的提醒', () {
+    test('加了配乐却没分离出人声：要说清两首曲子会叠在一起', () {
+      final notice = missingVocalsNotice(
+        const BgmPlan([
+          BgmSegment(
+              startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+        ]),
+        VoicePlan.empty,
+        null,
+      );
+
+      expect(notice, contains('叠在一起'));
+    });
+
+    test('没加配乐就不提醒——原背景本来就该在', () {
+      expect(missingVocalsNotice(BgmPlan.empty, VoicePlan.empty, null), isNull);
+    });
+  });
+}
