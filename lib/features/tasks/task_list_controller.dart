@@ -365,8 +365,13 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   Future<void> _runAnalyze(AnalysisPipeline pipeline, RenewTask task) async {
     final progress = ref.read(analysisProgressProvider.notifier);
     try {
-      await pipeline.analyze(task,
-          onProgress: (p) => progress.report(task.id, p));
+      await pipeline.analyze(
+        task,
+        onProgress: (p) => progress.report(task.id, p),
+        // 切分一好就刷新列表：那一刻任务已经能打开干活了，剩下的打标
+        // 在后台补。让人对着「分析中」多等三倍时间没道理。
+        onUnitsReady: (_) => unawaited(reload()),
+      );
       await reload();
     } catch (e) {
       AppLog.warn('任务 ${task.id} 分析失败：$e');

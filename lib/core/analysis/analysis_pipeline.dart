@@ -142,8 +142,14 @@ class AnalysisPipeline {
 
   /// [onProgress] 逐次传入而不是挂在实例上：管线是全应用共享的单例，
   /// 挂在实例上会让所有任务的进度都涌向同一个回调，还分不清是谁的。
+  ///
+  /// [onUnitsReady] 在**切分落库、打标开始之前**回调一次：那一刻任务已经能
+  /// 打开干活了（看切分、拖边界、听原片都不需要标签）。上层据此把任务从
+  /// 「分析中」放出来，剩下的打标在后台补。实测切分好只要 26 秒，而打标要
+  /// 七十多秒——让人干等三倍时间没道理。
   Future<RenewTask> analyze(RenewTask task,
-      {AnalysisProgressSink? onProgress}) async {
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady}) async {
     final info = task.videoInfo;
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
@@ -188,8 +194,22 @@ class AnalysisPipeline {
       fps: info.fps,
     );
 
-    final taggedUnits = await tagging
-        .tag(task, _withBoundaryTrace(units), onProgress: onProgress);
+    // 切分好就先落库、先放人进去干活——打标（实测占总时长七成）不该挡着。
+    // 用户进工作台第一件事是看切分对不对、拖边界，那些都不需要标签。
+    final ready = task.copyWith(
+      units: _withBoundaryTrace(units),
+      status: RenewTaskStatus.editing,
+      updatedAt: clock(),
+      asrSentences: sentences,
+      vocalsPath: stems?.vocalsPath,
+      backgroundPath: stems?.backgroundPath,
+    );
+    await repository.save(ready);
+    onUnitsReady?.call(ready);
+    AppLog.info('切分已就绪（${units.length} 个单元），打标转入后台');
+
+    final taggedUnits =
+        await tagging.tag(ready, ready.units!, onProgress: onProgress);
 
     _closeStage();
     _currentStage = null;
@@ -199,14 +219,7 @@ class AnalysisPipeline {
     ].join('、')}；合计 '
         '${(_stageMs.values.fold<int>(0, (a, b) => a + b) / 1000).toStringAsFixed(1)}s');
 
-    final updated = task.copyWith(
-      units: taggedUnits,
-      status: RenewTaskStatus.editing,
-      updatedAt: clock(),
-      asrSentences: sentences,
-      vocalsPath: stems?.vocalsPath,
-      backgroundPath: stems?.backgroundPath,
-    );
+    final updated = ready.copyWith(units: taggedUnits, updatedAt: clock());
     await repository.save(updated);
     return updated;
   }

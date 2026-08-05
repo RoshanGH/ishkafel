@@ -3,6 +3,16 @@ import 'dart:convert';
 import 'ark_chat_client.dart';
 import 'tag_dimension.dart';
 
+/// 打标用的模型。
+///
+/// **换成 mini 是拿标签密度换速度，这是产品决定**。同一批真实镜头实测：
+/// lite 每个镜头 13~25 秒、平均打 8.2 个标签；mini 4.7~9.6 秒、平均 4.8 个。
+/// 标签是「按相同标签检索候选素材」的唯一检索键，打得少意味着能匹配上的
+/// 素材也少——所以这是有代价的，将来觉得候选太少可以换回 lite（改这一个常量）。
+///
+/// 画面描述两者都能写，mini 更啰嗦些（每条都以「这个镜头拍摄的是…」开头）。
+const String taggingModel = 'doubao-seed-2-0-mini-260428';
+
 /// 台词语义单元打标（文本）
 class UnitTagger {
   final ArkChatClient chat;
@@ -25,6 +35,7 @@ class UnitTagger {
       maxTokens: 512,
       // 打标是判断题：同一段素材重跑一次不该给出另一套标签
       temperature: 0,
+      model: taggingModel,
     );
     final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(
@@ -86,6 +97,7 @@ class ShotTagger {
       frames: frames,
       maxTokens: 768,
       temperature: 0,
+      model: taggingModel,
     );
     final parsed = parseDimensionTags(content, dimensions);
     return ShotUnderstanding(

@@ -63,7 +63,8 @@ class _FakePipeline extends AnalysisPipeline {
 
   @override
   Future<RenewTask> analyze(RenewTask task,
-      {AnalysisProgressSink? onProgress}) async {
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady}) async {
     analyzeCallCount++;
     onProgress?.call(
         const AnalysisProgress(stage: AnalysisStage.extractingAudio));
