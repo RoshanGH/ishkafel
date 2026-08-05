@@ -43,37 +43,44 @@ class VocalSeparator {
     this.binary = 'audio-separator',
   });
 
-  /// 用的模型：BS-Roformer。
+  /// 用的模型：UVR-MDX-NET-Inst_HQ_3。
   ///
-  /// **这个选择是用耳朵定的，不是用指标定的**。先用的是 MDX 系列
-  /// （UVR-MDX-NET-Inst_HQ_3 / Voc_FT / Kim_Vocal_2），人声轨里明显留着背景
-  /// 音乐。而 RMS、频段能量、包络相关性这些指标在几个模型之间的差异都在
-  /// -30dB 以下——**根本测不出来**：压在人声下面 20~30dB 的音乐在总能量里
-  /// 只占千分之几，人耳却一听一个准。
+  /// **选它是拿音质换速度，这是产品决定，不是技术判断**。同一条 96 秒素材上
+  /// 实测（M1 Pro）：
   ///
-  /// 代价（M1 Pro、96 秒素材实测）：模型 610MB（MDX 是 64MB），分离 83 秒
-  /// （MDX 是 15 秒）。都是一次性的：模型只下一次，分离跑在导入后本来就要
-  /// 几分钟的分析流程里。质量在这件事上省不得——分不干净，换配乐就等于两首
-  /// 曲子一起响。
+  /// | 模型 | 耗时 | 模型体积 | 听感 |
+  /// |---|---|---|---|
+  /// | 本模型（MDX 系列） | **15s** | 64MB | 人声里还留着背景音乐 |
+  /// | 两遍 MDX | 29s | 64MB×2 | 未评 |
+  /// | BS-Roformer | 81s | 610MB | 几乎只剩人声 |
+  /// | Mel-Band Roformer | 94s | 961MB | 未评 |
+  /// | demucs.cpp（MixCut 用的） | 227s | 80MB | 可接受 |
   ///
-  /// 也试过 Mel-Band Roformer（961MB / 94 秒）：更大更慢，没有理由选它。
-  static const String model = 'model_bs_roformer_ep_368_sdr_12.9628.ckpt';
+  /// 质量最好的是 BS-Roformer，但它慢 5 倍、模型大 10 倍。用户权衡后选了速度。
+  ///
+  /// **另一条记录**：这几个模型的差异**用指标测不出来**——RMS、频段能量、
+  /// 包络相关性在它们之间全在 -30dB 以下。压在人声下面 20~30dB 的音乐在总
+  /// 能量里只占千分之几，人耳却一听一个准。这类判断只能靠听。
+  static const String model = 'UVR-MDX-NET-Inst_HQ_3.onnx';
 
-  /// 模型的短标记，进产物文件名——换模型后能自动重算，不会复用旧产物
+  /// 模型的短标记，进产物文件名——换模型后能自动重算，不会复用旧产物。
+  /// 这次换模型正是靠它：旧的 roformer 产物还在磁盘上，不会被误当成新结果。
   static String get modelTag =>
       model.contains('roformer') ? 'roformer' : 'mdx';
 
-  /// 攒批与分段。MDX 与 MDXC（Roformer 走这一支）各有各的参数名，两套都给：
-  /// 不认的那套会被忽略，换模型时不必跟着改调用点。
+  /// 攒批与分段。**对当前这个 MDX 模型是决定性的**：默认的 batch 1 /
+  /// segment 256 要 2 分 09 秒，改成 8 / 512 只要 15 秒——8.6 倍，而两次
+  /// 输出逐样本相减的残差只有 -40dB（听不出差别）。
   ///
-  /// 实测加大 batch 对 Roformer 没有帮助（1:22 vs 1:23，Apple GPU 已经吃满），
-  /// 但对 MDX 有决定性影响（2 分 09 秒 → 15 秒），所以这两个值仍然要给。
+  /// MDXC（Roformer 那一支）的参数名不同，也一并给上：不认的那套会被忽略，
+  /// 换模型时不必跟着改调用点。（顺带记一笔：加大 batch 对 Roformer 没用，
+  /// 实测 1:22 vs 1:23，Apple GPU 已经吃满。）
   static const int batchSize = 8;
   static const int segmentSize = 512;
 
   /// 分离 [audioPath]，两条轨落到 [outputDir]。
   ///
-  /// 已经分离过就直接复用（一次要一分多钟，重进任务不该再等一遍）。
+  /// 已经分离过就直接复用（重进任务不该再等一遍）。
   Future<SeparatedAudio> separate({
     required String audioPath,
     required Directory outputDir,

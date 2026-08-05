@@ -94,12 +94,38 @@ class AnalysisPipeline {
   /// （抽音频、ASR、语义切分）都不该再跑一遍。对外可见就是为了那条路径。
   final TaggingService tagging;
 
+  /// 每一步真正花了多久。
+  ///
+  /// **为什么要留在代码里**：这条链路有八步、跨本地与云端，"到底慢在哪儿"
+  /// 只能靠实测。此前靠读注释推断过一次，注释早已过时——把 ffmpeg 解码
+  /// 说成瓶颈，实际瓶颈是云端并发。凭猜测优化等于白干。
+  final _stageMs = <AnalysisStage, int>{};
+  Stopwatch? _stageWatch;
+  AnalysisStage? _currentStage;
+
+  /// 各阶段耗时（毫秒）。分析结束后可读，供日志与排查用。
+  Map<AnalysisStage, int> get stageDurationsMs => Map.unmodifiable(_stageMs);
+
+  void _closeStage() {
+    final stage = _currentStage;
+    final watch = _stageWatch;
+    if (stage != null && watch != null) {
+      _stageMs[stage] = (_stageMs[stage] ?? 0) + watch.elapsedMilliseconds;
+    }
+  }
+
   /// 上报一步进度。
   ///
   /// 回调抛异常只记日志：进度只是「说一声」，因为没人听就把整条分析废掉，
   /// 等于让十几分钟的计算白跑。
   void _report(AnalysisProgressSink? sink, AnalysisStage stage,
       {int? done, int? total}) {
+    // 同一阶段的多次进度上报（打标的 n/m）不重新计时，只在换阶段时结算
+    if (stage != _currentStage) {
+      _closeStage();
+      _currentStage = stage;
+      _stageWatch = Stopwatch()..start();
+    }
     if (sink == null) return;
     try {
       sink(AnalysisProgress(stage: stage, done: done, total: total));
@@ -151,6 +177,14 @@ class AnalysisPipeline {
 
     final taggedUnits = await tagging
         .tag(task, _withBoundaryTrace(units), onProgress: onProgress);
+
+    _closeStage();
+    _currentStage = null;
+    AppLog.info('分析耗时：${[
+      for (final e in _stageMs.entries)
+        '${e.key.name} ${(e.value / 1000).toStringAsFixed(1)}s'
+    ].join('、')}；合计 '
+        '${(_stageMs.values.fold<int>(0, (a, b) => a + b) / 1000).toStringAsFixed(1)}s');
 
     final updated = task.copyWith(
       units: taggedUnits,

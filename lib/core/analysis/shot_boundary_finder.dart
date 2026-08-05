@@ -30,10 +30,23 @@ class ShotBoundaryFinder {
     required String taskId,
     required double fps,
   }) async {
+    // 这一步内部分两段：本地 ffmpeg 采信号、云端灰区复核。两段的耗时差着
+    // 一个数量级（实测 19s vs 109s），合成一个数字看不出瓶颈在哪
+    final extractWatch = Stopwatch()..start();
     final signals = await extractor.extract(videoPath, taskId: taskId);
+    extractWatch.stop();
     final candidates = detector.detect(signals);
+
+    final reviewWatch = Stopwatch()..start();
     final reviewed = await _review(
         videoPath: videoPath, taskId: taskId, fps: fps, candidates: candidates);
+    reviewWatch.stop();
+    AppLog.info('镜头切点：采信号 '
+        '${(extractWatch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s、'
+        '灰区复核 '
+        '${(reviewWatch.elapsedMilliseconds / 1000).toStringAsFixed(1)}s'
+        '（送检 ${reviewer == null ? 0 : reviewer!.pick(candidates).length} 个，'
+        '并发 $reviewConcurrency）');
     lastDetails = Map.unmodifiable({for (final c in reviewed) c.ms: c});
     return List.unmodifiable([for (final c in reviewed) c.ms]);
   }

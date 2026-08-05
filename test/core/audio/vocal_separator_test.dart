@@ -50,15 +50,14 @@ void main() {
     expect(stems.backgroundPath, endsWith('背景.wav'));
   });
 
-  test('用 BS-Roformer：模型是用耳朵选的，指标测不出这种差别', () async {
+  test('模型是显式指定的，不用工具的默认值', () async {
     final b = _build();
 
     await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
 
-    expect(valueAfter(b.calls.single, '--model_filename'),
-        contains('bs_roformer'),
-        reason: 'MDX 系列的人声轨里明显留着背景音乐，而 RMS 与频段能量'
-            '在几个模型之间的差异都在 -30dB 以下，根本测不出来');
+    expect(valueAfter(b.calls.single, '--model_filename'), VocalSeparator.model,
+        reason: '换模型是拿音质换速度的产品决定（15s vs 81s），'
+            '不能交给工具的默认值决定');
   });
 
   test('两套架构的参数都给，换模型时不必跟着改调用点', () async {
