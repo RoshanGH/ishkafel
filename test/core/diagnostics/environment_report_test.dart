@@ -21,12 +21,14 @@ EnvironmentProbe _probe({
       ffmpegPath: '/opt/homebrew/bin/ffmpeg',
       ffprobePath: '/opt/homebrew/bin/ffprobe'),
   String? miaoaPath = '/Users/x/.local/bin/miaoa',
+  String? separatorPath = '/Users/x/.local/bin/audio-separator',
   AiCredentials credentials = _complete,
   ProcessRunnerLike run = _version,
 }) =>
     EnvironmentProbe(
       mediaTools: tools,
       resolveMiaoa: () => miaoaPath,
+      resolveSeparator: () => separatorPath,
       credentials: credentials,
       run: run,
     );
@@ -84,7 +86,7 @@ void main() {
 
     test('未安装的工具不去启动子进程', () async {
       var invoked = 0;
-      await _probe(miaoaPath: null, run: (e, a) async {
+      await _probe(miaoaPath: null, separatorPath: null, run: (e, a) async {
         invoked++;
         return ProcessResult(1, 0, 'v1', '');
       }).collect();
@@ -123,6 +125,25 @@ void main() {
               '只要一张截图就等于泄露；「体检报告」永远只报有没有，不报是什么');
       expect(dumped, isNot(contains('app-123456')));
       expect(dumped, isNot(contains('tok-abcdef')));
+    });
+  });
+
+  group('人声分离工具（可选项）', () {
+    test('装了就报路径', () async {
+      final report = await _probe().collect();
+
+      final tool = report.tools.firstWhere((t) => t.name == 'audio-separator');
+      expect(tool.installed, isTrue);
+    });
+
+    test('没装时给出安装命令，并说清它只影响换配乐', () async {
+      final report = await _probe(separatorPath: null).collect();
+
+      final tool = report.tools.firstWhere((t) => t.name == 'audio-separator');
+      expect(tool.installed, isFalse);
+      expect(tool.hint, contains('uv tool install'));
+      expect(tool.hint, contains('换配乐'),
+          reason: '缺了它照样能分析、能替换画面，不该让用户以为整个应用不能用');
     });
   });
 }

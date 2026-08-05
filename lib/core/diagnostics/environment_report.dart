@@ -3,6 +3,7 @@ import 'dart:io';
 import '../ai/ai_credentials.dart';
 import '../ffmpeg/media_tools_locator.dart';
 import '../ffmpeg/process_runner.dart';
+import '../audio/vocal_separator.dart';
 import '../miaoa/miaoa_locator.dart';
 
 /// 子进程执行签名（与 [ProcessRunner] 同型，这里另起别名只为让测试的替身
@@ -57,12 +58,16 @@ class EnvironmentReport {
 class EnvironmentProbe {
   final MediaToolsStatus mediaTools;
   final String? Function() resolveMiaoa;
+
+  /// 人声分离工具的路径解析（可选项，找不到返回 null）
+  final String? Function() resolveSeparator;
   final AiCredentials credentials;
   final ProcessRunnerLike run;
 
   const EnvironmentProbe({
     required this.mediaTools,
     required this.resolveMiaoa,
+    required this.resolveSeparator,
     required this.credentials,
     required this.run,
   });
@@ -73,6 +78,7 @@ class EnvironmentProbe {
       (MediaToolsLocator.ffmpeg, mediaTools.ffmpegPath, const ['-version']),
       (MediaToolsLocator.ffprobe, mediaTools.ffprobePath, const ['-version']),
       ('miaoa', miaoaPath, const ['--version']),
+      ('audio-separator', resolveSeparator(), const ['--version']),
     ];
 
     final tools = <ToolHealth>[];
@@ -120,6 +126,10 @@ EnvironmentProbe defaultEnvironmentProbe({
       resolveMiaoa: () {
         final resolved = resolveMiaoaBinary();
         return resolved == 'miaoa' ? null : resolved;
+      },
+      resolveSeparator: () {
+        final resolved = resolveVocalSeparatorBinary();
+        return resolved == 'audio-separator' ? null : resolved;
       },
       credentials: credentials,
       run: run ?? systemProcessRunner,

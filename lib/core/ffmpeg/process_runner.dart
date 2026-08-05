@@ -150,6 +150,11 @@ String missingToolMessage(String executable) {
     case 'miaoa':
       return '未找到 miaoa 命令行工具。请先安装并执行 miaoa auth login 登录，'
           '然后重新启动本应用。';
+    case 'audio-separator':
+      // 这一项是可选的：缺了照样能分析、能替换画面，只是换配乐时新曲子会
+      // 与原片自带的背景音叠在一起
+      return '未找到人声分离工具（换配乐时需要）。请在终端执行 '
+          'uv tool install "audio-separator[cpu]" 完成安装，然后重新启动本应用。';
     default:
       return '未找到所需的命令行工具 $executable。请先完成安装，然后重新启动本应用。';
   }
