@@ -11,6 +11,7 @@ import 'core/ai/taggers.dart';
 import 'core/ai/volcano_asr_provider.dart';
 import 'core/ai/volcano_semantic_splitter.dart';
 import 'core/analysis/analysis_pipeline.dart';
+import 'core/analysis/batch_frame_extractor.dart';
 import 'core/analysis/audio_extractor.dart';
 import 'core/analysis/boundary_snapper.dart';
 import 'core/analysis/scene_detector.dart';
@@ -156,6 +157,7 @@ AnalysisPipeline? _buildAnalysisPipeline(
     repository: FileTaskRepository(dataDir),
     workDir: Directory(p.join(dataDir.path, 'analysis_work')),
     thumbnails: ThumbnailService(),
+    batchFrames: BatchFrameExtractor(),
     unitTagger: UnitTagger(chat: chat),
     shotTagger: ShotTagger(chat: chat),
     vocabulary: MiaoaTagVocabularySource(

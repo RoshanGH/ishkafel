@@ -12,6 +12,8 @@ import '../models/tag_group_ref.dart';
 import '../models/tag_trace.dart';
 import '../ffmpeg/thumbnail_service.dart';
 import 'analysis_progress.dart';
+import 'batch_frame_extractor.dart';
+import 'batch_frame_plan.dart';
 import 'local_work_gate.dart';
 import 'shot_frame_sampler.dart';
 import 'tag_vocabulary.dart';
@@ -31,6 +33,10 @@ class TaggingService {
   final ShotTagger? shotTagger;
   final ThumbnailService? thumbnails;
 
+  /// 全片打标时把所有代表帧一次抽完（见 [BatchFrameExtractor]）。为空则
+  /// 一律逐帧抽——批量只是快一点，不是功能前提。
+  final BatchFrameExtractor? batchFrames;
+
   /// 受控词表的来源。词表是**按任务**解析的（取决于该任务在新建向导里选的
   /// 标签组），所以这里注入的是「按组 id 查词表」的能力，而不是一份写死的
   /// 词表——后者等于所有任务共用一份，受控词表也就名存实亡。
@@ -44,6 +50,7 @@ class TaggingService {
     this.unitTagger,
     this.shotTagger,
     this.thumbnails,
+    this.batchFrames,
     this.vocabulary,
     required this.workDir,
     DateTime Function()? clock,
@@ -153,6 +160,8 @@ class TaggingService {
     ];
     if (flat.isEmpty) return units;
 
+    final prefetched = await _prefetchFrames(task, units, flat);
+
     final tagged = List<Shot?>.filled(flat.length, null);
     // 完成计数与回填下标是两回事：并发下第 5 个开工的可能第 1 个结束，
     // 用下标当进度会让数字来回跳
@@ -164,7 +173,8 @@ class TaggingService {
         () async {
           final at = flat[i];
           tagged[i] = await _tagShot(
-              task, units[at.unit].shots[at.shot], i, vocabulary);
+              task, units[at.unit].shots[at.shot], i, vocabulary,
+              prefetched: prefetched);
           _report(onProgress, AnalysisStage.taggingShots,
               done: ++completed, total: flat.length);
         }(),
@@ -180,6 +190,39 @@ class TaggingService {
       for (var u = 0; u < units.length; u++)
         units[u].copyWith(shots: byUnit[u] ?? units[u].shots),
     ];
+  }
+
+  /// 全片打标前把所有代表帧一次抽完。
+  ///
+  /// 只在**帧数够多**时才这么做：批量的代价跟片长走（要解码整条），逐帧的
+  /// 代价跟帧数走，所以重打三个镜头时逐帧才是对的（见
+  /// [BatchFramePlan.worthBatching]）。批量失败一律返回 null——调用方照旧
+  /// 逐帧抽，慢一点但不会出错。
+  Future<Map<int, String>?> _prefetchFrames(RenewTask task,
+      List<SemanticUnit> units, List<({int unit, int shot})> flat) async {
+    final extractor = batchFrames;
+    final info = task.videoInfo;
+    if (extractor == null || info == null) return null;
+
+    final wanted = <int>[
+      for (final at in flat)
+        ...ShotFrameSampler.sampleAt(
+            startMs: units[at.unit].shots[at.shot].startMs,
+            endMs: units[at.unit].shots[at.shot].endMs),
+    ];
+    if (!BatchFramePlan.worthBatching(
+        frameCount: wanted.length,
+        videoDurationMs: info.duration.inMilliseconds)) {
+      return null;
+    }
+
+    return extractor.extract(
+      videoPath: task.sourcePath,
+      requestedMs: wanted,
+      fps: info.fps,
+      outDir: Directory(p.join(workDir.path, '${task.id}_frames')),
+      height: understandingFrameHeight,
+    );
   }
 
   /// 解析某一层的受控词表；未选组 / 无词表源 / 拉取失败 / 组内没标签
@@ -244,22 +287,26 @@ class TaggingService {
   /// 缩到 512 宽再送：多帧时分辨率是 token 消耗的主因，而判断「画面是什么」
   /// 不需要原始 1080p。
   Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
-      List<TagDimension> shotVocabulary) async {
+      List<TagDimension> shotVocabulary,
+      {Map<int, String>? prefetched}) async {
     try {
       final at = ShotFrameSampler.sampleAt(
           startMs: shot.startMs, endMs: shot.endMs);
       final frames = <List<int>>[];
       final paths = <String>[];
       for (var i = 0; i < at.length; i++) {
-        final outPath =
-            p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
+        // 批量抽过就直接用；批量整批作废时这里是 null，照旧逐帧抽
+        var outPath = prefetched?[at[i]];
+        if (outPath == null) {
+          outPath = p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
+          await LocalWorkGate.shared.run(() => thumbnails!.extractCover(
+                videoPath: task.sourcePath,
+                outPath: outPath!,
+                atSeconds: at[i] / 1000.0,
+                height: understandingFrameHeight,
+              ));
+        }
         paths.add(outPath);
-        await LocalWorkGate.shared.run(() => thumbnails!.extractCover(
-              videoPath: task.sourcePath,
-              outPath: outPath,
-              atSeconds: at[i] / 1000.0,
-              height: understandingFrameHeight,
-            ));
         frames.add(await File(outPath).readAsBytes());
       }
       final r = await shotTagger!.understand(

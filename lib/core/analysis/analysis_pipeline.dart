@@ -9,6 +9,7 @@ import '../models/tag_trace.dart';
 import '../models/semantic_unit.dart';
 import '../storage/task_repository.dart';
 import 'analysis_progress.dart';
+import 'batch_frame_extractor.dart';
 import 'audio_extractor.dart';
 import 'providers.dart';
 import 'scene_detector.dart';
@@ -53,6 +54,9 @@ class AnalysisPipeline {
   final ShotTagger? shotTagger;
   final ThumbnailService? thumbnails;
 
+  /// 全片打标时一次抽完所有代表帧；为空则一律逐帧抽
+  final BatchFrameExtractor? batchFrames;
+
   /// 受控词表的来源。词表是**按任务**解析的（取决于该任务在新建向导里选的
   /// 两个标签组），所以这里注入的是「按组 id 查词表」的能力，而不是一份写死
   /// 的词表——后者等于所有任务共用一份，受控词表也就名存实亡。
@@ -78,12 +82,14 @@ class AnalysisPipeline {
     this.unitTagger,
     this.shotTagger,
     this.thumbnails,
+    this.batchFrames,
     this.vocabulary,
   })  : clock = clock ?? DateTime.now,
         tagging = TaggingService(
           unitTagger: unitTagger,
           shotTagger: shotTagger,
           thumbnails: thumbnails,
+          batchFrames: batchFrames,
           vocabulary: vocabulary,
           workDir: workDir,
           clock: clock ?? DateTime.now,

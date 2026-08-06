@@ -44,12 +44,28 @@ void main() {
     expect(drafts.single.endMs, 9000);
   });
 
-  test('索引不合法（遗漏句子）时回退每句一单元', () async {
+  test('索引有遗漏时按模型的切点补齐，台词一句不落', () async {
     final splitter = VolcanoSemanticSplitter(
-        chat: fakeChat('{"units":[{"sentenceIndexes":[0]}]}'));
+        chat: fakeChat('{"units":[{"sentenceIndexes":[0]},{"sentenceIndexes":[2]}]}'));
+
     final drafts = await splitter.split(sentences);
-    expect(drafts.length, 3);
-    expect(drafts[2].transcript, '现在只要29块9。');
+
+    expect(drafts, hasLength(2), reason: '模型给了两个切点，就是两个单元');
+    // 第 1 句没人认领，并进前一个单元——不能凭空丢掉
+    expect(drafts[0].transcript, sentences[0].text + sentences[1].text);
+    expect(drafts[1].transcript, sentences[2].text);
+  });
+
+  test('修复后的单元把每一句都收进去，不丢内容', () async {
+    final splitter = VolcanoSemanticSplitter(
+        chat: fakeChat('{"units":[{"sentenceIndexes":[0]},{"sentenceIndexes":[2]}]}'));
+
+    final drafts = await splitter.split(sentences);
+
+    final joined = drafts.map((d) => d.transcript).join();
+    for (final s in sentences) {
+      expect(joined, contains(s.text), reason: '丢一句台词，成片就缺一段');
+    }
   });
 
   test('输出非 JSON 时回退每句一单元', () async {
@@ -68,12 +84,27 @@ void main() {
       expect(reasons, [SemanticSplitDegradation.unparsableOutput]);
     });
 
-    test('分组不合法（遗漏句子）→ 回调收到「分组不完整」原因', () async {
+    test('分组有瑕疵（遗漏句子）→ 按模型的切点补齐，而不是一句一个', () async {
       final reasons = <SemanticSplitDegradation>[];
       final splitter = VolcanoSemanticSplitter(
           chat: fakeChat('{"units":[{"sentenceIndexes":[0]}]}'),
           onDegraded: reasons.add);
-      await splitter.split(sentences);
+
+      final drafts = await splitter.split(sentences);
+
+      expect(drafts, hasLength(1),
+          reason: '模型只给了一个切点，那就是一个单元——'
+              '真机上「整份作废」把 27 句切成了 27 个单元');
+      expect(reasons, [SemanticSplitDegradation.repairedPartition]);
+    });
+
+    test('分组彻底不可用（索引全越界）才退回一句一个', () async {
+      final reasons = <SemanticSplitDegradation>[];
+      final splitter = VolcanoSemanticSplitter(
+          chat: fakeChat('{"units":[{"sentenceIndexes":[99]}]}'),
+          onDegraded: reasons.add);
+
+      expect((await splitter.split(sentences)), hasLength(3));
       expect(reasons, [SemanticSplitDegradation.invalidPartition]);
     });
 
