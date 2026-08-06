@@ -13,15 +13,27 @@ import 'candidate_search_controller.dart';
 class CandidateRanking {
   CandidateRanking._();
 
-  /// 这条素材命中了几个检索标签
-  static int overlap(Iterable<String> materialTags, Iterable<String> queryTags) {
+  /// 这条素材命中了**哪几个**检索标签。
+  ///
+  /// 按检索标签的顺序给，不是素材标签的顺序——用户是照着自己选的那几个标签
+  /// 在看列表。只说「命中 2 个」判断不了这条到底像不像：命中的是「灶台」
+  /// 还是「实拍」，差别很大。
+  static List<String> matchedTags({
+    required Iterable<String> materialTags,
+    required Iterable<String> queryTags,
+  }) {
     final has = materialTags.toSet();
-    var n = 0;
-    for (final tag in queryTags.toSet()) {
-      if (has.contains(tag)) n++;
-    }
-    return n;
+    final seen = <String>{};
+    return List.unmodifiable([
+      for (final tag in queryTags)
+        if (has.contains(tag) && seen.add(tag)) tag,
+    ]);
   }
+
+  /// 这条素材命中了几个检索标签。与 [matchedTags] 同源，免得两处各算一遍
+  /// 迟早对不上——界面上就会出现「命中 3 个」却只列出 2 个
+  static int overlap(Iterable<String> materialTags, Iterable<String> queryTags) =>
+      matchedTags(materialTags: materialTags, queryTags: queryTags).length;
 
   /// 重合度高的排前面。**稳定排序**：重合度相同的保持素材库给的原顺序——
   /// Dart 的 `List.sort` 本身不保证稳定，同分条目每次刷新都换位置，

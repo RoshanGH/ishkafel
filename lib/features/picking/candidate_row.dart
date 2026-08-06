@@ -136,16 +136,50 @@ class CandidateRow extends StatelessWidget {
     );
   }
 
-  /// 命中了几个检索标签。写出来排序才解释得通——否则用户只觉得顺序莫名其妙。
+  /// 命中了**哪几个**检索标签。
+  ///
+  /// 写出个数是为了让排序解释得通；写出标签名是因为个数判断不了像不像——
+  /// 同样「命中 2 个」，命中的是「灶台+实拍」还是「实拍+厨房情景」，
+  /// 这条素材能不能用差别很大。
+  ///
+  /// 一行放不下时**横向滚动而不是换行**：这一行高度是固定的（88pt 行内只留了
+  /// 一行给它），换行会把下面的内容顶出去。
   Widget _match() {
     if (queryTags.isEmpty) return const SizedBox.shrink();
-    final hit = CandidateRanking.overlap(entry.material.tags, queryTags);
-    if (hit == 0) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(left: AppSpacing.xs),
-      child: Text('命中 $hit/${queryTags.length} 标签',
-          style: const TextStyle(
-              color: AppColors.purple, fontSize: AppFontSize.micro)),
+    final hit = CandidateRanking.matchedTags(
+        materialTags: entry.material.tags, queryTags: queryTags);
+    if (hit.isEmpty) return const SizedBox.shrink();
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.only(left: AppSpacing.xs),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              Text('${hit.length}/${queryTags.length}',
+                  style: const TextStyle(
+                      color: AppColors.purple, fontSize: AppFontSize.micro)),
+              for (final tag in hit)
+                Padding(
+                  key: Key('candidate-hit-${entry.material.id}-$tag'),
+                  padding: const EdgeInsets.only(left: 3),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColors.purple.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: Text(tag,
+                        style: const TextStyle(
+                            color: AppColors.purple,
+                            fontSize: AppFontSize.micro)),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

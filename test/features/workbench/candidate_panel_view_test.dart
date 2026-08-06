@@ -254,7 +254,7 @@ void main() {
   });
 
   group('把最像的排前面', () {
-    testWidgets('命中标签的那条排到第一位，并写明命中几个', (tester) async {
+    testWidgets('命中标签的那条排到第一位，并写明命中的是哪个', (tester) async {
       await _pump(tester);
       await _whole(tester);
 
@@ -266,8 +266,10 @@ void main() {
           .map((t) => t.data)
           .toList();
 
-      expect(rows, contains('命中 1/1 标签'),
+      expect(rows, contains('1/1'),
           reason: '排序凭什么把它排前面，得让用户看得见');
+      expect(rows, contains('促单'),
+          reason: '只说「命中 1 个」判断不了像不像——命中的是哪个标签才是关键');
       // 第一行就是它：按重合度重排之后，沾边的那条不再被埋在后面
       final first = tester.getTopLeft(find.byKey(const Key('picking-candidate-102')));
       final other = tester.getTopLeft(find.byKey(const Key('picking-candidate-100')));
