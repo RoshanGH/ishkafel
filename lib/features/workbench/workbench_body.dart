@@ -207,7 +207,15 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             Expanded(
               flex: 5,
               child: LayoutBuilder(builder: (context, box) {
-                final widths = workbenchPanelWidths(box.maxWidth);
+                // 挑素材时把播放器两侧的死黑还给候选面板：素材是 9:16 竖屏，
+                // 播放器横向再宽也用不上，而候选网格的宽度直接换成
+                // 「一屏能看到几条」
+                final picking = _sideTab == SidePanelTab.candidates;
+                final widths = workbenchPanelWidths(
+                  box.maxWidth,
+                  stageHeight: box.maxHeight,
+                  candidatesActive: picking,
+                );
                 return Row(
                 children: [
                   SizedBox(

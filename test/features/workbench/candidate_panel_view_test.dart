@@ -253,8 +253,8 @@ void main() {
     });
   });
 
-  group('把最像的排前面', () {
-    testWidgets('命中标签的那条排到第一位，并写明命中的是哪个', (tester) async {
+  group('命中的标签要标出来', () {
+    testWidgets('写明命中了哪几个标签', (tester) async {
       await _pump(tester);
       await _whole(tester);
 
@@ -266,14 +266,22 @@ void main() {
           .map((t) => t.data)
           .toList();
 
-      expect(rows, contains('1/1'),
-          reason: '排序凭什么把它排前面，得让用户看得见');
+      expect(rows, contains('1/1'));
       expect(rows, contains('促单'),
           reason: '只说「命中 1 个」判断不了像不像——命中的是哪个标签才是关键');
-      // 第一行就是它：按重合度重排之后，沾边的那条不再被埋在后面
-      final first = tester.getTopLeft(find.byKey(const Key('picking-candidate-102')));
-      final other = tester.getTopLeft(find.byKey(const Key('picking-candidate-100')));
-      expect(first.dy, lessThan(other.dy));
+    });
+
+    testWidgets('顺序就是素材库给的顺序，不做客户端重排', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+
+      // 100、101、102 按素材库返回的先后排；102 命中标签也不会被提前
+      final a = tester.getTopLeft(find.byKey(const Key('picking-candidate-100')));
+      final c = tester.getTopLeft(find.byKey(const Key('picking-candidate-102')));
+
+      expect(a.dy, lessThan(c.dy),
+          reason: '只排当前这一页毫无意义：实测 5437 条结果的第一页里'
+              '重合度全是 1，排了跟没排一样，却给人「已按相似度排过」的错觉');
     });
   });
 

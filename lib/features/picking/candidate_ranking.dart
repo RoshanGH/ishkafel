@@ -1,15 +1,10 @@
-import 'candidate_search_controller.dart';
-
-/// 候选素材按「跟原片这一段有多像」排序。
+/// 「这条候选带了检索标签里的哪几个」。
 ///
-/// 素材库按「任一标签命中」检索：一个单元有四个标签时，只沾上其中一个的素材
-/// 也会进来。而 miaoa 返回的顺序大致是入库时间倒序——第一页看到的于是变成
-/// 「最近入库的沾边素材」，而不是「最像的那些」。挑素材本来就是扫第一页就定
-/// 的活，排序不对，后面所有功能都白搭。
-///
-/// 只用**标签重合度**排：它在结果到手的那一刻就能算，不必等 ffprobe。时长差
-/// 是探测出来的，用它排会让列表在探测回来时整个跳一遍——用户刚看到的那条就
-/// 找不着了。时长差仍然显示，只是不参与排序。
+/// **只用于展示，不用于排序**。曾经拿它给当前页重排过，实测无效且误导：
+/// S1 的六个标签「满足其一」搜出 5437 条，而这 5437 条全部来自「实拍」
+/// 一个标签——它在该项目里几乎等于「所有素材」。第一页 20 条重合度全是 1，
+/// 排了跟没排一样，却给人「已经按相似度排过」的错觉。现在按素材库给的
+/// 顺序原样展示。
 class CandidateRanking {
   CandidateRanking._();
 
@@ -34,22 +29,4 @@ class CandidateRanking {
   /// 迟早对不上——界面上就会出现「命中 3 个」却只列出 2 个
   static int overlap(Iterable<String> materialTags, Iterable<String> queryTags) =>
       matchedTags(materialTags: materialTags, queryTags: queryTags).length;
-
-  /// 重合度高的排前面。**稳定排序**：重合度相同的保持素材库给的原顺序——
-  /// Dart 的 `List.sort` 本身不保证稳定，同分条目每次刷新都换位置，
-  /// 用户会以为列表在自己乱动。
-  static List<CandidateEntry> byTagOverlap(
-    List<CandidateEntry> entries,
-    List<String> queryTags,
-  ) {
-    if (queryTags.isEmpty || entries.isEmpty) return entries;
-    final decorated = [
-      for (var i = 0; i < entries.length; i++)
-        (index: i, entry: entries[i], score: overlap(entries[i].material.tags, queryTags)),
-    ]..sort((a, b) {
-        final byScore = b.score.compareTo(a.score);
-        return byScore != 0 ? byScore : a.index.compareTo(b.index);
-      });
-    return List.unmodifiable([for (final d in decorated) d.entry]);
-  }
 }

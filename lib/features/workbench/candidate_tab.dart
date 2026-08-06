@@ -279,9 +279,6 @@ class CandidateTabState extends State<CandidateTab> {
 
   Future<void> _runSearch() async {
     final scope = _scope;
-    // 命中得多的排前面。素材库按「任一标签命中」检索，不重排的话第一页
-    // 是「最近入库的沾边素材」，而不是「最像的那些」
-    _search.rankTags = scope.tagNames;
     // 换了作用域，上一段的标签清单就不作数了
     _tagHits = null;
     switch (_searchMode) {

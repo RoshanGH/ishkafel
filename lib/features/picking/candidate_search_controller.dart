@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
-import 'candidate_ranking.dart';
 import 'picking_messages.dart';
 
 /// 候选怎么看：台词列表 / 画面网格。
@@ -106,11 +105,6 @@ class CandidateSearchController extends ChangeNotifier {
   /// 每页条数
   final int pageSize;
 
-  /// 排序用的检索标签名（这一层的标签）。命中得多的排前面——素材库按「任一
-  /// 命中」检索、又按入库时间倒序返回，不重排的话第一页是「最近入库的沾边
-  /// 素材」，而不是「最像的那些」。
-  List<String> rankTags = const [];
-
   /// 总页数（至少 1 页，免得界面显示「第 1/0 页」）
   int get pageCount =>
       _total <= 0 ? 1 : ((_total + pageSize - 1) ~/ pageSize);
@@ -206,11 +200,16 @@ class CandidateSearchController extends ChangeNotifier {
     _total = page.total;
     _skipped = page.skipped;
     // 先把卡片铺出来（规格标为探测中），不等 ffprobe——等的话用户要盯一分钟空白。
-    // 排序在这一刻定死：等探测回来再排，列表会整个跳一遍，
-    // 用户刚看到的那条就找不着了
-    _entries = CandidateRanking.byTagOverlap([
+    // **按素材库给的顺序原样展示**，不做客户端重排。
+    //
+    // 曾经按标签重合度重排过，实测无效且误导：S1 的六个标签「满足其一」
+    // 搜出 5437 条，而其中 5437 条全部来自「实拍」这一个标签——它在这个
+    // 项目里几乎等于「所有素材」。第一页 20 条重合度全是 1，排了跟没排
+    // 一样；真正 2/6 的素材在第 50 页开外，而我们只拿到第一页。
+    // 排一页 20 条制造出「已经排过序」的错觉，比不排更糟。
+    _entries = [
       for (final m in page.items) CandidateEntry(material: m, probing: true),
-    ], rankTags);
+    ];
     _notify();
 
     await _probeAll(generation);
