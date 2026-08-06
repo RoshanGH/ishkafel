@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
+import '../ai/ai_usage.dart';
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
@@ -92,6 +93,17 @@ class RenewTask {
   /// 换音色方案：哪几个台词语义单元换成哪个音色。见 [VoicePlan]。
   final VoicePlan voices;
 
+  /// 首次「能进去干活」之前，人**真的**等了多少毫秒。
+  ///
+  /// 从导入后开始分析算到切分就绪（能进编辑页）那一刻，不是分析全部跑完
+  /// ——打标在后台补，用户那时已经在时间线上操作了。只记第一次，之后重打标
+  /// 不再改它。
+  final int? firstReadyMs;
+
+  /// 这个任务累计花掉的 AI 用量。**会一直涨**：在工作台里每重打一次标、
+  /// 每复核一次切点都记进来。见 [AiUsage]。
+  final AiUsage aiUsage;
+
   RenewTask({
     required this.id,
     required this.name,
@@ -115,6 +127,8 @@ class RenewTask {
     List<UnitReplacement>? replacements,
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
+    this.firstReadyMs,
+    this.aiUsage = AiUsage.empty,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
         replacements =
@@ -188,6 +202,8 @@ class RenewTask {
     List<UnitReplacement>? replacements,
     BgmPlan? bgm,
     VoicePlan? voices,
+    int? firstReadyMs,
+    AiUsage? aiUsage,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -213,6 +229,8 @@ class RenewTask {
         replacements: replacements ?? this.replacements,
         bgm: bgm ?? this.bgm,
         voices: voices ?? this.voices,
+        firstReadyMs: firstReadyMs ?? this.firstReadyMs,
+        aiUsage: aiUsage ?? this.aiUsage,
       );
 
   Map<String, dynamic> toJson() => {
@@ -242,6 +260,8 @@ class RenewTask {
         'replacements': replacements?.map((r) => r.toJson()).toList(),
         'bgm': bgm.toJson(),
         'voices': voices.toJson(),
+        'firstReadyMs': firstReadyMs,
+        'aiUsage': aiUsage.toJson(),
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
@@ -275,6 +295,9 @@ class RenewTask {
         replacements: parseReplacements(json['replacements']),
         bgm: BgmPlan.fromJson(json['bgm']),
         voices: VoicePlan.fromJson(json['voices']),
+        firstReadyMs:
+            json['firstReadyMs'] is num ? (json['firstReadyMs'] as num).toInt() : null,
+        aiUsage: AiUsage.fromJson(json['aiUsage']),
       );
 
   /// 替换方案的宽松解析：整体畸形按「没进过阶段②」（null）处理，

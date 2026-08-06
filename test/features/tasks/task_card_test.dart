@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
+import 'package:ishkafel/core/ai/ai_usage.dart';
 import 'package:ishkafel/features/tasks/task_card.dart';
 
 RenewTask makeTask({String? coverPath}) => RenewTask(
@@ -79,6 +80,36 @@ void main() {
 
       expect(find.text('源文件缺失'), findsNothing);
       expect(find.textContaining('文件已被移动或删除'), findsNothing);
+    });
+  });
+
+  group('卡片上要看得到「等了多久、花了多少」', () {
+    testWidgets('两个数都显示出来', (tester) async {
+      await tester.pumpWidget(wrapCard(makeTask().copyWith(
+        firstReadyMs: 33400,
+        aiUsage: AiUsage.empty.plus(
+            model: 'doubao-seed-2-0-mini-260428',
+            promptTokens: 120000,
+            completionTokens: 8000),
+      )));
+
+      expect(find.text('等待 33 秒'), findsOneWidget);
+      expect(find.text('¥0.040'), findsOneWidget);
+    });
+
+    testWidgets('还没分析完的任务不摆空占位', (tester) async {
+      await tester.pumpWidget(wrapCard(makeTask()));
+
+      expect(find.byKey(const Key('task-card-waited')), findsNothing);
+      expect(find.byKey(const Key('task-card-cost')), findsNothing);
+    });
+
+    testWidgets('只有等待时间、还没调过 AI 时只显示等待', (tester) async {
+      await tester.pumpWidget(wrapCard(makeTask().copyWith(firstReadyMs: 5000)));
+
+      expect(find.text('等待 5 秒'), findsOneWidget);
+      expect(find.byKey(const Key('task-card-cost')), findsNothing,
+          reason: '一次都没调用过时摆个 ¥0 只是噪声');
     });
   });
 }

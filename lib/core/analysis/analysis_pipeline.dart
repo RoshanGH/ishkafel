@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import '../ai/taggers.dart';
 import '../ffmpeg/thumbnail_service.dart';
+import '../ai/ai_usage.dart';
+import '../ai/ai_usage_scope.dart';
 import '../log/app_log.dart';
 import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
@@ -153,9 +156,54 @@ class AnalysisPipeline {
   /// 打开干活了（看切分、拖边界、听原片都不需要标签）。上层据此把任务从
   /// 「分析中」放出来，剩下的打标在后台补。实测切分好只要 26 秒，而打标要
   /// 七十多秒——让人干等三倍时间没道理。
+  /// 分析一条任务，并把这一轮花掉的 AI 用量记到它头上。
+  ///
+  /// 记账包住整个分析（见 [AiUsageScope]）：语义切分、切点复核、两层打标的
+  /// 调用都埋在下面几层里，且几十个并发同时在跑，只有 Zone 拦得住全部。
+  /// 分析失败时也要结账——花掉的 token 不会因为失败退回来。
   Future<RenewTask> analyze(RenewTask task,
       {AnalysisProgressSink? onProgress,
       void Function(RenewTask ready)? onUnitsReady}) async {
+    RenewTask? result;
+    final usage = await AiUsageScope.collect(
+      () async {
+        result = await _analyze(task,
+            onProgress: onProgress, onUnitsReady: onUnitsReady);
+      },
+      onPartial: (partial) => unawaited(_billFailed(task.id, partial)),
+    );
+    return _bill(result!, usage);
+  }
+
+  /// 把用量并进任务并落库
+  Future<RenewTask> _bill(RenewTask task, AiUsage usage) async {
+    if (usage.calls == 0) return task;
+    final billed = task.copyWith(
+        aiUsage: task.aiUsage.merge(usage), updatedAt: clock());
+    await repository.save(billed);
+    return billed;
+  }
+
+  /// 分析失败时结账：花掉的 token 不会退回来，账要照记。
+  ///
+  /// **尽力而为，绝不抛**：这条路上真正要交给上层的是分析失败的原因，
+  /// 结账再抛一个错只会把它盖掉——实测就盖掉过一次 StateError。
+  Future<void> _billFailed(String id, AiUsage usage) async {
+    if (usage.calls == 0) return;
+    try {
+      final current = await repository.findById(id);
+      if (current == null) return;
+      await repository.save(current.copyWith(
+          aiUsage: current.aiUsage.merge(usage), updatedAt: clock()));
+    } catch (e) {
+      AppLog.warn('任务 $id 分析失败后的用量结账没写成（不影响报错）：$e');
+    }
+  }
+
+  Future<RenewTask> _analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady}) async {
+    final startedAt = clock();
     final info = task.videoInfo;
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
@@ -209,6 +257,9 @@ class AnalysisPipeline {
       asrSentences: sentences,
       vocalsPath: stems?.vocalsPath,
       backgroundPath: stems?.backgroundPath,
+      // 人真正等到这一刻就能进去干活了；只记第一次
+      firstReadyMs: task.firstReadyMs ??
+          clock().difference(startedAt).inMilliseconds,
     );
     await repository.save(ready);
     onUnitsReady?.call(ready);

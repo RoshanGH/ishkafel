@@ -1,5 +1,6 @@
 import 'dart:convert';
 import '../net/json_poster.dart';
+import 'ai_usage_scope.dart';
 
 /// 火山方舟 chat/completions 封装（文本 + 视觉多模态，同一模型）
 ///
@@ -133,6 +134,17 @@ class ArkChatClient {
   /// 估算永远说不准，实测才作数。
   static final ArkUsage usage = ArkUsage();
 
+  static void _recordScoped(String model, Object? usageJson) {
+    if (usageJson is! Map) return;
+    AiUsageScope.record(
+      model: model,
+      prompt: _tokens(usageJson['prompt_tokens']),
+      completion: _tokens(usageJson['completion_tokens']),
+    );
+  }
+
+  static int _tokens(Object? v) => v is num ? v.toInt() : 0;
+
   Future<String> _chat(List<Map<String, dynamic>> messages, int maxTokens,
       {String? model, double? temperature}) async {
     final body = <String, dynamic>{
@@ -160,6 +172,9 @@ class ArkChatClient {
           statusCode: result.statusCode);
     }
     usage.add(json['usage']);
+    // 同时记到当前任务的账上（见 [AiUsageScope]）：上面那个是进程内总计，
+    // 回答不了「这个任务花了多少」
+    _recordScoped(model ?? this.model, json['usage']);
     final choices = json['choices'];
     if (choices is! List || choices.isEmpty) {
       throw AiHttpException('Ark 响应缺少 choices：${result.body}',

@@ -8,6 +8,7 @@ import '../../core/analysis/analysis_progress.dart';
 import '../../core/models/renew_task.dart';
 import 'analysis_progress_store.dart';
 import 'task_card_hint.dart';
+import 'task_metrics.dart';
 import 'source_availability.dart';
 
 /// 状态徽标文案与配色
@@ -125,6 +126,7 @@ class TaskCard extends ConsumerWidget {
                         color: AppColors.textTertiary),
                   ),
                 ),
+                _MetricsRow(task: task),
               ],
             ),
           ),
@@ -132,6 +134,66 @@ class TaskCard extends ConsumerWidget {
       ),
     );
   }
+}
+
+/// 这条任务的两个数：人等了多久、到现在花了多少。
+///
+/// 等待时间是**一次性**的（首次能进编辑那一刻就定了）；花费**一直在涨**
+/// ——每次重打标都往上加。两个数放在一起，用户才看得出「这条片子值不值」。
+class _MetricsRow extends StatelessWidget {
+  final RenewTask task;
+
+  const _MetricsRow({required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final waited = formatWaited(task.firstReadyMs);
+    final spent = task.aiUsage.calls == 0 ? null : formatCost(task.aiUsage);
+    if (waited == null && spent == null) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        children: [
+          if (waited != null)
+            _Metric(
+                key: const Key('task-card-waited'),
+                icon: Icons.hourglass_bottom,
+                text: waited),
+          if (waited != null && spent != null) const SizedBox(width: 10),
+          if (spent != null)
+            Tooltip(
+              // 明细能对账：哪个模型调了几次、各花了多少
+              message: costBreakdown(task.aiUsage).join('\n'),
+              child: _Metric(
+                  key: const Key('task-card-cost'),
+                  icon: Icons.toll_outlined,
+                  text: spent),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Metric extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _Metric({super.key, required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 11, color: AppColors.textTertiary),
+          const SizedBox(width: 3),
+          Text(text,
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  color: AppColors.textTertiary)),
+        ],
+      );
 }
 
 /// 分析进度条：封面底部一条细进度 + 一行当前步骤。

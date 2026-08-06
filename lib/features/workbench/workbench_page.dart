@@ -11,6 +11,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
+import '../../core/ai/ai_usage_scope.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/miaoa/candidate_probe.dart';
@@ -656,8 +657,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
     setState(() => _retaggingCount = consequence.unitIndexes.length);
     try {
-      final tagged = await tagging.tag(_task, editor.units,
-          only: consequence.unitIndexes.toSet());
+      // 重打标是「花费不停累积」的主要来源：用户改一次切分就走一趟云端推理，
+      // 记账要跟着（见 [AiUsageScope]）
+      late List<SemanticUnit> tagged;
+      final usage = await AiUsageScope.collect(
+        () async {
+          tagged = await tagging.tag(_task, editor.units,
+              only: consequence.unitIndexes.toSet());
+        },
+        onPartial: (partial) => _task =
+            _task.copyWith(aiUsage: _task.aiUsage.merge(partial)),
+      );
+      _task = _task.copyWith(aiUsage: _task.aiUsage.merge(usage));
       if (!mounted) return;
       editor.replaceUnits(tagged);
       await _flushAutosave();
@@ -666,6 +677,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           content: Text('已重新打标 ${consequence.unitIndexes.length} 个台词语义单元')));
     } catch (e) {
       AppLog.warn('重新打标失败（taskId=${widget.task.id}）：$e');
+      // 失败也要把已经花掉的记上，并落库
+      unawaited(_flushAutosave());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('重新打标失败，标签已标记为待重打，可稍后重试'),
