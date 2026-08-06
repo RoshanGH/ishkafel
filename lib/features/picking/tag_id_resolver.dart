@@ -31,6 +31,16 @@ class TagIdResolver {
   /// 拉取失败的中文原因（成功或未拉取时为 null）
   String? get loadFailure => _loadFailure;
 
+  /// 忘掉上一次的结果，让下一次 [loadAll] 真的重新去拉。
+  ///
+  /// 失败之后没有重试路径，用户只能退出任务再进来才恢复——面板上的「重试」
+  /// 按钮走这里
+  void reset() {
+    _byGroup = const {};
+    _loaded = false;
+    _loadFailure = null;
+  }
+
   /// 拉取若干标签组的标签表。重复调用只在未成功时重试。
   ///
   /// 一个层可以选多个标签组，打标产出的标签名散落在各组里，只解析第一个组

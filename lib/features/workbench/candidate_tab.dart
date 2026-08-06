@@ -13,7 +13,9 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
 import '../picking/candidate_preview.dart';
+import '../../core/log/app_log.dart';
 import '../picking/tag_hit_probe.dart';
+import '../picking/tag_query_narrowing.dart';
 import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
@@ -94,6 +96,10 @@ class CandidateTabState extends State<CandidateTab> {
   /// 前者要在标签恢复可用时收回来，后者绝不能被抢走。见 [nextSearchMode]
   bool _modeAutoFellBack = false;
   bool _modeUserPinned = false;
+
+  /// 这一次实际用了哪几个标签、剔掉了哪几个。界面要说清楚——否则用户看到
+  /// 结果变了却不知道为什么
+  TagQueryPlan? _tagPlan;
 
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
@@ -258,6 +264,43 @@ class CandidateTabState extends State<CandidateTab> {
     await _runSearch();
   }
 
+  /// 收紧检索标签：把没有区分度的剔出去（见 [narrowTagQuery]）。
+  ///
+  /// 必须做，否则真机上会出现「51 个镜头搜出来的东西一模一样」——它们全带
+  /// 「实拍」，而「实拍」单独就命中该项目的全部 5437 条，「满足其一」的并集
+  /// 永远被它撑满。
+  ///
+  /// 各标签的条数走 [TagHitProbe]（按项目+标签缓存），且**并发数**：同一批
+  /// 标签在几十个镜头之间反复出现，第一次之后就是命中缓存，几乎不花时间。
+  Future<TagQueryPlan> _narrowedTags(PickingScope scope) async {
+    final tags = <({String name, int id})>[
+      for (var i = 0; i < scope.tagNames.length; i++)
+        if (i < scope.tagIds.length)
+          (name: scope.tagNames[i], id: scope.tagIds[i]),
+    ];
+    if (tags.length < 2) {
+      return TagQueryPlan(tagIds: scope.tagIds);
+    }
+    try {
+      final hits =
+          await _tagHitProbe.probe(tags: tags, projectIds: _projectIds);
+      return narrowTagQuery(hits: hits);
+    } catch (e) {
+      AppLog.warn('收紧检索标签失败，按原样检索：$e');
+      return TagQueryPlan(tagIds: scope.tagIds);
+    }
+  }
+
+  /// 就地重新拉标签表。
+  ///
+  /// 拉失败后原来没有任何重试路径，只能退出任务再进来——面板上那句
+  /// 「暂时不能按标签检索」就一直挂着
+  Future<void> _retryTagVocabulary() async {
+    _tagResolver.reset();
+    setState(() {});
+    await _loadTagVocabulary();
+  }
+
   /// 逐个标签数一遍。每个标签一次子进程，所以只在用户主动点了才跑。
   Future<void> _probeTagHits() async {
     final scope = _scope;
@@ -283,7 +326,10 @@ class CandidateTabState extends State<CandidateTab> {
     _tagHits = null;
     switch (_searchMode) {
       case CandidateSearchMode.tag:
-        await _search.searchByTags(tagIds: scope.tagIds);
+        final plan = await _narrowedTags(scope);
+        if (!mounted) return;
+        setState(() => _tagPlan = plan);
+        await _search.searchByTags(tagIds: plan.tagIds);
       case CandidateSearchMode.description:
         await _search.searchByDescription(scope.descriptionKeyword);
       case CandidateSearchMode.image:
@@ -330,6 +376,8 @@ class CandidateTabState extends State<CandidateTab> {
           picking: _picking,
           search: _search,
           scope: _scope,
+          tagPlan: _tagPlan,
+          onRetryTags: _retryTagVocabulary,
           searchMode: _searchMode,
           onSearchModeChanged: _onSearchModeChanged,
           onModeChanged: _onModeChanged,

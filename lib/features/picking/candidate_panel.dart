@@ -14,6 +14,7 @@ import 'tag_hit_probe.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
 import 'picking_scope.dart';
+import 'tag_query_narrowing.dart';
 import 'picking_widgets.dart';
 
 /// 阶段②右栏：替换模式三态分段 → 视觉镜头条 → 检索方式 → 候选卡 → 因子小结。
@@ -24,6 +25,13 @@ class CandidatePanel extends StatelessWidget {
   final PickingController picking;
   final CandidateSearchController search;
   final PickingScope scope;
+
+  /// 这一次实际用了哪几个标签、剔掉了哪几个（见 [narrowTagQuery]）。
+  /// 不说清楚的话，用户看到结果变了却不知道为什么
+  final TagQueryPlan? tagPlan;
+
+  /// 重新拉标签表并重跑检索。为空表示上层没接（测试里常见）
+  final VoidCallback? onRetryTags;
 
   /// 当前检索方式（三选一互斥）
   final CandidateSearchMode searchMode;
@@ -50,6 +58,8 @@ class CandidatePanel extends StatelessWidget {
     required this.picking,
     required this.search,
     required this.scope,
+    this.tagPlan,
+    this.onRetryTags,
     required this.searchMode,
     required this.onSearchModeChanged,
     required this.onModeChanged,
@@ -176,6 +186,21 @@ class CandidatePanel extends StatelessWidget {
         '这个台词语义单元没有切出视觉镜头，只能整体替换或保留原片',
       ));
     }
+    final plan = tagPlan;
+    if (searchMode == CandidateSearchMode.tag && plan != null) {
+      final reasons = <String>[
+        if (plan.droppedEmpty.isNotEmpty)
+          '${plan.droppedEmpty.join('、')}（本项目下没有素材）',
+        if (plan.droppedBroad.isNotEmpty)
+          '${plan.droppedBroad.join('、')}（几乎命中全部素材，用了等于没筛）',
+      ];
+      if (reasons.isNotEmpty) {
+        notes.add(_note(
+          const Key('picking-tag-narrowed'),
+          '已排除 ${reasons.join('；')}',
+        ));
+      }
+    }
     return notes;
   }
 
@@ -288,12 +313,53 @@ class CandidatePanel extends StatelessWidget {
                 },
             ],
           ),
-        if (tagReason != null) _reasonText(tagReason),
+        if (tagReason != null) _tagUnavailable(tagReason),
         if (searchMode == CandidateSearchMode.image)
           _reasonText(imageSearchUnavailableReason),
       ],
     );
   }
+
+  /// 标签检索用不了时，除了写清原因还要给一个**就地重试**的出口。
+  ///
+  /// 此前标签表拉失败后没有任何路径会再拉一次——只能退出去重进任务才恢复。
+  /// 用户的原话：「如果我每次刷新回来它就有的话，那为什么不直接加个刷新按钮」
+  Widget _tagUnavailable(String reason) => Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.sm),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(reason,
+                  style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: AppFontSize.micro,
+                      height: 1.5)),
+            ),
+            if (onRetryTags != null)
+              GestureDetector(
+                key: const Key('picking-retry-tags'),
+                onTap: onRetryTags,
+                behavior: HitTestBehavior.opaque,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: AppSpacing.sm),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.refresh,
+                          size: 12, color: AppColors.accentBlue),
+                      SizedBox(width: 2),
+                      Text('重试',
+                          style: TextStyle(
+                              color: AppColors.accentBlue,
+                              fontSize: AppFontSize.micro)),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
 
   Widget _reasonText(String text) => Padding(
         padding: const EdgeInsets.only(top: AppSpacing.sm),
