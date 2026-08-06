@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import 'candidate_ranking.dart';
 import 'candidate_search_controller.dart';
 import 'picking_messages.dart';
 
@@ -31,6 +32,12 @@ class CandidateCard extends StatelessWidget {
   /// 的三秒。
   final VoidCallback onPlay;
 
+  /// 这一层的检索标签，用来标出命中了哪几个。
+  ///
+  /// 只给个数判断不了像不像——同样「命中 2 个」，是「灶台+实拍」还是
+  /// 「实拍+剧情」，这条素材能不能用差别很大。
+  final List<String> queryTags;
+
   const CandidateCard({
     super.key,
     required this.entry,
@@ -38,6 +45,7 @@ class CandidateCard extends StatelessWidget {
     required this.targetMs,
     required this.onTap,
     required this.onPlay,
+    this.queryTags = const [],
   });
 
   @override
@@ -157,23 +165,51 @@ class CandidateCard extends StatelessWidget {
   Widget _bottomBadge() {
     if (entry.probing) return _pill(const Text(probingSpecLabel, style: _pillStyle));
     final spec = entry.spec;
-    if (spec == null) return const SizedBox.shrink();
-    final delta = durationDeltaText(candidateMs: spec.durationMs, targetMs: targetMs);
-    return _pill(Row(
+    final delta = spec == null
+        ? null
+        : durationDeltaText(candidateMs: spec.durationMs, targetMs: targetMs);
+    final hits = CandidateRanking.matchedTags(
+        materialTags: entry.material.tags, queryTags: queryTags);
+    if (spec == null && hits.isEmpty) return const SizedBox.shrink();
+
+    return _pill(Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(candidateDurationText(spec.durationMs), style: _pillStyle),
-        if (delta != null) ...[
-          const SizedBox(width: AppSpacing.xs),
-          Text(
-            delta,
-            key: Key('picking-duration-delta-${entry.material.id}'),
-            style: TextStyle(
-              color: delta.startsWith('+') ? AppColors.orange : AppColors.green,
-              fontSize: AppFontSize.micro,
+        if (spec != null)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(candidateDurationText(spec.durationMs), style: _pillStyle),
+              if (delta != null) ...[
+                const SizedBox(width: AppSpacing.xs),
+                Text(
+                  delta,
+                  key: Key('picking-duration-delta-${entry.material.id}'),
+                  style: TextStyle(
+                    color:
+                        delta.startsWith('+') ? AppColors.orange : AppColors.green,
+                    fontSize: AppFontSize.micro,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        // 命中了哪几个标签。格子只有 112pt 宽，放不下就省略，
+        // 悬停能看到全部——省略掉的部分不能就此消失
+        if (hits.isNotEmpty)
+          Tooltip(
+            message: '命中 ${hits.length}/${queryTags.length} 个标签：'
+                '${hits.join('、')}',
+            child: Text(
+              '${hits.length}/${queryTags.length} ${hits.join('·')}',
+              key: Key('picking-hits-${entry.material.id}'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppColors.purple, fontSize: AppFontSize.micro),
             ),
           ),
-        ],
       ],
     ));
   }
@@ -183,6 +219,7 @@ class CandidateCard extends StatelessWidget {
 
   Widget _pill(Widget child) => Positioned(
         left: AppSpacing.sm,
+        right: AppSpacing.sm,
         bottom: AppSpacing.sm,
         child: Container(
           padding: const EdgeInsets.symmetric(

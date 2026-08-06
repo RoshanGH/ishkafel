@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/candidate_probe.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
+import 'package:ishkafel/features/picking/candidate_card.dart';
 import 'package:ishkafel/features/picking/candidate_row.dart';
 import 'package:ishkafel/features/picking/candidate_search_controller.dart';
 
@@ -80,5 +81,59 @@ void main() {
     expect(tester.takeException(), isNull,
         reason: '这一行高度固定，溢出会直接画出黄黑条');
     expect(find.byKey(const Key('candidate-hit-7-人物喷')), findsOneWidget);
+  });
+
+  group('镜头替换用的是画面卡片，那里也要标出来', () {
+    Future<void> pumpCard(
+      WidgetTester tester, {
+      required List<String> materialTags,
+      required List<String> queryTags,
+    }) =>
+        tester.pumpWidget(MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: 112,
+                height: 174,
+                child: CandidateCard(
+                  entry: _entry(tags: materialTags),
+                  selected: false,
+                  targetMs: 2000,
+                  onTap: () {},
+                  onPlay: () {},
+                  queryTags: queryTags,
+                ),
+              ),
+            ),
+          ),
+        ));
+
+    testWidgets('卡片上写出命中了哪几个', (tester) async {
+      await pumpCard(tester,
+          materialTags: const ['灶台', '实拍'],
+          queryTags: const ['灶台', '常规清洁', '实拍']);
+
+      final text =
+          tester.widget<Text>(find.byKey(const Key('picking-hits-7'))).data!;
+      expect(text, contains('灶台'));
+      expect(text, contains('实拍'));
+      expect(text, startsWith('2/3'));
+    });
+
+    testWidgets('一个都没命中时不占位', (tester) async {
+      await pumpCard(tester,
+          materialTags: const ['别的'], queryTags: const ['灶台']);
+
+      expect(find.byKey(const Key('picking-hits-7')), findsNothing);
+    });
+
+    testWidgets('标签多到放不下也不撑破格子', (tester) async {
+      await pumpCard(tester,
+          materialTags: const ['灶台', '实拍', '口播', '厨房情景', '常规清洁'],
+          queryTags: const ['灶台', '实拍', '口播', '厨房情景', '常规清洁']);
+
+      expect(tester.takeException(), isNull,
+          reason: '格子只有 112pt 宽，溢出会直接画出黄黑条');
+    });
   });
 }

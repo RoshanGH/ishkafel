@@ -522,6 +522,7 @@ class CandidatePanel extends StatelessWidget {
           targetMs: scope.targetDurationMs,
           onTap: () => picking.toggleCandidate(entry.material.id),
           onPlay: () => onPreview(context, entry.material),
+          queryTags: scope.tagNames,
         );
       },
     );

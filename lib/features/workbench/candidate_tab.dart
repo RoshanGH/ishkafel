@@ -18,6 +18,7 @@ import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
 import '../picking/picking_scope.dart';
+import 'search_mode_policy.dart';
 import '../picking/tag_id_resolver.dart';
 
 /// 工作台右栏的「替换素材」视图。
@@ -88,6 +89,11 @@ class CandidateTabState extends State<CandidateTab> {
   late final TagIdResolver _tagResolver;
 
   CandidateSearchMode _searchMode = CandidateSearchMode.tag;
+
+  /// 当前这个模式是程序自动落下来的（标签用不了）还是用户自己点的。
+  /// 前者要在标签恢复可用时收回来，后者绝不能被抢走。见 [nextSearchMode]
+  bool _modeAutoFellBack = false;
+  bool _modeUserPinned = false;
 
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
@@ -214,24 +220,20 @@ class CandidateTabState extends State<CandidateTab> {
     unawaited(_refreshSearchIfNeeded());
   }
 
-  /// 标签不可用时自动落到画面描述——把一个用不了的检索方式选中着，
-  /// 面板就永远是空的，用户不知道该做什么
+  /// 标签不可用时自动落到画面描述——把一个用不了的检索方式选中着，面板就
+  /// 永远是空的。规则与「什么时候切回来」见 [nextSearchMode]
   void _syncSearchMode() {
     final scope = _scope;
-    // 整体替换没有「画面描述」这条路：画面描述是对单个镜头生成的，
-    // 一整句台词对应一串镜头，没有一句能代表它们的描述
-    if (!scope.descriptionSupported &&
-        _searchMode == CandidateSearchMode.description) {
-      _searchMode = CandidateSearchMode.tag;
-      return;
-    }
-    if (_searchMode != CandidateSearchMode.tag) return;
-    // 「还在读标签表」不是「用不了」：这一刻切走是不可逆的（不会再切回来），
-    // 拉完一切正常时用户就白白丢了主路径
-    if (scope.tagPending) return;
-    if (scope.tagUnavailableText != null && scope.descriptionSupported) {
-      _searchMode = CandidateSearchMode.description;
-    }
+    final next = nextSearchMode(
+      current: _searchMode,
+      tagAvailable: scope.tagUnavailableText == null,
+      tagPending: scope.tagPending,
+      descriptionSupported: scope.descriptionSupported,
+      userPinned: _modeUserPinned,
+      autoFellBack: _modeAutoFellBack,
+    );
+    _searchMode = next.mode;
+    _modeAutoFellBack = next.autoFellBack;
   }
 
   PickingScope get _scope => PickingScope.from(
@@ -295,7 +297,12 @@ class CandidateTabState extends State<CandidateTab> {
 
   void _onSearchModeChanged(CandidateSearchMode mode) {
     if (mode == _searchMode) return;
-    setState(() => _searchMode = mode);
+    setState(() {
+      _searchMode = mode;
+      // 用户点过的选择就钉住：之后换镜头也不再自动改
+      _modeUserPinned = true;
+      _modeAutoFellBack = false;
+    });
     unawaited(_refreshSearchIfNeeded());
   }
 
