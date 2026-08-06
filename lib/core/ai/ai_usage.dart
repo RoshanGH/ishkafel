@@ -40,6 +40,76 @@ class ModelUsage {
   static int _int(Object? v) => v is num ? v.toInt() : 0;
 }
 
+/// 按时长 / 字符计费的语音服务。
+///
+/// 与方舟的 token 计费是两套单位，不能混在一张表里算——那样只会把「小时」
+/// 当成「百万 token」乘。
+enum SpeechService {
+  /// 大模型录音文件识别（极速版），resource id `volc.bigasr.auc_turbo`。
+  /// 按音频**秒数**累计，4.5 元/小时
+  asrFlash(unit: '秒', label: '语音识别（极速版）'),
+
+  /// 豆包语音合成模型 2.0，resource id `seed-tts-2.0`。
+  /// 按**字符数**累计（一个汉字算一个字符），3 元/万字符
+  tts(unit: '字符', label: '语音合成'),
+
+  /// 豆包声音复刻模型 2.0，resource id `seed-icl-2.0`。同为 3 元/万字符，
+  /// 但分开记账——用户要看得出钱花在预置音色还是复刻音色上
+  voiceClone(unit: '字符', label: '声音复刻');
+
+  final String unit;
+  final String label;
+  const SpeechService({required this.unit, required this.label});
+
+  static SpeechService? byName(String name) {
+    for (final s in values) {
+      if (s.name == name) return s;
+    }
+    return null;
+  }
+}
+
+/// 一个语音服务的用量小计。[quantity] 的单位见 [SpeechService.unit]
+class ServiceUsage {
+  final int calls;
+  final int quantity;
+
+  const ServiceUsage({this.calls = 0, this.quantity = 0});
+
+  ServiceUsage plus(int amount) =>
+      ServiceUsage(calls: calls + 1, quantity: quantity + amount);
+
+  ServiceUsage merge(ServiceUsage other) => ServiceUsage(
+      calls: calls + other.calls, quantity: quantity + other.quantity);
+
+  Map<String, dynamic> toJson() => {'calls': calls, 'quantity': quantity};
+
+  static ServiceUsage? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    return ServiceUsage(
+      calls: raw['calls'] is num ? (raw['calls'] as num).toInt() : 0,
+      quantity: raw['quantity'] is num ? (raw['quantity'] as num).toInt() : 0,
+    );
+  }
+}
+
+/// 语音服务的单价（后付费目录价）。来源：火山「豆包语音-计费说明」。
+abstract final class SpeechPricing {
+  /// 元/小时
+  static const double asrPerHour = 4.5;
+
+  /// 元/万字符
+  static const double ttsPer10kChars = 3.0;
+
+  static double costOf(SpeechService service, int quantity) =>
+      switch (service) {
+        SpeechService.asrFlash => quantity / 3600 * asrPerHour,
+        SpeechService.tts ||
+        SpeechService.voiceClone =>
+          quantity / 10000 * ttsPer10kChars,
+      };
+}
+
 /// 火山方舟的单价（元 / 百万 token，≤32K 上下文档）。
 ///
 /// **来源存疑**：官方定价页是前端渲染的，抓不到正文；这里的数字取自公开的
@@ -77,11 +147,16 @@ abstract final class ArkPricing {
 class AiUsage {
   final Map<String, ModelUsage> byModel;
 
-  const AiUsage(this.byModel);
+  /// 按时长/字符计费的语音服务
+  final Map<SpeechService, ServiceUsage> byService;
+
+  const AiUsage(this.byModel, [this.byService = const {}]);
 
   static const AiUsage empty = AiUsage({});
 
-  int get calls => byModel.values.fold(0, (n, u) => n + u.calls);
+  int get calls =>
+      byModel.values.fold(0, (n, u) => n + u.calls) +
+      byService.values.fold(0, (n, u) => n + u.calls);
   int get promptTokens =>
       byModel.values.fold(0, (n, u) => n + u.promptTokens);
   int get completionTokens =>
@@ -107,19 +182,33 @@ class AiUsage {
       if (cost == null) return null;
       total += cost;
     }
+    for (final entry in byService.entries) {
+      total += SpeechPricing.costOf(entry.key, entry.value.quantity);
+    }
     return total;
   }
+
+  AiUsage plusService(
+          {required SpeechService service, required int quantity}) =>
+      AiUsage(
+          byModel,
+          Map.unmodifiable({
+            ...byService,
+            service: (byService[service] ?? const ServiceUsage()).plus(quantity),
+          }));
 
   AiUsage plus({
     required String model,
     required int promptTokens,
     required int completionTokens,
   }) =>
-      AiUsage(Map.unmodifiable({
-        ...byModel,
-        model: (byModel[model] ?? const ModelUsage())
-            .plus(prompt: promptTokens, completion: completionTokens),
-      }));
+      AiUsage(
+          Map.unmodifiable({
+            ...byModel,
+            model: (byModel[model] ?? const ModelUsage())
+                .plus(prompt: promptTokens, completion: completionTokens),
+          }),
+          byService);
 
   AiUsage merge(AiUsage other) {
     final merged = <String, ModelUsage>{...byModel};
@@ -127,27 +216,52 @@ class AiUsage {
       merged[entry.key] =
           (merged[entry.key] ?? const ModelUsage()).merge(entry.value);
     }
-    return AiUsage(Map.unmodifiable(merged));
+    final mergedServices = <SpeechService, ServiceUsage>{...byService};
+    for (final entry in other.byService.entries) {
+      mergedServices[entry.key] =
+          (mergedServices[entry.key] ?? const ServiceUsage())
+              .merge(entry.value);
+    }
+    return AiUsage(
+        Map.unmodifiable(merged), Map.unmodifiable(mergedServices));
   }
 
   Map<String, dynamic> toJson() => {
         'byModel': {
           for (final entry in byModel.entries) entry.key: entry.value.toJson(),
         },
+        'byService': {
+          for (final entry in byService.entries)
+            entry.key.name: entry.value.toJson(),
+        },
       };
 
   /// 宽松解析：老任务没有这个字段就是「没花过」，坏条目跳过不牵连其余
   static AiUsage fromJson(Object? raw) {
     if (raw is! Map) return empty;
-    final byModel = raw['byModel'];
-    if (byModel is! Map) return empty;
     final parsed = <String, ModelUsage>{};
-    for (final entry in byModel.entries) {
-      final key = entry.key;
-      final value = ModelUsage.tryFromJson(entry.value);
-      if (key is! String || value == null) continue;
-      parsed[key] = value;
+    final byModel = raw['byModel'];
+    if (byModel is Map) {
+      for (final entry in byModel.entries) {
+        final key = entry.key;
+        final value = ModelUsage.tryFromJson(entry.value);
+        if (key is! String || value == null) continue;
+        parsed[key] = value;
+      }
     }
-    return AiUsage(Map.unmodifiable(parsed));
+    final services = <SpeechService, ServiceUsage>{};
+    final byService = raw['byService'];
+    if (byService is Map) {
+      for (final entry in byService.entries) {
+        // 不认识的服务名跳过：可能是更新版本写的，按 0 算总比算错强
+        final key = entry.key is String
+            ? SpeechService.byName(entry.key as String)
+            : null;
+        final value = ServiceUsage.tryFromJson(entry.value);
+        if (key == null || value == null) continue;
+        services[key] = value;
+      }
+    }
+    return AiUsage(Map.unmodifiable(parsed), Map.unmodifiable(services));
   }
 }

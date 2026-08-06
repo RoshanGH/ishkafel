@@ -29,6 +29,17 @@ abstract final class AiUsageScope {
     return collector.usage;
   }
 
+  /// 记一笔按时长/字符计费的语音调用。[quantity] 的单位见
+  /// [SpeechService.unit]
+  static void recordService({
+    required SpeechService service,
+    required int quantity,
+  }) {
+    final collector = Zone.current[_key];
+    if (collector is! _Collector) return;
+    collector.addService(service, quantity);
+  }
+
   /// 记一笔。不在任何记账范围里时静默忽略——同一个 Ark 客户端在别处
   /// （比如启动期探测）也会被用到，那些调用没有归属，不该让它抛错。
   static void record({
@@ -52,5 +63,9 @@ class _Collector {
   }) {
     usage = usage.plus(
         model: model, promptTokens: prompt, completionTokens: completion);
+  }
+
+  void addService(SpeechService service, int quantity) {
+    usage = usage.plusService(service: service, quantity: quantity);
   }
 }

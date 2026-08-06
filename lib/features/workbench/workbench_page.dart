@@ -12,6 +12,7 @@ import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
+import '../../core/audio/voice_swap_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/miaoa/candidate_probe.dart';
@@ -446,14 +447,24 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final job = factory(_task);
     setState(() => _voiceProgress = (0, _task.voices.assignedUnits.length));
     try {
-      final results = await job.service.run(
-        units: editor.units,
-        sentences: widget.task.asrSentences ?? const [],
-        plan: _task.voices,
-        onProgress: (done, total) {
-          if (mounted) setState(() => _voiceProgress = (done, total));
+      // 合成按字符计费，且用户会反复改台词重生成——记进这个任务的账
+      late Map<int, VoiceSwapResult> results;
+      final usage = await AiUsageScope.collect(
+        () async {
+          results = await job.service.run(
+            units: editor.units,
+            sentences: widget.task.asrSentences ?? const [],
+            plan: _task.voices,
+            onProgress: (done, total) {
+              if (mounted) setState(() => _voiceProgress = (done, total));
+            },
+          );
         },
+        // 中途失败时前面已经合成的照样计费
+        onPartial: (partial) =>
+            _task = _task.copyWith(aiUsage: _task.aiUsage.merge(partial)),
       );
+      _task = _task.copyWith(aiUsage: _task.aiUsage.merge(usage));
       // 落盘：跑一轮要几十秒到几分钟，只留在内存里的话关掉页面就得重跑
       final written = <int, String>{};
       job.outputDir.createSync(recursive: true);

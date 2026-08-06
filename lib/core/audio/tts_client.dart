@@ -3,6 +3,10 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:characters/characters.dart';
+
+import '../ai/ai_usage.dart';
+import '../ai/ai_usage_scope.dart';
 import '../log/app_log.dart';
 import 'tts_protocol.dart';
 
@@ -73,6 +77,15 @@ class TtsClient {
     String resourceId = presetResource,
     Duration timeout = const Duration(seconds: 60),
   }) async {
+    // 按合成字符数计费（3 元/万字符，一个汉字算一个字符）。记在请求发出前
+    // ——失败重试也是要计费的，火山按送进去的字符算
+    AiUsageScope.recordService(
+      service: resourceId == clonedResource
+          ? SpeechService.voiceClone
+          : SpeechService.tts,
+      quantity: text.characters.length,
+    );
+
     final headers = <String, dynamic>{
       'X-Api-App-Id': appId,
       'X-Api-Access-Key': accessToken,

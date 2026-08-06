@@ -27,18 +27,31 @@ String formatCost(AiUsage usage) {
       : '¥${cost.toStringAsFixed(2)}';
 }
 
-/// 逐模型明细，供用户对账
-List<String> costBreakdown(AiUsage usage) => [
-      for (final entry in usage.byModel.entries)
-        () {
-          final u = entry.value;
-          final cost = ArkPricing.costOf(
-              model: entry.key,
-              prompt: u.promptTokens,
-              completion: u.completionTokens);
-          final money =
-              cost == null ? '单价未知' : '¥${cost.toStringAsFixed(4)}';
-          return '${entry.key}：${u.calls} 次 · 输入 ${u.promptTokens} · '
-              '输出 ${u.completionTokens} · $money';
-        }(),
-    ];
+/// 逐项明细，供用户对账。
+///
+/// 末尾注明「按目录价折算」：火山的在线推理与语音服务都有免费额度，账号也
+/// 常常是几个人共用的，这个数不等于账单上真正扣的钱。
+List<String> costBreakdown(AiUsage usage) {
+  final lines = <String>[
+    for (final entry in usage.byModel.entries)
+      () {
+        final u = entry.value;
+        final cost = ArkPricing.costOf(
+            model: entry.key,
+            prompt: u.promptTokens,
+            completion: u.completionTokens);
+        final money = cost == null ? '单价未知' : '¥${cost.toStringAsFixed(4)}';
+        return '${entry.key}：${u.calls} 次 · 输入 ${u.promptTokens} · '
+            '输出 ${u.completionTokens} · $money';
+      }(),
+    for (final entry in usage.byService.entries)
+      () {
+        final u = entry.value;
+        final cost = SpeechPricing.costOf(entry.key, u.quantity);
+        return '${entry.key.label}：${u.calls} 次 · '
+            '${u.quantity} ${entry.key.unit} · ¥${cost.toStringAsFixed(4)}';
+      }(),
+  ];
+  if (lines.isEmpty) return lines;
+  return [...lines, '（按目录价折算，未计免费额度）'];
+}

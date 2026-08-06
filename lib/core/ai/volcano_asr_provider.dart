@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import 'ai_usage.dart';
+import 'ai_usage_scope.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../net/json_poster.dart';
@@ -71,6 +73,11 @@ class VolcanoAsrProvider implements AsrProvider {
   Future<List<AsrSentence>> transcribe(String pcmPath) async {
     final pcm = await File(pcmPath).readAsBytes();
     final wav = wrapPcmAsWav(pcm, sampleRate);
+    // 按音频时长计费（4.5 元/小时）。16 位单声道 PCM：每秒 sampleRate*2 字节
+    AiUsageScope.recordService(
+      service: SpeechService.asrFlash,
+      quantity: (pcm.length / (sampleRate * 2)).round(),
+    );
     final result = await post(
       endpoint,
       {

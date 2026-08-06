@@ -70,20 +70,43 @@ void main() {
               promptTokens: 500,
               completionTokens: 50);
 
-      expect(costBreakdown(usage), [
-        'doubao-seed-2-0-mini-260428：2 次 · 输入 1500 · 输出 150 · ¥0.0006',
-      ]);
+      expect(costBreakdown(usage).first,
+          'doubao-seed-2-0-mini-260428：2 次 · 输入 1500 · 输出 150 · ¥0.0006');
     });
 
     test('算不出价的模型也列出来，标明算不出', () {
       final usage = AiUsage.empty
           .plus(model: '新模型', promptTokens: 10, completionTokens: 1);
 
-      expect(costBreakdown(usage).single, contains('单价未知'));
+      expect(costBreakdown(usage).first, contains('单价未知'));
     });
 
     test('没花过就没有明细', () {
       expect(costBreakdown(AiUsage.empty), isEmpty);
+    });
+  });
+
+  group('语音服务也要出现在明细里', () {
+    test('语音识别按秒列出，换算成钱', () {
+      final usage = AiUsage.empty
+          .plusService(service: SpeechService.asrFlash, quantity: 96);
+
+      expect(costBreakdown(usage).first,
+          '语音识别（极速版）：1 次 · 96 秒 · ¥0.1200');
+    });
+
+    test('语音合成按字符列出', () {
+      final usage = AiUsage.empty
+          .plusService(service: SpeechService.tts, quantity: 200);
+
+      expect(costBreakdown(usage).first, '语音合成：1 次 · 200 字符 · ¥0.0600');
+    });
+
+    test('末尾注明是折算值——账号常是共用的，这不等于账单', () {
+      final usage = AiUsage.empty
+          .plusService(service: SpeechService.tts, quantity: 200);
+
+      expect(costBreakdown(usage).last, contains('未计免费额度'));
     });
   });
 }
