@@ -136,9 +136,12 @@ class ArkChatClient {
 
   static void _recordScoped(String model, Object? usageJson) {
     if (usageJson is! Map) return;
+    // 命中缓存的部分单价只有输入价的五分之一，不拆开会高估
+    final details = usageJson['prompt_tokens_details'];
     AiUsageScope.record(
       model: model,
       prompt: _tokens(usageJson['prompt_tokens']),
+      cached: details is Map ? _tokens(details['cached_tokens']) : 0,
       completion: _tokens(usageJson['completion_tokens']),
     );
   }

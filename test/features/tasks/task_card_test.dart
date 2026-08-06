@@ -94,7 +94,7 @@ void main() {
       )));
 
       expect(find.text('等待 33 秒'), findsOneWidget);
-      expect(find.text('¥0.040'), findsOneWidget);
+      expect(find.text('¥0.080'), findsOneWidget);
     });
 
     testWidgets('还没分析完的任务不摆空占位', (tester) async {

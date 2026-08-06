@@ -41,11 +41,11 @@ void main() {
       final usage = AiUsage.empty
           .plus(
               model: 'doubao-seed-2-0-mini-260428',
-              promptTokens: 1000000,
+              promptTokens: 30000,
               completionTokens: 0)
           .plusService(service: SpeechService.asrFlash, quantity: 3600);
 
-      expect(usage.costYuan, closeTo(0.2 + 4.5, 0.0001));
+      expect(usage.costYuan, closeTo(30000 / 1e6 * 0.2 + 4.5, 0.0001));
     });
 
     test('累加不改原来的那份', () {

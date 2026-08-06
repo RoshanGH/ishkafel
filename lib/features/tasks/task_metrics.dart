@@ -36,12 +36,12 @@ List<String> costBreakdown(AiUsage usage) {
     for (final entry in usage.byModel.entries)
       () {
         final u = entry.value;
-        final cost = ArkPricing.costOf(
-            model: entry.key,
-            prompt: u.promptTokens,
-            completion: u.completionTokens);
+        final cost = usage.costOfModel(entry.key);
         final money = cost == null ? '单价未知' : '¥${cost.toStringAsFixed(4)}';
-        return '${entry.key}：${u.calls} 次 · 输入 ${u.promptTokens} · '
+        // 命中缓存的部分单价只有五分之一，单列出来才看得懂钱是怎么省的
+        final cached =
+            u.cachedTokens == 0 ? '' : '（其中缓存命中 ${u.cachedTokens}）';
+        return '${entry.key}：${u.calls} 次 · 输入 ${u.promptTokens}$cached · '
             '输出 ${u.completionTokens} · $money';
       }(),
     for (final entry in usage.byService.entries)

@@ -32,8 +32,9 @@ void main() {
           promptTokens: 120000,
           completionTokens: 8000);
 
-      // 120000/1e6*0.2 + 8000/1e6*2 = 0.024 + 0.016 = 0.04
-      expect(formatCost(usage), '¥0.040');
+      // 12 万输入落在第二档（>32K）：0.4；输出 0.8 万按该档 4.0
+      // 120000/1e6*0.4 + 8000/1e6*4 = 0.048 + 0.032 = 0.08
+      expect(formatCost(usage), '¥0.080');
     });
 
     test('金额大了就收敛到两位小数', () {
@@ -42,8 +43,9 @@ void main() {
           promptTokens: 20000000,
           completionTokens: 1000000);
 
-      // 20*0.6 + 1*3.6 = 15.6
-      expect(formatCost(usage), '¥15.60');
+      // 2000 万输入远超最高档，按第三档：输入 1.8、输出 10.8
+      // 20*1.8 + 1*10.8 = 46.8
+      expect(formatCost(usage), '¥46.80');
     });
 
     test('一次都没调用过就是 ¥0', () {

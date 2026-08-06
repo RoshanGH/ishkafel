@@ -50,27 +50,29 @@ void main() {
 
   group('算钱', () {
     test('输入输出分别按各自单价算', () {
-      // mini：输入 ¥0.2 / 输出 ¥2.0 每百万 token
+      // mini 第一档（输入 ≤32K）：输入 ¥0.2 / 输出 ¥2.0 每百万 token
       final usage = AiUsage.empty.plus(
           model: 'doubao-seed-2-0-mini-260428',
-          promptTokens: 1000000,
+          promptTokens: 30000,
           completionTokens: 1000000);
 
-      expect(usage.costYuan, closeTo(2.2, 0.0001));
+      expect(usage.costYuan,
+          closeTo(30000 / 1e6 * 0.2 + 1000000 / 1e6 * 2.0, 0.0001));
     });
 
     test('多个模型的钱加起来', () {
       final usage = AiUsage.empty
           .plus(
               model: 'doubao-seed-2-0-mini-260428',
-              promptTokens: 1000000,
+              promptTokens: 30000,
               completionTokens: 0)
           .plus(
               model: 'doubao-seed-2-0-lite-260215',
-              promptTokens: 1000000,
+              promptTokens: 30000,
               completionTokens: 0);
 
-      expect(usage.costYuan, closeTo(0.2 + 0.6, 0.0001));
+      expect(usage.costYuan,
+          closeTo(30000 / 1e6 * 0.2 + 30000 / 1e6 * 0.6, 0.0001));
     });
 
     test('不认识的模型算不出钱，如实说不知道，不悄悄按 0 算', () {
@@ -100,10 +102,10 @@ void main() {
     test('同系列不同日期的模型走同一份单价', () {
       final a = AiUsage.empty.plus(
           model: 'doubao-seed-2-0-lite-260428',
-          promptTokens: 1000000,
+          promptTokens: 30000,
           completionTokens: 0);
 
-      expect(a.costYuan, closeTo(0.6, 0.0001),
+      expect(a.costYuan, closeTo(30000 / 1e6 * 0.6, 0.0001),
           reason: '按模型全名逐个列价，换一个日期后缀就算不出钱了');
     });
   });

@@ -45,11 +45,13 @@ abstract final class AiUsageScope {
   static void record({
     required String model,
     required int prompt,
+    int cached = 0,
     required int completion,
   }) {
     final collector = Zone.current[_key];
     if (collector is! _Collector) return;
-    collector.add(model: model, prompt: prompt, completion: completion);
+    collector.add(
+        model: model, prompt: prompt, cached: cached, completion: completion);
   }
 }
 
@@ -59,10 +61,14 @@ class _Collector {
   void add({
     required String model,
     required int prompt,
+    required int cached,
     required int completion,
   }) {
     usage = usage.plus(
-        model: model, promptTokens: prompt, completionTokens: completion);
+        model: model,
+        promptTokens: prompt,
+        cachedTokens: cached,
+        completionTokens: completion);
   }
 
   void addService(SpeechService service, int quantity) {
