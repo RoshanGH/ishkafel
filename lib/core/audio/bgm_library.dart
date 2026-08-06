@@ -6,13 +6,6 @@ import '../miaoa/miaoa_tag_service.dart' show MiaoaException;
 import '../miaoa/miaoa_errors.dart';
 import 'bgm_plan.dart';
 
-/// miaoa 音频库检索（走 miaoa CLI 子进程）。
-///
-/// 与候选素材检索分开一个类，是因为两者除了「都调 content search」以外没有
-/// 共同点：这边是 `--type audio`、结果按时长与情绪挑，那边是
-/// `--type storyboard`、结果要做规格探测与时长差比对。硬塞进一个类只会让
-/// 两边的参数互相污染——打成 storyboard 会返回一堆画面素材，用户拿去当 BGM
-/// 一首都放不出来。
 /// 一页检索结果，外加「这页是怎么来的」。
 class BgmSearchPage {
   final List<BgmMaterial> items;
@@ -24,6 +17,13 @@ class BgmSearchPage {
   const BgmSearchPage({required this.items, this.widenedFromProject = false});
 }
 
+/// miaoa 音频库检索（走 miaoa CLI 子进程）。
+///
+/// 与候选素材检索分开一个类，是因为两者除了「都调 content search」以外没有
+/// 共同点：这边是 `--type audio`、结果按时长与情绪挑，那边是
+/// `--type storyboard`、结果要做规格探测与时长差比对。硬塞进一个类只会让
+/// 两边的参数互相污染——打成 storyboard 会返回一堆画面素材，用户拿去当 BGM
+/// 一首都放不出来。
 class BgmLibrary {
   final ProcessRunner run;
   final String binary;
@@ -105,6 +105,30 @@ class BgmLibrary {
     }
     if (skipped > 0) AppLog.warn('音频库检索：跳过 $skipped 条无法解析的记录');
     return List.unmodifiable(items);
+  }
+
+  /// 按 id 现取一个**新的**播放地址。
+  ///
+  /// 存进任务里的 `previewUrl` 是带签名的临时地址，隔天就 403——真机上正是
+  /// 它让预览音轨整条合成失败的。所以要用的时候现取，别信存下来的那个。
+  /// 取不到返回 null，由调用方决定退回旧地址还是报错。
+  Future<String?> freshPreviewUrl(int id) async {
+    try {
+      final result = await run(
+          binary, ['content', 'get', '--type', 'audio', '--json', '$id']);
+      if (result.exitCode != 0) {
+        AppLog.warn('取音频 $id 的新地址失败（exit=${result.exitCode}）');
+        return null;
+      }
+      final decoded = jsonDecode(_text(result.stdout));
+      if (decoded is! Map) return null;
+      final media = decoded['mediaFile'];
+      final url = media is Map ? media['previewUrl'] : null;
+      return url is String && url.isNotEmpty ? url : null;
+    } catch (e) {
+      AppLog.warn('取音频 $id 的新地址出错：$e');
+      return null;
+    }
   }
 
   /// 解析一条音频记录。

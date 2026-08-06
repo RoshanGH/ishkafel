@@ -48,10 +48,15 @@ class ExportRunner {
   /// 这一层要能在不联网的情况下测。
   final Future<String> Function(int candidateId) fetchMaterial;
 
+  /// 把一条配乐解析成本地可读的地址（见 [AudioTrackBuilder.resolveBgm]）。
+  /// 不注入时退回素材自带的签名地址——它随时可能已经失效。
+  final Future<String> Function(BgmMaterial material)? resolveBgm;
+
   ExportRunner({
     required this.run,
     required this.workDir,
     required this.fetchMaterial,
+    this.resolveBgm,
   });
 
   /// 导出全部组合到 [outputDir]。
@@ -80,9 +85,13 @@ class ExportRunner {
     final total = combos.length;
 
     onProgress?.call(0, total, '准备声音');
-    final String audio;
+    final AudioTrack track;
     try {
-      audio = await AudioTrackBuilder(run: run, workDir: workDir).build(
+      track = await AudioTrackBuilder(
+        run: run,
+        workDir: workDir,
+        resolveBgm: resolveBgm,
+      ).build(
         sourcePath: sourcePath,
         units: units,
         vocalsPath: vocalsPath,
@@ -98,6 +107,11 @@ class ExportRunner {
       ];
     }
 
+    // 少一段垫乐仍是能交付的成片，不该整批作废——但要如实说出来
+    for (final warning in track.bgmWarnings) {
+      onProgress?.call(0, total, warning);
+    }
+
     final clips = <String, String>{}; // 段落指纹 → 已渲染的画面切片
     final out = <ExportOutcome>[];
     for (final combo in combos) {
@@ -106,7 +120,7 @@ class ExportRunner {
         final path = await _composeOne(
           combo: combo,
           sourcePath: sourcePath,
-          audio: audio,
+          audio: track.path,
           outputDir: outputDir,
           clips: clips,
         );

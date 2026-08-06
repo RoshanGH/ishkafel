@@ -12,6 +12,8 @@ import 'core/ai/volcano_asr_provider.dart';
 import 'core/ai/volcano_semantic_splitter.dart';
 import 'core/analysis/analysis_pipeline.dart';
 import 'core/analysis/batch_frame_extractor.dart';
+import 'core/audio/bgm_cache.dart';
+import 'core/audio/bgm_library.dart';
 import 'core/analysis/audio_extractor.dart';
 import 'core/analysis/boundary_snapper.dart';
 import 'core/analysis/scene_detector.dart';
@@ -103,10 +105,14 @@ Future<void> main() async {
                 run: const ResolvingProcessRunner().call,
                 workDir:
                     Directory(p.join(dataDir.path, 'preview_audio', taskId)),
+                // 配乐走本地缓存：miaoa 的签名地址隔天就 403，直接拿存在任务
+                // 里的那个去请求，昨天选好的配乐今天就放不出来
+                resolveBgm: bgmCache(dataDir).fetch,
               )),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
+            resolveBgm: bgmCache(dataDir).fetch,
             fetchMaterial: MaterialDownloader(
               content: MiaoaContentService(binary: resolveMiaoaBinary()),
               cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
@@ -122,6 +128,12 @@ Future<void> main() async {
 /// 两层打标在这里接通：taggers 走同一个 Ark 客户端（无状态，可共享），
 /// 受控词表走 [MiaoaTagVocabularySource]——按**任务自己选的**标签组现取，
 /// 而不是在这里写死一份全局词表。
+/// 配乐缓存：全应用共用一份（同一首曲子被多个任务用到时只下一次）
+BgmCache bgmCache(Directory dataDir) => BgmCache(
+      library: BgmLibrary(binary: resolveMiaoaBinary()),
+      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+    );
+
 AnalysisPipeline? _buildAnalysisPipeline(
     AiCredentials credentials, Directory dataDir) {
   if (!credentials.isComplete) {

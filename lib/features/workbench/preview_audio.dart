@@ -30,6 +30,10 @@ enum PreviewAudioState {
   /// 已经挂上合成后的音轨
   ready,
 
+  /// 挂上了，但有配乐没铺上（地址失效 / 网络不通）。声音是能听的，
+  /// 只是少了那几段垫乐——与「整条失败」是两回事，不能混为一谈
+  degraded,
+
   /// 合成失败，退回原声
   failed,
 }
@@ -119,7 +123,7 @@ class PreviewAudioController extends ChangeNotifier {
     _failure = null;
     _set(PreviewAudioState.building);
     try {
-      final path = await make(task.id).build(
+      final track = await make(task.id).build(
         sourcePath: task.sourcePath,
         units: units,
         vocalsPath: task.vocalsPath,
@@ -128,14 +132,19 @@ class PreviewAudioController extends ChangeNotifier {
       );
       // 合成期间用户又改了：这一次的结果已经过期，丢掉
       if (_buildingFingerprint != fingerprint) return;
-      if (!File(path).existsSync()) {
+      if (!File(track.path).existsSync()) {
         throw Exception('合成后的音轨文件不存在');
       }
-      final ok = await playback.setExternalAudio(path);
+      final ok = await playback.setExternalAudio(track.path);
       _builtFingerprint = fingerprint;
       _buildingFingerprint = null;
       if (ok) {
-        _set(PreviewAudioState.ready);
+        // 部分配乐没铺上时照样能听，但要说清楚是哪一段——只说「合成失败」
+        // 会让人以为整条音轨都没了
+        _failure = track.bgmWarnings.isEmpty ? null : track.bgmWarnings.join('；');
+        _set(track.bgmWarnings.isEmpty
+            ? PreviewAudioState.ready
+            : PreviewAudioState.degraded);
       } else {
         _failure = '这个播放器挂不了外挂音轨，预览听到的仍是原片的声音';
         _set(PreviewAudioState.failed);
@@ -144,7 +153,7 @@ class PreviewAudioController extends ChangeNotifier {
       AppLog.warn('预览音轨合成失败（taskId=${task.id}）：$e');
       if (_buildingFingerprint != fingerprint) return;
       _buildingFingerprint = null;
-      _failure = '预览音轨合成失败，听到的仍是原片的声音';
+      _failure = '预览音轨合成失败，听到的仍是原片的声音：$e';
       _set(PreviewAudioState.failed);
     }
   }
@@ -187,6 +196,9 @@ String? previewAudioNotice(PreviewAudioState state, String? failure) =>
       PreviewAudioState.original => null,
       PreviewAudioState.building => '正在合成预览音轨（配乐/配音），稍后就能听到',
       PreviewAudioState.ready => null,
+      // 声音是能听的，只是少了几段垫乐——说成「不可用」会让人以为白干了
+      PreviewAudioState.degraded =>
+        failure == null ? null : '$failure。其余声音正常，重新选一次配乐即可',
       PreviewAudioState.failed => failure ?? '预览音轨不可用，听到的仍是原片的声音',
     };
 

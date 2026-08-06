@@ -21,17 +21,40 @@ import 'bgm_plan.dart';
 ///
 /// 最后一条是刻意的：分离是有损的（真机实测，人声轨+背景轨与原混音的残差在
 /// -27dB，听得出来）。没换配乐的地方没必要先损一道。
+/// 合成结果：落地路径 + 这一次哪几段配乐没铺上。
+///
+/// 把降级信息**带回来**而不是塞进回调：谁调用谁决定怎么告诉用户（预览是一条
+/// 提示条，导出是结果页上的一行），构建器不该猜。
+class AudioTrack {
+  final String path;
+
+  /// 人话，可直接展示。为空表示一切正常
+  final List<String> bgmWarnings;
+
+  const AudioTrack({required this.path, this.bgmWarnings = const []});
+}
+
 class AudioTrackBuilder {
   final ProcessRunner run;
   final Directory workDir;
 
-  AudioTrackBuilder({required this.run, required this.workDir});
+  /// 把一条配乐解析成 ffmpeg 能读的地址。
+  ///
+  /// 缺省用素材自带的 `previewUrl`——那是**带签名的临时地址，隔天就 403**。
+  /// 真实装配要注入 [BgmCache]：优先本地缓存、必要时按 id 现取新地址。
+  final Future<String> Function(BgmMaterial material)? resolveBgm;
+
+  AudioTrackBuilder({
+    required this.run,
+    required this.workDir,
+    this.resolveBgm,
+  });
 
   /// 合成整条音轨，返回落地的 WAV 路径。
   ///
   /// [vocalsPath] 是分离出来的纯人声轨；为 null（没装分离工具或分离失败）时，
   /// 被配乐覆盖的段落只能退回原混音——新旧背景会叠在一起，由上层如实告知用户。
-  Future<String> build({
+  Future<AudioTrack> build({
     required String sourcePath,
     required List<SemanticUnit> units,
     String? vocalsPath,
@@ -40,6 +63,7 @@ class AudioTrackBuilder {
   }) async {
     workDir.createSync(recursive: true);
     final covered = bgmCoveredRanges(units, bgm);
+    final degraded = <String>[];
 
     final parts = <String>[];
     for (final unit in units) {
@@ -58,32 +82,64 @@ class AudioTrackBuilder {
     await _ffmpeg(
         ExportCommands.concat(listFile: listFile.path, out: out), '拼接声音');
 
-    // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓
+    // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓。
+    //
+    // **一段失败只丢那一段**：签名地址会过期、网络会断，而整条音轨作废意味着
+    // 用户连人声和换过的音色都听不到——真机上就这么炸过一次，界面只说了句
+    // 「预览音轨合成失败」，人完全不知道是哪条配乐、该做什么。
     for (var i = 0; i < bgm.segments.length; i++) {
       final segment = bgm.segments[i];
-      final url = segment.material.previewUrl;
       final range = shotRangeOf(units, segment);
-      if (url == null || url.isEmpty || range == null) {
-        AppLog.warn('配乐「${segment.material.name}」没有可用地址或范围，这一段跳过');
+      if (range == null) {
+        AppLog.warn('配乐「${segment.material.name}」找不到对应的镜头范围，这一段跳过');
+        continue;
+      }
+      final String source;
+      try {
+        source = await _resolve(segment.material);
+      } catch (e) {
+        final message = '配乐「${segment.material.name}」这次取不到（$e），'
+            '这一段先没有配乐';
+        AppLog.warn(message);
+        degraded.add(message);
         continue;
       }
       final mixed = p.join(workDir.path, 'mix_bgm_$i.wav');
-      await _ffmpeg(
-        ExportCommands.mixBgm(
-          voice: out,
-          bgm: url,
-          out: mixed,
-          startMs: range.$1,
-          durationMs: range.$2 - range.$1,
-          // 每段自己的音量（见 [BgmSegment.volume]）——预览和导出走同一条路，
-          // 这里改了两边一起变
-          bgmVolume: segment.volume,
-        ),
-        '配乐「${segment.material.name}」',
-      );
+      try {
+        await _ffmpeg(
+          ExportCommands.mixBgm(
+            voice: out,
+            bgm: source,
+            out: mixed,
+            startMs: range.$1,
+            durationMs: range.$2 - range.$1,
+            // 每段自己的音量（见 [BgmSegment.volume]）——预览和导出走同一条路，
+            // 这里改了两边一起变
+            bgmVolume: segment.volume,
+          ),
+          '配乐「${segment.material.name}」',
+        );
+      } catch (e) {
+        final message = '配乐「${segment.material.name}」这一段没铺上（$e）';
+        AppLog.warn(message);
+        degraded.add(message);
+        continue;
+      }
       out = mixed;
     }
-    return out;
+    return AudioTrack(path: out, bgmWarnings: List.unmodifiable(degraded));
+  }
+
+  /// 缺省退回素材自带地址——它随时可能已经失效，所以真实装配一定要注入
+  /// [resolveBgm]
+  Future<String> _resolve(BgmMaterial material) async {
+    final resolver = resolveBgm;
+    if (resolver != null) return resolver(material);
+    final url = material.previewUrl;
+    if (url == null || url.isEmpty) {
+      throw StateError('没有可用地址');
+    }
+    return url;
   }
 
   /// 一个单元切出来的若干段声音。
