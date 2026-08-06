@@ -76,20 +76,41 @@ class BgmSegment {
   final BgmMaterial material;
   final BgmFit fit;
 
+  /// 这一段配乐压到原始音量的几成（0~1）。
+  ///
+  /// **每段独立**：用户在不同段铺不同的曲子，有的本来就响、有的很闷，
+  /// 一个全局值必然有一段不合适。
+  final double volume;
+
+  /// 默认压到四分之一——垫乐盖过台词是最常见的翻车方式，而这条片子的
+  /// 主体是口播
+  static const double defaultVolume = 0.25;
+
   const BgmSegment({
     required this.startShot,
     required this.endShot,
     required this.material,
     required this.fit,
+    this.volume = defaultVolume,
   });
+
+  /// 夹回 0~1。构造函数是 const 的（很多地方直接 `const BgmSegment(...)`），
+  /// 夹取只能放在入口：来自界面的滑块、来自存档的脏数据。
+  static double clampVolume(double v) => v < 0
+      ? 0
+      : v > 1
+          ? 1
+          : v;
 
   bool covers(int shotIndex) => shotIndex >= startShot && shotIndex <= endShot;
 
-  BgmSegment copyWith({int? startShot, int? endShot}) => BgmSegment(
+  BgmSegment copyWith({int? startShot, int? endShot, double? volume}) =>
+      BgmSegment(
         startShot: startShot ?? this.startShot,
         endShot: endShot ?? this.endShot,
         material: material,
         fit: fit,
+        volume: volume ?? this.volume,
       );
 
   Map<String, dynamic> toJson() => {
@@ -97,6 +118,7 @@ class BgmSegment {
         'endShot': endShot,
         'material': material.toJson(),
         'fit': fit.name,
+        'volume': volume,
       };
 
   static BgmSegment? tryFromJson(Object? raw) {
@@ -107,11 +129,14 @@ class BgmSegment {
     final material = BgmMaterial.tryFromJson(raw['material']);
     if (material == null) return null;
     final fit = BgmFit.values.firstWhereOrNull((f) => f.name == raw['fit']);
+    final volume = raw['volume'];
     return BgmSegment(
       startShot: start,
       endShot: end,
       material: material,
       fit: fit ?? BgmFit.exact,
+      // 老存档没有这个字段；脏数据由构造函数夹回 0~1
+      volume: volume is num ? clampVolume(volume.toDouble()) : defaultVolume,
     );
   }
 }
@@ -155,6 +180,7 @@ class BgmPlan {
     required int endShot,
     required BgmMaterial material,
     required int shotRangeMs,
+    double volume = BgmSegment.defaultVolume,
   }) {
     // 用户可能从右往左拖
     final from = startShot <= endShot ? startShot : endShot;
@@ -182,10 +208,21 @@ class BgmPlan {
       endShot: to,
       material: material,
       fit: fitFor(materialDurationMs: material.durationMs, rangeMs: shotRangeMs),
+      volume: BgmSegment.clampVolume(volume),
     ));
     next.sort((a, b) => a.startShot.compareTo(b.startShot));
     return BgmPlan(List.unmodifiable(next));
   }
+
+  /// 只改某一段的音量，不换曲子。[startShot] 用来认段；找不到就原样返回。
+  BgmPlan withVolume({required int startShot, required double volume}) =>
+      BgmPlan(List.unmodifiable([
+        for (final s in segments)
+          if (s.startShot == startShot)
+            s.copyWith(volume: BgmSegment.clampVolume(volume))
+          else
+            s,
+      ]));
 
   /// 移除覆盖 [shotIndex] 的那一段；没有就原样返回
   BgmPlan removeAt(int shotIndex) {

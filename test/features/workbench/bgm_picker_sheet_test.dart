@@ -67,6 +67,7 @@ Future<BgmChoice?> _open(
   int rangeMs = 12000,
   bool canClear = false,
   List<String>? played,
+  double initialVolume = BgmSegment.defaultVolume,
 }) async {
   BgmChoice? result;
   await tester.pumpWidget(ProviderScope(
@@ -83,7 +84,10 @@ Future<BgmChoice?> _open(
               key: const Key('open'),
               onPressed: () async {
                 result = await showBgmPicker(context,
-                    rangeMs: rangeMs, rangeLabel: 'S2–S5', canClear: canClear);
+                    rangeMs: rangeMs,
+                    rangeLabel: 'S2–S5',
+                    canClear: canClear,
+                    initialVolume: initialVolume);
               },
               child: const Text('开'),
             ),
@@ -247,6 +251,77 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(result, isNull, reason: '浮层还开着，用户只是在试听');
+    });
+  });
+
+  group('配乐音量：每段独立', () {
+    testWidgets('默认压到 25%，滑块和数字都显示出来', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      expect(find.byKey(const Key('bgm-volume')), findsOneWidget);
+      expect(find.text('25%'), findsOneWidget);
+    });
+
+    testWidgets('改已有段落时带出这一段现在的音量，不是默认值', (tester) async {
+      await _open(tester,
+          library: _FakeLibrary(items: const [_long]),
+          canClear: true,
+          initialVolume: 0.6);
+
+      expect(find.text('60%'), findsOneWidget,
+          reason: '每次点进来都显示 25%，用户会以为自己上次没调成');
+    });
+
+    testWidgets('选曲子时把当前音量一起交出去', (tester) async {
+      BgmChoice? picked;
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          bgmLibraryProvider
+              .overrideWithValue(_FakeLibrary(items: const [_long])),
+          auditionPlayerFactoryProvider
+              .overrideWithValue(() => _FakePlayer(<String>[])),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  key: const Key('open'),
+                  onPressed: () async {
+                    picked = await showBgmPicker(context,
+                        rangeMs: 12000,
+                        rangeLabel: 'S1',
+                        initialVolume: 0.5);
+                  },
+                  child: const Text('开'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.byKey(const Key('open')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+
+      expect((picked as BgmPicked).volume, 0.5);
+    });
+
+    testWidgets('只改音量时有单独的出口，不用重选一遍曲子', (tester) async {
+      await _open(tester,
+          library: _FakeLibrary(items: const [_long]),
+          canClear: true,
+          initialVolume: 0.25);
+
+      expect(find.byKey(const Key('bgm-apply-volume')), findsNothing,
+          reason: '没动过就不该冒出一个「应用音量」');
+
+      await tester.drag(find.byKey(const Key('bgm-volume')), const Offset(60, 0));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('bgm-apply-volume')), findsOneWidget);
     });
   });
 }

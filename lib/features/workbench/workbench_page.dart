@@ -530,6 +530,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       endShot: toShot,
       material: choice.material,
       shotRangeMs: rangeMs,
+      volume: choice.volume,
     ));
   }
 
@@ -557,14 +558,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       rangeLabel: _shotRangeLabel(segment.startShot, segment.endShot),
       canClear: true,
       projectIds: _projectIds,
+      initialVolume: segment.volume,
     );
     if (choice == null || !mounted) return;
     await _saveBgm(switch (choice) {
-      BgmPicked(:final material) => _task.bgm.assign(
+      BgmVolumeChanged(:final volume) => _task.bgm
+          .withVolume(startShot: segment.startShot, volume: volume),
+      BgmPicked(:final material, :final volume) => _task.bgm.assign(
           startShot: segment.startShot,
           endShot: segment.endShot,
           material: material,
           shotRangeMs: rangeMs,
+          volume: volume,
         ),
       BgmCleared() => _task.bgm.removeAt(segment.startShot),
     });

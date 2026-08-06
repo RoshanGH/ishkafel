@@ -18,10 +18,17 @@ sealed class BgmChoice {
   const BgmChoice();
 }
 
-/// 用这条素材
+/// 用这条素材，音量压到 [volume]
 class BgmPicked extends BgmChoice {
   final BgmMaterial material;
-  const BgmPicked(this.material);
+  final double volume;
+  const BgmPicked(this.material, {this.volume = BgmSegment.defaultVolume});
+}
+
+/// 曲子不换，只改音量
+class BgmVolumeChanged extends BgmChoice {
+  final double volume;
+  const BgmVolumeChanged(this.volume);
 }
 
 /// 这一段不要配乐了
@@ -39,6 +46,7 @@ Future<BgmChoice?> showBgmPicker(
   required String rangeLabel,
   bool canClear = false,
   List<int> projectIds = const [],
+  double initialVolume = BgmSegment.defaultVolume,
 }) =>
     showDialog<BgmChoice>(
       context: context,
@@ -47,6 +55,7 @@ Future<BgmChoice?> showBgmPicker(
         rangeLabel: rangeLabel,
         canClear: canClear,
         projectIds: projectIds,
+        initialVolume: initialVolume,
       ),
     );
 
@@ -58,9 +67,13 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
   final List<int> projectIds;
   final bool canClear;
 
+  /// 这一段当前的音量。改这一段时带进来，用户看到的是现在的值而不是默认值
+  final double initialVolume;
+
   const _BgmPickerDialog({
     required this.rangeMs,
     required this.rangeLabel,
+    required this.initialVolume,
     required this.canClear,
     this.projectIds = const [],
   });
@@ -76,6 +89,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   // 在 initState 里就建好：`late final` 会拖到第一次用才初始化，而搜索出错
   // 或库里为空时压根不会走到列表，等 dispose 再去 ref.read 已经太晚了
   late final BgmAudition _audition;
+  late double _volume = widget.initialVolume;
 
   /// 每次检索领一个代次号：用户敲得快时慢到的旧结果不能覆盖新的
   int _generation = 0;
@@ -149,10 +163,22 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
               ),
               const SizedBox(height: AppSpacing.sm),
               Expanded(child: _body()),
+              _VolumeRow(
+                value: _volume,
+                onChanged: (v) => setState(() => _volume = v),
+              ),
             ],
           ),
         ),
         actions: [
+          // 曲子不换、只把音量改了的情形要有出口，否则用户被迫重选一遍
+          if (widget.canClear && _volume != widget.initialVolume)
+            TextButton(
+              key: const Key('bgm-apply-volume'),
+              onPressed: () =>
+                  Navigator.of(context).pop(BgmVolumeChanged(_volume)),
+              child: const Text('应用音量'),
+            ),
           if (widget.canClear)
             TextButton(
               key: const Key('bgm-clear'),
@@ -207,7 +233,8 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         material: items[i],
         rangeMs: widget.rangeMs,
         audition: _audition,
-        onTap: () => Navigator.of(context).pop(BgmPicked(items[i])),
+        onTap: () =>
+            Navigator.of(context).pop(BgmPicked(items[i], volume: _volume)),
       ),
     );
     if (!page.widenedFromProject) return list;
@@ -227,6 +254,51 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
       ],
     );
   }
+}
+
+/// 配乐音量：**每段独立**。用户在不同段铺不同曲子，有的本来就响、有的很闷，
+/// 一个全局值必然有一段不合适。
+class _VolumeRow extends StatelessWidget {
+  final double value;
+  final ValueChanged<double> onChanged;
+
+  const _VolumeRow({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.sm),
+        child: Row(
+          children: [
+            const Icon(Icons.volume_up_outlined,
+                size: 14, color: AppColors.textSecondary),
+            const SizedBox(width: AppSpacing.xs),
+            const Text('配乐音量',
+                style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: AppFontSize.caption)),
+            Expanded(
+              child: Slider(
+                key: const Key('bgm-volume'),
+                value: value,
+                // 上限就是原始音量：垫乐压过口播是最常见的翻车方式，
+                // 给到 200% 只会让人更容易做错
+                max: 1,
+                divisions: 20,
+                activeColor: AppColors.accentBlue,
+                onChanged: onChanged,
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Text('${(value * 100).round()}%',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: AppFontSize.caption)),
+            ),
+          ],
+        ),
+      );
 }
 
 class _Row extends StatelessWidget {

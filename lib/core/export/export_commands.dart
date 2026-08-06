@@ -146,8 +146,8 @@ class ExportCommands {
 
   /// 把配乐混进人声轨。
   ///
-  /// 配乐压到 [bgmVolume]（默认 0.25）：垫乐盖过台词是最常见的翻车方式，
-  /// 而这条片子的主体是口播。`duration=first` 让成片长度跟着人声轨走——
+  /// 配乐压到 [bgmVolume]（每段自己的值，见 [BgmSegment.volume]；默认 0.25）：
+  /// 垫乐盖过台词是最常见的翻车方式，而这条片子的主体是口播。`duration=first` 让成片长度跟着人声轨走——
   /// 配乐比片子长时不该把片子拖长。
   static List<String> mixBgm({
     required String voice,

@@ -75,6 +75,9 @@ class AudioTrackBuilder {
           out: mixed,
           startMs: range.$1,
           durationMs: range.$2 - range.$1,
+          // 每段自己的音量（见 [BgmSegment.volume]）——预览和导出走同一条路，
+          // 这里改了两边一起变
+          bgmVolume: segment.volume,
         ),
         '配乐「${segment.material.name}」',
       );
