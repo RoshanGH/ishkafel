@@ -149,7 +149,11 @@ class BgmSegment {
 class BgmPlan {
   final List<BgmSegment> segments;
 
-  const BgmPlan(this.segments);
+  /// 上一次操作把相邻同素材段合并、并因此改掉了某一段的音量时的说明。
+  /// 不是方案的一部分，只在这一次操作后拿来提示用户
+  final String? mergedVolumeNotice;
+
+  const BgmPlan(this.segments, {this.mergedVolumeNotice});
 
   static const empty = BgmPlan([]);
 
@@ -211,7 +215,63 @@ class BgmPlan {
       volume: BgmSegment.clampVolume(volume),
     ));
     next.sort((a, b) => a.startShot.compareTo(b.startShot));
+    // 刚放上去的这一段的音量是「最后设的」，合并时由它覆盖整段
+    return _merged(next, winningVolume: BgmSegment.clampVolume(volume));
+  }
+
+  /// 把这个镜头区间从所有配乐段里**抠掉**。
+  ///
+  /// 整体替换一个台词语义单元时用：那一段的画面、口播、配乐全部来自候选素材，
+  /// 原来铺在它上面的配乐在这一段就不存在了。抠完可能是截断、劈成两段、
+  /// 或整段消失。
+  BgmPlan carveOutShots(int fromShot, int toShot) {
+    final from = fromShot <= toShot ? fromShot : toShot;
+    final to = fromShot <= toShot ? toShot : fromShot;
+    final next = <BgmSegment>[];
+    for (final s in segments) {
+      // 完全被盖住：整段没了
+      if (s.startShot >= from && s.endShot <= to) continue;
+      // 不相干：原样
+      if (s.endShot < from || s.startShot > to) {
+        next.add(s);
+        continue;
+      }
+      // 左右各留下不重叠的那截；被抠的部分落在中间时劈成两段
+      if (s.startShot < from) next.add(s.copyWith(endShot: from - 1));
+      if (s.endShot > to) next.add(s.copyWith(startShot: to + 1));
+    }
+    next.sort((a, b) => a.startShot.compareTo(b.startShot));
     return BgmPlan(List.unmodifiable(next));
+  }
+
+  /// 相邻的同一首曲子并成一段——不在接缝处从头重播。
+  ///
+  /// 音量取**最后设的那个**（[winningVolume]）：用户刚在选择浮层里调过，
+  /// 被前一段盖掉会让人觉得「我刚设的没生效」。因此确实改到了别的段时，
+  /// 通过 [mergedVolumeNotice] 说一声，不静默。
+  static BgmPlan _merged(List<BgmSegment> sorted, {double? winningVolume}) {
+    final out = <BgmSegment>[];
+    var changedVolume = false;
+    for (final s in sorted) {
+      final last = out.isEmpty ? null : out.last;
+      if (last != null &&
+          last.material.id == s.material.id &&
+          last.endShot + 1 == s.startShot) {
+        final volume = winningVolume ?? last.volume;
+        if (last.volume != volume || s.volume != volume) changedVolume = true;
+        out[out.length - 1] =
+            last.copyWith(endShot: s.endShot, volume: volume);
+        continue;
+      }
+      out.add(s);
+    }
+    return BgmPlan(
+      List.unmodifiable(out),
+      mergedVolumeNotice: changedVolume && winningVolume != null
+          ? '已与相邻的同一段配乐合并，整段音量设为 '
+              '${(winningVolume * 100).round()}%'
+          : null,
+    );
   }
 
   /// 只改某一段的音量，不换曲子。[startShot] 用来认段；找不到就原样返回。
