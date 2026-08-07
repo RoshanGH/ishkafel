@@ -53,6 +53,12 @@ class CandidatePanel extends StatelessWidget {
   final bool tagHitsLoading;
   final VoidCallback? onProbeTagHits;
 
+  /// 检索限定在哪个项目组内；null 表示没设，检索会横跨我的全部项目。
+  ///
+  /// 必须一直摆在明面上：项目组是排他性的筛选条件，看不见它就没法判断
+  /// 「搜出来的东西不对」到底是标签选错了还是根本没限项目。
+  final String? projectName;
+
   const CandidatePanel({
     super.key,
     required this.picking,
@@ -69,6 +75,7 @@ class CandidatePanel extends StatelessWidget {
     this.tagHits,
     this.tagHitsLoading = false,
     this.onProbeTagHits,
+    this.projectName,
   });
 
   /// 镜头替换只有画面视图：那一层挑的就是画面，摆一个台词列表反而绕远
@@ -133,7 +140,33 @@ class CandidatePanel extends StatelessWidget {
           Text('${seconds.toStringAsFixed(1)}s',
               style: const TextStyle(
                   color: AppColors.textTertiary, fontSize: AppFontSize.caption)),
+          const Spacer(),
+          // 面板窄的时候项目名可能很长，让它省略而不是把标题挤出去
+          Flexible(child: _projectChip()),
         ],
+      ),
+    );
+  }
+
+  /// 项目组范围。设了就低调显示，没设就用警示色——不限项目时搜出来的
+  /// 素材横跨几十个项目，多半用不上，这个状态必须刺眼
+  Widget _projectChip() {
+    final name = projectName;
+    final scoped = name != null && name.isNotEmpty;
+    final color = scoped ? AppColors.textSecondary : AppColors.orange;
+    return Container(
+      key: const Key('picking-project-scope'),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: Text(
+        scoped ? '限定项目组 · $name' : '未设项目组 · 搜的是我的全部项目',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(color: color, fontSize: AppFontSize.caption),
       ),
     );
   }

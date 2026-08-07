@@ -225,4 +225,49 @@ void main() {
     gate.complete();
     await expectLater(pending, completes);
   });
+
+  group('项目组是排他性的筛选条件', () {
+    /// 三种检索方式 + 翻页，都必须把 --projects 带上。
+    /// 少带一处，用户就会在这个项目里看到别的项目的素材，
+    /// 而界面上根本看不出是哪一步漏了。
+    Future<List<List<String>>> callsOf(
+        Future<void> Function(CandidateSearchController c) run) async {
+      final calls = <List<String>>[];
+      final controller = CandidateSearchController(
+        service: MiaoaContentService(run: (_, args) async {
+          calls.add(args);
+          return _ok(_searchJson(1, total: 100));
+        }),
+        probe: CandidateProbe(run: (_, _) async => _ok(_probeStdout)),
+        projectIds: const [104],
+      );
+      await run(controller);
+      controller.dispose();
+      return calls;
+    }
+
+    test('按标签检索带上项目组', () async {
+      final calls = await callsOf((c) => c.searchByTags(tagIds: const [13589]));
+      expect(calls.single, containsAllInOrder(['--projects', '104']));
+    });
+
+    test('按画面描述检索带上项目组', () async {
+      final calls = await callsOf((c) => c.searchByDescription('电饭煲'));
+      expect(calls.single, containsAllInOrder(['--projects', '104']));
+    });
+
+    test('首帧搜图带上项目组', () async {
+      final calls = await callsOf((c) => c.searchByImage('oss/a.jpg'));
+      expect(calls.single, containsAllInOrder(['--projects', '104']));
+    });
+
+    test('翻页时同样带上——翻到第二页就搜遍全库的话更难发现', () async {
+      final calls = await callsOf((c) async {
+        await c.searchByDescription('电饭煲');
+        await c.nextPage();
+      });
+      expect(calls, hasLength(2));
+      expect(calls.last, containsAllInOrder(['--projects', '104']));
+    });
+  });
 }

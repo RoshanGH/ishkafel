@@ -6,6 +6,7 @@ import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
@@ -107,7 +108,8 @@ List<SemanticUnit> _units() => const [
 
 late List<CandidateMaterial> played;
 
-Future<_Content> _pump(WidgetTester tester, {bool empty = false}) async {
+Future<_Content> _pump(WidgetTester tester,
+    {bool empty = false, ProjectRef? project}) async {
   played = [];
   final content = _Content()..empty = empty;
   tester.view.physicalSize = const Size(360, 900);
@@ -133,6 +135,7 @@ Future<_Content> _pump(WidgetTester tester, {bool empty = false}) async {
           tagService: _Tags(),
           candidateProbe: CandidateProbe(run: (_, _) async => throw 'no probe'),
           onPreview: (context, material) async => played.add(material),
+          project: project,
           // 每页 3 条：够验证翻页，又不必造一屏数据
           pageSize: 3,
         ),
@@ -313,6 +316,32 @@ void main() {
       await _whole(tester);
 
       expect(find.byKey(const Key('picking-probe-tag-hits')), findsNothing);
+    });
+  });
+
+  group('项目组范围一直摆在明面上', () {
+    /// 项目组是排他性的筛选条件。看不见它，用户就没法判断
+    /// 「搜出来的东西不对」是标签选错了还是根本没限项目——
+    /// 真实排查里就为这个来回猜过一轮。
+    testWidgets('设了项目组就写出是哪个', (tester) async {
+      await _pump(tester,
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+
+      expect(find.text('限定项目组 · 滴露植源喷雾'), findsOneWidget);
+    });
+
+    testWidgets('没设项目组时明确说搜的是全部项目', (tester) async {
+      await _pump(tester);
+
+      expect(find.text('未设项目组 · 搜的是我的全部项目'), findsOneWidget);
+    });
+
+    testWidgets('换到镜头替换照样在——两层用的是同一个项目组', (tester) async {
+      await _pump(tester,
+          project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
+      await _perShot(tester);
+
+      expect(find.text('限定项目组 · 滴露植源喷雾'), findsOneWidget);
     });
   });
 }

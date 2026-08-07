@@ -387,6 +387,7 @@ class CandidateTabState extends State<CandidateTab> {
           tagHits: _tagHits,
           tagHitsLoading: _tagHitsLoading,
           onProbeTagHits: _probeTagHits,
+          projectName: widget.project?.name,
         ),
       );
 }

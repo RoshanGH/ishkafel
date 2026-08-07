@@ -424,7 +424,18 @@ class TimelinePainter extends CustomPainter {
           ..strokeWidth = 1,
       );
 
-      final maxWidth = rect.width - _shotLabelPadding * 2;
+      // 徽标在左、删除按钮在右，文字只能用中间剩下的那段——不让开的话
+      // 曲名会被压在徽标底下（真机上就这么糊过一次）
+      final badge = ReplacementBadges.bgmBadgeRect(rect);
+      final showBadge = span.segment.materials.length > 1 && badge != null;
+      final showDelete = rect.width >= bgmDeleteMinWidth;
+      final textLeft = rect.left +
+          _shotLabelPadding +
+          (showBadge ? badge.width + ReplacementBadges.inset : 0);
+      final textRight = rect.right -
+          _shotLabelPadding -
+          (showDelete ? bgmDeleteSize + bgmEdgeHitRadius : 0);
+      final maxWidth = textRight - textLeft;
       if (maxWidth <= 0) continue;
       canvas.save();
       canvas.clipRect(rect);
@@ -435,13 +446,12 @@ class TimelinePainter extends CustomPainter {
       final fit = short.isEmpty ? '' : ' · $short';
       // 选了几首备选就标几——和 U/S 两层的徽标一个意思：导出时这一段会
       // 轮流用这几首
-      if (span.segment.materials.length > 1) {
-        _drawBadge(canvas, ReplacementBadges.bgmBadgeRect(rect),
-            '${span.segment.materials.length}');
+      if (showBadge) {
+        _drawBadge(canvas, badge, '${span.segment.materials.length}');
       }
 
       // 段落上直接给一个删除按钮：此前删一段要点开素材库浮层再点移除，太重
-      if (rect.width >= bgmDeleteMinWidth) {
+      if (showDelete) {
         final boxRight = rect.right - bgmEdgeHitRadius;
         final boxTop = rect.top + 2;
         final center =
@@ -459,7 +469,7 @@ class TimelinePainter extends CustomPainter {
       _drawText(
         canvas,
         '${span.segment.previewMaterial.name}$fit',
-        Offset(rect.left + _shotLabelPadding, rect.top + 5),
+        Offset(textLeft, rect.top + 5),
         AppColors.textPrimary,
         fontSize: AppFontSize.micro,
         maxWidth: maxWidth,
