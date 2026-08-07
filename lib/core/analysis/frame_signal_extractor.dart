@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../ffmpeg/process_runner.dart';
 import 'frame_signal.dart';
+import '../log/app_log.dart';
 
 /// `metadata=print` 的每条记录：`pts_time:0.0333 … lavfi.scene_score=0.101`
 final _sceneRecord =
@@ -97,9 +98,23 @@ class FrameSignalExtractor {
     if (!await sceneFile.exists() || !await thumbFile.exists()) {
       throw const FfmpegException('画面分析产物缺失，无法检测视觉镜头切点');
     }
-    return buildFrameSignals(
+    final signals = buildFrameSignals(
       sceneMetadata: await sceneFile.readAsString(),
       thumbBytes: await thumbFile.readAsBytes(),
     );
+    // 这两个是 ffmpeg 与 Dart 之间的中转文件，读完就再没人看了。
+    // 缩略图流一条 96 秒的片子就是 8.5MB，留着只是白占地方
+    await _discard(sceneFile);
+    await _discard(thumbFile);
+    return signals;
+  }
+
+  /// 删不掉不算错误：中转文件留下来最多占点地方，为它中断切点检测才是本末倒置
+  static Future<void> _discard(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      AppLog.warn('清理画面分析中转文件失败 ${file.path}：$e');
+    }
   }
 }

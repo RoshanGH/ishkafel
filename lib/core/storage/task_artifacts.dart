@@ -1,0 +1,155 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../log/app_log.dart';
+
+/// 中间产物归属判定：文件名等于 id，或以 `id.` / `id_` 开头。
+///
+/// 不能用裸前缀匹配——id 为 `ab` 时 `abc.pcm` 也会被判成它的产物，清理时
+/// 就会误删另一条任务的文件。分隔符是这条判定的全部意义所在。
+bool artifactBelongsTo(String name, String taskId) =>
+    name == taskId ||
+    name.startsWith('$taskId.') ||
+    name.startsWith('${taskId}_');
+
+/// **一条任务在磁盘上会留下什么——唯一的一份清单。**
+///
+/// 为什么要有这个类：产物散在七八个目录里，删任务的清理器、设置页的「可回收
+/// 空间」、启动时的孤儿清扫各自维护一份路径清单，只要有一处漏掉，那类产物就
+/// 永远留在盘上没人管。真机上就是这个下场——1.4G 数据里活着的任务只有一条，
+/// 六条已删任务的封面、人声分离结果（32M/条）、预览切片全都还躺着，
+/// 因为清理器写的是 `if (entity is! File) continue`，把目录整个跳过了。
+///
+/// 新增一种产物**只改这里**，删任务与孤儿清扫会自动覆盖到它。
+class TaskArtifacts {
+  final Directory dataDir;
+
+  const TaskArtifacts(this.dataDir);
+
+  /// 一个任务一个子目录的那些：`<这个目录>/<taskId>/…`
+  static const perTaskDirNames = [
+    'preview_audio', // 预览音轨的中间产物
+    'preview_video', // 预览画面的段落切片
+    'export_work', // 导出的中间产物
+    'voices', // 生成的配音
+    'picked_thumbs', // 已选素材的首帧图
+  ];
+
+  /// 分析工作目录：任务产物**平铺**在这里（`<id>_thumbs.raw`、`<id>.pcm`…），
+  /// 外加两个按任务分的子目录（`<id>_frames/`、`stems/<id>/`）
+  Directory get workDir => Directory(p.join(dataDir.path, 'analysis_work'));
+
+  Directory get coversDir => Directory(p.join(dataDir.path, 'covers'));
+
+  Directory get stemsDir => Directory(p.join(workDir.path, 'stems'));
+
+  /// 属于 [taskId] 的全部产物（文件与目录都算）
+  List<FileSystemEntity> of(String taskId) => [
+        File(p.join(coversDir.path, '$taskId.jpg')),
+        ..._workEntities().where(
+            (e) => artifactBelongsTo(p.basename(e.path), taskId)),
+        Directory(p.join(stemsDir.path, taskId)),
+        for (final name in perTaskDirNames)
+          Directory(p.join(dataDir.path, name, taskId)),
+      ].where((e) => e.existsSync()).toList();
+
+  /// 「用完即弃」的中转文件——**不管属于哪条任务，一律该删**。
+  ///
+  /// 它们只在产生它们的那一步里被读一次：
+  /// - `<id>.pcm`：ASR 的输入，转完就没人看了（一条 96 秒的片子 18MB）；
+  /// - `<id>_thumbs.raw`：切点检测的缩略图流，算完信号就没人看了（8.5MB）；
+  /// - `<id>_scene.txt`：ffmpeg 场景分数的中转文件，同上；
+  /// - `<id>_rev<ms>.jpg`：切点复核图，模型判完就没人看了（一条片子上百张）。
+  ///
+  /// 新代码已经在用完那一刻删掉它们，这里管的是**老存档留下的那批**——
+  /// 它们归属得到现存任务，[orphans] 永远不会碰。
+  List<FileSystemEntity> transients() => _workEntities()
+      .whereType<File>()
+      .where((e) => isTransient(p.basename(e.path)))
+      .toList();
+
+  static final _transientPatterns = [
+    RegExp(r'\.pcm$'),
+    RegExp(r'_thumbs\.raw$'),
+    RegExp(r'_scene\.txt$'),
+    RegExp(r'_rev\d+\.jpg$'),
+  ];
+
+  static bool isTransient(String name) =>
+      _transientPatterns.any((re) => re.hasMatch(name));
+
+  /// 归属不到 [liveTaskIds] 里任何一条的产物。
+  ///
+  /// 崩溃、手动删存档、开发期换机器——总会留下没主的东西，删任务时清干净
+  /// 只解决一半问题，启动时再扫一遍才是根治。
+  List<FileSystemEntity> orphans(Set<String> liveTaskIds) {
+    bool orphan(String name) =>
+        !liveTaskIds.any((id) => artifactBelongsTo(name, id));
+
+    return [
+      ..._children(coversDir).where((e) => orphan(_stem(e))),
+      ..._workEntities().where((e) => orphan(p.basename(e.path))),
+      ..._children(stemsDir).where((e) => orphan(p.basename(e.path))),
+      for (final name in perTaskDirNames)
+        ..._children(Directory(p.join(dataDir.path, name)))
+            .where((e) => orphan(p.basename(e.path))),
+    ];
+  }
+
+  /// 删掉给定的这些，返回**实际**释放的字节数（删失败的不计入，不虚报）
+  int delete(Iterable<FileSystemEntity> entities) {
+    var freed = 0;
+    for (final entity in entities) {
+      if (!entity.existsSync()) continue;
+      final size = sizeOf(entity);
+      try {
+        entity.deleteSync(recursive: true);
+        freed += size;
+      } catch (e) {
+        // 单个被占用/无权限不该中断整轮清理
+        AppLog.warn('清理产物失败 ${entity.path}：$e');
+      }
+    }
+    return freed;
+  }
+
+  static int sizeOf(FileSystemEntity entity) {
+    try {
+      if (entity is File) return entity.lengthSync();
+      if (entity is Directory) {
+        var total = 0;
+        for (final child
+            in entity.listSync(recursive: true, followLinks: false)) {
+          if (child is File) total += child.lengthSync();
+        }
+        return total;
+      }
+    } catch (e) {
+      // 扫描期间被删掉是正常竞态
+      AppLog.warn('读取产物大小失败 ${entity.path}：$e');
+    }
+    return 0;
+  }
+
+  /// analysis_work 第一层里属于任务的东西。`stems` 是按任务分的子目录，
+  /// 不在这一层算——它由 [stemsDir] 单独管
+  List<FileSystemEntity> _workEntities() => _children(workDir)
+      .where((e) => p.basename(e.path) != 'stems')
+      .toList();
+
+  static List<FileSystemEntity> _children(Directory dir) {
+    if (!dir.existsSync()) return const [];
+    try {
+      return dir.listSync(followLinks: false);
+    } catch (e) {
+      AppLog.warn('读取目录失败 ${dir.path}：$e');
+      return const [];
+    }
+  }
+
+  /// 封面是 `<id>.jpg`，归属判定要拿掉扩展名再比——否则 `ab.jpg` 会被
+  /// 当成 id 为 `ab.jpg` 的任务的产物
+  static String _stem(FileSystemEntity entity) =>
+      p.basenameWithoutExtension(entity.path);
+}

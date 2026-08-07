@@ -53,7 +53,8 @@ List<SemanticUnit> _units() => const [
   final work = Directory.systemTemp.createTempSync('ishkafel_exp_work_');
   final out = Directory.systemTemp.createTempSync('ishkafel_exp_out_');
   addTearDown(() {
-    work.deleteSync(recursive: true);
+    // 导出跑完会自己把工作目录清掉，这里只兜底没跑到那一步的用例
+    if (work.existsSync()) work.deleteSync(recursive: true);
     out.deleteSync(recursive: true);
   });
   final fetched = <int>[];
@@ -221,5 +222,37 @@ void main() {
 
     expect(results, hasLength(1));
     expect(results.single.ok, isTrue);
+  });
+
+  group('导出完把中间产物清掉', () {
+    /// 成片已经写到用户指定的目录，工作目录里那堆切片和中间音轨就没用了。
+    /// 一批导出动辄几百兆，留着只会让磁盘只增不减。
+    test('跑完之后工作目录不留东西', () async {
+      final work = Directory.systemTemp.createTempSync('ishkafel_exp_clean_');
+      final out = Directory.systemTemp.createTempSync('ishkafel_exp_kept_');
+      addTearDown(() {
+        if (work.existsSync()) work.deleteSync(recursive: true);
+        out.deleteSync(recursive: true);
+      });
+      final runner = ExportRunner(
+        run: (binary, args) async {
+          await File(args.last).writeAsString('out');
+          return ProcessResult(1, 0, '', '');
+        },
+        workDir: work,
+        fetchMaterial: (id) async => '/m/$id.mp4',
+      );
+
+      final results = await runner.exportAll(
+        sourcePath: '/v/a.mp4',
+        units: _units(),
+        replacements: const [],
+        outputDir: out,
+      );
+
+      expect(results, hasLength(1));
+      expect(work.existsSync(), isFalse);
+      expect(out.listSync(), isNotEmpty, reason: '成片本身当然要留着');
+    });
   });
 }

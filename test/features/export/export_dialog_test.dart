@@ -49,7 +49,8 @@ Future<void> _open(
   final work = Directory.systemTemp.createTempSync('ishkafel_ed_work_');
   final out = Directory.systemTemp.createTempSync('ishkafel_ed_out_');
   addTearDown(() {
-    work.deleteSync(recursive: true);
+    // 导出跑完会自己把工作目录清掉
+    if (work.existsSync()) work.deleteSync(recursive: true);
     out.deleteSync(recursive: true);
   });
 
@@ -132,7 +133,9 @@ void main() {
 
   testWidgets('失败的逐条点名带原因，不让用户自己找', (tester) async {
     final work = Directory.systemTemp.createTempSync('ishkafel_ed_fail_');
-    addTearDown(() => work.deleteSync(recursive: true));
+    addTearDown(() {
+      if (work.existsSync()) work.deleteSync(recursive: true);
+    });
 
     await _open(
       tester,

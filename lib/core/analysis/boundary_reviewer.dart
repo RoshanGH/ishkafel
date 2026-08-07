@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -100,6 +101,14 @@ class BoundaryReviewer {
     return BoundaryVerdict.unknown;
   }
 
+  static Future<void> _discard(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      AppLog.warn('清理切点复核图失败 ${file.path}：$e');
+    }
+  }
+
   Future<BoundaryVerdict> reviewOne({
     required String videoPath,
     required ShotBoundaryCandidate candidate,
@@ -119,6 +128,9 @@ class BoundaryReviewer {
               outPath: outPath));
       if (result.exitCode != 0) return BoundaryVerdict.unknown;
       final bytes = await File(outPath).readAsBytes();
+      // 复核图只喂给模型判这一次，判完就没人看了（打标痕迹里存的是打标帧，
+      // 不是复核帧）。一条 96 秒的片子会攒下上百张
+      unawaited(_discard(File(outPath)));
       // 判断题，不是创作题：不给 0 的话同一个切点两次能给出不同结论，
       // 而视觉镜头层本该是「程序切的、可复现的」。
       //

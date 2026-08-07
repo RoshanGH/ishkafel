@@ -311,7 +311,20 @@ class ExportRunner {
       }
     }
     onProgress?.call(total, total, '完成');
+    // 成片已经写到用户指定的目录，工作目录里那堆切片/中间音轨就没用了。
+    // 一批导出的中间产物动辄几百兆，留着只会让磁盘只增不减；下次导出要用
+    // 什么会重新渲染，这里没有什么值得留的
+    _discardWorkDir();
     return List.unmodifiable(out);
+  }
+
+  /// 删不掉不算错误：导出本身已经成了，为清理报错是本末倒置
+  void _discardWorkDir() {
+    try {
+      if (workDir.existsSync()) workDir.deleteSync(recursive: true);
+    } catch (e) {
+      AppLog.warn('清理导出中间产物失败 ${workDir.path}：$e');
+    }
   }
 
   /// 拼一条成片：逐段渲染画面 → concat → 与共用的声音合成

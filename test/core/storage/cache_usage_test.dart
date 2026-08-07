@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/storage/cache_usage.dart';
+import 'package:ishkafel/core/storage/task_artifacts.dart';
 
 late Directory _root;
 late Directory _covers;
@@ -28,7 +29,7 @@ void main() {
       _write(_work, 'a.pcm', 1000);
       _write(_work, 'a_tl32_0.jpg', 500);
 
-      final usage = await CacheScanner(coversDir: _covers, workDir: _work)
+      final usage = await CacheScanner(dataDir: _root)
           .scan(knownTaskIds: const {'a'});
 
       expect(usage.coversBytes, 100);
@@ -38,10 +39,8 @@ void main() {
     });
 
     test('目录不存在时给 0，而不是抛异常', () async {
-      final usage = await CacheScanner(
-        coversDir: Directory('${_root.path}/nope'),
-        workDir: Directory('${_root.path}/nope2'),
-      ).scan(knownTaskIds: const {});
+      final usage = await CacheScanner(dataDir: Directory('${_root.path}/nope'))
+          .scan(knownTaskIds: const {});
 
       expect(usage.totalBytes, 0);
       expect(usage.fileCount, 0);
@@ -50,7 +49,7 @@ void main() {
     test('子目录里的文件也算进去', () async {
       _write(_work, 'sub/deep.bin', 700);
 
-      final usage = await CacheScanner(coversDir: _covers, workDir: _work)
+      final usage = await CacheScanner(dataDir: _root)
           .scan(knownTaskIds: const {});
 
       expect(usage.workBytes, 700,
@@ -64,7 +63,7 @@ void main() {
       _write(_work, 'ghost.pcm', 300);
       _write(_covers, 'ghost.jpg', 50);
 
-      final usage = await CacheScanner(coversDir: _covers, workDir: _work)
+      final usage = await CacheScanner(dataDir: _root)
           .scan(knownTaskIds: const {'alive'});
 
       expect(usage.orphanBytes, 350);
@@ -78,7 +77,7 @@ void main() {
       _write(_work, 'ab.pcm', 100);
       _write(_work, 'abc.pcm', 100);
 
-      final usage = await CacheScanner(coversDir: _covers, workDir: _work)
+      final usage = await CacheScanner(dataDir: _root)
           .scan(knownTaskIds: const {'ab'});
 
       expect(usage.orphanCount, 1, reason: 'abc 才是孤儿，ab 的产物必须保住');
@@ -89,7 +88,7 @@ void main() {
       _write(_work, 'a.pcm', 100);
       _write(_covers, 'a.jpg', 50);
 
-      final usage = await CacheScanner(coversDir: _covers, workDir: _work)
+      final usage = await CacheScanner(dataDir: _root)
           .scan(knownTaskIds: const {'a'});
 
       expect(usage.orphanCount, 0);
@@ -102,7 +101,7 @@ void main() {
       _write(_work, 'alive.pcm', 100);
       _write(_work, 'ghost.pcm', 300);
 
-      final scanner = CacheScanner(coversDir: _covers, workDir: _work);
+      final scanner = CacheScanner(dataDir: _root);
       final freed = await scanner.purgeOrphans(knownTaskIds: const {'alive'});
 
       expect(freed, 300);
@@ -110,28 +109,25 @@ void main() {
       expect(File('${_work.path}/ghost.pcm').existsSync(), isFalse);
     });
 
-    test('单个文件删不掉（占用/权限）不影响其余文件被清理', () async {
+    test('清到一半遇到已经不在的东西就跳过，其余照删', () async {
       _write(_work, 'ghost1.pcm', 100);
       _write(_work, 'ghost2.pcm', 200);
+      final artifacts = TaskArtifacts(_root);
 
-      final scanner = CacheScanner(
-        coversDir: _covers,
-        workDir: _work,
-        deleteFile: (file) async {
-          if (file.path.endsWith('ghost1.pcm')) throw const FileSystemException('占用中');
-          await file.delete();
-        },
-      );
-      final freed = await scanner.purgeOrphans(knownTaskIds: const {});
+      final freed = artifacts.delete([
+        File('${_work.path}/ghost1.pcm'),
+        File('${_work.path}/根本不存在.pcm'),
+        File('${_work.path}/ghost2.pcm'),
+      ]);
 
-      expect(freed, 200, reason: '实际释放的只有删成功的那部分，不能虚报');
+      expect(freed, 300, reason: '实际释放的只算删成功的那部分，不能虚报');
       expect(File('${_work.path}/ghost2.pcm').existsSync(), isFalse);
     });
 
     test('没有孤儿时不动任何文件', () async {
       _write(_work, 'a.pcm', 100);
 
-      final freed = await CacheScanner(coversDir: _covers, workDir: _work)
+      final freed = await CacheScanner(dataDir: _root)
           .purgeOrphans(knownTaskIds: const {'a'});
 
       expect(freed, 0);

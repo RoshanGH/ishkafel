@@ -32,6 +32,7 @@ import 'core/miaoa/miaoa_locator.dart';
 import 'core/miaoa/miaoa_tag_service.dart';
 import 'core/diagnostics/environment_report.dart';
 import 'core/storage/cache_usage.dart';
+import 'core/storage/task_artifacts.dart';
 import 'core/storage/file_task_repository.dart';
 import 'features/import_flow/import_service.dart';
 import 'features/settings/settings_providers.dart';
@@ -59,9 +60,8 @@ Future<void> main() async {
   final dataDir = Directory(p.join(supportDir.path, 'ishkafel_data'));
   final repository = FileTaskRepository(dataDir);
   final coversDir = Directory(p.join(dataDir.path, 'covers'));
-  final workDir = Directory(p.join(dataDir.path, 'analysis_work'));
   final artifactCleaner =
-      FileTaskArtifactCleaner(coversDir: coversDir, workDir: workDir);
+      FileTaskArtifactCleaner(dataDir: dataDir);
   final importService = ImportService(
     repository: repository,
     ffprobe: FfprobeService(),
@@ -82,6 +82,10 @@ Future<void> main() async {
   // 缺失时列表页常驻横幅引导安装，而不是等用户导入时撞见子进程异常
   final mediaTools = sharedMediaToolsLocator.preflight();
 
+  // 开机扫一遍孤儿产物。删任务时清干净只解决一半问题——崩溃、手动删存档、
+  // 开发期换机器总会留下没主的东西，它们只会一直躺在盘上占地方
+  await _sweepOrphans(repository, dataDir);
+
   runApp(ProviderScope(
     overrides: [
       taskRepositoryProvider.overrideWithValue(repository),
@@ -91,7 +95,7 @@ Future<void> main() async {
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里
       cacheScannerProvider.overrideWithValue(
-          CacheScanner(coversDir: coversDir, workDir: workDir)),
+          CacheScanner(dataDir: dataDir)),
       environmentProbeProvider.overrideWithValue(defaultEnvironmentProbe(
           mediaTools: mediaTools, credentials: credentials)),
       miaoaAccountServiceProvider.overrideWithValue(MiaoaAccountService()),
@@ -153,6 +157,27 @@ Future<void> main() async {
     ],
     child: const IshkafelApp(),
   ));
+}
+
+/// 清掉归属不到任何现存任务的产物。
+///
+/// 失败不阻断启动：读不出任务清单时**一个都不删**——宁可留着占地方，
+/// 也不能因为清单是空的就把用户所有素材当孤儿清了。
+Future<void> _sweepOrphans(FileTaskRepository repository, Directory dataDir) async {
+  try {
+    final tasks = await repository.findAll();
+    final artifacts = TaskArtifacts(dataDir);
+    // 无主的 + 用完即弃的。后者归属得到现存任务，只靠孤儿判定永远清不掉
+    final junk = [
+      ...artifacts.orphans({for (final t in tasks) t.id}),
+      ...artifacts.transients(),
+    ];
+    if (junk.isEmpty) return;
+    final freed = artifacts.delete(junk);
+    AppLog.info('启动清理：${junk.length} 项无用产物，释放 ${formatBytes(freed)}');
+  } catch (e) {
+    AppLog.warn('启动清理孤儿产物失败，跳过：$e');
+  }
 }
 
 /// 凭据完整时组装真实分析管线；不完整时返回 null（导入后跳过自动分析）。

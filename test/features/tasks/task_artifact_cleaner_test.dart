@@ -28,7 +28,7 @@ void main() {
     workDir = Directory('${tempDir.path}/analysis_work');
     await coversDir.create(recursive: true);
     await workDir.create(recursive: true);
-    cleaner = FileTaskArtifactCleaner(coversDir: coversDir, workDir: workDir);
+    cleaner = FileTaskArtifactCleaner(dataDir: tempDir);
   });
 
   tearDown(() async => tempDir.delete(recursive: true));
@@ -58,18 +58,44 @@ void main() {
   });
 
   test('目录整个不存在时静默通过，且不会把目录建出来', () async {
-    final missingCovers = Directory('${tempDir.path}/nope_covers');
-    final missingWork = Directory('${tempDir.path}/nope_work');
-    final empty = FileTaskArtifactCleaner(
-      coversDir: missingCovers,
-      workDir: missingWork,
-    );
+    final blank = Directory('${tempDir.path}/blank');
+    final empty = FileTaskArtifactCleaner(dataDir: blank);
 
     await empty.cleanup('ab');
 
-    expect(await missingCovers.exists(), isFalse,
-        reason: '清理不该反过来创建目录');
-    expect(await missingWork.exists(), isFalse);
+    expect(await blank.exists(), isFalse, reason: '清理不该反过来创建目录');
+  });
+
+  test('人声分离结果、抽帧目录、预览切片这些「目录型」产物也要删干净', () async {
+    // 真机上就是这几样删不掉：清理器写的是 `if (entity is! File) continue`，
+    // 把目录整个跳过了。一条任务的人声分离结果 32M，六条已删任务就是 200M
+    final stems = Directory('${workDir.path}/stems/ab')..createSync(recursive: true);
+    await touch(stems, '人声.wav');
+    final frames = Directory('${workDir.path}/ab_frames')..createSync();
+    await touch(frames, 'batch_000.jpg');
+    final preview = Directory('${tempDir.path}/preview_video/ab')
+      ..createSync(recursive: true);
+    await touch(preview, 'pv_src_0_1000.mp4');
+    final audio = Directory('${tempDir.path}/preview_audio/ab')
+      ..createSync(recursive: true);
+    await touch(audio, 'mix_voice.wav');
+    final voices = Directory('${tempDir.path}/voices/ab')..createSync(recursive: true);
+    await touch(voices, 'u0.wav');
+    final thumbs = Directory('${tempDir.path}/picked_thumbs/ab')
+      ..createSync(recursive: true);
+    await touch(thumbs, '100.jpg');
+
+    // 另一条任务的同类产物一个都不能碰
+    final otherStems = Directory('${workDir.path}/stems/zz')
+      ..createSync(recursive: true);
+    await touch(otherStems, '人声.wav');
+
+    await cleaner.cleanup('ab');
+
+    for (final dir in [stems, frames, preview, audio, voices, thumbs]) {
+      expect(await dir.exists(), isFalse, reason: '${dir.path} 该被删掉');
+    }
+    expect(await otherStems.exists(), isTrue);
   });
 
   test('清理一个从不存在的任务：不抛异常，也不碰其他任务的产物', () async {

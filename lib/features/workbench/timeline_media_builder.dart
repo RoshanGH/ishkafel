@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -158,18 +159,70 @@ class TimelineMediaBuilder {
     required Directory workDir,
     required int waveBuckets,
   }) async {
-    // 与分析管线共用同一份 PCM（同为 16kHz 单声道 s16le）：管线跑过就直接
-    // 命中缓存，既不重复占磁盘，也省掉第二次 ffmpeg 提取
+    // 缓存的是**算好的包络**（几百个浮点，几 KB），不是 PCM 本身。
+    //
+    // 早先是留着那份 16kHz 单声道 PCM 复用——可它一条 96 秒的片子就有 18MB，
+    // 而时间线要的只有包络。存包络之后 PCM 就成了纯中转文件，分析跑完即删。
+    final wavePath = timelineWavePath(workDir, taskId);
+    final cached = await _readEnvelope(wavePath, waveBuckets);
+    if (cached != null) return cached;
+
     final pcmPath = analysisPcmPath(workDir, taskId);
     try {
       final samples = await _isValidCacheFile(pcmPath, _minValidPcmBytes)
           ? AudioExtractor.bytesToPcm16(await File(pcmPath).readAsBytes())
           : await audio.extractSamples(
               videoPath: videoPath, outPcmPath: pcmPath);
-      return computeEnvelope(samples, waveBuckets);
+      final envelope = computeEnvelope(samples, waveBuckets);
+      await _writeEnvelope(wavePath, envelope);
+      // 算完就把中转的 PCM 丢掉：下次进来直接读包络，不必再解一遍音频
+      await _discard(File(pcmPath));
+      return envelope;
     } catch (e) {
       AppLog.warn('时间线音频提取失败（taskId=$taskId）：$e');
       return List.filled(waveBuckets, 0.0);
+    }
+  }
+
+  /// 读缓存的包络。桶数对不上（换了窗口宽度）就当没有——按别的桶数画出来
+  /// 的波形会和时间线对不齐
+  static Future<List<double>?> _readEnvelope(String path, int buckets) async {
+    final file = File(path);
+    if (!await file.exists()) return null;
+    try {
+      final json = jsonDecode(await file.readAsString());
+      if (json is! Map) return null;
+      if (json['buckets'] != buckets) return null;
+      final values = json['envelope'];
+      if (values is! List) return null;
+      return List<double>.unmodifiable(
+          values.map((v) => (v as num).toDouble()));
+    } catch (e) {
+      // 半截文件/格式变了：当没有，重算一遍就是
+      AppLog.warn('读取时间线波形缓存失败 $path：$e');
+      return null;
+    }
+  }
+
+  static Future<void> _writeEnvelope(String path, List<double> envelope) async {
+    try {
+      await File(path).writeAsString(jsonEncode({
+        'buckets': envelope.length,
+        // 三位小数足够画波形，全精度会让文件大三倍
+        'envelope': [
+          for (final v in envelope) double.parse(v.toStringAsFixed(3)),
+        ],
+      }));
+    } catch (e) {
+      AppLog.warn('写入时间线波形缓存失败 $path：$e');
+    }
+  }
+
+  static Future<void> _discard(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      AppLog.warn('清理中转 PCM 失败 ${file.path}：$e');
     }
   }
 

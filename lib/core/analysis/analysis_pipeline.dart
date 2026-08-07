@@ -27,6 +27,11 @@ import 'tagging_service.dart';
 /// 两处提取参数完全相同（16kHz 单声道 s16le），分开存会让同一份音频被写两
 /// 遍：一条 5 分钟素材约 20MB，白白翻倍。共用后时间线可直接命中管线的产物，
 /// 连第二次 ffmpeg 都省掉。
+/// 时间线波形缓存：算好的包络（几 KB），不是 PCM。
+/// 命名带 `<taskId>_` 前缀，删任务与孤儿清扫自动覆盖到它（见 TaskArtifacts）
+String timelineWavePath(Directory workDir, String taskId) =>
+    p.join(workDir.path, '${taskId}_wave.json');
+
 String analysisPcmPath(Directory workDir, String taskId) =>
     p.join(workDir.path, '$taskId.pcm');
 
@@ -133,6 +138,16 @@ class AnalysisPipeline {
   ///
   /// 回调抛异常只记日志：进度只是「说一声」，因为没人听就把整条分析废掉，
   /// 等于让十几分钟的计算白跑。
+  /// 删不掉不算错误：留着最多占点地方，为它中断分析才是本末倒置
+  static Future<void> _discardPcm(String path) async {
+    try {
+      final file = File(path);
+      if (await file.exists()) await file.delete();
+    } catch (e) {
+      AppLog.warn('清理 ASR 中转 PCM 失败 $path：$e');
+    }
+  }
+
   void _report(AnalysisProgressSink? sink, AnalysisStage stage,
       {int? done, int? total}) {
     // 同一阶段的多次进度上报（打标的 n/m）不重新计时，只在换阶段时结算
@@ -231,6 +246,9 @@ class AnalysisPipeline {
 
     _report(onProgress, AnalysisStage.transcribing);
     final sentences = await sentencesFuture;
+    // ASR 是这份 PCM 的唯一读者，转完就没人看了。一条 96 秒的片子约 18MB，
+    // 留着只会让 analysis_work 只增不减；真要重跑分析，重抽一次只要几秒
+    unawaited(_discardPcm(pcmPath));
 
     _report(onProgress, AnalysisStage.splitting);
     final drafts = await splitter.split(sentences);

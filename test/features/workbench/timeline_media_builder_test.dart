@@ -251,7 +251,7 @@ void main() {
       ]);
     });
 
-    test('PCM 与分析管线共用同一路径 <taskId>.pcm，不再另写一份 _tl.pcm', () async {
+    test('波形算完就把中转 PCM 丢掉，只留几 KB 的包络缓存', () async {
       final thumbs = fakeThumbnails();
       final audio = fakeAudio();
       final builder =
@@ -266,10 +266,55 @@ void main() {
         waveBuckets: 4,
       );
 
-      expect(audio.calls.single.last, analysisPcmPath(workDir, 't8'));
-      expect(await File('${workDir.path}/t8.pcm').exists(), isTrue);
-      expect(await File('${workDir.path}/t8_tl.pcm').exists(), isFalse,
-          reason: '同参数音频不应被存两遍');
+      expect(audio.calls.single.last, analysisPcmPath(workDir, 't8'),
+          reason: '提取仍走管线那条共享路径，不另写一份 _tl.pcm');
+      expect(await File('${workDir.path}/t8.pcm').exists(), isFalse,
+          reason: '18MB 的 PCM 只是中转，时间线要的是包络');
+      expect(await File(timelineWavePath(workDir, 't8')).exists(), isTrue);
+      expect(await File('${workDir.path}/t8_tl.pcm').exists(), isFalse);
+    });
+
+    test('第二次进来直接读包络缓存，不再解一遍音频', () async {
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      Future<TimelineMedia> once() => builder.build(
+            videoPath: '/v/a.mp4',
+            taskId: 't9',
+            durationMs: 6000,
+            workDir: workDir,
+            thumbCount: 1,
+            waveBuckets: 4,
+          );
+
+      final first = await once();
+      final second = await once();
+
+      expect(audio.calls, hasLength(1), reason: '第二次该命中包络缓存');
+      expect(second.waveEnvelope, first.waveEnvelope);
+    });
+
+    test('换了桶数就重算——按别的桶数画的波形和时间线对不齐', () async {
+      final thumbs = fakeThumbnails();
+      final audio = fakeAudio();
+      final builder =
+          TimelineMediaBuilder(thumbnails: thumbs.service, audio: audio.service);
+
+      Future<void> once(int buckets) => builder.build(
+            videoPath: '/v/a.mp4',
+            taskId: 't10',
+            durationMs: 6000,
+            workDir: workDir,
+            thumbCount: 1,
+            waveBuckets: buckets,
+          );
+
+      await once(4);
+      await once(8);
+
+      expect(audio.calls, hasLength(2));
     });
 
     test('分析管线已产出的 PCM 被直接复用，不再重复提取', () async {
