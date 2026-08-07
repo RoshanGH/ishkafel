@@ -76,6 +76,9 @@ class TimelineView extends StatefulWidget {
   /// 当前替换方案：时间线上标出「哪几段挑好了素材、各几条」
   final List<UnitReplacement> replacements;
 
+  /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）
+  final Map<int, int> composedDurations;
+
   /// 点了那个数字徽标：跳到右栏对应的那一段（shotIndex 为 null 表示整体替换）
   final void Function(int unitIndex, int? shotIndex)? onReplacementBadgeTap;
 
@@ -109,6 +112,7 @@ class TimelineView extends StatefulWidget {
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.replacements = const [],
+    this.composedDurations = const {},
     this.onReplacementBadgeTap,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
@@ -527,6 +531,7 @@ class _TimelineViewState extends State<TimelineView> {
                     bgmSelecting: _bgmSelecting,
                     voices: widget.voices,
                     replacements: widget.replacements,
+                    composedDurations: widget.composedDurations,
                     textCache: _textCache,
                   ),
                 ),

@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import '../replaced_duration_label.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/features/workbench/timeline/bgm_track.dart';
@@ -47,6 +48,12 @@ class TimelinePainter extends CustomPainter {
   /// 当前替换方案（按单元下标对齐）。时间线上要看得见「哪几段已经挑好了
   /// 素材、各挑了几条」——此前这件事只在右栏里可见，回到时间线就断片了。
   final List<UnitReplacement> replacements;
+
+  /// 被整体替换的单元在**成片**里有多长（单元下标 → 毫秒）。
+  /// 时间线画的是原片切分、不变形，但要把「这一段成片里变成多长」写出来，
+  /// 否则用户不知道成片总长已经变了
+  final Map<int, int> composedDurations;
+
   final TimelineGeometry geometry;
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
@@ -89,6 +96,7 @@ class TimelinePainter extends CustomPainter {
     required this.geometry,
     this.bgm = BgmPlan.empty,
     this.bgmSelecting,
+    this.composedDurations = const {},
     this.voices = VoicePlan.empty,
     this.thumbImages,
     this.waveEnvelope,
@@ -271,6 +279,11 @@ class TimelinePainter extends CustomPainter {
   /// 单元块首行：编号 + 标签（打标接通后）或时长
   String _unitHeadline(SemanticUnit unit) {
     final id = 'U${unit.index + 1}';
+    // 整体替换会改变这一段在成片里的长度——那比标签更要紧，先写它
+    final replaced = replacedDurationLabel(
+        sourceMs: unit.endMs - unit.startMs,
+        composedMs: composedDurations[unit.index]);
+    if (replaced != null) return '$id · $replaced';
     if (unit.tags.isNotEmpty) return '$id ${unit.tags.first}';
     final seconds = (unit.endMs - unit.startMs) / 1000;
     return '$id · ${seconds.toStringAsFixed(1)}s';

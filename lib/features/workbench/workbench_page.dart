@@ -213,8 +213,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
     // 只更新 notifier，不触发页面重建；重复值直接丢弃（mpv 会重复上报同一毫秒）
     _positionSub = playback.positionMsStream.listen((ms) {
-      if (!mounted || _playhead.value == ms) return;
-      _playhead.value = ms;
+      if (!mounted) return;
+      // 预览播的可能是**合成出来的成片**（整体替换会改变时长），而时间线画的
+      // 是原片切分——播放头要换算回原片时刻，否则整体替换之后指针就飘了
+      final at = _previewAudio?.timeline?.toSourceMs(ms) ?? ms;
+      if (_playhead.value == at) return;
+      _playhead.value = at;
     });
     unawaited(_openSource(playback, task.sourcePath));
     unawaited(_loadMedia());
@@ -223,6 +227,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _previewAudio = PreviewAudioController(
       playback: playback,
       factory: ref.read(audioTrackBuilderFactoryProvider),
+      composerFactory: ref.read(previewComposerFactoryProvider),
     )..addListener(_onPreviewAudioChanged);
     _syncPreviewAudio();
   }
@@ -239,6 +244,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       task: _task,
       units: editor.units,
       voiceAudio: _voiceAudio,
+      // 有替换时预览要把画面也合出来——各槽位取标了 ★ 的那个候选
+      replacements: _replacements ?? const [],
     );
   }
 
@@ -549,6 +556,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _retryPreviewAudio() {
     _previewAudio?.invalidate();
     _syncPreviewAudio();
+  }
+
+  /// 被整体替换的单元在成片里的时长。预览合成完才知道（要读候选素材），
+  /// 没合成过时为空
+  Map<int, int> get _composedDurations {
+    final timeline = _previewAudio?.timeline;
+    if (timeline == null) return const {};
+    return {
+      for (final e in timeline.wholeDurations.entries) e.key: e.value,
+    };
   }
 
   /// 传给 miaoa CLI 的 `--projects`；不限项目时为空
@@ -915,6 +932,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
             Expanded(
               child: WorkbenchBody(
+                // 整体替换后这一段在成片里多长——时间线上标出来
+                composedDurations: _composedDurations,
                 editor: editor,
                 playback: playback,
                 videoWidget: _videoWidget,

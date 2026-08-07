@@ -65,6 +65,10 @@ class WorkbenchBody extends StatefulWidget {
 
   /// 当前替换方案：时间线上标出「哪几段挑好了素材、各几条」
   final List<UnitReplacement> replacements;
+
+  /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）。时间线上标出来，
+  /// 用户才知道成片总长已经变了
+  final Map<int, int> composedDurations;
   final void Function(int unitIndex)? onChangeVoice;
 
   /// 试听某个单元已生成的配音；返回 null 表示这一句还没生成
@@ -89,6 +93,7 @@ class WorkbenchBody extends StatefulWidget {
     this.clock,
     this.voices = VoicePlan.empty,
     this.replacements = const [],
+    this.composedDurations = const {},
     this.onChangeVoice,
     this.previewVoice,
     this.bgm = BgmPlan.empty,
@@ -378,6 +383,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   bgm: widget.bgm,
                   voices: widget.voices,
                   replacements: widget.replacements,
+                  composedDurations: widget.composedDurations,
                   onReplacementBadgeTap: _jumpToReplacement,
                   onBgmRangeSelected: widget.onBgmRangeSelected,
                   onBgmSegmentTap: widget.onBgmSegmentTap,

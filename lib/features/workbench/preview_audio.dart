@@ -10,7 +10,10 @@ import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/export/composed_timeline.dart';
 import '../../core/playback/playback_controller.dart';
+import '../../core/replacement/replacement_plan.dart';
+import 'preview_composer.dart';
 
 /// 造一个能干活的混音器（真实 ffmpeg + 任务自己的工作目录）。
 /// 缺省 null 由 main.dart 覆盖；测试注入假实现。
@@ -38,7 +41,14 @@ enum PreviewAudioState {
   failed,
 }
 
-/// 让预览里听到的就是导出后的声音。
+/// 造一个能干活的预览合成器（真实 ffmpeg + 素材下载）。
+/// 缺省 null 表示「不合成画面」——那时预览还是播原片、只挂外挂音轨
+typedef PreviewComposerFactory = PreviewComposer Function(String taskId);
+
+final previewComposerFactoryProvider =
+    Provider<PreviewComposerFactory?>((ref) => null);
+
+/// 让预览里听到的、**看到的**都是导出后的样子。
 ///
 /// **为什么必须合成一条**：配音是**替换**那几句的原声，配乐是**叠加**在背景上，
 /// 两者混在一起只有一个可靠做法——先合出成片那条音轨，再让播放器用它
@@ -50,14 +60,31 @@ class PreviewAudioController extends ChangeNotifier {
   final PlaybackController playback;
   final AudioTrackBuilderFactory? factory;
 
+  /// 画面合成器。有替换时把画面也拼出来，预览才看得到整体替换与变速；
+  /// 为空则退回「播原片 + 挂外挂音轨」（画面永远是原片）
+  final PreviewComposerFactory? composerFactory;
+
+  /// 原片路径，没有替换时播它
+  String? _sourcePath;
+
   /// 合成前的等待。拖一次边界会触发几十次改动，逐次合成既浪费又会排成长队。
   final Duration debounce;
 
   PreviewAudioController({
     required this.playback,
     required this.factory,
+    this.composerFactory,
     this.debounce = const Duration(milliseconds: 700),
   });
+
+  /// 成片的时间轴。整体替换会改变时长——播放头要靠它在「时间线（原片）」与
+  /// 「播放器（成片）」之间换算
+  ComposedTimeline? _timeline;
+  ComposedTimeline? get timeline => _timeline;
+
+  /// 现在播的是不是合成出来的片子（而不是原片）
+  bool get playingComposed => _composedPath != null;
+  String? _composedPath;
 
   PreviewAudioState _state = PreviewAudioState.original;
   PreviewAudioState get state => _state;
@@ -81,19 +108,27 @@ class PreviewAudioController extends ChangeNotifier {
     required RenewTask task,
     required List<SemanticUnit> units,
     required Map<int, String> voiceAudio,
+    List<UnitReplacement> replacements = const [],
   }) {
+    _sourcePath = task.sourcePath;
     final fingerprint = _fingerprintOf(
-        task: task, units: units, voiceAudio: voiceAudio);
+        task: task,
+        units: units,
+        voiceAudio: voiceAudio,
+        replacements: replacements);
     if (fingerprint == _builtFingerprint || fingerprint == _buildingFingerprint) {
       return;
     }
 
     _timer?.cancel();
-    // 没配乐也没换音色：原片那条音轨就是对的，什么都不做
-    if (task.bgm.segments.isEmpty && task.voices.isEmpty) {
+    // 没配乐、没换音色、也没有替换：原片就是正确答案，什么都不做
+    final hasReplacement = replacements.any((r) => r.factor > 1 ||
+        r.wholeCandidateIds.isNotEmpty ||
+        r.shotCandidateIds.values.any((v) => v.isNotEmpty));
+    if (task.bgm.segments.isEmpty && task.voices.isEmpty && !hasReplacement) {
       _builtFingerprint = fingerprint;
       _buildingFingerprint = null;
-      unawaited(playback.clearExternalAudio());
+      unawaited(_backToSource());
       _set(PreviewAudioState.original);
       return;
     }
@@ -103,8 +138,20 @@ class PreviewAudioController extends ChangeNotifier {
           fingerprint: fingerprint,
           task: task,
           units: units,
-          voiceAudio: voiceAudio));
+          voiceAudio: voiceAudio,
+          replacements: replacements));
     });
+  }
+
+  /// 回到「播原片」：替换全撤掉之后要把播放源换回去，否则还停在上一次
+  /// 合成出来的那条片子上
+  Future<void> _backToSource() async {
+    _timeline = null;
+    if (_composedPath != null && _sourcePath != null) {
+      _composedPath = null;
+      await playback.open(_sourcePath!);
+    }
+    await playback.clearExternalAudio();
   }
 
   Future<void> _build({
@@ -112,6 +159,7 @@ class PreviewAudioController extends ChangeNotifier {
     required RenewTask task,
     required List<SemanticUnit> units,
     required Map<int, String> voiceAudio,
+    List<UnitReplacement> replacements = const [],
   }) async {
     final make = factory;
     if (make == null) {
@@ -135,6 +183,29 @@ class PreviewAudioController extends ChangeNotifier {
       if (!File(track.path).existsSync()) {
         throw Exception('合成后的音轨文件不存在');
       }
+
+      // 有替换就把画面也拼出来——只挂外挂音轨的话，整体替换那一段
+      // 画面还停在原片上，从那儿之后声画全错位
+      final composed = await _composeVideo(
+          task: task,
+          units: units,
+          replacements: replacements,
+          audioPath: track.path);
+      if (_buildingFingerprint != fingerprint) return;
+      if (composed != null) {
+        _composedPath = composed.videoPath;
+        _timeline = composed.timeline;
+        await playback.open(composed.videoPath!);
+        _builtFingerprint = fingerprint;
+        _buildingFingerprint = null;
+        _failure =
+            track.bgmWarnings.isEmpty ? null : track.bgmWarnings.join('；');
+        _set(track.bgmWarnings.isEmpty
+            ? PreviewAudioState.ready
+            : PreviewAudioState.degraded);
+        return;
+      }
+
       final ok = await playback.setExternalAudio(track.path);
       _builtFingerprint = fingerprint;
       _buildingFingerprint = null;
@@ -155,6 +226,31 @@ class PreviewAudioController extends ChangeNotifier {
       _buildingFingerprint = null;
       _failure = '预览音轨合成失败，听到的仍是原片的声音：$e';
       _set(PreviewAudioState.failed);
+    }
+  }
+
+  /// 有替换时合成画面；没有替换、或者没装合成器时返回 null（退回外挂音轨）
+  Future<ComposedPreview?> _composeVideo({
+    required RenewTask task,
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+    required String audioPath,
+  }) async {
+    final makeComposer = composerFactory;
+    if (makeComposer == null || replacements.isEmpty) return null;
+    try {
+      final result = await makeComposer(task.id).compose(
+        sourcePath: task.sourcePath,
+        units: units,
+        replacements: replacements,
+        audioPath: audioPath,
+      );
+      return result.videoPath == null ? null : result;
+    } catch (e) {
+      // 画面合不出来时退回「原片 + 外挂音轨」：声音仍然是对的，
+      // 只是看不到替换效果，比整个预览黑掉强
+      AppLog.warn('预览画面合成失败，退回原片画面（taskId=${task.id}）：$e');
+      return null;
     }
   }
 
@@ -179,7 +275,13 @@ class PreviewAudioController extends ChangeNotifier {
     required RenewTask task,
     required List<SemanticUnit> units,
     required Map<int, String> voiceAudio,
+    List<UnitReplacement> replacements = const [],
   }) {
+    final picks = [
+      for (final r in replacements)
+        '${r.mode.name}:${r.wholePreviewId}:'
+            '${r.shotPreviewIds.entries.map((e) => '${e.key}-${e.value}').join('|')}',
+    ].join(',');
     final bgm = [
       for (final s in task.bgm.segments)
         '${s.startUnit}-${s.endUnit}-${s.previewMaterial.id}-${s.volume}',
@@ -189,7 +291,8 @@ class PreviewAudioController extends ChangeNotifier {
         '${a.unitIndex}-${a.voice.id}-${voiceAudio[a.unitIndex] ?? ''}',
     ].join(',');
     final bounds = [for (final u in units) '${u.startMs}-${u.endMs}'].join(',');
-    return '$bgm|$voices|$bounds|${task.vocalsPath ?? ''}';
+    // 预览版换了也要重合——那正是「预览播哪一个候选」的开关
+    return '$bgm|$voices|$bounds|${task.vocalsPath ?? ''}|$picks';
   }
 
   @override

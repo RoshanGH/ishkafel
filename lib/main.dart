@@ -46,6 +46,7 @@ import 'core/miaoa/miaoa_content_service.dart';
 import 'core/audio/vocal_separator.dart';
 import 'core/audio/audio_track_builder.dart';
 import 'features/workbench/preview_audio.dart';
+import 'features/workbench/preview_composer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -108,6 +109,22 @@ Future<void> main() async {
                 // 配乐走本地缓存：miaoa 的签名地址隔天就 403，直接拿存在任务
                 // 里的那个去请求，昨天选好的配乐今天就放不出来
                 resolveBgm: bgmCache(dataDir).fetch,
+              )),
+      // 预览合成：有替换时把画面也拼出来，看到的就是那一条变体
+      previewComposerFactoryProvider
+          .overrideWithValue((taskId) => PreviewComposer(
+                run: const ResolvingProcessRunner().call,
+                workDir:
+                    Directory(p.join(dataDir.path, 'preview_video', taskId)),
+                fetchMaterial: MaterialDownloader(
+                  content: MiaoaContentService(binary: resolveMiaoaBinary()),
+                  cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+                ).fetch,
+                probeDurationMs: (path) async => (await FfprobeService(
+                        run: const ResolvingProcessRunner().call)
+                    .probe(path))
+                    .duration
+                    .inMilliseconds,
               )),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
