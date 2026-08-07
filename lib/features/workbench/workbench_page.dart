@@ -797,6 +797,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       replacements: _replacements ?? const [],
       bgm: _task.bgm,
       voiceAudio: _voiceAudio,
+      // 导出前要核对「选了音色的单元是不是都生成了配音」——少了会静默出原声
+      voices: _task.voices,
       vocalsPath: _task.vocalsPath,
       outputDir: outputDir,
     );

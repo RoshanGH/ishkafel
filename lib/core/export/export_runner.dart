@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../audio/bgm_plan.dart';
+import '../audio/voice_plan.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
@@ -59,6 +60,39 @@ class ExportRunner {
     this.resolveBgm,
   });
 
+  /// 出片前的拦截：有任何一条会让成片**静默出错**就返回原因，否则 null。
+  ///
+  /// 这几条的共同点是「导出来的片子看着正常，其实不是用户要的」——
+  /// 用户发现不了，所以宁可不导。
+  static String? _deliveryBlocker({
+    required BgmPlan bgm,
+    required String? vocalsPath,
+    required VoicePlan voices,
+    required Map<int, String> voiceAudio,
+  }) {
+    // 有配乐却没有分离出来的人声轨：新配乐只能叠在原混音上，原片自带的
+    // 背景音还在，成片里两首曲子一起响
+    if (bgm.segments.isNotEmpty &&
+        (vocalsPath == null || !File(vocalsPath).existsSync())) {
+      return '这条片子有配乐，但没有分离出来的纯人声轨——直接导出会让新配乐'
+          '叠在原片背景音上（两首曲子一起响）。请先装好分离工具并重新分析';
+    }
+
+    // 选了音色却没生成配音：那一段会静默用回原声
+    final missing = <String>[];
+    for (final index in voices.assignedUnits) {
+      final path = voiceAudio[index];
+      if (path == null || !File(path).existsSync()) {
+        missing.add('U${index + 1}');
+      }
+    }
+    if (missing.isNotEmpty) {
+      return '${missing.join('、')} 选了音色但还没生成配音，'
+          '直接导出这几段会是原声。请先点「生成配音」';
+    }
+    return null;
+  }
+
   /// 导出全部组合到 [outputDir]。
   ///
   /// 一条失败不拖累其余：失败的那条记下原因继续跑下一条——十条里坏一条，
@@ -70,6 +104,10 @@ class ExportRunner {
     required Directory outputDir,
     BgmPlan bgm = BgmPlan.empty,
     Map<int, String> voiceAudio = const {},
+
+    /// 换音色方案。用来核对「选了音色的单元是不是都生成了配音」——
+    /// 少了会静默导出原声
+    VoicePlan voices = VoicePlan.empty,
 
     /// 分离出来的纯人声轨；被配乐覆盖的段落要用它，否则新旧背景一起响
     String? vocalsPath,
@@ -83,6 +121,21 @@ class ExportRunner {
     workDir.createSync(recursive: true);
     outputDir.createSync(recursive: true);
     final total = combos.length;
+
+    // 出片前先把「会静默做错」的几件事拦掉。
+    //
+    // **预览可以降级，成片不行**：预览时人还在编辑、听得出来；成片少一段
+    // 垫乐、少一句换过的配音、或者新旧背景叠在一起，交付出去没人会发现。
+    // 宁可这一次导不出来，也不能给一条看起来正常、其实是错的片子。
+    final blocker = _deliveryBlocker(
+        bgm: bgm, vocalsPath: vocalsPath, voices: voices, voiceAudio: voiceAudio);
+    if (blocker != null) {
+      AppLog.warn('导出前置检查未通过：$blocker');
+      return [
+        for (final c in combos)
+          ExportOutcome(index: c.index, failure: blocker),
+      ];
+    }
 
     onProgress?.call(0, total, '准备声音');
     final AudioTrack track;
@@ -107,9 +160,15 @@ class ExportRunner {
       ];
     }
 
-    // 少一段垫乐仍是能交付的成片，不该整批作废——但要如实说出来
-    for (final warning in track.bgmWarnings) {
-      onProgress?.call(0, total, warning);
+    // 配乐没铺上就是错的成片。预览那边是降级，这里必须失败
+    if (track.bgmWarnings.isNotEmpty) {
+      final why = track.bgmWarnings.join('；');
+      AppLog.warn('导出中止：$why');
+      return [
+        for (final c in combos)
+          ExportOutcome(
+              index: c.index, failure: '配乐没能铺上，已中止导出：$why'),
+      ];
     }
 
     final clips = <String, String>{}; // 段落指纹 → 已渲染的画面切片

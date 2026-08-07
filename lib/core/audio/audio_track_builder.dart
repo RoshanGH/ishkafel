@@ -28,7 +28,9 @@ import 'bgm_plan.dart';
 class AudioTrack {
   final String path;
 
-  /// 人话，可直接展示。为空表示一切正常
+  /// 哪几段配乐没铺上（人话，可直接展示）。为空表示一切正常。
+  ///
+  /// **预览据此提示、导出据此中止**——同一份信息，两种处置
   final List<String> bgmWarnings;
 
   const AudioTrack({required this.path, this.bgmWarnings = const []});
@@ -84,9 +86,13 @@ class AudioTrackBuilder {
 
     // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓。
     //
-    // **一段失败只丢那一段**：签名地址会过期、网络会断，而整条音轨作废意味着
-    // 用户连人声和换过的音色都听不到——真机上就这么炸过一次，界面只说了句
-    // 「预览音轨合成失败」，人完全不知道是哪条配乐、该做什么。
+    // **一段失败只丢那一段，并把原因带回去**：签名地址会过期、网络会断，
+    // 而整条音轨作废意味着用户连人声和换过的音色都听不到——真机上就这么
+    // 炸过一次，界面只说了句「预览音轨合成失败」，人完全不知道是哪条配乐。
+    //
+    // 但**只有预览可以这样**：预览时人还在编辑、听得出来。导出拿到
+    // [AudioTrack.bgmWarnings] 非空就中止（见 [ExportRunner]）——成片少一段
+    // 垫乐是静默的错，交付出去没人会发现。
     for (var i = 0; i < bgm.segments.length; i++) {
       final segment = bgm.segments[i];
       final range = shotRangeOf(units, segment);
@@ -98,8 +104,7 @@ class AudioTrackBuilder {
       try {
         source = await _resolve(segment.material);
       } catch (e) {
-        final message = '配乐「${segment.material.name}」这次取不到（$e），'
-            '这一段先没有配乐';
+        final message = '配乐「${segment.material.name}」这次取不到（$e）';
         AppLog.warn(message);
         degraded.add(message);
         continue;

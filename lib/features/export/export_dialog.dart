@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/audio/voice_plan.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
@@ -29,6 +30,7 @@ Future<void> showExportDialog(
   required List<UnitReplacement> replacements,
   BgmPlan bgm = BgmPlan.empty,
   Map<int, String> voiceAudio = const {},
+  VoicePlan voices = VoicePlan.empty,
 
   /// 分离出来的纯人声轨：被配乐覆盖的段落要用它
   String? vocalsPath,
@@ -45,6 +47,7 @@ Future<void> showExportDialog(
         replacements: replacements,
         bgm: bgm,
         voiceAudio: voiceAudio,
+        voices: voices,
         vocalsPath: vocalsPath,
         outputDir: outputDir,
       ),
@@ -58,6 +61,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final List<UnitReplacement> replacements;
   final BgmPlan bgm;
   final Map<int, String> voiceAudio;
+  final VoicePlan voices;
   final String? vocalsPath;
   final Directory outputDir;
 
@@ -69,6 +73,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.replacements,
     required this.bgm,
     required this.voiceAudio,
+    required this.voices,
     required this.vocalsPath,
     required this.outputDir,
   });
@@ -105,6 +110,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         outputDir: widget.outputDir,
         bgm: widget.bgm,
         voiceAudio: widget.voiceAudio,
+        voices: widget.voices,
         vocalsPath: widget.vocalsPath,
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
