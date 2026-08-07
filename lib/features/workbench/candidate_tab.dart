@@ -289,7 +289,9 @@ class CandidateTabState extends State<CandidateTab> {
     try {
       final hits =
           await _tagHitProbe.probe(tags: tags, projectIds: _projectIds);
-      final narrowed = narrowTagQuery(hits: hits);
+      // 分母：判断一个标签宽不宽，要看它占本项目的多少，不能拿标签之间互相比
+      final total = await _tagHitProbe.libraryTotal(projectIds: _projectIds);
+      final narrowed = narrowTagQuery(hits: hits, libraryTotal: total);
       // 收紧之后一个标签都不剩（比如一条条数都没数出来）就退回原样。
       // 空检索键换来的是 CLI 那句「未选择任何标签」的红字，比搜得宽糟得多
       if (narrowed.tagIds.isEmpty) return TagQueryPlan(tagIds: scope.tagIds);

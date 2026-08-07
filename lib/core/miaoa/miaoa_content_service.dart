@@ -191,6 +191,20 @@ class MiaoaContentService {
     ]);
   }
 
+  /// 这个项目里一共有多少条分镜。
+  ///
+  /// 判断一个标签「有没有区分度」要拿它的命中数和这个总数比——「实拍」在
+  /// 6012 条的项目里命中 5437 条（90%），用了等于没筛；同一个数字在 788 条
+  /// 的项目里就是完全正常的检索键。没有分母就只能拿标签之间互相比，
+  /// 小项目里必然误判（见 [narrowTagQuery]）。
+  Future<int> countAll({List<int> projectIds = const []}) async {
+    final page = await _search([
+      ..._projects(projectIds),
+      ..._paging(1, 1),
+    ]);
+    return page.total;
+  }
+
   /// 空列表就整个不传 `--projects`：CLI 把「不传」解释成我的全部项目聚合，
   /// 而传一个空串会被当成非法值
   static List<String> _projects(List<int> ids) =>

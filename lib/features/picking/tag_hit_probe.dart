@@ -58,4 +58,20 @@ class TagHitProbe {
     }
     return List.unmodifiable(out);
   }
+
+  /// 这个项目里一共有多少条分镜——判断标签宽不宽的分母。
+  /// 一个项目只查一次，之后全命中缓存。查不到返回 null（那就不做宽泛剔除）。
+  Future<int?> libraryTotal({List<int> projectIds = const []}) async {
+    final key = '${projectIds.join(',')}#total';
+    if (_cache.containsKey(key)) return _cache[key];
+    int? total;
+    try {
+      total = await service.countAll(projectIds: projectIds);
+    } catch (e) {
+      // 数不出分母不该让检索停摆：退化成「只剔 0 条的」
+      AppLog.warn('项目分镜总数查询失败：$e');
+    }
+    _cache[key] = total;
+    return total;
+  }
 }
