@@ -39,6 +39,8 @@ import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import '../picking/picked_material_store.dart';
+import '../picking/picked_media_cache.dart';
+import '../picking/picking_providers.dart';
 import 'edit_consequence_dialog.dart';
 import 'task_tag_groups_dialog.dart';
 import 'timeline/timeline_painter.dart';
@@ -197,6 +199,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void initState() {
     super.initState();
     _tasks = ref.read(taskListProvider.notifier);
+    _mediaCache = _buildMediaCache();
     final task = widget.task;
     final units = task.units;
     final videoInfo = task.videoInfo;
@@ -325,6 +328,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     unawaited(_preview?.dispose());
     _previewAudio?.removeListener(_onPreviewAudioChanged);
     _previewAudio?.dispose();
+    // 离开工作台时做一次配额回收：固定住的一律不动，只淘汰没人用的
+    final cache = _mediaCache;
+    if (cache != null) {
+      cache.sweep();
+      cache.dispose();
+    }
     super.dispose();
   }
 
@@ -902,6 +911,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 已选素材本体的本地固定。全应用共用一份缓存目录（和导出读的是同一个），
+  /// 但固定集合是按任务来的——所以每个工作台各持一个实例
+  PickedMediaCache? _mediaCache;
+
+  /// 下载动作来自 [materialFetcherProvider]（和导出读同一个缓存目录）；
+  /// 没接（测试环境）就不固定
+  PickedMediaCache? _buildMediaCache() {
+    final fetch = ref.read(materialFetcherProvider);
+    final dataDir = ref.read(dataDirProvider);
+    if (fetch == null || dataDir == null) return null;
+    return PickedMediaCache(
+      fetch: fetch,
+      cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+    );
+  }
+
   /// 首帧图落在任务数据目录下。没有数据目录（测试环境）就不落地——
   /// 托盘照样能画，只是重开就没了
   PickedMaterialStore? get _defaultPickedStore {
@@ -1008,6 +1033,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   pickedMaterials: _task.pickedMaterials,
                   onPickedMaterialsChanged: _onPickedMaterialsChanged,
                   pickedStore: widget.pickedStore ?? _defaultPickedStore,
+                  mediaCache: _mediaCache,
                   contentService: widget.contentService,
                   candidateProbe: widget.candidateProbe,
                   tagService: widget.tagService,
@@ -1020,7 +1046,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         bottomNavigationBar: AnimatedBuilder(
           animation: editor,
           builder: (context, _) {
-            final blocked = exportBlockedReason(_plan);
+            final cache = _mediaCache;
+            final notReady = cache?.notReady ?? const <int>[];
+            final blocked = exportBlockedReason(
+              _plan,
+              pendingMedia: notReady.length,
+              failedMedia: notReady
+                  .where((id) =>
+                      cache!.statusOf(id) == PickedMediaStatus.failed)
+                  .length,
+            );
             return WorkbenchBottomBar(
               summaryText: _summaryText(editor),
               voiceCount: _task.voices.assignedUnits.length,

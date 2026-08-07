@@ -226,4 +226,28 @@ void main() {
       expect(text, 'U1 保留原片 · 因子 = 1');
     });
   });
+
+  group('素材没落到本地就不给导出', () {
+    /// 用户的担心：「万一我在执行导出的时候，其他人在妙啊的系统上执行把这些
+    /// 素材删掉，我就很尴尬了」。所以挑中就下载、下齐了才让导出。
+    test('还在下的时候说清楚在等什么', () {
+      final text = exportBlockedReason(ReplacementPlan(const []),
+          pendingMedia: 3);
+
+      expect(text, contains('3 条'));
+      expect(text, contains('存到本地'));
+    });
+
+    test('有下不下来的就直接拦住，并指路去哪儿重试', () {
+      final text = exportBlockedReason(ReplacementPlan(const []),
+          pendingMedia: 2, failedMedia: 2);
+
+      expect(text, contains('没能存到本地'));
+      expect(text, contains('重试'));
+    });
+
+    test('素材齐了就不拦——组合数没超上限时可以导', () {
+      expect(exportBlockedReason(ReplacementPlan(const [])), isNull);
+    });
+  });
 }

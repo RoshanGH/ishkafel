@@ -32,7 +32,23 @@ String combinationSummaryText(ReplacementPlan plan) {
 ///
 /// 必须说清三件事：现在多少条、超出多少条、该从哪个台词语义单元减——
 /// 只说「超出上限」的话，用户面对十几个单元根本不知道去动哪一个。
-String? exportBlockedReason(ReplacementPlan plan) {
+/// [pendingMedia] 是已选但**本体还没落到本地**的素材条数，[failedMedia] 是
+/// 其中彻底下不下来的。素材没齐就导，成片里会缺画面——用户设置好的东西
+/// 出了错就该直接失败，而不是导出一批半成品（见 docs/2026-08-07-四种替换的
+/// 导出规格.md「导出兜底原则」）。
+String? exportBlockedReason(
+  ReplacementPlan plan, {
+  int pendingMedia = 0,
+  int failedMedia = 0,
+}) {
+  if (failedMedia > 0) {
+    return '有 $failedMedia 条已选素材没能存到本地，导出会缺画面。'
+        '请在「替换素材」的已选托盘上点 ↻ 重试，或换一条素材';
+  }
+  if (pendingMedia > 0) {
+    return '正在把 $pendingMedia 条已选素材存到本地，存完就能导出'
+        '——存到本地之后，素材库那边被删也不影响这条任务';
+  }
   if (!plan.exceedsLimit) return null;
   final where = _reduceHint(plan);
   if (plan.overflowsPreciseCount) {

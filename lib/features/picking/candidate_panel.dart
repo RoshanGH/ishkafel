@@ -58,9 +58,13 @@ class CandidatePanel extends StatelessWidget {
   /// 和当前这一页的检索结果是什么完全无关——见 [PickedTray]
   final List<PickedItem> picked;
 
-  /// 取消勾选 / 设为预览版
+  /// 取消勾选 / 设为预览版 / 重新下载素材本体
   final ValueChanged<int>? onRemovePicked;
   final ValueChanged<int>? onSetPreviewPicked;
+  final ValueChanged<int>? onRetryPickedMedia;
+
+  /// 这台机器上做不做素材本地固定（决定托盘上说不说「已存到本地」）
+  final bool pickedMediaTracked;
 
   /// 检索限定在哪个项目组内；null 表示没设，检索会横跨我的全部项目。
   ///
@@ -88,6 +92,8 @@ class CandidatePanel extends StatelessWidget {
     this.picked = const [],
     this.onRemovePicked,
     this.onSetPreviewPicked,
+    this.onRetryPickedMedia,
+    this.pickedMediaTracked = false,
   });
 
   /// 镜头替换只有画面视图：那一层挑的就是画面，摆一个台词列表反而绕远
@@ -637,6 +643,8 @@ class CandidatePanel extends StatelessWidget {
         items: picked,
         onRemove: onRemovePicked ?? (_) {},
         onSetPreview: onSetPreviewPicked ?? (_) {},
+        onRetryMedia: onRetryPickedMedia,
+        mediaTracked: pickedMediaTracked,
       );
 
   /// 台词视图：按可用宽度分列铺开。

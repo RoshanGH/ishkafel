@@ -14,6 +14,7 @@ import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
 import '../picking/picked_material_store.dart';
+import '../picking/picked_media_cache.dart';
 import '../picking/picked_tray.dart';
 import '../picking/candidate_preview.dart';
 import '../../core/log/app_log.dart';
@@ -60,6 +61,10 @@ class CandidateTab extends StatefulWidget {
   /// 把一条候选落到盘上（下首帧图）。注入而不是内建：单测不碰网络和磁盘
   final PickedMaterialStore? pickedStore;
 
+  /// 把已选素材的**视频本体**固定在本地。为空表示不固定——预览和导出仍然
+  /// 能按 id 现取，只是素材库那边一动就会出事
+  final PickedMediaCache? mediaCache;
+
   /// 只读回看：已导出的任务不能再改方案
   final bool readOnly;
 
@@ -87,6 +92,7 @@ class CandidateTab extends StatefulWidget {
     this.pickedMaterials = const [],
     this.onPickedMaterialsChanged,
     this.pickedStore,
+    this.mediaCache,
     this.initialReplacements,
     this.readOnly = false,
     this.project,
@@ -152,12 +158,16 @@ class CandidateTabState extends State<CandidateTab> {
     );
     _tagResolver = TagIdResolver(widget.tagService ?? MiaoaTagService());
 
+    widget.mediaCache?.addListener(_onMediaChanged);
     widget.editor.addListener(_onEditorChanged);
     // 挂载时先对齐一次当前选中。右栏切回「替换素材」时这个面板是重新挂载的，
     // 只订阅「之后的变化」会让它停在 U1——而用户早就在时间线上走到别处了。
     _syncSelectionFromEditor();
     _syncSearchMode();
     unawaited(_loadTagVocabulary());
+    // 进面板就把已选素材固定住。只在勾选**变化**时才做的话，打开一条早就
+    // 选好的任务什么都不会发生——而那正是最需要提前把素材抓在手里的时候
+    unawaited(_syncPicked());
     unawaited(_backfillPicked());
   }
 
@@ -200,6 +210,7 @@ class CandidateTabState extends State<CandidateTab> {
 
   @override
   void dispose() {
+    widget.mediaCache?.removeListener(_onMediaChanged);
     widget.editor.removeListener(_onEditorChanged);
     _picking.removeListener(_onPickingChanged);
     _picking.dispose();
@@ -238,6 +249,10 @@ class CandidateTabState extends State<CandidateTab> {
     if (sel.shotIndex != null) _picking.selectShot(sel.shotIndex);
   }
 
+  void _onMediaChanged() {
+    if (mounted) setState(() {});
+  }
+
   /// 把「勾了哪些」和「落地记录」对齐：
   /// - 新勾上的：从当前检索结果里取到素材信息，连首帧图一起落到盘上；
   /// - 取消勾选的：记录和首帧图一起清掉，不留垃圾。
@@ -245,6 +260,9 @@ class CandidateTabState extends State<CandidateTab> {
   /// 只落信息不落视频——见 [PickedMaterialStore] 的说明。
   Future<void> _syncPicked() async {
     final referenced = _referencedCandidateIds();
+    // 勾上就把素材本体拉到本地固定住；取消勾选只解除固定，不删文件
+    // ——取消常是试错动作，改回来还得重下几十兆（见 [PickedMediaCache]）
+    widget.mediaCache?.pinAll(referenced);
 
     // 先做减法：取消勾选是同步就该看到的
     final dropped = _picked.keys.where((id) => !referenced.contains(id)).toSet();
@@ -357,6 +375,8 @@ class CandidateTabState extends State<CandidateTab> {
           material: _picked[id],
           isPreview: id == preview,
           targetMs: _scope.targetDurationMs,
+          media: widget.mediaCache?.statusOf(id) ?? PickedMediaStatus.ready,
+          mediaFailure: widget.mediaCache?.failureOf(id),
         ),
     ];
   }
@@ -561,6 +581,10 @@ class CandidateTabState extends State<CandidateTab> {
               widget.readOnly ? null : _picking.toggleCandidate,
           onSetPreviewPicked:
               widget.readOnly ? null : _picking.setPreviewCandidate,
+          onRetryPickedMedia: widget.mediaCache == null || widget.readOnly
+              ? null
+              : widget.mediaCache!.retry,
+          pickedMediaTracked: widget.mediaCache != null,
         ),
       );
 }

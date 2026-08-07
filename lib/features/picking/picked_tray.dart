@@ -6,6 +6,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/replacement/picked_material.dart';
+import 'picked_media_cache.dart';
 import 'picking_messages.dart';
 
 /// 托盘里的一条：已经勾选的候选。
@@ -23,11 +24,20 @@ class PickedItem {
   /// 这一段的目标时长，用来算时长差；为 0 表示不显示
   final int targetMs;
 
+  /// 素材本体在本地的状态。用户要能一眼看出「这条已经拿到手了」——
+  /// 后台默默下载但状态不可见，只会在导出那一刻被打脸
+  final PickedMediaStatus media;
+
+  /// 下不下来的原因（可直接展示）；没失败时为 null
+  final String? mediaFailure;
+
   const PickedItem({
     required this.candidateId,
     this.material,
     this.isPreview = false,
     this.targetMs = 0,
+    this.media = PickedMediaStatus.absent,
+    this.mediaFailure,
   });
 }
 
@@ -44,6 +54,13 @@ class PickedTray extends StatelessWidget {
   /// 取消勾选
   final ValueChanged<int> onRemove;
 
+  /// 重新下载一条下失败的素材
+  final ValueChanged<int>? onRetryMedia;
+
+  /// 这台机器上到底做不做本地固定。不做的时候别说「已存到本地」——
+  /// 那是一句没有依据的承诺
+  final bool mediaTracked;
+
   /// 设为预览版
   final ValueChanged<int> onSetPreview;
 
@@ -52,6 +69,8 @@ class PickedTray extends StatelessWidget {
     required this.items,
     required this.onRemove,
     required this.onSetPreview,
+    this.onRetryMedia,
+    this.mediaTracked = false,
   });
 
   @override
@@ -65,9 +84,7 @@ class PickedTray extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
             child: Text(
-              items.length > 1
-                  ? '已选 ${items.length} 条 · ★ 的那条用于预览，导出时每条各出一版'
-                  : '已选 1 条',
+              _summary(),
               style: const TextStyle(
                   color: AppColors.textTertiary, fontSize: AppFontSize.micro),
             ),
@@ -98,6 +115,7 @@ class PickedTray extends StatelessWidget {
           children: [
             _thumb(item),
             const SizedBox(width: AppSpacing.xs),
+            if (mediaTracked) _mediaDot(item),
             Expanded(
               child: Text(
                 _label(item),
@@ -119,6 +137,14 @@ class PickedTray extends StatelessWidget {
               tooltip: item.isPreview ? '预览播的就是这一条' : '设为预览版',
               onTap: () => onSetPreview(item.candidateId),
             ),
+            if (item.media == PickedMediaStatus.failed && onRetryMedia != null)
+              _icon(
+                key: Key('picked-retry-${item.candidateId}'),
+                icon: Icons.refresh,
+                color: AppColors.accentBlue,
+                tooltip: item.mediaFailure ?? '重新下载',
+                onTap: () => onRetryMedia!(item.candidateId),
+              ),
             _icon(
               key: Key('picked-remove-${item.candidateId}'),
               icon: Icons.close,
@@ -128,6 +154,57 @@ class PickedTray extends StatelessWidget {
           ],
         ),
       );
+
+  /// 顶上那行小结：选了几条、素材落地到什么程度了
+  String _summary() {
+    final plain = items.length > 1
+        ? '已选 ${items.length} 条 · ★ 的那条用于预览，导出时每条各出一版'
+        : '已选 1 条';
+    if (!mediaTracked) return plain;
+    final pending = items
+        .where((i) => i.media != PickedMediaStatus.ready)
+        .length;
+    final failed =
+        items.where((i) => i.media == PickedMediaStatus.failed).length;
+    if (failed > 0) {
+      return '已选 ${items.length} 条 · $failed 条素材没下下来，'
+          '点 ↻ 重试；不解决的话导出会直接失败';
+    }
+    if (pending > 0) {
+      return '已选 ${items.length} 条 · 正在把素材存到本地（$pending 条待完成）';
+    }
+    return items.length > 1
+        ? '已选 ${items.length} 条 · 素材已全部存到本地 · '
+            '★ 的那条用于预览，导出时每条各出一版'
+        : '已选 1 条 · 素材已存到本地';
+  }
+
+  /// 素材本体的状态点。做成小圆点而不是一行字：一条 260 宽的胶囊放不下
+  /// 一句话，而用户扫的是「有没有红的」
+  Widget _mediaDot(PickedItem item) {
+    final (color, tip) = switch (item.media) {
+      PickedMediaStatus.ready => (AppColors.green, '素材已存到本地，'
+          '素材库那边被删也不影响这条任务'),
+      PickedMediaStatus.downloading => (AppColors.accentBlue, '正在下载素材…'),
+      PickedMediaStatus.failed => (
+          AppColors.red,
+          item.mediaFailure ?? '素材没下下来'
+        ),
+      PickedMediaStatus.absent => (AppColors.textTertiary, '素材还没开始下'),
+    };
+    return Tooltip(
+      message: tip,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 4),
+        child: Container(
+          key: Key('picked-media-${item.candidateId}'),
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+      ),
+    );
+  }
 
   /// 素材名/台词都没有时退回 id——总比一片空白强，用户至少能拿它去库里对
   static String _label(PickedItem item) {

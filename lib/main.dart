@@ -40,6 +40,7 @@ import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
 import 'features/workbench/voice_swap_runner.dart';
 import 'features/export/export_dialog.dart';
+import 'features/picking/picking_providers.dart';
 import 'features/export/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
@@ -126,6 +127,11 @@ Future<void> main() async {
                     .duration
                     .inMilliseconds,
               )),
+      // 挑素材时就把本体下到本地：和导出读同一个缓存目录，导出时不必再下
+      materialFetcherProvider.overrideWithValue(MaterialDownloader(
+        content: MiaoaContentService(binary: resolveMiaoaBinary()),
+        cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+      ).fetch),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),

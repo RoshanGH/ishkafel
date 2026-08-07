@@ -10,7 +10,11 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'dart:io';
+
 import 'package:ishkafel/core/replacement/picked_material.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/features/picking/picked_media_cache.dart';
 import 'package:ishkafel/features/picking/candidate_row.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
@@ -132,7 +136,10 @@ List<SemanticUnit> _units() => const [
 late List<CandidateMaterial> played;
 
 Future<_Content> _pump(WidgetTester tester,
-    {bool empty = false, ProjectRef? project}) async {
+    {bool empty = false,
+    ProjectRef? project,
+    PickedMediaCache? cache,
+    List<UnitReplacement>? initial}) async {
   played = [];
   final content = _Content()..empty = empty;
   tester.view.physicalSize = const Size(360, 900);
@@ -159,6 +166,8 @@ Future<_Content> _pump(WidgetTester tester,
           candidateProbe: CandidateProbe(run: (_, _) async => throw 'no probe'),
           onPreview: (context, material) async => played.add(material),
           project: project,
+          mediaCache: cache,
+          initialReplacements: initial,
           // 每页 3 条：够验证翻页，又不必造一屏数据
           pageSize: 3,
         ),
@@ -572,6 +581,52 @@ void main() {
       await tester.tap(find.byKey(const Key('picked-remove-100')));
       await tester.pumpAndSettle();
       expect(saved.last, isEmpty);
+    });
+  });
+
+  group('已选素材要固定在本地', () {
+    /// 用户的担心：「万一我在执行导出的时候，其他人在妙啊的系统上执行把
+    /// 这些素材删掉，我就很尴尬了」。所以挑中就把本体拉到本地。
+    testWidgets('打开一条早就选好的任务，进来就开始固定', (tester) async {
+      final asked = <int>[];
+      final cache = PickedMediaCache(
+        fetch: (id) async {
+          asked.add(id);
+          return '/local/$id.mp4';
+        },
+        cacheDir: Directory.systemTemp.createTempSync('ishkafel_tab_'),
+      );
+      addTearDown(cache.dispose);
+
+      await _pump(tester,
+          cache: cache,
+          initial: [UnitReplacement.whole(const [100])]);
+
+      expect(asked, [100],
+          reason: '只在勾选变化时才固定的话，打开一条早就选好的任务什么都不会发生'
+              '——而那正是最需要提前把素材抓在手里的时候');
+    });
+
+    testWidgets('取消勾选只解除固定，不重新下载', (tester) async {
+      final asked = <int>[];
+      final cache = PickedMediaCache(
+        fetch: (id) async {
+          asked.add(id);
+          return '/local/$id.mp4';
+        },
+        cacheDir: Directory.systemTemp.createTempSync('ishkafel_tab2_'),
+      );
+      addTearDown(cache.dispose);
+
+      await _pump(tester, cache: cache);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picked-remove-100')));
+      await tester.pumpAndSettle();
+
+      expect(cache.pinned, isEmpty);
+      expect(asked, [100], reason: '取消不该触发第二次下载');
     });
   });
 }
