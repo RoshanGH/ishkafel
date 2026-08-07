@@ -541,6 +541,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return true;
   }
 
+  /// 重新合成预览音轨。
+  ///
+  /// 配乐取不到最常见的两个原因是网络抖动和登录过期——重试一次多半就好了，
+  /// 而此前用户只能去重新选一首曲子，那根本不是他的问题。
+  void _retryPreviewAudio() {
+    _previewAudio?.invalidate();
+    _syncPreviewAudio();
+  }
+
   /// 传给 miaoa CLI 的 `--projects`；不限项目时为空
   List<int> get _projectIds =>
       _task.project == null ? const [] : [_task.project!.id];
@@ -889,9 +898,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                     _previewAudio?.failure)
                 case final notice?)
               PreviewAudioBanner(
-                  text: notice,
-                  building:
-                      _previewAudio?.state == PreviewAudioState.building),
+                text: notice,
+                building: _previewAudio?.state == PreviewAudioState.building,
+                onRetry: _retryPreviewAudio,
+              ),
             if (missingVocalsNotice(
                     _task.bgm, _task.voices, _task.vocalsPath)
                 case final notice?)

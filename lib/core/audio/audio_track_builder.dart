@@ -6,6 +6,7 @@ import '../export/export_commands.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
+import 'bgm_cache.dart';
 import 'bgm_plan.dart';
 
 /// 成片声音的合成器：口播 + 配音 + 配乐，合成一条完整音轨。
@@ -104,8 +105,13 @@ class AudioTrackBuilder {
       try {
         source = await _resolve(segment.material);
       } catch (e) {
-        final message = '配乐「${segment.material.name}」这次取不到（$e）';
-        AppLog.warn(message);
+        // 底层已经把原因说成人话了，不要再套一层——真机上套出来的那句
+        // 「配乐「X」这次取不到（配乐「X」下下来是坏的…）」曲名重复、长得没法读。
+        // 但也不能假设它一定带了曲名：没提到就补一次，提到了就原样用
+        final raw = e is BgmUnavailableException ? e.message : '$e';
+        final name = segment.material.name;
+        final message = raw.contains(name) ? raw : '配乐「$name」：$raw';
+        AppLog.warn('配乐取不到：$message');
         degraded.add(message);
         continue;
       }
@@ -125,7 +131,7 @@ class AudioTrackBuilder {
           '配乐「${segment.material.name}」',
         );
       } catch (e) {
-        final message = '配乐「${segment.material.name}」这一段没铺上（$e）';
+        final message = '配乐「${segment.material.name}」这一段没铺上：$e';
         AppLog.warn(message);
         degraded.add(message);
         continue;

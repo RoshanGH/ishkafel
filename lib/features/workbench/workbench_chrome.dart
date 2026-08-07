@@ -122,8 +122,15 @@ class PreviewAudioBanner extends StatelessWidget {
   final String text;
   final bool building;
 
+  /// 重新合成一次。取不到配乐最常见的原因是网络抖动或登录过期——那不是
+  /// 用户的问题，不该逼他去重选一首曲子。为空表示这条提示没有重试出口
+  final VoidCallback? onRetry;
+
   const PreviewAudioBanner(
-      {super.key, required this.text, required this.building});
+      {super.key,
+      required this.text,
+      required this.building,
+      this.onRetry});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -150,6 +157,17 @@ class PreviewAudioBanner extends StatelessWidget {
                       fontSize: AppFontSize.body,
                       fontWeight: FontWeight.w600)),
             ),
+            if (onRetry != null && !building)
+              TextButton(
+                key: const Key('preview-audio-retry'),
+                onPressed: onRetry,
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.orange,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                child: const Text('重试'),
+              ),
           ],
         ),
       );

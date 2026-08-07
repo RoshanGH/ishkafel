@@ -220,4 +220,34 @@ void main() {
       expect(missingVocalsNotice(BgmPlan.empty, VoicePlan.empty, null), isNull);
     });
   });
+
+  group('取不到配乐时要能就地重试', () {
+    test('invalidate 之后同一份方案会重新合成一遍', () async {
+      final mixer = _mixer();
+      final c = PreviewAudioController(
+          playback: FakePlaybackController(),
+          factory: mixer.factory,
+          debounce: _noDebounce);
+      final task = _task(bgm: BgmPlan.empty.assign(
+          startUnit: 0, endUnit: 0, material: _track, rangeMs: 4000));
+
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final first = mixer.builds.length;
+      expect(first, greaterThan(0));
+
+      // 方案没变：不该重复合成
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(mixer.builds, hasLength(first));
+
+      // 点了「重试」
+      c.invalidate();
+      c.update(task: task, units: _units(), voiceAudio: const {});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(mixer.builds.length, greaterThan(first),
+          reason: '不清指纹的话重试等于没点——方案没变就直接跳过了');
+    });
+  });
 }

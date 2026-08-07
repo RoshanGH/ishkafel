@@ -158,6 +158,15 @@ class PreviewAudioController extends ChangeNotifier {
     }
   }
 
+  /// 忘掉上一次的结果，让下一次 [sync] 真的重新合成一遍。
+  ///
+  /// 「重试」按钮走这里：不清指纹的话，方案没变就直接跳过了，重试等于没点
+  void invalidate() {
+    _builtFingerprint = null;
+    _buildingFingerprint = null;
+    _failure = null;
+  }
+
   void _set(PreviewAudioState next) {
     if (_state == next) return;
     _state = next;
@@ -197,8 +206,10 @@ String? previewAudioNotice(PreviewAudioState state, String? failure) =>
       PreviewAudioState.building => '正在合成预览音轨（配乐/配音），稍后就能听到',
       PreviewAudioState.ready => null,
       // 声音是能听的，只是少了几段垫乐——说成「不可用」会让人以为白干了
+      // 底层的原因已经是人话了，这里只补一句「其余声音正常」——
+      // 再套一层解释会让曲名重复出现，长得没法读
       PreviewAudioState.degraded =>
-        failure == null ? null : '$failure。其余声音正常，重新选一次配乐即可',
+        failure == null ? null : '$failure。其余声音正常',
       PreviewAudioState.failed => failure ?? '预览音轨不可用，听到的仍是原片的声音',
     };
 

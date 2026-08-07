@@ -32,49 +32,77 @@ class BgmCache {
   /// 这次会话里已经验过的，不再重复 ffprobe
   final Set<String> _verified = {};
 
+  /// 自动重试的次数。网络抖一下、或者地址正好在这一刻失效，都不该让用户
+  /// 去重选一首曲子——那根本不是他的问题
+  final int retries;
+
+  /// 两次重试之间等多久（测试里给 0）
+  final Duration retryDelay;
+
   BgmCache({
     required this.library,
     required this.cacheDir,
     Future<void> Function(String url, File to)? download,
     this.verify,
+    this.retries = 2,
+    this.retryDelay = const Duration(milliseconds: 400),
   }) : download = download ?? _httpDownload;
 
   /// 拿到这条配乐的本地路径，必要时下载。
+  ///
+  /// **失败会自己再试**（[retries] 次）：最常见的两种原因——网络抖动、
+  /// 登录/签名过期——重试一次就好了，没道理让用户去重选一首曲子。
+  /// 只有「素材已从素材库删除」这种永久错误才立刻放弃。
   Future<String> fetch(BgmMaterial material) async {
     cacheDir.createSync(recursive: true);
     final file = File(p.join(cacheDir.path, '${material.id}.mp3'));
-    // 空文件视为上次没下完，重下
     if (file.existsSync() && file.lengthSync() > 0) {
       if (await _usable(file.path)) return file.path;
       AppLog.warn('缓存里的配乐「${material.name}」解不出来，删掉重下');
       file.deleteSync();
     }
 
+    BgmUnavailableException? last;
+    for (var attempt = 0; attempt <= retries; attempt++) {
+      if (attempt > 0 && retryDelay > Duration.zero) {
+        await Future<void>.delayed(retryDelay);
+      }
+      try {
+        return await _fetchOnce(material, file);
+      } on BgmUnavailableException catch (e) {
+        last = e;
+        if (!e.retryable) rethrow;
+        AppLog.warn('配乐「${material.name}」第 ${attempt + 1} 次没取到：${e.message}');
+      }
+    }
+    throw last!;
+  }
+
+  Future<String> _fetchOnce(BgmMaterial material, File file) async {
     final url =
         await library.freshPreviewUrl(material.id) ?? material.previewUrl;
     if (url == null || url.isEmpty) {
+      // 现取也拿不到、存档里也没有：多半已经从素材库删掉了，再试没意义
       throw BgmUnavailableException(
-          '配乐「${material.name}」没有可用的下载地址，可能已从素材库删除');
+          '配乐「${material.name}」在素材库里已经找不到了，请重新选一首',
+          retryable: false);
     }
 
     final temp = File('${file.path}.part');
     try {
       await download(url, temp);
       temp.renameSync(file.path);
-      // 重下之后还是坏的就别往下传了——交出去只会让 ffmpeg 报一个看不懂的错
-      if (!await _usable(file.path)) {
-        file.deleteSync();
-        throw BgmUnavailableException(
-            '配乐「${material.name}」下下来是坏的（可能是地址失效后返回的错误页），'
-            '请重新选一次这一段的配乐');
-      }
-    } on BgmUnavailableException {
-      rethrow;
     } catch (e) {
       // 半截文件会让 ffmpeg 报一个完全看不懂的错，不如直接删掉重来
       if (temp.existsSync()) temp.deleteSync();
-      AppLog.warn('配乐「${material.name}」(${material.id}) 下载失败：$e');
-      rethrow;
+      throw BgmUnavailableException(
+          '配乐「${material.name}」下载失败（网络不通或登录已过期）：$e');
+    }
+    if (!await _usable(file.path)) {
+      file.deleteSync();
+      throw BgmUnavailableException(
+          '配乐「${material.name}」下下来的文件解不出来，'
+          '多半是地址失效后返回了一个错误页');
     }
     return file.path;
   }
@@ -104,10 +132,15 @@ class BgmCache {
   }
 }
 
-/// 这条配乐这次拿不到。**只影响它自己那一段**，不该让整条音轨作废
+/// 这条配乐这次拿不到。
+///
+/// [retryable] 区分「再试一次可能就好了」（网络抖动、登录过期、地址失效后
+/// 返回了错误页）和「试多少次都一样」（素材已从素材库删除）。界面据此决定
+/// 是给「重试」还是让用户重选。
 class BgmUnavailableException implements Exception {
   final String message;
-  const BgmUnavailableException(this.message);
+  final bool retryable;
+  const BgmUnavailableException(this.message, {this.retryable = true});
   @override
   String toString() => message;
 }
