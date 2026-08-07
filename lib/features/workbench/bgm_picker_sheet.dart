@@ -18,11 +18,19 @@ sealed class BgmChoice {
   const BgmChoice();
 }
 
-/// 用这条素材，音量压到 [volume]
+/// 用这几首（**互为备选**，导出时轮流用），音量压到 [volume]
 class BgmPicked extends BgmChoice {
-  final BgmMaterial material;
+  final List<BgmMaterial> materials;
+
+  /// 预览播的是第几首。预览只能放一个，导出会把备选都用上
+  final int previewIndex;
   final double volume;
-  const BgmPicked(this.material, {this.volume = BgmSegment.defaultVolume});
+
+  const BgmPicked(
+    this.materials, {
+    this.previewIndex = 0,
+    this.volume = BgmSegment.defaultVolume,
+  });
 }
 
 /// 曲子不换，只改音量
@@ -47,6 +55,8 @@ Future<BgmChoice?> showBgmPicker(
   bool canClear = false,
   List<int> projectIds = const [],
   double initialVolume = BgmSegment.defaultVolume,
+  List<BgmMaterial> initialMaterials = const [],
+  int initialPreviewIndex = 0,
 }) =>
     showDialog<BgmChoice>(
       context: context,
@@ -56,6 +66,8 @@ Future<BgmChoice?> showBgmPicker(
         canClear: canClear,
         projectIds: projectIds,
         initialVolume: initialVolume,
+        initialMaterials: initialMaterials,
+        initialPreviewIndex: initialPreviewIndex,
       ),
     );
 
@@ -70,10 +82,16 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
   /// 这一段当前的音量。改这一段时带进来，用户看到的是现在的值而不是默认值
   final double initialVolume;
 
+  /// 这一段已经选了哪几首、预览的是第几首
+  final List<BgmMaterial> initialMaterials;
+  final int initialPreviewIndex;
+
   const _BgmPickerDialog({
     required this.rangeMs,
     required this.rangeLabel,
     required this.initialVolume,
+    this.initialMaterials = const [],
+    this.initialPreviewIndex = 0,
     required this.canClear,
     this.projectIds = const [],
   });
@@ -90,6 +108,25 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   // 或库里为空时压根不会走到列表，等 dispose 再去 ref.read 已经太晚了
   late final BgmAudition _audition;
   late double _volume = widget.initialVolume;
+
+  /// 已选的备选（有序——导出时按这个顺序轮流用）
+  late final List<BgmMaterial> _picked =
+      List<BgmMaterial>.from(widget.initialMaterials);
+  late int _previewIndex = widget.initialPreviewIndex;
+
+  void _toggle(BgmMaterial m) {
+    setState(() {
+      final at = _picked.indexWhere((x) => x.id == m.id);
+      if (at >= 0) {
+        _picked.removeAt(at);
+        // 删掉的正好是预览那首、或排在它前面：预览下标要跟着挪
+        if (_previewIndex >= _picked.length) _previewIndex = 0;
+        else if (at < _previewIndex) _previewIndex--;
+      } else {
+        _picked.add(m);
+      }
+    });
+  }
 
   /// 每次检索领一个代次号：用户敲得快时慢到的旧结果不能覆盖新的
   int _generation = 0;
@@ -172,7 +209,9 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         ),
         actions: [
           // 曲子不换、只把音量改了的情形要有出口，否则用户被迫重选一遍
-          if (widget.canClear && _volume != widget.initialVolume)
+          if (widget.canClear &&
+              _volume != widget.initialVolume &&
+              _picked.isEmpty)
             TextButton(
               key: const Key('bgm-apply-volume'),
               onPressed: () =>
@@ -190,6 +229,20 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
             key: const Key('bgm-cancel'),
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('取消'),
+          ),
+          // 多选之后要有确认出口：点一首只是勾上，不再直接关掉浮层
+          FilledButton(
+            key: const Key('bgm-confirm'),
+            onPressed: _picked.isEmpty
+                ? null
+                : () => Navigator.of(context).pop(BgmPicked(
+                      List.unmodifiable(_picked),
+                      previewIndex: _previewIndex,
+                      volume: _volume,
+                    )),
+            child: Text(_picked.isEmpty
+                ? '选一首'
+                : '用这 ${_picked.length} 首'),
           ),
         ],
       );
@@ -229,13 +282,20 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
       itemCount: items.length,
       separatorBuilder: (_, _) =>
           const Divider(height: 1, color: AppColors.border),
-      itemBuilder: (_, i) => _Row(
-        material: items[i],
-        rangeMs: widget.rangeMs,
-        audition: _audition,
-        onTap: () =>
-            Navigator.of(context).pop(BgmPicked(items[i], volume: _volume)),
-      ),
+      itemBuilder: (_, i) {
+        final at = _picked.indexWhere((x) => x.id == items[i].id);
+        return _Row(
+          material: items[i],
+          rangeMs: widget.rangeMs,
+          audition: _audition,
+          // 选中的显示排号（1、2、3…）——那就是导出时轮流用的次序
+          pickedOrder: at < 0 ? null : at + 1,
+          isPreview: at >= 0 && at == _previewIndex,
+          onTap: () => _toggle(items[i]),
+          onSetPreview:
+              at < 0 ? null : () => setState(() => _previewIndex = at),
+        );
+      },
     );
     if (!page.widenedFromProject) return list;
     // 不说明的话，用户会把这些曲子当成本项目的
@@ -305,13 +365,26 @@ class _Row extends StatelessWidget {
   final BgmMaterial material;
   final int rangeMs;
   final BgmAudition audition;
+
+  /// 已选中时是第几个（1 起）。这个次序就是导出时轮流用的次序
+  final int? pickedOrder;
+
+  /// 是不是这一段的预览版——预览只能放一首
+  final bool isPreview;
+
   final VoidCallback onTap;
+
+  /// 把这一首设为预览版；未选中时为 null
+  final VoidCallback? onSetPreview;
 
   const _Row(
       {required this.material,
       required this.rangeMs,
       required this.audition,
-      required this.onTap});
+      required this.onTap,
+      this.pickedOrder,
+      this.isPreview = false,
+      this.onSetPreview});
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -323,14 +396,31 @@ class _Row extends StatelessWidget {
     final fit = BgmPlan.fitFor(
         materialDurationMs: material.durationMs, rangeMs: rangeMs);
     final playing = audition.playingId == material.id;
+    final picked = pickedOrder != null;
     return InkWell(
       key: Key('bgm-item-${material.id}'),
       onTap: onTap,
-      child: Padding(
+      child: Container(
+        color: picked
+            ? AppColors.accentBlue.withValues(alpha: 0.10)
+            : Colors.transparent,
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
         child: Row(
           children: [
+            // 选中的显示排号——那就是导出时轮流用的次序
+            SizedBox(
+              width: 20,
+              child: picked
+                  ? Text('$pickedOrder',
+                      key: Key('bgm-order-${material.id}'),
+                      style: const TextStyle(
+                          color: AppColors.accentBlue,
+                          fontSize: AppFontSize.caption,
+                          fontWeight: FontWeight.w600))
+                  : const Icon(Icons.radio_button_unchecked,
+                      size: 13, color: AppColors.textTertiary),
+            ),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,6 +473,17 @@ class _Row extends StatelessWidget {
             ),
             // 光看名字和时长挑不出配乐：轻快到什么程度、压在口播下面吵不吵，
             // 只能听
+            // 预览只能放一首：选中之后才谈得上「哪一首用来预览」
+            if (picked)
+              IconButton(
+                key: Key('bgm-preview-${material.id}'),
+                tooltip: isPreview ? '预览播的就是这一首' : '设为预览版',
+                onPressed: onSetPreview,
+                icon: Icon(isPreview ? Icons.star : Icons.star_border,
+                    size: 18),
+                color:
+                    isPreview ? AppColors.orange : AppColors.textTertiary,
+              ),
             IconButton(
               key: Key('bgm-play-${material.id}'),
               tooltip: playing ? '停止试听' : '试听',

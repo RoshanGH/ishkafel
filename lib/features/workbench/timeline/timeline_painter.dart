@@ -409,11 +409,11 @@ class TimelinePainter extends CustomPainter {
       if (maxWidth <= 0) continue;
       canvas.save();
       canvas.clipRect(rect);
-      // 名字后面缀上「裁/循环」：同一首曲子铺在不同长度的区间上，处理方式
-      // 不同而块体长得一样，不写出来用户没法一眼看出哪段会循环
-      final fit = span.segment.fit == BgmFit.exact
-          ? ''
-          : ' · ${span.segment.fit == BgmFit.cut ? "裁" : "循环"}';
+      // 名字后面缀一句处理方式：同一首曲子铺在不同长度的区间上，块体长得
+      // 一样，不写出来用户没法一眼看出哪段会循环。
+      // 「裁」两个字太省，会让人以为素材被改了——其实只是播到段尾就停
+      final short = span.segment.fit.shortLabel;
+      final fit = short.isEmpty ? '' : ' · $short';
       _drawText(
         canvas,
         '${span.segment.previewMaterial.name}$fit',

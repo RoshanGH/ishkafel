@@ -146,7 +146,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('轻快垫乐'), findsOneWidget, reason: '前提：选择面板弹出来了');
+    // 一段可以选多首（互为备选），所以点一条只是勾上，要再点「确定」
     await tester.tap(find.byKey(const Key('bgm-item-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('bgm-confirm')));
     await tester.pumpAndSettle();
 
     final saved = await repo.findById('bgm-1');

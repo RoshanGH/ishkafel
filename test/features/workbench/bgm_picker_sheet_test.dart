@@ -61,6 +61,42 @@ const _voice = BgmMaterial(
     previewUrl: null,
     hasSpeech: true);
 
+/// 带上「已选了哪几首」的打开方式，用来测「改已有段落」
+Future<void> _openWith(
+  WidgetTester tester, {
+  required _FakeLibrary library,
+  required List<BgmMaterial> initialMaterials,
+  int initialPreviewIndex = 0,
+}) async {
+  await tester.pumpWidget(ProviderScope(
+    overrides: [
+      bgmLibraryProvider.overrideWithValue(library),
+      auditionPlayerFactoryProvider
+          .overrideWithValue(() => _FakePlayer(<String>[])),
+    ],
+    child: MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              key: const Key('open'),
+              onPressed: () => showBgmPicker(context,
+                  rangeMs: 12000,
+                  rangeLabel: 'U1',
+                  canClear: true,
+                  initialMaterials: initialMaterials,
+                  initialPreviewIndex: initialPreviewIndex),
+              child: const Text('开'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  ));
+  await tester.tap(find.byKey(const Key('open')));
+  await tester.pumpAndSettle();
+}
+
 Future<BgmChoice?> _open(
   WidgetTester tester, {
   required _FakeLibrary library,
@@ -170,8 +206,10 @@ void main() {
 
       await tester.tap(find.byKey(const Key('bgm-item-1')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-confirm')));
+      await tester.pumpAndSettle();
 
-      expect((picked as BgmPicked).material.name, '三十秒垫乐');
+      expect((picked as BgmPicked).materials.single.name, '三十秒垫乐');
     });
 
     testWidgets('已有配乐时才给「移除」，新建区间时不给', (tester) async {
@@ -305,6 +343,8 @@ void main() {
 
       await tester.tap(find.byKey(const Key('bgm-item-1')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-confirm')));
+      await tester.pumpAndSettle();
 
       expect((picked as BgmPicked).volume, 0.5);
     });
@@ -322,6 +362,153 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('bgm-apply-volume')), findsOneWidget);
+    });
+  });
+
+  group('一段可以选多首，互为备选', () {
+    testWidgets('勾几首就带几首出来，顺序就是导出轮流的次序', (tester) async {
+      BgmChoice? picked;
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          bgmLibraryProvider.overrideWithValue(
+              _FakeLibrary(items: const [_long, _short, _withUrl])),
+          auditionPlayerFactoryProvider
+              .overrideWithValue(() => _FakePlayer(<String>[])),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  key: const Key('open'),
+                  onPressed: () async {
+                    picked = await showBgmPicker(context,
+                        rangeMs: 12000, rangeLabel: 'U1');
+                  },
+                  child: const Text('开'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.byKey(const Key('open')));
+      await tester.pumpAndSettle();
+
+      // 先点第二首、再点第一首——次序按点击顺序
+      await tester.tap(find.byKey(const Key('bgm-item-2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-confirm')));
+      await tester.pumpAndSettle();
+
+      expect((picked as BgmPicked).materials.map((m) => m.id), [2, 1]);
+    });
+
+    testWidgets('选中的显示排号，那就是轮流的次序', (tester) async {
+      await _open(tester,
+          library: _FakeLibrary(items: const [_long, _short]));
+
+      await tester.tap(find.byKey(const Key('bgm-item-2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+
+      expect(
+          tester.widget<Text>(find.byKey(const Key('bgm-order-2'))).data, '1');
+      expect(
+          tester.widget<Text>(find.byKey(const Key('bgm-order-1'))).data, '2');
+    });
+
+    testWidgets('再点一次取消选中', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('bgm-order-1')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('bgm-order-1')), findsNothing);
+    });
+
+    testWidgets('一首都没选时确定按钮点不动', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('bgm-confirm')))
+              .onPressed,
+          isNull,
+          reason: '点了没反应比灰着更让人困惑');
+    });
+
+    testWidgets('第一个选中的默认是预览版，可以改到别的', (tester) async {
+      BgmChoice? picked;
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          bgmLibraryProvider
+              .overrideWithValue(_FakeLibrary(items: const [_long, _short])),
+          auditionPlayerFactoryProvider
+              .overrideWithValue(() => _FakePlayer(<String>[])),
+        ],
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: ElevatedButton(
+                  key: const Key('open'),
+                  onPressed: () async {
+                    picked = await showBgmPicker(context,
+                        rangeMs: 12000, rangeLabel: 'U1');
+                  },
+                  child: const Text('开'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ));
+      await tester.tap(find.byKey(const Key('open')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('bgm-item-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-item-2')));
+      await tester.pumpAndSettle();
+      // 把第二首设为预览版
+      await tester.tap(find.byKey(const Key('bgm-preview-2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-confirm')));
+      await tester.pumpAndSettle();
+
+      expect((picked as BgmPicked).previewIndex, 1);
+    });
+
+    testWidgets('没选中的那些没有「设为预览版」——预览只能放选中的', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      expect(find.byKey(const Key('bgm-preview-1')), findsNothing);
+    });
+
+    testWidgets('改已有段落时带出已选的几首和预览版', (tester) async {
+      await _openWith(tester,
+          library: _FakeLibrary(items: const [_long, _short]),
+          initialMaterials: const [_short, _long],
+          initialPreviewIndex: 1);
+
+      expect(
+          tester.widget<Text>(find.byKey(const Key('bgm-order-2'))).data, '1');
+      expect(
+          tester.widget<Text>(find.byKey(const Key('bgm-order-1'))).data, '2');
+      expect(
+          tester.widget<Icon>(find.descendant(
+              of: find.byKey(const Key('bgm-preview-1')),
+              matching: find.byType(Icon))).icon,
+          Icons.star,
+          reason: '预览版指的是第二首（_long）');
     });
   });
 }

@@ -527,9 +527,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     await _saveBgm(_task.bgm.assign(
       startUnit: fromUnit,
       endUnit: toUnit,
-      // 选择浮层暂时还是单选；模型已经支持一段多首备选（导出轮流用），
-      // 多选的界面下一步做
-      materials: [choice.material],
+      materials: choice.materials,
+      previewIndex: choice.previewIndex,
       rangeMs: rangeMs,
       volume: choice.volume,
     ));
@@ -569,15 +568,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       canClear: true,
       projectIds: _projectIds,
       initialVolume: segment.volume,
+      initialMaterials: segment.materials,
+      initialPreviewIndex: segment.previewIndex,
     );
     if (choice == null || !mounted) return;
     await _saveBgm(switch (choice) {
       BgmVolumeChanged(:final volume) => _task.bgm
           .withVolume(startUnit: segment.startUnit, volume: volume),
-      BgmPicked(:final material, :final volume) => _task.bgm.assign(
+      BgmPicked(:final materials, :final previewIndex, :final volume) =>
+        _task.bgm.assign(
           startUnit: segment.startUnit,
           endUnit: segment.endUnit,
-          materials: [material],
+          materials: materials,
+          previewIndex: previewIndex,
           rangeMs: rangeMs,
           volume: volume,
         ),
