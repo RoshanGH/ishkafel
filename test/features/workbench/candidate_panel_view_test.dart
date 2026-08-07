@@ -629,4 +629,52 @@ void main() {
       expect(asked, [100], reason: '取消不该触发第二次下载');
     });
   });
+
+  group('已选的那几条在下面的结果列表里怎么呈现', () {
+    /// 托盘是「我选了什么」，结果列表是「库里有什么」——两处呈现的是同一份
+    /// 勾选数据，任一处操作都同步。不从结果里剔掉已选的：剔了之后条目会
+    /// 跳位，而且用户想取消时反而在列表里找不到它。
+    testWidgets('照样出现在结果列表里，而且是选中态', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      // Key 挂在 CandidateRow 内部的 GestureDetector 上，所以按 entry 找
+      final row = tester
+          .widgetList<CandidateRow>(find.byType(CandidateRow))
+          .firstWhere((r) => r.entry.material.id == 100);
+      expect(row.selected, isTrue, reason: '选了就得画成选中，否则用户会以为没生效');
+      expect(row.isPreview, isTrue, reason: '第一条选中的默认就是预览版');
+    });
+
+    testWidgets('结果列表的条数与顺序不因为选了什么而变', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      final before = tester
+          .widgetList<CandidateRow>(find.byType(CandidateRow))
+          .map((r) => r.entry.material.id)
+          .toList();
+
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      final after = tester
+          .widgetList<CandidateRow>(find.byType(CandidateRow))
+          .map((r) => r.entry.material.id)
+          .toList();
+      expect(after, before, reason: '顺序就是素材库给的顺序，选中不参与重排');
+    });
+
+    testWidgets('在列表里再点一下就取消，托盘同步消失', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picked-chip-100')), findsNothing);
+    });
+  });
 }
