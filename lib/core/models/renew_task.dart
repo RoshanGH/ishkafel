@@ -4,6 +4,7 @@ import '../log/app_log.dart';
 import '../ai/ai_usage.dart';
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
+import '../replacement/picked_material.dart';
 import '../replacement/replacement_plan.dart';
 import 'project_ref.dart';
 import 'tag_group_ref.dart';
@@ -86,6 +87,14 @@ class RenewTask {
   /// 选过没有」这个事实抹掉。
   final List<UnitReplacement>? replacements;
 
+  /// 已挑中的素材，落到盘上的那一份（按 [replacements] 里出现过的候选 id
+  /// 收敛，不再被引用的会被清掉）。见 [PickedMaterial]。
+  ///
+  /// [replacements] 里只有一串 id，光凭它画不出「我选的是哪三条」——
+  /// 候选卡只有当前这一页的检索结果，翻页/换检索方式/换项目组/重开 app
+  /// 之后一个勾都看不见。
+  final List<PickedMaterial> pickedMaterials;
+
   /// 配乐方案：一段 BGM 铺在连续的一串视觉镜头上（可跨台词语义单元）。
   /// 见 [BgmPlan]。
   final BgmPlan bgm;
@@ -125,12 +134,14 @@ class RenewTask {
     this.shotTagPrompt = '',
     this.analysisError,
     List<UnitReplacement>? replacements,
+    List<PickedMaterial> pickedMaterials = const [],
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.firstReadyMs,
     this.aiUsage = AiUsage.empty,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
+        pickedMaterials = List.unmodifiable(pickedMaterials),
         replacements =
             replacements == null ? null : List.unmodifiable(replacements);
 
@@ -200,6 +211,7 @@ class RenewTask {
     String? analysisError,
     bool clearAnalysisError = false,
     List<UnitReplacement>? replacements,
+    List<PickedMaterial>? pickedMaterials,
     BgmPlan? bgm,
     VoicePlan? voices,
     int? firstReadyMs,
@@ -227,6 +239,7 @@ class RenewTask {
         analysisError:
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
         replacements: replacements ?? this.replacements,
+        pickedMaterials: pickedMaterials ?? this.pickedMaterials,
         bgm: bgm ?? this.bgm,
         voices: voices ?? this.voices,
         firstReadyMs: firstReadyMs ?? this.firstReadyMs,
@@ -258,6 +271,7 @@ class RenewTask {
         'shotTagPrompt': shotTagPrompt,
         'analysisError': analysisError,
         'replacements': replacements?.map((r) => r.toJson()).toList(),
+        'pickedMaterials': pickedMaterials.map((m) => m.toJson()).toList(),
         'bgm': bgm.toJson(),
         'voices': voices.toJson(),
         'firstReadyMs': firstReadyMs,
@@ -296,6 +310,7 @@ class RenewTask {
             parsePrompt(json['shotTagPrompt'], json['shotTagGroups']),
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
+        pickedMaterials: PickedMaterial.parseList(json['pickedMaterials']),
         // 老存档里配乐是按**镜头**记区间的，读出来后按单元换算一次
         // （见 [BgmPlan.migrateShotsToUnits]）——直接丢掉的话用户已经选好的
         // 配乐会凭空消失
@@ -360,7 +375,9 @@ class RenewTask {
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences) &&
-      const DeepCollectionEquality().equals(other.replacements, replacements);
+      const DeepCollectionEquality().equals(other.replacements, replacements) &&
+      const DeepCollectionEquality()
+          .equals(other.pickedMaterials, pickedMaterials);
 
   @override
   int get hashCode => Object.hash(
@@ -381,5 +398,6 @@ class RenewTask {
       analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!),
-      replacements == null ? null : Object.hashAll(replacements!));
+      replacements == null ? null : Object.hashAll(replacements!),
+      Object.hashAll(pickedMaterials));
 }

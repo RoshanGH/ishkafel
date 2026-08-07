@@ -10,6 +10,7 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/features/picking/candidate_row.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
@@ -463,6 +464,114 @@ void main() {
       expect(second.dy, first.dy,
           reason: '1360 宽应该排得下两列，第二条要和第一条同一行');
       expect(second.dx, greaterThan(first.dx));
+    });
+  });
+
+  group('已选托盘：我选了哪几条，一直看得见', () {
+    /// 勾选状态原本只画在候选卡上，而候选卡只有当前这一页的检索结果。
+    /// 翻页/换检索方式/换项目组之后一个勾都看不见——用户原话
+    /// 「我没有看到我选了那 3 个，我不知道是不是我那 3 个」。
+    testWidgets('勾上就出现在托盘里', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picked-chip-100')), findsOneWidget);
+      expect(find.text('已选 1 条'), findsOneWidget);
+    });
+
+    testWidgets('翻到下一页也还在——它和这一页搜到什么无关', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-next-page')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picking-candidate-100')), findsNothing,
+          reason: '第 2 页没有这条素材');
+      expect(find.byKey(const Key('picked-chip-100')), findsOneWidget,
+          reason: '但我选了它，就得一直看得见');
+    });
+
+    testWidgets('托盘上能直接取消勾选', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picked-remove-100')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picked-chip-100')), findsNothing);
+    });
+
+    testWidgets('镜头替换那一层同样有托盘——两层是同一套问题', (tester) async {
+      await _pump(tester);
+      await _perShot(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picked-chip-100')), findsOneWidget);
+    });
+
+    testWidgets('换到另一个镜头时托盘跟着换——托盘是当前作用域的', (tester) async {
+      await _pump(tester);
+      await _perShot(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-shot-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('picked-chip-100')), findsNothing,
+          reason: 'S1 选的那条不该算在 S2 头上');
+    });
+
+    testWidgets('落地记录上抛给工作台存盘', (tester) async {
+      final saved = <List<PickedMaterial>>[];
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 340,
+            height: 880,
+            child: CandidateTab(
+              editor: SegmentationEditorController(
+                initialUnits: _units(),
+                durationMs: 4000,
+                fps: 30,
+                sentences: const [],
+              ),
+              shotTagGroups: const [TagGroupRef(id: 1, name: '画面层')],
+              unitTagGroups: const [TagGroupRef(id: 2, name: '台词层')],
+              onReplacementsChanged: (_) {},
+              onPickedMaterialsChanged: saved.add,
+              contentService: _Content(),
+              tagService: _Tags(),
+              candidateProbe:
+                  CandidateProbe(run: (_, _) async => throw 'no probe'),
+              onPreview: (context, material) async {},
+              pageSize: 3,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-candidate-100')));
+      await tester.pumpAndSettle();
+
+      expect(saved.last.single.id, 100);
+      expect(saved.last.single.voiceover, '这是第 0 条素材的台词',
+          reason: '存的是「这条素材是什么」，不只是一个 id');
+
+      // 取消勾选之后记录也要清掉，不留垃圾
+      await tester.tap(find.byKey(const Key('picked-remove-100')));
+      await tester.pumpAndSettle();
+      expect(saved.last, isEmpty);
     });
   });
 }

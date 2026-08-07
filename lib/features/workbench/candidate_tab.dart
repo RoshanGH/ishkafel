@@ -10,8 +10,11 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
+import '../picking/picked_material_store.dart';
+import '../picking/picked_tray.dart';
 import '../picking/candidate_preview.dart';
 import '../../core/log/app_log.dart';
 import '../picking/tag_hit_probe.dart';
@@ -47,6 +50,16 @@ class CandidateTab extends StatefulWidget {
   /// 方案有任何改动就上抛，由工作台落库（与切分改动同一条自动保存通路）
   final ValueChanged<List<UnitReplacement>> onReplacementsChanged;
 
+  /// 已挑中素材的落地记录（随任务存盘）。为空表示还没挑过 / 旧任务
+  final List<PickedMaterial> pickedMaterials;
+
+  /// 落地记录有变动就上抛，和 [onReplacementsChanged] 走同一条保存通路。
+  /// 没接的话托盘照样能画（用内存里那份），只是重开 app 就没了
+  final ValueChanged<List<PickedMaterial>>? onPickedMaterialsChanged;
+
+  /// 把一条候选落到盘上（下首帧图）。注入而不是内建：单测不碰网络和磁盘
+  final PickedMaterialStore? pickedStore;
+
   /// 只读回看：已导出的任务不能再改方案
   final bool readOnly;
 
@@ -71,6 +84,9 @@ class CandidateTab extends StatefulWidget {
     required this.shotTagGroups,
     this.unitTagGroups = const [],
     required this.onReplacementsChanged,
+    this.pickedMaterials = const [],
+    this.onPickedMaterialsChanged,
+    this.pickedStore,
     this.initialReplacements,
     this.readOnly = false,
     this.project,
@@ -116,10 +132,17 @@ class CandidateTabState extends State<CandidateTab> {
   /// 上一次见到的单元数：编辑到增删单元时方案要跟着重建
   late int _unitCount;
 
+  /// 已挑中素材的落地记录（候选 id → 记录）。种子来自任务，之后跟着勾选走
+  late Map<int, PickedMaterial> _picked;
+
+  /// 正在落地的候选 id：防止同一条被并发写两遍
+  final Set<int> _saving = {};
+
   @override
   void initState() {
     super.initState();
     _picking = _buildPicking(widget.initialReplacements);
+    _picked = {for (final m in widget.pickedMaterials) m.id: m};
     _unitCount = widget.editor.units.length;
     _search = CandidateSearchController(
       service: widget.contentService ?? MiaoaContentService(),
@@ -135,6 +158,7 @@ class CandidateTabState extends State<CandidateTab> {
     _syncSelectionFromEditor();
     _syncSearchMode();
     unawaited(_loadTagVocabulary());
+    unawaited(_backfillPicked());
   }
 
   /// 传给 CLI 的 `--projects`；不限项目时为空
@@ -214,12 +238,136 @@ class CandidateTabState extends State<CandidateTab> {
     if (sel.shotIndex != null) _picking.selectShot(sel.shotIndex);
   }
 
+  /// 把「勾了哪些」和「落地记录」对齐：
+  /// - 新勾上的：从当前检索结果里取到素材信息，连首帧图一起落到盘上；
+  /// - 取消勾选的：记录和首帧图一起清掉，不留垃圾。
+  ///
+  /// 只落信息不落视频——见 [PickedMaterialStore] 的说明。
+  Future<void> _syncPicked() async {
+    final referenced = _referencedCandidateIds();
+
+    // 先做减法：取消勾选是同步就该看到的
+    final dropped = _picked.keys.where((id) => !referenced.contains(id)).toSet();
+    if (dropped.isNotEmpty) {
+      setState(() => _picked = {
+            for (final e in _picked.entries)
+              if (referenced.contains(e.key)) e.key: e.value,
+          });
+      widget.pickedStore?.prune(referenced);
+      _emitPicked();
+    }
+
+    // 再做加法：一条条落地，落完一条刷新一条（首帧图要下载，不能等齐了再画）
+    for (final id in referenced) {
+      if (_picked.containsKey(id) || _saving.contains(id)) continue;
+      final entry = _search.entries
+          .firstWhereOrNull((e) => e.material.id == id);
+      if (entry == null) continue; // 不在这一页结果里，交给 [_backfillPicked]
+      _saving.add(id);
+      await _store(entry.material, entry.spec?.durationMs);
+    }
+  }
+
+  /// 落地一条，成功与否都要出结果——首帧图下不下得来是次要的，
+  /// 「我选了哪几条」不能因为一张图丢掉
+  Future<void> _store(CandidateMaterial material, int? durationMs) async {
+    PickedMaterial record;
+    try {
+      final store = widget.pickedStore;
+      record = store == null
+          ? PickedMaterial(
+              id: material.id,
+              name: material.name,
+              voiceover: material.voiceover,
+              sceneDescription: material.sceneDescription,
+              durationMs: durationMs)
+          : await store.save(material, durationMs: durationMs);
+    } catch (e) {
+      AppLog.warn('已选素材 ${material.id} 落地失败：$e');
+      record = PickedMaterial(id: material.id, name: material.name);
+    } finally {
+      _saving.remove(material.id);
+    }
+    if (!mounted) return;
+    // 落地期间可能已经被取消勾选了，那就别再写回去
+    if (!_referencedCandidateIds().contains(material.id)) return;
+    setState(() => _picked = {..._picked, material.id: record});
+    _emitPicked();
+  }
+
+  /// 旧任务里只有一串 id、没有落地记录：按 id 去库里补一次。
+  /// 补完就写盘，之后再进来就不用连网了。
+  Future<void> _backfillPicked() async {
+    final missing = _referencedCandidateIds()
+        .where((id) => !_picked.containsKey(id) && !_saving.contains(id))
+        .toList();
+    if (missing.isEmpty) return;
+    final service = widget.contentService ?? MiaoaContentService();
+    for (final id in missing) {
+      _saving.add(id);
+      try {
+        final material = await service.fetchById(id);
+        if (material == null) {
+          _saving.remove(id);
+          // 素材在库里被删了也要占个位——凭空少一条比显示一条「读不出来」更糟
+          if (!mounted) return;
+          setState(() => _picked = {
+                ..._picked,
+                id: PickedMaterial(id: id, name: '素材 #$id（素材库里已找不到）'),
+              });
+          continue;
+        }
+        await _store(material, null);
+      } catch (e) {
+        _saving.remove(id);
+        AppLog.warn('补取已选素材 $id 失败：$e');
+      }
+      if (!mounted) return;
+    }
+  }
+
+  /// 方案里引用到的全部候选 id（两层都算）
+  Set<int> _referencedCandidateIds() => {
+        for (final r in _picking.replacements) ...[
+          ...r.wholeCandidateIds,
+          for (final ids in r.shotCandidateIds.values) ...ids,
+        ],
+      };
+
+  void _emitPicked() {
+    final list = _picked.values.toList(growable: false);
+    widget.onPickedMaterialsChanged?.call(List.unmodifiable(list));
+  }
+
+  /// 当前作用域的托盘内容。顺序按用户勾选的先后，不按 id
+  List<PickedItem> get _pickedItems {
+    final ids = switch (_picking.currentMode) {
+      ReplacementMode.keepOriginal => const <int>[],
+      ReplacementMode.whole => _picking.currentReplacement.wholeCandidateIds,
+      ReplacementMode.perShot =>
+        _picking.currentReplacement.shotCandidateIds[
+                _picking.selectedShotIndex ?? -1] ??
+            const <int>[],
+    };
+    final preview = _picking.previewCandidateId;
+    return [
+      for (final id in ids)
+        PickedItem(
+          candidateId: id,
+          material: _picked[id],
+          isPreview: id == preview,
+          targetMs: _scope.targetDurationMs,
+        ),
+    ];
+  }
+
   /// 方案/选中变化后按需重新检索（同一作用域不重复打网络），并把改动落库。
   void _onPickingChanged() {
     if (!mounted) return;
     // 勾一条候选就是一次改动，直接落库：工作台里没有「未保存」这回事。
     // markSaved 会再 notify 一次，但那一次 dirty 已是 false，不会递归。
     if (_picking.dirty && !widget.readOnly) _emit();
+    unawaited(_syncPicked());
     final before = _searchMode;
     _syncSearchMode();
     if (before != _searchMode) setState(() {});
@@ -408,6 +556,11 @@ class CandidateTabState extends State<CandidateTab> {
           tagHitsLoading: _tagHitsLoading,
           onProbeTagHits: _probeTagHits,
           projectName: widget.project?.name,
+          picked: _pickedItems,
+          onRemovePicked:
+              widget.readOnly ? null : _picking.toggleCandidate,
+          onSetPreviewPicked:
+              widget.readOnly ? null : _picking.setPreviewCandidate,
         ),
       );
 }

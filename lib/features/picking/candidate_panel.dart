@@ -15,6 +15,7 @@ import 'picking_controller.dart';
 import 'picking_messages.dart';
 import 'picking_scope.dart';
 import 'tag_query_narrowing.dart';
+import 'picked_tray.dart';
 import 'picking_widgets.dart';
 
 /// 阶段②右栏：替换模式三态分段 → 视觉镜头条 → 检索方式 → 候选卡 → 因子小结。
@@ -53,6 +54,14 @@ class CandidatePanel extends StatelessWidget {
   final bool tagHitsLoading;
   final VoidCallback? onProbeTagHits;
 
+  /// 当前作用域已经勾了哪几条（落地记录）。摆在候选区最上面，
+  /// 和当前这一页的检索结果是什么完全无关——见 [PickedTray]
+  final List<PickedItem> picked;
+
+  /// 取消勾选 / 设为预览版
+  final ValueChanged<int>? onRemovePicked;
+  final ValueChanged<int>? onSetPreviewPicked;
+
   /// 检索限定在哪个项目组内；null 表示没设，检索会横跨我的全部项目。
   ///
   /// 必须一直摆在明面上：项目组是排他性的筛选条件，看不见它就没法判断
@@ -76,6 +85,9 @@ class CandidatePanel extends StatelessWidget {
     this.tagHitsLoading = false,
     this.onProbeTagHits,
     this.projectName,
+    this.picked = const [],
+    this.onRemovePicked,
+    this.onSetPreviewPicked,
   });
 
   /// 镜头替换只有画面视图：那一层挑的就是画面，摆一个台词列表反而绕远
@@ -478,8 +490,26 @@ class CandidatePanel extends StatelessWidget {
         ),
       );
 
-  /// 候选区：五种状态各有明确呈现，任何一种都不留空白
+  /// 候选区 = 「已选」托盘 + 五种状态之一。
+  ///
+  /// 托盘在**每一种状态下都在**，包括检索失败和 0 结果——「我选了哪三条」
+  /// 和「这次搜到没搜到」是两件事，后者出问题不该把前者也一起吞掉。
   Widget _body(BuildContext context) {
+    final content = _content(context);
+    if (picked.isEmpty) return content;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+          child: _tray(),
+        ),
+        Expanded(child: content),
+      ],
+    );
+  }
+
+  Widget _content(BuildContext context) {
     if (picking.currentMode == ReplacementMode.keepOriginal) {
       return _hint('这个台词语义单元保留原片。要替换的话，先在上方选择「整体替换」或「镜头替换」');
     }
@@ -601,6 +631,13 @@ class CandidatePanel extends StatelessWidget {
 
   /// 一列台词行至少要这么宽，否则缩略图 + 操作按钮挤完就没地方放台词了
   static const double transcriptColumnWidth = 620;
+
+  /// 候选区上方那条「已选」托盘
+  Widget _tray() => PickedTray(
+        items: picked,
+        onRemove: onRemovePicked ?? (_) {},
+        onSetPreview: onSetPreviewPicked ?? (_) {},
+      );
 
   /// 台词视图：按可用宽度分列铺开。
   ///

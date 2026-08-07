@@ -10,6 +10,7 @@ import '../../core/models/project_ref.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
@@ -435,6 +436,19 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       RenewTask task, List<UnitReplacement> replacements) async {
     final updated = task.copyWith(
       replacements: replacements,
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 已挑中素材的落地记录。和替换方案分开存：方案是「选了哪些 id」，
+  /// 这里是「那些 id 到底是什么」——后者是为了让用户随时看得见自己选了什么，
+  /// 和检索结果、翻到第几页、换没换项目组都无关。
+  Future<void> savePickedMaterials(
+      RenewTask task, List<PickedMaterial> materials) async {
+    final updated = task.copyWith(
+      pickedMaterials: materials,
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);

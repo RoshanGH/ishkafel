@@ -15,6 +15,7 @@ import '../../core/ai/ai_usage_scope.dart';
 import '../../core/audio/voice_swap_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/net/http_bytes.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
@@ -23,9 +24,11 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
+import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/editing/edit_consequence.dart';
 import '../picking/picking_messages.dart';
+import '../settings/settings_providers.dart';
 import '../tasks/task_list_controller.dart';
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
@@ -35,6 +38,7 @@ import 'voice_picker_sheet.dart';
 import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
+import '../picking/picked_material_store.dart';
 import 'edit_consequence_dialog.dart';
 import 'task_tag_groups_dialog.dart';
 import 'timeline/timeline_painter.dart';
@@ -77,6 +81,10 @@ class WorkbenchPage extends ConsumerStatefulWidget {
   final DateTime Function()? clock;
 
   /// 右栏「替换素材」的依赖，缺省走真实 miaoa CLI；测试注入假实现
+  /// 把挑中的素材落到盘上（下首帧图）。为空表示不落地——托盘仍然能画，
+  /// 只是重开 app 之后要现拉
+  final PickedMaterialStore? pickedStore;
+
   final MiaoaContentService? contentService;
   final CandidateProbe? candidateProbe;
   final MiaoaTagService? tagService;
@@ -95,6 +103,7 @@ class WorkbenchPage extends ConsumerStatefulWidget {
     this.playbackFactory,
     this.mediaBuilder,
     this.clock,
+    this.pickedStore,
     this.contentService,
     this.candidateProbe,
     this.tagService,
@@ -878,6 +887,32 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 右栏落地了新的已选素材：跟着存盘。存失败不打断选材——盘上少一条记录
+  /// 只影响「下次进来还看不看得见」，不影响这次的方案
+  Future<void> _onPickedMaterialsChanged(List<PickedMaterial> next) async {
+    if (!_isEditable) return;
+    if (const DeepCollectionEquality().equals(_task.pickedMaterials, next)) {
+      return;
+    }
+    try {
+      await _tasks!.savePickedMaterials(_task, next);
+      _task = _task.copyWith(pickedMaterials: next);
+    } catch (e) {
+      AppLog.warn('已选素材落库失败（taskId=${widget.task.id}）：$e');
+    }
+  }
+
+  /// 首帧图落在任务数据目录下。没有数据目录（测试环境）就不落地——
+  /// 托盘照样能画，只是重开就没了
+  PickedMaterialStore? get _defaultPickedStore {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return PickedMaterialStore(
+      dir: Directory(p.join(dataDir.path, 'picked_thumbs', widget.task.id)),
+      fetch: httpBytes,
+    );
+  }
+
   ReplacementPlan get _plan => ReplacementPlan(_replacements ?? const []);
 
   String _summaryText(SegmentationEditorController editor) =>
@@ -970,6 +1005,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   onReplacementsChanged: _onReplacementsChanged,
                   readOnly: !_isEditable,
                   project: _task.project,
+                  pickedMaterials: _task.pickedMaterials,
+                  onPickedMaterialsChanged: _onPickedMaterialsChanged,
+                  pickedStore: widget.pickedStore ?? _defaultPickedStore,
                   contentService: widget.contentService,
                   candidateProbe: widget.candidateProbe,
                   tagService: widget.tagService,
