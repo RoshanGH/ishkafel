@@ -1,5 +1,8 @@
 import 'package:collection/collection.dart';
 
+import '../log/app_log.dart';
+import '../models/semantic_unit.dart';
+
 /// 一条可用作 BGM 的音频素材（来自 miaoa 音频库）
 class BgmMaterial {
   final int id;
@@ -71,8 +74,15 @@ enum BgmFit {
 /// 错位；按镜头存则天然跟着走。下标是**全片打平**的（跨台词语义单元连续
 /// 编号）——配乐本来就不跟台词走，一段情绪往往横跨好几句话。
 class BgmSegment {
-  final int startShot;
-  final int endShot;
+  /// **按台词语义单元对齐，不是镜头**。
+  ///
+  /// 整体替换之后单元还在（只是时长变了），镜头没了——那一整段变成一条候选
+  /// 素材。按镜头记的区间在那一刻就悬空了；按单元记则永远有意义。
+  ///
+  /// 代价：不能给单元内的部分镜头铺配乐（真机上 U4 是 40 秒 20 个镜头，
+  /// 以后只能整段铺或整段不铺）。垫乐本来就是大段铺的，这个粒度够用。
+  final int startUnit;
+  final int endUnit;
   final BgmMaterial material;
   final BgmFit fit;
 
@@ -86,12 +96,17 @@ class BgmSegment {
   /// 主体是口播
   static const double defaultVolume = 0.25;
 
+  /// 这一段是从老存档读来的、下标其实是**镜头**下标，还没换算成单元。
+  /// 只在 [BgmPlan.migrateShotsToUnits] 之前为真
+  final bool legacyShotRange;
+
   const BgmSegment({
-    required this.startShot,
-    required this.endShot,
+    required this.startUnit,
+    required this.endUnit,
     required this.material,
     required this.fit,
     this.volume = defaultVolume,
+    this.legacyShotRange = false,
   });
 
   /// 夹回 0~1。构造函数是 const 的（很多地方直接 `const BgmSegment(...)`），
@@ -102,37 +117,42 @@ class BgmSegment {
           ? 1
           : v;
 
-  bool covers(int shotIndex) => shotIndex >= startShot && shotIndex <= endShot;
+  bool covers(int unitIndex) => unitIndex >= startUnit && unitIndex <= endUnit;
 
-  BgmSegment copyWith({int? startShot, int? endShot, double? volume}) =>
+  BgmSegment copyWith({int? startUnit, int? endUnit, double? volume}) =>
       BgmSegment(
-        startShot: startShot ?? this.startShot,
-        endShot: endShot ?? this.endShot,
+        startUnit: startUnit ?? this.startUnit,
+        endUnit: endUnit ?? this.endUnit,
         material: material,
         fit: fit,
         volume: volume ?? this.volume,
       );
 
   Map<String, dynamic> toJson() => {
-        'startShot': startShot,
-        'endShot': endShot,
+        'startUnit': startUnit,
+        'endUnit': endUnit,
         'material': material.toJson(),
         'fit': fit.name,
         'volume': volume,
       };
 
+  /// 老存档用的是镜头下标（`startShot`/`endShot`）。这里照读，
+  /// 由 [BgmPlan.migrateShotsToUnits] 换算成单元下标——直接丢掉的话，
+  /// 用户已经选好的配乐会凭空消失
   static BgmSegment? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
-    final start = raw['startShot'];
-    final end = raw['endShot'];
+    final legacy = raw['startUnit'] == null;
+    final start = raw[legacy ? 'startShot' : 'startUnit'];
+    final end = raw[legacy ? 'endShot' : 'endUnit'];
     if (start is! int || end is! int || end < start) return null;
     final material = BgmMaterial.tryFromJson(raw['material']);
     if (material == null) return null;
     final fit = BgmFit.values.firstWhereOrNull((f) => f.name == raw['fit']);
     final volume = raw['volume'];
     return BgmSegment(
-      startShot: start,
-      endShot: end,
+      startUnit: start,
+      endUnit: end,
+      legacyShotRange: legacy,
       material: material,
       fit: fit ?? BgmFit.exact,
       // 老存档没有这个字段；脏数据由构造函数夹回 0~1
@@ -159,9 +179,9 @@ class BgmPlan {
 
   bool get isEmpty => segments.isEmpty;
 
-  /// 这个镜头归哪一段管；没有配乐时返回 null
-  BgmSegment? segmentAt(int shotIndex) =>
-      segments.firstWhereOrNull((s) => s.covers(shotIndex));
+  /// 这个台词语义单元归哪一段管；没有配乐时返回 null
+  BgmSegment? segmentAt(int unitIndex) =>
+      segments.firstWhereOrNull((s) => s.covers(unitIndex));
 
   /// 差在这个范围内就当「刚好」。差 0.2 秒还写「会循环播放」是在吓唬用户。
   static const int fitToleranceMs = 500;
@@ -175,73 +195,119 @@ class BgmPlan {
     return diff > 0 ? BgmFit.cut : BgmFit.loop;
   }
 
-  /// 把 [material] 铺到 [startShot]..[endShot] 上。
+  /// 把 [material] 铺到 [startUnit]..[endUnit] 上。
   ///
-  /// [shotRangeMs] 是这段镜头的实际总时长，用来判断裁还是循环——调用方
+  /// [rangeMs] 是这几个单元的实际总时长，用来判断裁还是循环——调用方
   /// 拿得到 units，这里不重复算一遍。
   BgmPlan assign({
-    required int startShot,
-    required int endShot,
+    required int startUnit,
+    required int endUnit,
     required BgmMaterial material,
-    required int shotRangeMs,
+    required int rangeMs,
     double volume = BgmSegment.defaultVolume,
   }) {
     // 用户可能从右往左拖
-    final from = startShot <= endShot ? startShot : endShot;
-    final to = startShot <= endShot ? endShot : startShot;
+    final from = startUnit <= endUnit ? startUnit : endUnit;
+    final to = startUnit <= endUnit ? endUnit : startUnit;
 
     final next = <BgmSegment>[];
     for (final old in segments) {
       // 完全被压住：整段让出去
-      if (old.startShot >= from && old.endShot <= to) continue;
+      if (old.startUnit >= from && old.endUnit <= to) continue;
       // 完全不相干：原样保留
-      if (old.endShot < from || old.startShot > to) {
+      if (old.endUnit < from || old.startUnit > to) {
         next.add(old);
         continue;
       }
       // 部分重叠：左右各留下不重叠的那截（新段落在中间时会劈成两半）
-      if (old.startShot < from) {
-        next.add(old.copyWith(endShot: from - 1));
+      if (old.startUnit < from) {
+        next.add(old.copyWith(endUnit: from - 1));
       }
-      if (old.endShot > to) {
-        next.add(old.copyWith(startShot: to + 1));
+      if (old.endUnit > to) {
+        next.add(old.copyWith(startUnit: to + 1));
       }
     }
     next.add(BgmSegment(
-      startShot: from,
-      endShot: to,
+      startUnit: from,
+      endUnit: to,
       material: material,
-      fit: fitFor(materialDurationMs: material.durationMs, rangeMs: shotRangeMs),
+      fit: fitFor(materialDurationMs: material.durationMs, rangeMs: rangeMs),
       volume: BgmSegment.clampVolume(volume),
     ));
-    next.sort((a, b) => a.startShot.compareTo(b.startShot));
+    next.sort((a, b) => a.startUnit.compareTo(b.startUnit));
     // 刚放上去的这一段的音量是「最后设的」，合并时由它覆盖整段
     return _merged(next, winningVolume: BgmSegment.clampVolume(volume));
   }
 
-  /// 把这个镜头区间从所有配乐段里**抠掉**。
+  /// 把这个单元区间从所有配乐段里**抠掉**。
   ///
   /// 整体替换一个台词语义单元时用：那一段的画面、口播、配乐全部来自候选素材，
   /// 原来铺在它上面的配乐在这一段就不存在了。抠完可能是截断、劈成两段、
   /// 或整段消失。
-  BgmPlan carveOutShots(int fromShot, int toShot) {
-    final from = fromShot <= toShot ? fromShot : toShot;
-    final to = fromShot <= toShot ? toShot : fromShot;
+  BgmPlan carveOutUnits(int fromUnit, int toUnit) {
+    final from = fromUnit <= toUnit ? fromUnit : toUnit;
+    final to = fromUnit <= toUnit ? toUnit : fromUnit;
     final next = <BgmSegment>[];
     for (final s in segments) {
       // 完全被盖住：整段没了
-      if (s.startShot >= from && s.endShot <= to) continue;
+      if (s.startUnit >= from && s.endUnit <= to) continue;
       // 不相干：原样
-      if (s.endShot < from || s.startShot > to) {
+      if (s.endUnit < from || s.startUnit > to) {
         next.add(s);
         continue;
       }
       // 左右各留下不重叠的那截；被抠的部分落在中间时劈成两段
-      if (s.startShot < from) next.add(s.copyWith(endShot: from - 1));
-      if (s.endShot > to) next.add(s.copyWith(startShot: to + 1));
+      if (s.startUnit < from) next.add(s.copyWith(endUnit: from - 1));
+      if (s.endUnit > to) next.add(s.copyWith(startUnit: to + 1));
     }
-    next.sort((a, b) => a.startShot.compareTo(b.startShot));
+    next.sort((a, b) => a.startUnit.compareTo(b.startUnit));
     return BgmPlan(List.unmodifiable(next));
+  }
+
+  /// 一段配乐覆盖的单元对应到全片的哪一段时间；越界返回 null。
+  ///
+  /// 直接取单元的起止——不必再打平成镜头再换算，那是按镜头记区间时的做法。
+  static (int, int)? unitRangeOf(List<SemanticUnit> units, BgmSegment segment) {
+    if (units.isEmpty || segment.startUnit >= units.length) return null;
+    final start = segment.startUnit.clamp(0, units.length - 1);
+    final end = segment.endUnit.clamp(start, units.length - 1);
+    return (units[start].startMs, units[end].endMs);
+  }
+
+  /// 把老存档里按**镜头**记的区间换算成单元区间。
+  ///
+  /// 跨到哪个单元就算到哪个单元——粒度变粗是这次改动的代价。镜头下标越界的
+  /// 整段丢掉：留一段指向不存在单元的配乐，导出时才发现更糟。
+  BgmPlan migrateShotsToUnits(List<SemanticUnit> units) {
+    if (!segments.any((s) => s.legacyShotRange)) return this;
+    final unitOfShot = <int>[];
+    for (var u = 0; u < units.length; u++) {
+      for (var i = 0; i < units[u].shots.length; i++) {
+        unitOfShot.add(u);
+      }
+    }
+    final next = <BgmSegment>[];
+    for (final s in segments) {
+      if (!s.legacyShotRange) {
+        next.add(s);
+        continue;
+      }
+      if (s.startUnit >= unitOfShot.length) {
+        AppLog.warn('配乐「${s.material.name}」的镜头区间已越界，迁移时丢弃');
+        continue;
+      }
+      final from = unitOfShot[s.startUnit.clamp(0, unitOfShot.length - 1)];
+      final to = unitOfShot[s.endUnit.clamp(0, unitOfShot.length - 1)];
+      next.add(BgmSegment(
+        startUnit: from,
+        endUnit: to,
+        material: s.material,
+        fit: s.fit,
+        volume: s.volume,
+      ));
+    }
+    next.sort((a, b) => a.startUnit.compareTo(b.startUnit));
+    return _merged(next);
   }
 
   /// 相邻的同一首曲子并成一段——不在接缝处从头重播。
@@ -256,11 +322,11 @@ class BgmPlan {
       final last = out.isEmpty ? null : out.last;
       if (last != null &&
           last.material.id == s.material.id &&
-          last.endShot + 1 == s.startShot) {
+          last.endUnit + 1 == s.startUnit) {
         final volume = winningVolume ?? last.volume;
         if (last.volume != volume || s.volume != volume) changedVolume = true;
         out[out.length - 1] =
-            last.copyWith(endShot: s.endShot, volume: volume);
+            last.copyWith(endUnit: s.endUnit, volume: volume);
         continue;
       }
       out.add(s);
@@ -274,19 +340,19 @@ class BgmPlan {
     );
   }
 
-  /// 只改某一段的音量，不换曲子。[startShot] 用来认段；找不到就原样返回。
-  BgmPlan withVolume({required int startShot, required double volume}) =>
+  /// 只改某一段的音量，不换曲子。[startUnit] 用来认段；找不到就原样返回。
+  BgmPlan withVolume({required int startUnit, required double volume}) =>
       BgmPlan(List.unmodifiable([
         for (final s in segments)
-          if (s.startShot == startShot)
+          if (s.startUnit == startUnit)
             s.copyWith(volume: BgmSegment.clampVolume(volume))
           else
             s,
       ]));
 
-  /// 移除覆盖 [shotIndex] 的那一段；没有就原样返回
-  BgmPlan removeAt(int shotIndex) {
-    final target = segmentAt(shotIndex);
+  /// 移除覆盖 [unitIndex] 的那一段；没有就原样返回
+  BgmPlan removeAt(int unitIndex) {
+    final target = segmentAt(unitIndex);
     if (target == null) return this;
     return BgmPlan(List.unmodifiable(
         segments.where((s) => !identical(s, target)).toList()));
@@ -304,7 +370,7 @@ class BgmPlan {
       final segment = BgmSegment.tryFromJson(item);
       if (segment != null) parsed.add(segment);
     }
-    parsed.sort((a, b) => a.startShot.compareTo(b.startShot));
+    parsed.sort((a, b) => a.startUnit.compareTo(b.startUnit));
     return BgmPlan(List.unmodifiable(parsed));
   }
 }

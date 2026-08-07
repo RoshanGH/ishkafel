@@ -81,35 +81,38 @@ void main() {
         // 只盖住全片第一个镜头（U1 的 S1，0~2000）
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 0, endShot: 0, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, material: _bgmTrack, fit: BgmFit.cut),
         ]),
       );
 
       final inputs = _inputsOf(b.calls);
-      expect(inputs.where((i) => i == '/v/vocals.wav'), hasLength(1),
-          reason: '只有被配乐盖住的那一个镜头要去掉原背景');
-      expect(inputs.where((i) => i == '/v/a.mp4'), hasLength(2),
-          reason: '其余两个镜头照常用原混音');
+      expect(inputs.where((i) => i == '/v/vocals.wav'), hasLength(2),
+          reason: 'U1 被盖住，它的两个镜头都要去掉原背景');
+      expect(inputs.where((i) => i == '/v/a.mp4'), hasLength(1),
+          reason: 'U2 没被盖住，照常用原混音——分离是有损的，'
+              '没换配乐的地方没必要先损一道');
     });
 
-    test('按镜头切而不是按单元：同一个单元里只盖住一半时，另一半不该白白损音质',
+    test('配乐按单元对齐，盖不到半个单元——整段要么全用人声轨要么全不用',
         () async {
       final b = _build();
 
+      // 只盖住 U2
       await b.builder.build(
         sourcePath: '/v/a.mp4',
         units: _units(),
         vocalsPath: '/v/vocals.wav',
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 1, endShot: 1, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 1, endUnit: 1, material: _bgmTrack, fit: BgmFit.cut),
         ]),
       );
 
-      // U1 的 S2 用人声轨，S1 用原混音
+      // U1 的两个镜头都用原混音，U2 那个用人声轨
       final trims = b.calls.where((a) => a.contains('-vn')).toList();
       expect(trims[0][trims[0].indexOf('-i') + 1], '/v/a.mp4');
-      expect(trims[1][trims[1].indexOf('-i') + 1], '/v/vocals.wav');
+      expect(trims[1][trims[1].indexOf('-i') + 1], '/v/a.mp4');
+      expect(trims[2][trims[2].indexOf('-i') + 1], '/v/vocals.wav');
     });
 
     test('没有人声轨时退回原混音，不至于整条合不出来', () async {
@@ -120,7 +123,7 @@ void main() {
         units: _units(),
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 0, endShot: 0, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, material: _bgmTrack, fit: BgmFit.cut),
         ]),
       );
 
@@ -161,7 +164,7 @@ void main() {
   });
 
   group('配乐叠上去', () {
-    test('每段配乐混一次，位置按它覆盖的镜头算', () async {
+    test('每段配乐混一次，位置按它覆盖的单元算', () async {
       final b = _build();
 
       await b.builder.build(
@@ -170,13 +173,13 @@ void main() {
         vocalsPath: '/v/vocals.wav',
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 1, endShot: 2, material: _bgmTrack, fit: BgmFit.loop),
+              startUnit: 1, endUnit: 2, material: _bgmTrack, fit: BgmFit.loop),
         ]),
       );
 
       final mix = b.calls.firstWhere((a) => a.contains('-filter_complex'));
-      // S2 起点 2000ms、到 S3 终点 6000ms
-      expect(mix.join(' '), contains('adelay=2000|2000'));
+      // U2 起点 4000ms（endUnit 越界时夹到最后一个单元）
+      expect(mix.join(' '), contains('adelay=4000|4000'));
       expect(mix.join(' '), contains('https://cdn/b.mp3'));
     });
 
@@ -188,8 +191,8 @@ void main() {
         units: _units(),
         bgm: const BgmPlan([
           BgmSegment(
-            startShot: 0,
-            endShot: 0,
+            startUnit: 0,
+            endUnit: 0,
             material: BgmMaterial(
                 id: 1, name: '过期的', durationMs: 1000, previewUrl: null),
             fit: BgmFit.cut,

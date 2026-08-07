@@ -93,22 +93,24 @@ void main() {
   _voiceMarks();
 
   group('在配乐轨上横向拖选一段连续镜头', () {
-    testWidgets('拖过两个镜头就选中这两个', (tester) async {
+    // 视口 500px 对应 10000ms：x=50 → 1000ms（U1）、x=350 → 7000ms（U2）
+    testWidgets('在一个单元内部拖，就选中这一个单元', (tester) async {
       await _pump(tester);
 
       await tester.dragFrom(_at(50), const Offset(100, 0));
       await tester.pumpAndSettle();
 
-      expect(ranges, [(0, 1)]);
+      expect(ranges, [(0, 0)],
+          reason: '配乐按台词语义单元对齐，吸附到单元边界而不是镜头');
     });
 
-    testWidgets('区间可以跨台词语义单元——配乐本来就不跟台词走', (tester) async {
+    testWidgets('拖过两个单元就选中这两个', (tester) async {
       await _pump(tester);
 
-      await tester.dragFrom(_at(150), const Offset(200, 0));
+      await tester.dragFrom(_at(50), const Offset(300, 0));
       await tester.pumpAndSettle();
 
-      expect(ranges, [(1, 2)]);
+      expect(ranges, [(0, 1)]);
     });
 
     testWidgets('从右往左拖也认，回调里已经排好序', (tester) async {
@@ -117,16 +119,16 @@ void main() {
       await tester.dragFrom(_at(350), const Offset(-300, 0));
       await tester.pumpAndSettle();
 
-      expect(ranges, [(0, 2)]);
+      expect(ranges, [(0, 1)]);
     });
 
-    testWidgets('拖出片尾时夹到最后一个镜头，选区不会突然消失', (tester) async {
+    testWidgets('拖出片尾时夹到最后一个单元，选区不会突然消失', (tester) async {
       await _pump(tester);
 
       await tester.dragFrom(_at(350), const Offset(400, 0));
       await tester.pumpAndSettle();
 
-      expect(ranges, [(2, 2)]);
+      expect(ranges, [(1, 1)]);
     });
 
     testWidgets('只读回看时不给选——已导出的任务不该还能改配乐', (tester) async {
@@ -156,7 +158,7 @@ void main() {
         tester,
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 0, endShot: 1, material: _track, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 1, material: _track, fit: BgmFit.cut),
         ]),
       );
 
@@ -171,7 +173,7 @@ void main() {
         tester,
         bgm: const BgmPlan([
           BgmSegment(
-              startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
         ]),
       );
 

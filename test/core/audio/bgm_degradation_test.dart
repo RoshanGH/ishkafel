@@ -12,17 +12,16 @@ const _a = BgmMaterial(
 const _b = BgmMaterial(
     id: 2, name: '风声', durationMs: 30000, previewUrl: 'https://o/b.mp3');
 
+/// 五个单元，各 1 秒——配乐按单元对齐，测试也得有多个单元才谈得上「哪一段」
 List<SemanticUnit> _units() => [
-      SemanticUnit(
-        index: 0,
-        startMs: 0,
-        endMs: 6000,
-        transcript: '台词',
-        shots: [
-          for (var i = 0; i < 6; i++)
-            Shot(startMs: i * 1000, endMs: (i + 1) * 1000),
-        ],
-      ),
+      for (var i = 0; i < 5; i++)
+        SemanticUnit(
+          index: i,
+          startMs: i * 1000,
+          endMs: (i + 1) * 1000,
+          transcript: 'U${i + 1}',
+          shots: [Shot(startMs: i * 1000, endMs: (i + 1) * 1000)],
+        ),
     ];
 
 void main() {
@@ -60,8 +59,8 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _a, shotRangeMs: 2000)
-          .assign(startShot: 3, endShot: 4, material: _b, shotRangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000)
+          .assign(startUnit: 3, endUnit: 4, material: _b, rangeMs: 2000),
     );
 
     expect(out.path, isNotEmpty, reason: '整条作废的话，用户连人声和换过的音色都听不到');
@@ -77,7 +76,7 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _a, shotRangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000),
     );
 
     expect(out.bgmWarnings.single, contains('尤克里里'));
@@ -91,8 +90,8 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _a, shotRangeMs: 2000)
-          .assign(startShot: 3, endShot: 4, material: _b, shotRangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000)
+          .assign(startUnit: 3, endUnit: 4, material: _b, rangeMs: 2000),
     );
 
     expect(out.path, isNotEmpty);
@@ -114,7 +113,7 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _a, shotRangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000),
     );
 
     expect(ran.where((c) => c.contains('https://o/a.mp3')), hasLength(1));

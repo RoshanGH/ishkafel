@@ -56,49 +56,49 @@ void main() {
   });
 
   group('区间时长', () {
-    test('跨单元的连续区间时长是各镜头之和', () {
-      final ms = shotRangeMs(_units(), from: 2, to: 3);
+    test('连续几个单元的时长是它们之和', () {
+      final ms = unitRangeMs(_units(), from: 0, to: 1);
 
-      expect(ms, 4000, reason: 'S3(4000-6000) + S4(6000-8000)');
+      expect(ms, 10000, reason: 'U1(0-6000) + U2(6000-10000)');
     });
 
-    test('单个镜头', () {
-      expect(shotRangeMs(_units(), from: 0, to: 0), 2000);
+    test('单个单元', () {
+      expect(unitRangeMs(_units(), from: 0, to: 0), 6000);
     });
 
     test('倒着传也认', () {
-      expect(shotRangeMs(_units(), from: 3, to: 2), 4000);
+      expect(unitRangeMs(_units(), from: 1, to: 0), 10000);
     });
 
     test('越界下标被夹住，不抛异常', () {
-      expect(shotRangeMs(_units(), from: -5, to: 99), 10000);
-      expect(shotRangeMs(const [], from: 0, to: 3), 0);
+      expect(unitRangeMs(_units(), from: -5, to: 99), 10000);
+      expect(unitRangeMs(const [], from: 0, to: 3), 0);
     });
   });
 
   group('把方案摊成可绘制的段', () {
     test('每段带上它在时间轴上的起止', () {
       final plan = const BgmPlan([]).assign(
-        startShot: 1,
-        endShot: 3,
+        startUnit: 1,
+        endUnit: 1,
         material: const BgmMaterial(
             id: 1, name: '垫乐', durationMs: 6000, previewUrl: null),
-        shotRangeMs: 6000,
+        rangeMs: 4000,
       );
 
       final spans = bgmSpans(plan, _units());
 
       expect(spans, hasLength(1));
-      expect(spans.single.startMs, 2000);
-      expect(spans.single.endMs, 8000, reason: '从 S2 开头到 S4 结尾');
+      expect(spans.single.startMs, 6000);
+      expect(spans.single.endMs, 10000, reason: 'U2 的起止');
       expect(spans.single.segment.material.name, '垫乐');
     });
 
-    test('方案里引用了已经不存在的镜头下标时跳过那一段', () {
+    test('方案里引用了已经不存在的单元下标时跳过那一段', () {
       const plan = BgmPlan([
         BgmSegment(
-          startShot: 10,
-          endShot: 12,
+          startUnit: 10,
+          endUnit: 12,
           material: BgmMaterial(
               id: 1, name: '垫乐', durationMs: 1000, previewUrl: null),
           fit: BgmFit.loop,
@@ -106,15 +106,15 @@ void main() {
       ]);
 
       expect(bgmSpans(plan, _units()), isEmpty,
-          reason: '用户把镜头合并掉之后，旧方案会指向不存在的下标——'
+          reason: '用户把单元合并掉之后，旧方案会指向不存在的下标——'
               '画一段悬空的配乐比不画更让人困惑');
     });
 
-    test('尾端越界的段被夹到最后一个镜头', () {
+    test('尾端越界的段被夹到最后一个单元', () {
       const plan = BgmPlan([
         BgmSegment(
-          startShot: 3,
-          endShot: 99,
+          startUnit: 1,
+          endUnit: 99,
           material: BgmMaterial(
               id: 1, name: '垫乐', durationMs: 1000, previewUrl: null),
           fit: BgmFit.loop,
@@ -129,24 +129,26 @@ void main() {
 }
 
 void _shotIndexAt() {
-  group('某个时刻落在第几个镜头上', () {
-    test('落在镜头内部', () {
-      expect(shotIndexAtMs(_units(), 2500), 1);
-      expect(shotIndexAtMs(_units(), 7000), 3);
+  // 配乐轨按台词语义单元对齐（U1 0~6000、U2 6000~10000），
+  // 框选时吸附到单元边界而不是 51 个镜头一格一格对
+  group('某个时刻落在第几个台词语义单元上', () {
+    test('落在单元内部', () {
+      expect(unitIndexAtMs(_units(), 2500), 0);
+      expect(unitIndexAtMs(_units(), 7000), 1);
     });
 
-    test('边界属于后一个镜头（半开区间 [start, end)）', () {
-      expect(shotIndexAtMs(_units(), 2000), 1);
-      expect(shotIndexAtMs(_units(), 6000), 3);
+    test('边界属于后一个单元（半开区间 [start, end)）', () {
+      expect(unitIndexAtMs(_units(), 6000), 1);
+      expect(unitIndexAtMs(_units(), 5999), 0);
     });
 
     test('滑出片头片尾时夹住，不让选区突然消失', () {
-      expect(shotIndexAtMs(_units(), -500), 0);
-      expect(shotIndexAtMs(_units(), 999999), 4);
+      expect(unitIndexAtMs(_units(), -500), 0);
+      expect(unitIndexAtMs(_units(), 999999), 1);
     });
 
-    test('没有镜头时返回 null', () {
-      expect(shotIndexAtMs(const [], 100), isNull);
+    test('没有单元时返回 null', () {
+      expect(unitIndexAtMs(const [], 100), isNull);
     });
   });
 }

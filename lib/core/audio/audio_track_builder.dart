@@ -95,7 +95,7 @@ class AudioTrackBuilder {
     // 垫乐是静默的错，交付出去没人会发现。
     for (var i = 0; i < bgm.segments.length; i++) {
       final segment = bgm.segments[i];
-      final range = shotRangeOf(units, segment);
+      final range = BgmPlan.unitRangeOf(units, segment);
       if (range == null) {
         AppLog.warn('配乐「${segment.material.name}」找不到对应的镜头范围，这一段跳过');
         continue;
@@ -200,24 +200,12 @@ class AudioTrackBuilder {
     return false;
   }
 
-  /// 配乐覆盖到的时间区间（按全片打平的镜头下标换算）
+  /// 配乐覆盖到的时间区间（按台词语义单元换算）
   static List<(int, int)> bgmCoveredRanges(
           List<SemanticUnit> units, BgmPlan bgm) =>
       [
-        for (final segment in bgm.segments) ?shotRangeOf(units, segment),
+        for (final segment in bgm.segments) ?BgmPlan.unitRangeOf(units, segment),
       ];
-
-  /// 一段配乐覆盖的镜头对应到全片的哪一段时间；越界返回 null
-  static (int, int)? shotRangeOf(List<SemanticUnit> units, BgmSegment segment) {
-    final flat = [
-      for (final unit in units)
-        for (final shot in unit.shots) shot,
-    ];
-    if (flat.isEmpty || segment.startShot >= flat.length) return null;
-    final start = segment.startShot.clamp(0, flat.length - 1);
-    final end = segment.endShot.clamp(start, flat.length - 1);
-    return (flat[start].startMs, flat[end].endMs);
-  }
 
   Future<void> _ffmpeg(List<String> args, String what) async {
     final result = await run('ffmpeg', args);

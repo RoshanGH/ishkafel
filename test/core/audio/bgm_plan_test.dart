@@ -12,34 +12,34 @@ void main() {
   group('把一段 BGM 铺到一串连续的视觉镜头上', () {
     test('区间可以跨台词语义单元——配乐本来就不跟台词走', () {
       final plan = const BgmPlan([]).assign(
-        startShot: 3,
-        endShot: 9,
+        startUnit: 3,
+        endUnit: 9,
         material: _track,
-        shotRangeMs: 20000,
+        rangeMs: 20000,
       );
 
-      expect(plan.segments.single.startShot, 3);
-      expect(plan.segments.single.endShot, 9);
+      expect(plan.segments.single.startUnit, 3);
+      expect(plan.segments.single.endUnit, 9);
     });
 
     test('倒着选也认（用户从右往左拖）', () {
       final plan = const BgmPlan([]).assign(
-        startShot: 9,
-        endShot: 3,
+        startUnit: 9,
+        endUnit: 3,
         material: _track,
-        shotRangeMs: 20000,
+        rangeMs: 20000,
       );
 
-      expect(plan.segments.single.startShot, 3);
-      expect(plan.segments.single.endShot, 9);
+      expect(plan.segments.single.startUnit, 3);
+      expect(plan.segments.single.endUnit, 9);
     });
 
     test('段按起点排序，便于逐段渲染与导出', () {
       final plan = const BgmPlan([])
-          .assign(startShot: 10, endShot: 12, material: _track, shotRangeMs: 8000)
-          .assign(startShot: 0, endShot: 2, material: _short, shotRangeMs: 8000);
+          .assign(startUnit: 10, endUnit: 12, material: _track, rangeMs: 8000)
+          .assign(startUnit: 0, endUnit: 2, material: _short, rangeMs: 8000);
 
-      expect(plan.segments.map((s) => s.startShot), [0, 10]);
+      expect(plan.segments.map((s) => s.startUnit), [0, 10]);
     });
   });
 
@@ -47,8 +47,8 @@ void main() {
     test('完全覆盖旧段时旧段消失', () {
       final plan = _planWith([
         const BgmSegment(
-            startShot: 2, endShot: 5, material: _short, fit: BgmFit.loop),
-      ]).assign(startShot: 0, endShot: 9, material: _track, shotRangeMs: 20000);
+            startUnit: 2, endUnit: 5, material: _short, fit: BgmFit.loop),
+      ]).assign(startUnit: 0, endUnit: 9, material: _track, rangeMs: 20000);
 
       expect(plan.segments.length, 1);
       expect(plan.segments.single.material.id, 1);
@@ -57,23 +57,23 @@ void main() {
     test('部分重叠时旧段被裁到不重叠的那部分', () {
       final plan = _planWith([
         const BgmSegment(
-            startShot: 0, endShot: 5, material: _short, fit: BgmFit.loop),
-      ]).assign(startShot: 4, endShot: 9, material: _track, shotRangeMs: 20000);
+            startUnit: 0, endUnit: 5, material: _short, fit: BgmFit.loop),
+      ]).assign(startUnit: 4, endUnit: 9, material: _track, rangeMs: 20000);
 
       expect(plan.segments.length, 2);
-      expect(plan.segments[0].startShot, 0);
-      expect(plan.segments[0].endShot, 3,
+      expect(plan.segments[0].startUnit, 0);
+      expect(plan.segments[0].endUnit, 3,
           reason: '旧段留下 0-3，被新段占走的 4-5 交出去');
-      expect(plan.segments[1].startShot, 4);
+      expect(plan.segments[1].startUnit, 4);
     });
 
     test('新段落在旧段中间时旧段被劈成两半', () {
       final plan = _planWith([
         const BgmSegment(
-            startShot: 0, endShot: 9, material: _short, fit: BgmFit.loop),
-      ]).assign(startShot: 4, endShot: 5, material: _track, shotRangeMs: 4000);
+            startUnit: 0, endUnit: 9, material: _short, fit: BgmFit.loop),
+      ]).assign(startUnit: 4, endUnit: 5, material: _track, rangeMs: 4000);
 
-      expect(plan.segments.map((s) => '${s.startShot}-${s.endShot}'),
+      expect(plan.segments.map((s) => '${s.startUnit}-${s.endUnit}'),
           ['0-3', '4-5', '6-9']);
     });
   });
@@ -81,21 +81,21 @@ void main() {
   group('长的裁、短的循环——用户不必自己算', () {
     test('素材比区间长：裁', () {
       final plan = const BgmPlan([]).assign(
-          startShot: 0, endShot: 3, material: _track, shotRangeMs: 12000);
+          startUnit: 0, endUnit: 3, material: _track, rangeMs: 12000);
 
       expect(plan.segments.single.fit, BgmFit.cut);
     });
 
     test('素材比区间短：循环', () {
       final plan = const BgmPlan([]).assign(
-          startShot: 0, endShot: 3, material: _short, shotRangeMs: 12000);
+          startUnit: 0, endUnit: 3, material: _short, rangeMs: 12000);
 
       expect(plan.segments.single.fit, BgmFit.loop);
     });
 
     test('差得在半秒以内就当刚好，不写「裁」也不写「循环」', () {
       final plan = const BgmPlan([]).assign(
-          startShot: 0, endShot: 3, material: _short, shotRangeMs: 5200);
+          startUnit: 0, endUnit: 3, material: _short, rangeMs: 5200);
 
       expect(plan.segments.single.fit, BgmFit.exact,
           reason: '差 0.2 秒还写「会循环播放」，是在吓唬用户');
@@ -106,7 +106,7 @@ void main() {
     test('按镜头下标查它归哪一段管', () {
       final plan = _planWith([
         const BgmSegment(
-            startShot: 2, endShot: 5, material: _track, fit: BgmFit.cut),
+            startUnit: 2, endUnit: 5, material: _track, fit: BgmFit.cut),
       ]);
 
       expect(plan.segmentAt(3)?.material.id, 1);
@@ -116,12 +116,12 @@ void main() {
     test('移除某一段不动其余段', () {
       final plan = _planWith([
         const BgmSegment(
-            startShot: 0, endShot: 1, material: _track, fit: BgmFit.cut),
+            startUnit: 0, endUnit: 1, material: _track, fit: BgmFit.cut),
         const BgmSegment(
-            startShot: 4, endShot: 5, material: _short, fit: BgmFit.loop),
+            startUnit: 4, endUnit: 5, material: _short, fit: BgmFit.loop),
       ]).removeAt(4);
 
-      expect(plan.segments.single.startShot, 0);
+      expect(plan.segments.single.startUnit, 0);
     });
 
     test('移除一个没有配乐的镜头是空操作，不崩', () {
@@ -134,12 +134,12 @@ void main() {
   group('落盘往返', () {
     test('存下来再读回来是同一份方案', () {
       final plan = const BgmPlan([]).assign(
-          startShot: 1, endShot: 4, material: _track, shotRangeMs: 8000);
+          startUnit: 1, endUnit: 4, material: _track, rangeMs: 8000);
 
       final back = BgmPlan.fromJson(plan.toJson());
 
-      expect(back.segments.single.startShot, 1);
-      expect(back.segments.single.endShot, 4);
+      expect(back.segments.single.startUnit, 1);
+      expect(back.segments.single.endUnit, 4);
       expect(back.segments.single.material.name, '轻快电子');
       expect(back.segments.single.fit, BgmFit.cut);
     });

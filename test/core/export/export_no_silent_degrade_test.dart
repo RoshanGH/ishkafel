@@ -56,7 +56,7 @@ void main() {
       replacements: const [],
       outputDir: Directory('${temp.path}/out'),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _bgm, shotRangeMs: 4000),
+          .assign(startUnit: 0, endUnit: 1, material: _bgm, rangeMs: 4000),
       vocalsPath: '${temp.path}/vocals.wav',
     );
 
@@ -78,7 +78,7 @@ void main() {
       replacements: const [],
       outputDir: Directory('${temp.path}/out'),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _bgm, shotRangeMs: 4000),
+          .assign(startUnit: 0, endUnit: 1, material: _bgm, rangeMs: 4000),
       vocalsPath: null,
     );
 
@@ -115,7 +115,7 @@ void main() {
       replacements: const [],
       outputDir: Directory('${temp.path}/out'),
       bgm: BgmPlan.empty
-          .assign(startShot: 0, endShot: 1, material: _bgm, shotRangeMs: 4000),
+          .assign(startUnit: 0, endUnit: 1, material: _bgm, rangeMs: 4000),
       vocalsPath: vocals.path,
       voices: VoicePlan.empty
           .assign([0], const VoiceRef(id: 'v1', name: '音色甲')),

@@ -512,24 +512,23 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
-  /// 在配乐轨上框选完一段镜头：挑一首铺上去。
-  Future<void> _pickBgmForRange(int fromShot, int toShot) async {
+  /// 在配乐轨上框选完一段单元：挑一首铺上去。
+  Future<void> _pickBgmForRange(int fromUnit, int toUnit) async {
     final editor = _editor;
     if (editor == null) return;
-    final rangeMs =
-        shotRangeMs(editor.units, from: fromShot, to: toShot);
+    final rangeMs = unitRangeMs(editor.units, from: fromUnit, to: toUnit);
     final choice = await showBgmPicker(
       context,
       rangeMs: rangeMs,
-      rangeLabel: _shotRangeLabel(fromShot, toShot),
+      rangeLabel: _unitRangeLabel(fromUnit, toUnit),
       projectIds: _projectIds,
     );
     if (choice is! BgmPicked || !mounted) return;
     await _saveBgm(_task.bgm.assign(
-      startShot: fromShot,
-      endShot: toShot,
+      startUnit: fromUnit,
+      endUnit: toUnit,
       material: choice.material,
-      shotRangeMs: rangeMs,
+      rangeMs: rangeMs,
       volume: choice.volume,
     ));
   }
@@ -550,12 +549,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   Future<void> _editBgmSegment(BgmSegment segment) async {
     final editor = _editor;
     if (editor == null) return;
-    final rangeMs = shotRangeMs(editor.units,
-        from: segment.startShot, to: segment.endShot);
+    final rangeMs = unitRangeMs(editor.units,
+        from: segment.startUnit, to: segment.endUnit);
     final choice = await showBgmPicker(
       context,
       rangeMs: rangeMs,
-      rangeLabel: _shotRangeLabel(segment.startShot, segment.endShot),
+      rangeLabel: _unitRangeLabel(segment.startUnit, segment.endUnit),
       canClear: true,
       projectIds: _projectIds,
       initialVolume: segment.volume,
@@ -563,22 +562,21 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (choice == null || !mounted) return;
     await _saveBgm(switch (choice) {
       BgmVolumeChanged(:final volume) => _task.bgm
-          .withVolume(startShot: segment.startShot, volume: volume),
+          .withVolume(startUnit: segment.startUnit, volume: volume),
       BgmPicked(:final material, :final volume) => _task.bgm.assign(
-          startShot: segment.startShot,
-          endShot: segment.endShot,
+          startUnit: segment.startUnit,
+          endUnit: segment.endUnit,
           material: material,
-          shotRangeMs: rangeMs,
+          rangeMs: rangeMs,
           volume: volume,
         ),
-      BgmCleared() => _task.bgm.removeAt(segment.startShot),
+      BgmCleared() => _task.bgm.removeAt(segment.startUnit),
     });
   }
 
-  /// 「S3–S7」这样的区间名。用全片打平的镜头序号——配乐区间可以跨单元，
-  /// 写成「U2S1–U4S2」反而更难对上时间线上那一条。
-  String _shotRangeLabel(int from, int to) =>
-      from == to ? 'S${from + 1}' : 'S${from + 1}–S${to + 1}';
+  /// 「U2–U4」这样的区间名。配乐按台词语义单元对齐（见 [BgmSegment.startUnit]）
+  String _unitRangeLabel(int from, int to) =>
+      from == to ? 'U${from + 1}' : 'U${from + 1}–U${to + 1}';
 
   Future<void> _saveBgm(BgmPlan next) async {
     setState(() => _task = _task.copyWith(bgm: next));

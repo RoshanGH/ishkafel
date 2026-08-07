@@ -264,7 +264,12 @@ class RenewTask {
         'aiUsage': aiUsage.toJson(),
       };
 
-  factory RenewTask.fromJson(Map<String, dynamic> json) => RenewTask(
+  factory RenewTask.fromJson(Map<String, dynamic> json) {
+    // 先解出单元：配乐的老存档要靠它把镜头下标换算成单元下标
+    final units = (json['units'] as List<dynamic>?)
+        ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
+        .toList();
+    return RenewTask(
         id: json['id'] as String,
         name: json['name'] as String,
         sourcePath: json['sourcePath'] as String,
@@ -276,9 +281,7 @@ class RenewTask {
         status: parseStatus(json['status']),
         createdAt: DateTime.parse(json['createdAt'] as String),
         updatedAt: DateTime.parse(json['updatedAt'] as String),
-        units: (json['units'] as List<dynamic>?)
-            ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
-            .toList(),
+        units: units,
         asrSentences: (json['asrSentences'] as List<dynamic>?)
             ?.map((e) => AsrSentence.fromJson(e as Map<String, dynamic>))
             .toList(),
@@ -293,12 +296,17 @@ class RenewTask {
             parsePrompt(json['shotTagPrompt'], json['shotTagGroups']),
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
-        bgm: BgmPlan.fromJson(json['bgm']),
+        // 老存档里配乐是按**镜头**记区间的，读出来后按单元换算一次
+        // （见 [BgmPlan.migrateShotsToUnits]）——直接丢掉的话用户已经选好的
+        // 配乐会凭空消失
+        bgm: BgmPlan.fromJson(json['bgm'])
+            .migrateShotsToUnits(units ?? const []),
         voices: VoicePlan.fromJson(json['voices']),
         firstReadyMs:
             json['firstReadyMs'] is num ? (json['firstReadyMs'] as num).toInt() : null,
         aiUsage: AiUsage.fromJson(json['aiUsage']),
       );
+  }
 
   /// 替换方案的宽松解析：整体畸形按「没进过阶段②」（null）处理，
   /// 单条畸形降级为保留原片但**保留位置**——列表下标就是台词语义单元下标，

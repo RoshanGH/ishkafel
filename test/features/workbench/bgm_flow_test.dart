@@ -152,7 +152,7 @@ void main() {
     final saved = await repo.findById('bgm-1');
     expect(saved!.bgm.segments, hasLength(1));
     expect(saved.bgm.segments.single.material.name, '轻快垫乐');
-    expect(saved.bgm.segments.single.startShot, 0);
+    expect(saved.bgm.segments.single.startUnit, 0);
   });
 
   testWidgets('点已有的一段可以移除', (tester) async {
@@ -160,8 +160,8 @@ void main() {
       tester,
       bgm: const BgmPlan([
         BgmSegment(
-          startShot: 0,
-          endShot: 1,
+          startUnit: 0,
+          endUnit: 1,
           material: BgmMaterial(
               id: 1, name: '轻快垫乐', durationMs: 30000, previewUrl: null),
           fit: BgmFit.cut,

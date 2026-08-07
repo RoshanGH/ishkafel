@@ -261,7 +261,7 @@ class _TimelineViewState extends State<TimelineView> {
     // 替换数量徽标优先命中：它压在块体上，先判它才点得到
     if (_hitReplacementBadge(position)) return;
     if (_isOnBgmTrack(position)) {
-      final at = _shotIndexAtX(position.dx);
+      final at = _unitIndexAtX(position.dx);
       final segment = at == null ? null : widget.bgm.segmentAt(at);
       if (segment != null) widget.onBgmSegmentTap?.call(segment);
       return;
@@ -323,7 +323,7 @@ class _TimelineViewState extends State<TimelineView> {
     // 配乐轨上横向拖拽 = 框选一段连续镜头。判定放在边界命中之前：配乐轨
     // 上本来就没有边界手柄，不会打架。
     if (!widget.readOnly && _isOnBgmTrack(details.localPosition)) {
-      final at = _shotIndexAtX(details.localPosition.dx);
+      final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null) {
         setState(() => _bgmSelecting = (from: at, to: at));
         _dragHit = null;
@@ -406,12 +406,14 @@ class _TimelineViewState extends State<TimelineView> {
       position.dy >= TimelineTracks.bgmTop &&
       position.dy < TimelineTracks.bgmBottom;
 
-  int? _shotIndexAtX(double dx) => shotIndexAtMs(
+  /// 配乐轨按台词语义单元对齐——框选时吸附到单元边界，而不是 51 个镜头
+  /// 一格一格对
+  int? _unitIndexAtX(double dx) => unitIndexAtMs(
       widget.controller.units, widget.geometry.pxToMs(dx));
 
   void _handleDragUpdate(DragUpdateDetails details) {
     if (_bgmSelecting case final sel?) {
-      final at = _shotIndexAtX(details.localPosition.dx);
+      final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null && at != sel.to) {
         setState(() => _bgmSelecting = (from: sel.from, to: at));
       }

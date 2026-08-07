@@ -106,7 +106,7 @@ void main() {
         task: _task(
             bgm: const BgmPlan([
               BgmSegment(
-                  startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+                  startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
             ]),
             vocalsPath: '/v/vocals.wav'),
         factory: mixer.factory,
@@ -134,7 +134,7 @@ void main() {
       final mixer = _mixer();
       final task = _task(
           bgm: const BgmPlan([
-        BgmSegment(startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+        BgmSegment(startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
       ]));
       final c = PreviewAudioController(
           playback: FakePlaybackController(),
@@ -156,7 +156,7 @@ void main() {
       final mixer = _mixer();
       final task = _task(
           bgm: const BgmPlan([
-        BgmSegment(startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+        BgmSegment(startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
       ]));
       final c = PreviewAudioController(
           playback: FakePlaybackController(),
@@ -207,7 +207,7 @@ void main() {
       final notice = missingVocalsNotice(
         const BgmPlan([
           BgmSegment(
-              startShot: 0, endShot: 0, material: _track, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
         ]),
         VoicePlan.empty,
         null,
