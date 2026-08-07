@@ -255,10 +255,15 @@ class CandidateTabState extends State<CandidateTab> {
       _search.clear();
       return;
     }
-    // 项目进指纹：换了项目就得重搜，同一个标签在别的项目下命中的是另一批素材
+    // 项目进指纹：换了项目就得重搜，同一个标签在别的项目下命中的是另一批素材。
+    //
+    // 解析出来的标签 id 也进指纹：标签表是异步拉的，第一次进来时它还没到手，
+    // 这一刻算出的检索键是空的。拉完之后 id 从空变成一串，指纹跟着变，这次
+    // 检索才会真的重跑——此前指纹里没有它，拉完就直接 return 了，面板一直
+    // 停在「无法检索」，只能退出任务再进来。
     final key = '${_picking.selectedUnitIndex}/${_picking.selectedShotIndex}/'
         '${_searchMode.name}/${_picking.currentMode.name}/'
-        '${widget.project?.id ?? 0}';
+        '${widget.project?.id ?? 0}/${_scope.tagIds.join(',')}';
     if (key == _lastSearchKey) return;
     _lastSearchKey = key;
     await _runSearch();
@@ -284,7 +289,11 @@ class CandidateTabState extends State<CandidateTab> {
     try {
       final hits =
           await _tagHitProbe.probe(tags: tags, projectIds: _projectIds);
-      return narrowTagQuery(hits: hits);
+      final narrowed = narrowTagQuery(hits: hits);
+      // 收紧之后一个标签都不剩（比如一条条数都没数出来）就退回原样。
+      // 空检索键换来的是 CLI 那句「未选择任何标签」的红字，比搜得宽糟得多
+      if (narrowed.tagIds.isEmpty) return TagQueryPlan(tagIds: scope.tagIds);
+      return narrowed;
     } catch (e) {
       AppLog.warn('收紧检索标签失败，按原样检索：$e');
       return TagQueryPlan(tagIds: scope.tagIds);
@@ -326,6 +335,15 @@ class CandidateTabState extends State<CandidateTab> {
     _tagHits = null;
     switch (_searchMode) {
       case CandidateSearchMode.tag:
+        // 一个标签 id 都没解析出来就别去调 CLI。它只会回一句「未选择任何
+        // 标签，无法检索候选素材」，用红色错误把整个面板盖住——而真正的
+        // 原因（标签表还在拉 / 这一层的标签不在当前标签组里）已经写在
+        // 检索方式下方那行灰字里了，红字反而把它压住。
+        if (scope.tagIds.isEmpty) {
+          setState(() => _tagPlan = null);
+          _search.clear();
+          return;
+        }
         final plan = await _narrowedTags(scope);
         if (!mounted) return;
         setState(() => _tagPlan = plan);

@@ -13,8 +13,11 @@ import 'picking_messages.dart';
 /// 整体替换换的是「一句台词对应的一段画面」，所以这一层用户先看的是**这条
 /// 素材原本在说什么**——只给一格缩略图，他得一条条点开听才知道合不合适。
 ///
-/// 一行 88pt：缩略图 + 台词两行 + 时长/时长差 + 试看/复制/勾选。一屏能看到
-/// 六七条，而此前的双列大卡一屏只有两条。
+/// 一行 72pt：缩略图 + 台词两行 + 时长/时长差 + 试看/复制/勾选。
+///
+/// 右栏宽 1200 而高只有 400 出头，一行 88pt 时**一屏只看得到两条**，翻一批
+/// 素材要滚十几次。行高压到 72、外面再按宽度分成多列（见
+/// [CandidatePanel] 的台词视图），同样的位置能看到六条。
 class CandidateRow extends StatelessWidget {
   final CandidateEntry entry;
   final bool selected;
@@ -47,7 +50,7 @@ class CandidateRow extends StatelessWidget {
     this.onSetPreview,
   });
 
-  static const double height = 88;
+  static const double height = 72;
 
   @override
   Widget build(BuildContext context) {
@@ -82,12 +85,13 @@ class CandidateRow extends StatelessWidget {
     );
   }
 
-  /// 竖屏素材的小图：42×72，够认出「是不是这段画面」，又不挤掉台词
+  /// 竖屏素材的小图：32×56，够认出「是不是这段画面」，又不挤掉台词。
+  /// 高度是行高减去上下内边距（72 - 8×2）——再高就把行撑破了
   Widget _thumb(String? url) => ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: SizedBox(
-          width: 42,
-          height: 72,
+          width: 32,
+          height: 56,
           child: url == null || url.isEmpty
               ? _thumbFallback(Icons.image_not_supported_outlined)
               : Image.network(
@@ -150,7 +154,7 @@ class CandidateRow extends StatelessWidget {
   /// 同样「命中 2 个」，命中的是「灶台+实拍」还是「实拍+厨房情景」，
   /// 这条素材能不能用差别很大。
   ///
-  /// 一行放不下时**横向滚动而不是换行**：这一行高度是固定的（88pt 行内只留了
+  /// 一行放不下时**横向滚动而不是换行**：这一行高度是固定的（行内只留了
   /// 一行给它），换行会把下面的内容顶出去。
   Widget _match() {
     if (queryTags.isEmpty) return const SizedBox.shrink();

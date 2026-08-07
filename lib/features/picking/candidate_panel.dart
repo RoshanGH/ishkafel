@@ -85,6 +85,13 @@ class CandidatePanel extends StatelessWidget {
   CandidateView get _effectiveView =>
       _canSwitchView ? view : CandidateView.gallery;
 
+  /// 检索方式那一栏有没有东西可画。整体替换只有「标签」一条路（见
+  /// [_searchSegment]），既没有分段按钮也没有原因说明时它是空的
+  bool get _hasSearchSegment =>
+      scope.descriptionSupported ||
+      scope.tagUnavailableText != null ||
+      searchMode == CandidateSearchMode.image;
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -100,21 +107,24 @@ class CandidatePanel extends StatelessWidget {
           ),
           ..._modeNotes(),
           if (picking.currentMode == ReplacementMode.perShot) _shotStrip(),
+          // 检索方式与「台词/画面」并排放一行。右栏宽 1200 而高只有 400 出头，
+          // 两条通栏分段各占一行等于白扔掉一排素材的位置
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.sm),
-            child: _searchSegment(),
-          ),
-          if (_canSwitchView && search.status == CandidateSearchStatus.ready)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md, 0, AppSpacing.md, AppSpacing.sm),
-              child: _viewSegment(),
+                AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_hasSearchSegment) Expanded(flex: 3, child: _searchSegment()),
+                if (_canSwitchView) ...[
+                  if (_hasSearchSegment) const SizedBox(width: AppSpacing.md),
+                  // 检索方式那半边空着时就整行都归它，不留一块没用的空地
+                  Expanded(flex: _hasSearchSegment ? 2 : 5, child: _viewSegment()),
+                ],
+              ],
             ),
+          ),
           Expanded(child: _body(context)),
-          if (search.status == CandidateSearchStatus.ready &&
-              search.entries.isNotEmpty)
-            _pager(),
           _footer(),
         ],
       ),
@@ -420,33 +430,32 @@ class CandidatePanel extends StatelessWidget {
         ],
       );
 
-  /// 分页条。命中几百条时只给第一页，用户根本不知道后面还有——
+  /// 分页。命中几百条时只给第一页，用户根本不知道后面还有——
   /// 「共 N 条」与页码都要摆出来。
-  Widget _pager() => Container(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _pageButton(
-              key: const Key('picking-prev-page'),
-              icon: Icons.chevron_left,
-              enabled: search.hasPrevPage,
-              onTap: search.prevPage,
-            ),
-            Text(
-              '第 ${search.page}/${search.pageCount} 页 · 共 ${search.total} 条',
-              style: const TextStyle(
-                  color: AppColors.textTertiary, fontSize: AppFontSize.micro),
-            ),
-            _pageButton(
-              key: const Key('picking-next-page'),
-              icon: Icons.chevron_right,
-              enabled: search.hasNextPage,
-              onTap: search.nextPage,
-            ),
-          ],
-        ),
+  ///
+  /// 和小结共用底栏的一行：右栏的高度全是候选区的本钱，单独占一行等于
+  /// 少看一整排素材。
+  Widget _pager() => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _pageButton(
+            key: const Key('picking-prev-page'),
+            icon: Icons.chevron_left,
+            enabled: search.hasPrevPage,
+            onTap: search.prevPage,
+          ),
+          Text(
+            '第 ${search.page}/${search.pageCount} 页 · 共 ${search.total} 条',
+            style: const TextStyle(
+                color: AppColors.textTertiary, fontSize: AppFontSize.micro),
+          ),
+          _pageButton(
+            key: const Key('picking-next-page'),
+            icon: Icons.chevron_right,
+            enabled: search.hasNextPage,
+            onTap: search.nextPage,
+          ),
+        ],
       );
 
   Widget _pageButton({
@@ -476,6 +485,13 @@ class CandidatePanel extends StatelessWidget {
     }
     switch (search.status) {
       case CandidateSearchStatus.idle:
+        // 标签检索用不了时，原因（表还在拉 / 标签不在当前标签组里）已经写在
+        // 检索方式下方那行灰字上，这里再补一句「选择一种检索方式」是废话，
+        // 而且会让用户以为还有别的路可选
+        if (searchMode == CandidateSearchMode.tag &&
+            scope.tagUnavailableText != null) {
+          return const SizedBox.shrink();
+        }
         return _hint('选择一种检索方式，为这一段挑选候选素材');
       case CandidateSearchStatus.loading:
         return const Center(
@@ -583,11 +599,25 @@ class CandidatePanel extends StatelessWidget {
         ),
       );
 
-  /// 台词视图：一行一条，一屏六七条
-  Widget _transcriptList(BuildContext context) => ListView.separated(
+  /// 一列台词行至少要这么宽，否则缩略图 + 操作按钮挤完就没地方放台词了
+  static const double transcriptColumnWidth = 620;
+
+  /// 台词视图：按可用宽度分列铺开。
+  ///
+  /// 此前是单列 [ListView]，右栏宽 1200 而高只有 400 出头——一条 88pt 的行
+  /// 一屏只放得下两条，右边一半的宽度全空着。改成按宽度分列后同样的位置能
+  /// 看到六条，条目顺序仍是逐行从左到右，和素材库返回的顺序一致。
+  Widget _transcriptList(BuildContext context) => GridView.builder(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: transcriptColumnWidth,
+          crossAxisSpacing: AppSpacing.sm,
+          mainAxisSpacing: AppSpacing.sm,
+          // 行高由 CandidateRow 定死，不跟着列宽变——用 childAspectRatio 的话
+          // 窗口一宽行就跟着变高，白占地方
+          mainAxisExtent: CandidateRow.height,
+        ),
         itemCount: search.entries.length,
-        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
           final entry = search.entries[i];
           final picked = picking.isCandidateSelected(entry.material.id);
@@ -644,17 +674,28 @@ class CandidatePanel extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: AppColors.border)),
       ),
-      child: Text(
-        selectionSummaryText(
-          unitIndex: picking.selectedUnitIndex,
-          shotIndex: picking.selectedShotIndex,
-          selectedCount: picking.selectedCountInScope,
-          totalCount: search.total,
-          replacement: picking.currentReplacement,
-          shotCount: picking.currentShotCount,
-        ),
-        style: const TextStyle(
-            color: AppColors.textSecondary, fontSize: AppFontSize.caption),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              selectionSummaryText(
+                unitIndex: picking.selectedUnitIndex,
+                shotIndex: picking.selectedShotIndex,
+                selectedCount: picking.selectedCountInScope,
+                totalCount: search.total,
+                replacement: picking.currentReplacement,
+                shotCount: picking.currentShotCount,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppColors.textSecondary, fontSize: AppFontSize.caption),
+            ),
+          ),
+          if (search.status == CandidateSearchStatus.ready &&
+              search.entries.isNotEmpty)
+            _pager(),
+        ],
       ),
     );
   }

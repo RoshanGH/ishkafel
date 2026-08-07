@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
@@ -8,6 +10,7 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/project_ref.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'package:ishkafel/features/picking/candidate_row.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
 /// 每页 3 条、共 7 条：够验证翻页，又不必造一屏数据
@@ -74,6 +77,25 @@ class _Content implements MiaoaContentService {
   }) async {
     pages.add(page);
     return _page(page, pageSize);
+  }
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+/// 标签表拉得很慢：用来复现「表还没到手就检索」
+class _SlowTags implements MiaoaTagService {
+  final Completer<void> gate;
+  _SlowTags(this.gate);
+
+  @override
+  Future<List<TagInfo>> listTags(int groupId) async {
+    await gate.future;
+    return switch (groupId) {
+      1 => const [TagInfo(id: 11, name: '近景')],
+      2 => const [TagInfo(id: 21, name: '促单')],
+      _ => const [],
+    };
   }
 
   @override
@@ -342,6 +364,105 @@ void main() {
       await _perShot(tester);
 
       expect(find.text('限定项目组 · 滴露植源喷雾'), findsOneWidget);
+    });
+  });
+
+  group('标签表还没到手时不能报「未选择任何标签」', () {
+    /// 标签表是异步拉的。第一次进面板时它还没到手，这一刻算出的检索键是
+    /// 空的——此前会照样把空检索键发给 CLI，换回一句红色的「未选择任何
+    /// 标签，无法检索候选素材」；更糟的是拉完之后检索指纹没变，不会重跑，
+    /// 面板就一直卡在那句红字上，只能退出任务再进来。
+    testWidgets('标签表拉回来之后自动重搜，不停在「无法检索」上', (tester) async {
+      final gate = Completer<void>();
+      final content = _Content();
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 340,
+            height: 880,
+            child: CandidateTab(
+              editor: SegmentationEditorController(
+                initialUnits: _units(),
+                durationMs: 4000,
+                fps: 30,
+                sentences: const [],
+              ),
+              shotTagGroups: const [TagGroupRef(id: 1, name: '画面层')],
+              unitTagGroups: const [TagGroupRef(id: 2, name: '台词层')],
+              onReplacementsChanged: (_) {},
+              contentService: content,
+              tagService: _SlowTags(gate),
+              candidateProbe:
+                  CandidateProbe(run: (_, _) async => throw 'no probe'),
+              onPreview: (context, material) async {},
+              pageSize: 3,
+            ),
+          ),
+        ),
+      ));
+      await tester.pump();
+      await _whole(tester);
+
+      expect(content.pages, isEmpty,
+          reason: '标签还没解析出来就调 CLI，只会换回一句红字');
+
+      gate.complete();
+      await tester.pumpAndSettle();
+
+      expect(content.pages, isNotEmpty, reason: '表到手了就该自己重搜');
+      expect(find.text('这是第 0 条素材的台词'), findsOneWidget);
+    });
+  });
+
+  group('一屏能看到几条', () {
+    /// 用户原话：「我草，好烦，就看两条吗？」——右栏宽 1200 而高只有 400 出头，
+    /// 单列 88pt 的行一屏只放得下两条，右边一半宽度全空着。
+    testWidgets('面板够宽时台词行分成多列铺开', (tester) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 1360,
+            height: 880,
+            child: CandidateTab(
+              editor: SegmentationEditorController(
+                initialUnits: _units(),
+                durationMs: 4000,
+                fps: 30,
+                sentences: const [],
+              ),
+              shotTagGroups: const [TagGroupRef(id: 1, name: '画面层')],
+              unitTagGroups: const [TagGroupRef(id: 2, name: '台词层')],
+              onReplacementsChanged: (_) {},
+              contentService: _Content(),
+              tagService: _Tags(),
+              candidateProbe:
+                  CandidateProbe(run: (_, _) async => throw 'no probe'),
+              onPreview: (context, material) async {},
+              pageSize: 3,
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await _whole(tester);
+
+      final rows = tester
+          .widgetList<CandidateRow>(find.byType(CandidateRow))
+          .toList();
+      expect(rows.length, greaterThan(1));
+      final first = tester.getTopLeft(find.byWidget(rows[0]));
+      final second = tester.getTopLeft(find.byWidget(rows[1]));
+      expect(second.dy, first.dy,
+          reason: '1360 宽应该排得下两列，第二条要和第一条同一行');
+      expect(second.dx, greaterThan(first.dx));
     });
   });
 }
