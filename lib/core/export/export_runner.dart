@@ -10,6 +10,7 @@ import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 import '../audio/audio_track_builder.dart';
 import 'export_commands.dart';
+import 'speed_fit.dart';
 import 'export_plan.dart';
 
 /// 一条成片的导出结果
@@ -53,12 +54,50 @@ class ExportRunner {
   /// 不注入时退回素材自带的签名地址——它随时可能已经失效。
   final Future<String> Function(BgmMaterial material)? resolveBgm;
 
+  /// 读一条本地素材有多长（毫秒）。镜头替换要按它算变速倍率；读不出来
+  /// 返回 null，那时退回裁/冻帧而不是瞎猜倍率。
+  final Future<int?> Function(String path)? probeDurationMs;
+
   ExportRunner({
     required this.run,
     required this.workDir,
     required this.fetchMaterial,
     this.resolveBgm,
+    this.probeDurationMs,
   });
+
+  /// 变速越界的镜头替换（见 [SpeedFit]）。整体替换不参与——那一层是画面和
+  /// 声音一起换、时长随候选，本来就不变速。
+  Future<String?> _speedBlocker(List<ExportCombination> combos) async {
+    final probe = probeDurationMs;
+    if (probe == null) return null;
+
+    final seen = <String>{};
+    final bad = <String>[];
+    for (final combo in combos) {
+      for (final segment in combo.segments) {
+        final id = segment.candidateId;
+        if (id == null || segment.shotIndex == null) continue;
+        final key = '${segment.startMs}_${segment.endMs}_$id';
+        if (!seen.add(key)) continue;
+
+        final int? candidateMs;
+        try {
+          candidateMs = await probe(await fetchMaterial(id));
+        } catch (e) {
+          AppLog.warn('读不出候选 $id 的时长，这一段退回裁/冻帧：$e');
+          continue;
+        }
+        // 读不出来就不猜倍率
+        if (candidateMs == null || candidateMs <= 0) continue;
+        final why = SpeedFit.rejectReason(
+            candidateMs: candidateMs, slotMs: segment.durationMs);
+        if (why == null) continue;
+        bad.add('U${segment.unitIndex + 1} 的 S${segment.shotIndex! + 1}：$why');
+      }
+    }
+    return bad.isEmpty ? null : bad.join('\n');
+  }
 
   /// 出片前的拦截：有任何一条会让成片**静默出错**就返回原因，否则 null。
   ///
@@ -127,8 +166,15 @@ class ExportRunner {
     // **预览可以降级，成片不行**：预览时人还在编辑、听得出来；成片少一段
     // 垫乐、少一句换过的配音、或者新旧背景叠在一起，交付出去没人会发现。
     // 宁可这一次导不出来，也不能给一条看起来正常、其实是错的片子。
-    final blocker = _deliveryBlocker(
-        bgm: bgm, vocalsPath: vocalsPath, voices: voices, voiceAudio: voiceAudio);
+    // 镜头替换的候选必须能在 0.8×~2.0× 内对齐坑位。一次把所有越界的点名，
+    // 免得用户改一个导一次
+    final tooFar = await _speedBlocker(combos);
+    final blocker = tooFar ??
+        _deliveryBlocker(
+            bgm: bgm,
+            vocalsPath: vocalsPath,
+            voices: voices,
+            voiceAudio: voiceAudio);
     if (blocker != null) {
       AppLog.warn('导出前置检查未通过：$blocker');
       return [
@@ -241,10 +287,15 @@ class ExportRunner {
       );
     } else {
       final material = await fetchMaterial(segment.candidateId!);
+      // 镜头替换按倍率变速；整体替换与探不出时长的退回裁/冻帧
+      final candidateMs = segment.shotIndex == null
+          ? null
+          : await _probeQuietly(material);
       await _ffmpeg(
         ExportCommands.fitCandidateVideo(
           input: material,
           durationMs: segment.durationMs,
+          candidateDurationMs: candidateMs,
           out: out,
         ),
         'U${segment.unitIndex + 1} 的替换画面',
@@ -252,6 +303,18 @@ class ExportRunner {
     }
     clips[key] = out;
     return out;
+  }
+
+  Future<int?> _probeQuietly(String path) async {
+    final probe = probeDurationMs;
+    if (probe == null) return null;
+    try {
+      final ms = await probe(path);
+      return ms != null && ms > 0 ? ms : null;
+    } catch (e) {
+      AppLog.warn('读不出 $path 的时长，这一段退回裁/冻帧：$e');
+      return null;
+    }
   }
 
   Future<void> _ffmpeg(List<String> args, String what) async {

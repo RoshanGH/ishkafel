@@ -113,6 +113,12 @@ Future<void> main() async {
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
             resolveBgm: bgmCache(dataDir).fetch,
+            // 镜头替换要按候选的真实时长算变速倍率
+            probeDurationMs: (path) async => (await FfprobeService(
+                    run: const ResolvingProcessRunner().call)
+                .probe(path))
+                .duration
+                .inMilliseconds,
             fetchMaterial: MaterialDownloader(
               content: MiaoaContentService(binary: resolveMiaoaBinary()),
               cacheDir: Directory(p.join(dataDir.path, 'material_cache')),

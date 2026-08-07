@@ -1,3 +1,5 @@
+import 'speed_fit.dart';
+
 /// 导出用的 ffmpeg 命令行拼装（纯函数，不起进程）。
 ///
 /// 拆出来单独放是因为这一层最容易出隐蔽错误：参数顺序错一个位置、少一个
@@ -50,29 +52,53 @@ class ExportCommands {
         out,
       ];
 
-  /// 把一条候选素材套进这一段的时长：比目标长就裁，短就**冻结最后一帧补齐**。
+  /// 把一条候选素材套进这一段的时长。
   ///
-  /// 为什么不循环播放：三秒的坑位放一段两秒的素材，循环会看到画面突然跳回
-  /// 开头——观众一眼看出是拼的。冻帧虽然也不完美，但至少是「这个镜头多停了
-  /// 一会儿」，在广告片里是常见手法。
+  /// 给了 [candidateDurationMs] 就**变速**填满（镜头替换的规格：只换画面、
+  /// 口播不动，所以画面必须严丝合缝地对齐原坑位）。倍率与允许范围见
+  /// [SpeedFit]，越界的在导出前就该被拦下，这里不再判断。
+  ///
+  /// 不给 [candidateDurationMs] 时退回老做法——比目标长就裁、短就**冻结
+  /// 最后一帧补齐**。不循环播放：三秒的坑位放一段两秒的素材，循环会看到画面
+  /// 突然跳回开头，观众一眼看出是拼的；冻帧至少像「这个镜头多停了一会儿」。
+  ///
+  /// 变速之后仍然 tpad + `-frames:v`：倍率是浮点数，舍入之后可能差最后一两
+  /// 帧，差一帧后面每一段都往前挪。
   static List<String> fitCandidateVideo({
     required String input,
     required int durationMs,
     required String out,
-  }) =>
-      [
-        '-y', '-v', 'error',
-        '-i', input,
-        '-an',
-        // tpad 只在素材比坑位短时起作用；长时由 -frames:v 截断
-        '-vf',
-        '${_scalePad()},tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}',
-        '-r', '$fps',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-        '-pix_fmt', 'yuv420p',
-        '-frames:v', '${frameCount(durationMs)}',
-        out,
-      ];
+    int? candidateDurationMs,
+  }) {
+    final factor = candidateDurationMs == null
+        ? 1.0
+        : SpeedFit.factorFor(
+            candidateMs: candidateDurationMs, slotMs: durationMs);
+    // 一样长时不插滤镜：白走一道只会掉画质
+    final speed = (factor - 1).abs() < 1e-6
+        ? ''
+        : ',setpts=PTS/${_trim(factor)}';
+    return [
+      '-y', '-v', 'error',
+      '-i', input,
+      '-an',
+      '-vf',
+      '${_scalePad()}$speed'
+          ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}',
+      '-r', '$fps',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+      '-pix_fmt', 'yuv420p',
+      '-frames:v', '${frameCount(durationMs)}',
+      out,
+    ];
+  }
+
+  /// 倍率写进滤镜串：去掉浮点尾巴，`PTS/1.5000000000000002` 既难读也没必要
+  static String _trim(double v) {
+    final text = v.toStringAsFixed(6);
+    final trimmed = text.replaceFirst(RegExp(r'0+$'), '');
+    return trimmed.endsWith('.') ? trimmed.substring(0, trimmed.length - 1) : trimmed;
+  }
 
   /// 切一段原片的**声音**（画面单独成轨）
   static List<String> trimOriginalAudio({
