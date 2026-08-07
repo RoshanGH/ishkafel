@@ -120,8 +120,11 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
       if (at >= 0) {
         _picked.removeAt(at);
         // 删掉的正好是预览那首、或排在它前面：预览下标要跟着挪
-        if (_previewIndex >= _picked.length) _previewIndex = 0;
-        else if (at < _previewIndex) _previewIndex--;
+        if (_previewIndex >= _picked.length) {
+          _previewIndex = 0;
+        } else if (at < _previewIndex) {
+          _previewIndex--;
+        }
       } else {
         _picked.add(m);
       }
