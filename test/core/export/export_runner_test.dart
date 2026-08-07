@@ -92,7 +92,29 @@ void main() {
     expect(b.fetched, [11, 12]);
   });
 
-  test('声音只做一遍——所有组合的声音完全相同', () async {
+  test('镜头替换时声音只做一遍——那一层不改声音', () async {
+    final b = _build();
+
+    await b.runner.exportAll(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      // 镜头替换只换画面、变速对齐原坑位，声音一个字节都不变
+      replacements: [
+        UnitReplacement.perShot(const {
+          0: [11, 12, 13]
+        }),
+        UnitReplacement.keepOriginal(),
+      ],
+      outputDir: b.out,
+    );
+
+    // 每个单元一段原声，共两段；三条组合不该把它们各做三遍
+    // （声音由共用的 AudioTrackBuilder 合成，产物叫 mix_u*）
+    expect(b.ffmpeg.countWhere((a) => a.contains('mix_u')), 2,
+        reason: '声音是变量之外的东西，三条组合各做一遍纯属浪费');
+  });
+
+  test('整体替换时声音逐条合——每条变体说的话都不一样', () async {
     final b = _build();
 
     await b.runner.exportAll(
@@ -105,10 +127,9 @@ void main() {
       outputDir: b.out,
     );
 
-    // 每个单元一段原声，共两段；三条组合不该把它们各做三遍
-    // （声音由共用的 AudioTrackBuilder 合成，产物叫 mix_u*）
-    expect(b.ffmpeg.countWhere((a) => a.contains('mix_u')), 2,
-        reason: '声音是变量之外的东西，三条组合各做一遍纯属浪费');
+    expect(b.ffmpeg.countWhere((a) => a.contains('mix_u')), 6,
+        reason: '三条变体 × 两个单元。整体替换换的是整段（含口播），'
+            '共用一条声音就全错了');
   });
 
   test('同一段原片画面只切一遍——它会在多条组合里重复出现', () async {

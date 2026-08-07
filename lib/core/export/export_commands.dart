@@ -52,6 +52,25 @@ class ExportCommands {
         out,
       ];
 
+  /// 整体替换的那一段画面：**原样接上**，只做分辨率/帧率归一。
+  ///
+  /// 不加速不放慢不裁不补——整体替换换的是「这一整段」，时长随候选，
+  /// 后面所有单元跟着后移。对齐到原坑位是镜头替换该干的事。
+  static List<String> wholeReplacementVideo({
+    required String input,
+    required String out,
+  }) =>
+      [
+        '-y', '-v', 'error',
+        '-i', input,
+        '-an',
+        '-vf', _scalePad(),
+        '-r', '$fps',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+        out,
+      ];
+
   /// 把一条候选素材套进这一段的时长。
   ///
   /// 给了 [candidateDurationMs] 就**变速**填满（镜头替换的规格：只换画面、
@@ -115,6 +134,22 @@ class ExportCommands {
         // 声音按画面的帧数对齐（不足补静音）：两边各走各的，片尾必然错位
         '-af', 'apad',
         '-t', (exactSeconds(endMs - startMs)).toStringAsFixed(6),
+        ..._audioNormalize(),
+        out,
+      ];
+
+  /// 整体替换的那一段：**把候选素材的声音整段取出来，不裁不补**。
+  ///
+  /// 整体替换换的是「这一整段」——画面和声音都来自候选，时长随它。裁到原单元
+  /// 的长度就不是整体替换了，那是镜头替换该干的事。
+  static List<String> wholeReplacementAudio({
+    required String input,
+    required String out,
+  }) =>
+      [
+        '-y', '-v', 'error',
+        '-i', input,
+        '-vn',
         ..._audioNormalize(),
         out,
       ];

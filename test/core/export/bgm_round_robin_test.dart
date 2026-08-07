@@ -99,7 +99,7 @@ void main() {
     expect(used, ['A'], reason: '只有一条变体，就只用第一首');
   });
 
-  test('每段配乐只有一首时，全部变体共用同一条音轨（不白合几遍）', () async {
+  test('镜头替换 + 配乐没备选时，全部变体共用同一条音轨（不白合几遍）', () async {
     var audioBuilds = 0;
     final runner = ExportRunner(
       run: (binary, args) async {
@@ -117,7 +117,12 @@ void main() {
     await runner.exportAll(
       sourcePath: '/v/a.mp4',
       units: _units(),
-      replacements: [UnitReplacement.whole(const [71, 72, 73])],
+      // 镜头替换只换画面、变速对齐原坑位，声音一个字节都不变
+      replacements: [
+        UnitReplacement.perShot(const {
+          0: [71, 72, 73]
+        })
+      ],
       outputDir: Directory('${temp.path}/out'),
       bgm: BgmPlan.empty
           .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 6000),
@@ -125,6 +130,7 @@ void main() {
     );
 
     expect(audioBuilds, 1,
-        reason: '配乐没有备选、声音对每条变体都一样时，合一次就够');
+        reason: '配乐没有备选、又没有整体替换时，三条变体的声音完全一样，'
+            '合一次就够');
   });
 }

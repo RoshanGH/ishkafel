@@ -68,7 +68,8 @@ class ExportRunner {
 
   /// 变速越界的镜头替换（见 [SpeedFit]）。整体替换不参与——那一层是画面和
   /// 声音一起换、时长随候选，本来就不变速。
-  Future<String?> _speedBlocker(List<ExportCombination> combos) async {
+  Future<String?> _speedBlocker(List<ExportCombination> combos,
+      Future<String> Function(int id) material) async {
     final probe = probeDurationMs;
     if (probe == null) return null;
 
@@ -83,7 +84,7 @@ class ExportRunner {
 
         final int? candidateMs;
         try {
-          candidateMs = await probe(await fetchMaterial(id));
+          candidateMs = await probe(await material(id));
         } catch (e) {
           AppLog.warn('读不出候选 $id 的时长，这一段退回裁/冻帧：$e');
           continue;
@@ -177,6 +178,12 @@ class ExportRunner {
     outputDir.createSync(recursive: true);
     final total = combos.length;
 
+    // 同一个候选会在预取和渲染两处用到，也会在多条组合里重复出现——
+    // 记一下，别让下载器为同一个 id 跑好几遍
+    final fetched = <int, String>{};
+    Future<String> material(int id) async =>
+        fetched[id] ??= await fetchMaterial(id);
+
     // 出片前先把「会静默做错」的几件事拦掉。
     //
     // **预览可以降级，成片不行**：预览时人还在编辑、听得出来；成片少一段
@@ -184,7 +191,7 @@ class ExportRunner {
     // 宁可这一次导不出来，也不能给一条看起来正常、其实是错的片子。
     // 镜头替换的候选必须能在 0.8×~2.0× 内对齐坑位。一次把所有越界的点名，
     // 免得用户改一个导一次
-    final tooFar = await _speedBlocker(combos);
+    final tooFar = await _speedBlocker(combos, material);
     final blocker = tooFar ??
         _deliveryBlocker(
             bgm: bgm,
@@ -201,13 +208,42 @@ class ExportRunner {
     }
 
     onProgress?.call(0, total, '准备声音');
-    // 配乐每段只有一首时，所有变体的声音一模一样，合一次就够；
-    // 有备选（导出时轮流用）就得逐条合——那是变体之间唯一不同的地方
-    final perVariant = bgm.segments.any((s) => s.materials.length > 1);
-    final audioOf = <int, String>{};
+    // 整体替换的那些单元：把候选下到本地并读出真实时长。
+    // 声音要取自它、后面所有单元的位置也要按它的新长度重算
+    final Map<int, Map<int, ({String path, int ms})>> wholeByCombo = {};
     try {
-      for (var i = 0; i < (perVariant ? combos.length : 1); i++) {
-        final track = await AudioTrackBuilder(
+      for (var i = 0; i < combos.length; i++) {
+        final per = <int, ({String path, int ms})>{};
+        for (final segment in combos[i].segments) {
+          final id = segment.candidateId;
+          // shotIndex == null 才是整体替换（镜头替换有 shotIndex）
+          if (id == null || segment.shotIndex != null) continue;
+          final path = await material(id);
+          final ms = await _probeQuietly(path) ?? segment.durationMs;
+          per[segment.unitIndex] = (path: path, ms: ms);
+        }
+        wholeByCombo[i] = per;
+      }
+    } catch (e) {
+      AppLog.warn('导出：整体替换的素材准备失败：$e');
+      return [
+        for (final c in combos)
+          ExportOutcome(index: c.index, failure: '整体替换的素材取不到：$e'),
+      ];
+    }
+
+    // 配乐每段只有一首时所有变体的声音一模一样，合一次就够；有备选（轮流用）
+    // 或整体替换（各条变体的候选不同、时长也不同）就得逐条合
+    final perVariant = bgm.segments.any((s) => s.materials.length > 1) ||
+        wholeByCombo.values.any((m) => m.isNotEmpty);
+
+    /// 合第 [i] 条变体的声音。配乐没铺上就抛——成片少一段垫乐是静默的错。
+    /// 抛出来的原因统一带「声音合成失败」前缀：调用方在两处接它（共用那条
+    /// 在循环外、逐条那条在循环里），错误文案不该因为走了哪条路而不同
+    Future<String> buildAudio(int i) async {
+      final AudioTrack track;
+      try {
+        track = await AudioTrackBuilder(
           run: run,
           // 逐条合时各用各的目录，否则中间产物互相覆盖
           workDir: perVariant
@@ -221,26 +257,38 @@ class ExportRunner {
           bgm: bgm,
           voiceAudio: voiceAudio,
           variantIndex: i,
+          wholeAudio: {
+            for (final e in (wholeByCombo[i] ?? const {}).entries)
+              e.key: e.value.path,
+          },
+          wholeDurations: {
+            for (final e in (wholeByCombo[i] ?? const {}).entries)
+              e.key: e.value.ms,
+          },
         );
-        // 配乐没铺上就是错的成片。预览那边是降级，这里必须失败
-        if (track.bgmWarnings.isNotEmpty) {
-          final why = track.bgmWarnings.join('；');
-          AppLog.warn('导出中止：$why');
-          return [
-            for (final c in combos)
-              ExportOutcome(
-                  index: c.index, failure: '配乐没能铺上，已中止导出：$why'),
-          ];
-        }
-        audioOf[i] = track.path;
+      } catch (e) {
+        throw Exception('声音合成失败：$e');
       }
-    } catch (e) {
-      AppLog.warn('导出：声音合成失败：$e');
-      // 声音挂了就没有哪条能成——如实把同一条原因给每一条
-      return [
-        for (final c in combos)
-          ExportOutcome(index: c.index, failure: '声音合成失败：$e'),
-      ];
+      if (track.bgmWarnings.isNotEmpty) {
+        throw Exception(
+            '声音合成失败：配乐没能铺上——${track.bgmWarnings.join('；')}');
+      }
+      return track.path;
+    }
+
+    // 共用那条要在这里就合出来：它挂了**每一条**都成不了。
+    // 逐条合的放到下面各自的 try 里——一条的声音挂了不该拖累其余。
+    String? sharedAudio;
+    if (!perVariant) {
+      try {
+        sharedAudio = await buildAudio(0);
+      } catch (e) {
+        AppLog.warn('导出：$e');
+        // 共用的那条声音挂了，每一条都成不了——如实给同一个原因
+        return [
+          for (final c in combos) ExportOutcome(index: c.index, failure: '$e'),
+        ];
+      }
     }
 
     final clips = <String, String>{}; // 段落指纹 → 已渲染的画面切片
@@ -251,7 +299,8 @@ class ExportRunner {
         final path = await _composeOne(
           combo: combo,
           sourcePath: sourcePath,
-          audio: audioOf[perVariant ? out.length : 0]!,
+          material: material,
+          audio: sharedAudio ?? await buildAudio(out.length),
           outputDir: outputDir,
           clips: clips,
         );
@@ -272,10 +321,11 @@ class ExportRunner {
     required String audio,
     required Directory outputDir,
     required Map<String, String> clips,
+    required Future<String> Function(int id) material,
   }) async {
     final parts = <String>[];
     for (final segment in combo.segments) {
-      parts.add(await _renderSegment(segment, sourcePath, clips));
+      parts.add(await _renderSegment(segment, sourcePath, clips, material));
     }
 
     final listFile = File(p.join(workDir.path, 'concat_${combo.index}.txt'))
@@ -295,6 +345,7 @@ class ExportRunner {
     ExportSegment segment,
     String sourcePath,
     Map<String, String> clips,
+    Future<String> Function(int id) material,
   ) async {
     final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}';
     final hit = clips[key];
@@ -312,20 +363,25 @@ class ExportRunner {
         'U${segment.unitIndex + 1} 的原片画面',
       );
     } else {
-      final material = await fetchMaterial(segment.candidateId!);
-      // 镜头替换按倍率变速；整体替换与探不出时长的退回裁/冻帧
-      final candidateMs = segment.shotIndex == null
-          ? null
-          : await _probeQuietly(material);
-      await _ffmpeg(
-        ExportCommands.fitCandidateVideo(
-          input: material,
-          durationMs: segment.durationMs,
-          candidateDurationMs: candidateMs,
-          out: out,
-        ),
-        'U${segment.unitIndex + 1} 的替换画面',
-      );
+      final path = await material(segment.candidateId!);
+      if (segment.shotIndex == null) {
+        // **整体替换：原样接上**，不加速不放慢不裁不补，时长随候选
+        await _ffmpeg(
+          ExportCommands.wholeReplacementVideo(input: path, out: out),
+          'U${segment.unitIndex + 1} 的替换画面',
+        );
+      } else {
+        // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝）
+        await _ffmpeg(
+          ExportCommands.fitCandidateVideo(
+            input: path,
+            durationMs: segment.durationMs,
+            candidateDurationMs: await _probeQuietly(path),
+            out: out,
+          ),
+          'U${segment.unitIndex + 1} 的替换画面',
+        );
+      }
     }
     clips[key] = out;
     return out;

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../export/composed_timeline.dart';
 import '../export/export_commands.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
@@ -67,8 +68,20 @@ class AudioTrackBuilder {
     /// 这是第几条导出变体。配乐每一段可以选多首**备选**，按这个序号轮流取
     /// （见 [BgmSegment.materialFor]）。预览传 null，那时用各段的预览版
     int? variantIndex,
+
+    /// 被**整体替换**的单元：单元下标 → 候选素材的本地路径。
+    /// 那一段的口播来自候选自己，不再是原片
+    Map<int, String> wholeAudio = const {},
+
+    /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）。配乐的位置要按
+    /// 这个换算，否则从被替换的那个单元之后全部错位
+    Map<int, int> wholeDurations = const {},
   }) async {
     workDir.createSync(recursive: true);
+    // 整体替换会改变单元时长，后面所有单元跟着挪——配乐的位置必须按
+    // **成片**时间轴算（见 [ComposedTimeline]）
+    final timeline =
+        ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
     final covered = bgmCoveredRanges(units, bgm);
     final degraded = <String>[];
 
@@ -80,6 +93,7 @@ class AudioTrackBuilder {
         vocalsPath: vocalsPath,
         covered: covered,
         voiceAudio: voiceAudio,
+        wholeAudio: wholeAudio[unit.index],
       ));
     }
 
@@ -103,7 +117,8 @@ class AudioTrackBuilder {
       final material = variantIndex == null
           ? segment.previewMaterial
           : segment.materialFor(variantIndex);
-      final range = BgmPlan.unitRangeOf(units, segment);
+      final range =
+          timeline.rangeOfUnits(segment.startUnit, segment.endUnit);
       if (range == null) {
         AppLog.warn('配乐「${material.name}」找不到对应的镜头范围，这一段跳过');
         continue;
@@ -170,7 +185,20 @@ class AudioTrackBuilder {
     required String? vocalsPath,
     required List<(int, int)> covered,
     required Map<int, String> voiceAudio,
+
+    /// 这个单元被整体替换了：口播来自这条候选素材，整段取用不裁不补
+    String? wholeAudio,
   }) async {
+    // 整体替换优先于换音色——同一个单元两者都设时导出前置检查已经拦下了
+    if (wholeAudio != null && File(wholeAudio).existsSync()) {
+      final out = p.join(workDir.path, 'mix_u${unit.index}_whole.wav');
+      await _ffmpeg(
+        ExportCommands.wholeReplacementAudio(input: wholeAudio, out: out),
+        'U${unit.index + 1} 的替换声音',
+      );
+      return [out];
+    }
+
     final voice = voiceAudio[unit.index];
     if (voice != null && File(voice).existsSync()) {
       final out = p.join(workDir.path, 'mix_u${unit.index}_voice.wav');
