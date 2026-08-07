@@ -25,6 +25,12 @@ class CandidateRow extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onPlay;
 
+  /// 是不是这一段的预览版（播放时放的就是它）
+  final bool isPreview;
+
+  /// 设为预览版；未选中时为 null
+  final VoidCallback? onSetPreview;
+
   /// 这一层的检索标签，用来标出「命中几个」——排序凭什么把它排前面，
   /// 得让用户看得见
   final List<String> queryTags;
@@ -37,6 +43,8 @@ class CandidateRow extends StatelessWidget {
     required this.onTap,
     required this.onPlay,
     this.queryTags = const [],
+    this.isPreview = false,
+    this.onSetPreview,
   });
 
   static const double height = 88;
@@ -221,6 +229,15 @@ class CandidateRow extends StatelessWidget {
           _check(),
           Row(
             children: [
+              // 只有选中的候选才谈得上「用哪一个预览」
+              if (onSetPreview != null || isPreview)
+                _iconButton(
+                  key: Key('picking-preview-${material.id}'),
+                  icon: isPreview ? Icons.star : Icons.star_border,
+                  tooltip: isPreview ? '预览播的就是这一条' : '设为预览版',
+                  color: isPreview ? AppColors.orange : null,
+                  onTap: onSetPreview ?? () {},
+                ),
               _iconButton(
                 key: Key('picking-copy-name-${material.id}'),
                 icon: Icons.content_copy,
@@ -243,6 +260,7 @@ class CandidateRow extends StatelessWidget {
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
+    Color? color,
   }) =>
       Tooltip(
         message: tooltip,
@@ -252,7 +270,7 @@ class CandidateRow extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           child: Padding(
             padding: const EdgeInsets.all(3),
-            child: Icon(icon, size: 15, color: AppColors.textSecondary),
+            child: Icon(icon, size: 15, color: color ?? AppColors.textSecondary),
           ),
         ),
       );

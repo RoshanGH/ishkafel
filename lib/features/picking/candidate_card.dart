@@ -32,6 +32,13 @@ class CandidateCard extends StatelessWidget {
   /// 的三秒。
   final VoidCallback onPlay;
 
+  /// 是不是这一段的**预览版**：播放时放的就是它。导出会把选中的都用上，
+  /// 预览只能放一个
+  final bool isPreview;
+
+  /// 把这一条设为预览版；未选中时为 null（预览只能放已选中的）
+  final VoidCallback? onSetPreview;
+
   /// 这一层的检索标签，用来标出命中了哪几个。
   ///
   /// 只给个数判断不了像不像——同样「命中 2 个」，是「灶台+实拍」还是
@@ -46,6 +53,8 @@ class CandidateCard extends StatelessWidget {
     required this.onTap,
     required this.onPlay,
     this.queryTags = const [],
+    this.isPreview = false,
+    this.onSetPreview,
   });
 
   @override
@@ -72,6 +81,7 @@ class CandidateCard extends StatelessWidget {
             _topRow(context, material.id, material.name),
             _bottomBadge(),
             _checkMark(),
+            _previewMark(),
             _playButton(),
           ],
         ),
@@ -231,6 +241,34 @@ class CandidateCard extends StatelessWidget {
           child: child,
         ),
       );
+
+  /// 预览版标记摆在左上角：右上是勾选圈、左下是时长、右下是试看，只剩这里。
+  /// 只有选中的候选才谈得上「用哪一个预览」
+  Widget _previewMark() {
+    if (onSetPreview == null && !isPreview) return const SizedBox.shrink();
+    return Positioned(
+      left: AppSpacing.xs,
+      top: AppSpacing.xs,
+      child: GestureDetector(
+        key: Key('picking-preview-${entry.material.id}'),
+        onTap: onSetPreview,
+        behavior: HitTestBehavior.opaque,
+        child: Tooltip(
+          message: isPreview ? '预览播的就是这一条' : '设为预览版',
+          child: Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: AppColors.stageBackground.withValues(alpha: 0.7),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(isPreview ? Icons.star : Icons.star_border,
+                size: 13,
+                color: isPreview ? AppColors.orange : AppColors.textTertiary),
+          ),
+        ),
+      ),
+    );
+  }
 
   /// 试看按钮摆在右下角：左下是时长徽标，右上是勾选圈，这里是唯一不打架的位置
   Widget _playButton() => Positioned(

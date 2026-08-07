@@ -152,7 +152,10 @@ class PickingController extends ChangeNotifier {
         _replace(
           _selectedUnitIndex,
           UnitReplacement.whole(
-              _toggled(currentReplacement.wholeCandidateIds, candidateId)),
+            _toggled(currentReplacement.wholeCandidateIds, candidateId),
+            // 取消勾选的正好是预览版时，构造函数会自动退回第一个
+            previewId: currentReplacement.wholePreviewId,
+          ),
         );
       case ReplacementMode.perShot:
         final shot = _selectedShotIndex;
@@ -163,9 +166,50 @@ class PickingController extends ChangeNotifier {
           shot: _toggled(
               currentReplacement.shotCandidateIds[shot] ?? const [], candidateId),
         };
-        _replace(_selectedUnitIndex, UnitReplacement.perShot(byShot));
+        _replace(
+            _selectedUnitIndex,
+            UnitReplacement.perShot(byShot,
+                previewIds: currentReplacement.shotPreviewIds));
     }
   }
+
+  /// 把某个候选设为**预览版**：播放时这一段放的就是它。
+  ///
+  /// 导出仍然会把选中的候选都用上（一个一条变体），预览只能放一个——
+  /// 这个标记就是「放哪一个」。只对已经勾选的候选生效。
+  void setPreviewCandidate(int candidateId) {
+    if (!isCandidateSelected(candidateId)) return;
+    switch (currentMode) {
+      case ReplacementMode.keepOriginal:
+        return;
+      case ReplacementMode.whole:
+        _replace(
+          _selectedUnitIndex,
+          UnitReplacement.whole(currentReplacement.wholeCandidateIds,
+              previewId: candidateId),
+        );
+      case ReplacementMode.perShot:
+        final shot = _selectedShotIndex;
+        if (shot == null) return;
+        _replace(
+          _selectedUnitIndex,
+          UnitReplacement.perShot(currentReplacement.shotCandidateIds,
+              previewIds: {
+                ...currentReplacement.shotPreviewIds,
+                shot: candidateId,
+              }),
+        );
+    }
+  }
+
+  /// 当前作用域里预览播的是哪一个候选；没选候选时为 null
+  int? get previewCandidateId => switch (currentMode) {
+        ReplacementMode.keepOriginal => null,
+        ReplacementMode.whole => currentReplacement.wholePreviewId,
+        ReplacementMode.perShot => _selectedShotIndex == null
+            ? null
+            : currentReplacement.shotPreviewId(_selectedShotIndex!),
+      };
 
   /// 返回新列表，绝不改动传入的那份
   static List<int> _toggled(List<int> current, int id) => current.contains(id)

@@ -29,11 +29,33 @@ class UnitReplacement {
   /// （[mode] 为 [ReplacementMode.perShot] 时有效；未出现的镜头保留原画面）
   final Map<int, List<int>> shotCandidateIds;
 
+  /// 整体替换时，预览播的是哪一个候选。
+  ///
+  /// **预览只能放一个，导出会把选中的都用上**。为空表示还没选候选。
+  /// 指到一个没选中的候选上时退回第一个——方案是存在盘上的，用户取消勾选
+  /// 之后预览指向可能就没了。
+  final int? wholePreviewId;
+
+  /// 镜头替换时，各镜头预览播的是哪一个候选（镜头下标 → 候选 id）
+  final Map<int, int> shotPreviewIds;
+
   UnitReplacement._({
     required this.mode,
     required List<int> wholeCandidateIds,
     required Map<int, List<int>> shotCandidateIds,
+    int? wholePreviewId,
+    Map<int, int> shotPreviewIds = const {},
   })  : wholeCandidateIds = List.unmodifiable(wholeCandidateIds),
+        wholePreviewId = wholeCandidateIds.contains(wholePreviewId)
+            ? wholePreviewId
+            : (wholeCandidateIds.isEmpty ? null : wholeCandidateIds.first),
+        shotPreviewIds = Map.unmodifiable({
+          for (final e in shotCandidateIds.entries)
+            if (e.value.isNotEmpty)
+              e.key: e.value.contains(shotPreviewIds[e.key])
+                  ? shotPreviewIds[e.key]!
+                  : e.value.first,
+        }),
         shotCandidateIds = Map.unmodifiable({
           for (final e in shotCandidateIds.entries)
             e.key: List<int>.unmodifiable(e.value),
@@ -47,14 +69,17 @@ class UnitReplacement {
       );
 
   /// 整体替换。空候选列表等价于「还没选」，因子仍为 1
-  factory UnitReplacement.whole(List<int> candidateIds) => UnitReplacement._(
+  factory UnitReplacement.whole(List<int> candidateIds, {int? previewId}) =>
+      UnitReplacement._(
         mode: ReplacementMode.whole,
         wholeCandidateIds: _dedupe(candidateIds),
         shotCandidateIds: const {},
+        wholePreviewId: previewId,
       );
 
   /// 镜头级替换
-  factory UnitReplacement.perShot(Map<int, List<int>> byShot) =>
+  factory UnitReplacement.perShot(Map<int, List<int>> byShot,
+          {Map<int, int> previewIds = const {}}) =>
       UnitReplacement._(
         mode: ReplacementMode.perShot,
         wholeCandidateIds: const [],
@@ -62,7 +87,11 @@ class UnitReplacement {
           for (final e in byShot.entries)
             if (e.value.isNotEmpty) e.key: _dedupe(e.value),
         },
+        shotPreviewIds: previewIds,
       );
+
+  /// 这个镜头预览播哪一个候选；没替换这个镜头时返回 null
+  int? shotPreviewId(int shotIndex) => shotPreviewIds[shotIndex];
 
   /// 同一个候选被选两次不该让组合数翻倍
   static List<int> _dedupe(List<int> ids) {
@@ -98,8 +127,12 @@ class UnitReplacement {
   Map<String, dynamic> toJson() => {
         'mode': mode.name,
         'wholeCandidateIds': wholeCandidateIds,
+        'wholePreviewId': wholePreviewId,
         'shotCandidateIds': {
           for (final e in shotCandidateIds.entries) '${e.key}': e.value,
+        },
+        'shotPreviewIds': {
+          for (final e in shotPreviewIds.entries) '${e.key}': e.value,
         },
       };
 
@@ -117,10 +150,28 @@ class UnitReplacement {
       case ReplacementMode.keepOriginal:
         return UnitReplacement.keepOriginal();
       case ReplacementMode.whole:
-        return UnitReplacement.whole(_intList(raw['wholeCandidateIds']));
+        return UnitReplacement.whole(_intList(raw['wholeCandidateIds']),
+            previewId: raw['wholePreviewId'] is int
+                ? raw['wholePreviewId'] as int
+                : null);
       case ReplacementMode.perShot:
-        return UnitReplacement.perShot(_shotMap(raw['shotCandidateIds']));
+        return UnitReplacement.perShot(_shotMap(raw['shotCandidateIds']),
+            previewIds: _previewMap(raw['shotPreviewIds']));
     }
+  }
+
+  /// 镜头下标 → 预览候选 id。畸形条目跳过——预览指向丢了会退回第一个，
+  /// 不是什么要紧事，没必要为它把整条方案废掉
+  static Map<int, int> _previewMap(Object? raw) {
+    if (raw is! Map) return const {};
+    final out = <int, int>{};
+    for (final entry in raw.entries) {
+      final shot = int.tryParse('${entry.key}');
+      final id = entry.value;
+      if (shot == null || id is! int) continue;
+      out[shot] = id;
+    }
+    return out;
   }
 
   static ReplacementMode _parseMode(Object? raw) {

@@ -557,13 +557,18 @@ class CandidatePanel extends StatelessWidget {
         separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
           final entry = search.entries[i];
+          final picked = picking.isCandidateSelected(entry.material.id);
           return CandidateRow(
             entry: entry,
-            selected: picking.isCandidateSelected(entry.material.id),
+            selected: picked,
             targetMs: scope.targetDurationMs,
             onTap: () => picking.toggleCandidate(entry.material.id),
             onPlay: () => onPreview(context, entry.material),
             queryTags: scope.tagNames,
+            isPreview: picking.previewCandidateId == entry.material.id,
+            onSetPreview: picked
+                ? () => picking.setPreviewCandidate(entry.material.id)
+                : null,
           );
         },
       );
@@ -582,13 +587,18 @@ class CandidatePanel extends StatelessWidget {
       itemCount: search.entries.length,
       itemBuilder: (context, i) {
         final entry = search.entries[i];
+        final picked = picking.isCandidateSelected(entry.material.id);
         return CandidateCard(
           entry: entry,
-          selected: picking.isCandidateSelected(entry.material.id),
+          selected: picked,
           targetMs: scope.targetDurationMs,
           onTap: () => picking.toggleCandidate(entry.material.id),
           onPlay: () => onPreview(context, entry.material),
           queryTags: scope.tagNames,
+          isPreview: picking.previewCandidateId == entry.material.id,
+          onSetPreview: picked
+              ? () => picking.setPreviewCandidate(entry.material.id)
+              : null,
         );
       },
     );
