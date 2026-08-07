@@ -8,7 +8,9 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/features/workbench/preview_audio.dart';
+import 'package:ishkafel/features/workbench/preview_composer.dart';
 
 const _track = BgmMaterial(
     id: 9, name: '垫乐', durationMs: 30000, previewUrl: 'https://cdn/b.mp3');
@@ -66,6 +68,7 @@ RenewTask _task({
 const _noDebounce = Duration.zero;
 
 void main() {
+  _composerReuse();
   group('没配乐也没换音色', () {
     test('什么都不做，用原片自带的声音', () async {
       final playback = FakePlaybackController();
@@ -248,6 +251,71 @@ void main() {
 
       expect(mixer.builds.length, greaterThan(first),
           reason: '不清指纹的话重试等于没点——方案没变就直接跳过了');
+    });
+  });
+}
+
+void _composerReuse() {
+  group('合成器每个任务只建一次', () {
+    /// 合成器内部有段落级缓存。每次合成都新建一个，等于把缓存扔掉——
+    /// 真机上这会让四十多段被反复重渲染，「正在合成预览音轨」永远挂在那儿。
+    test('改一次方案不会换一个新的合成器', () async {
+      final dir = Directory.systemTemp.createTempSync('ishkafel_pcr_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      var made = 0;
+      final mixer = _mixer();
+
+      final c = PreviewAudioController(
+        playback: FakePlaybackController(),
+        factory: mixer.factory,
+        debounce: _noDebounce,
+        composerFactory: (taskId) {
+          made++;
+          return PreviewComposer(
+            run: (binary, args) async {
+              await File(args.last).writeAsString('mp4');
+              return ProcessResult(1, 0, '', '');
+            },
+            workDir: dir,
+            fetchMaterial: (id) async {
+              final f = File('${dir.path}/m$id.mp4')..writeAsStringSync('mp4');
+              return f.path;
+            },
+          );
+        },
+      );
+
+      for (final ids in [
+        [71],
+        [72],
+        [73]
+      ]) {
+        c.update(
+          task: _task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: [UnitReplacement.whole(ids)],
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      expect(made, 1, reason: '每改一次方案就换一个新合成器，段落缓存就永远是空的');
+      c.dispose();
+    });
+  });
+
+  group('合成进度写进那句提示里', () {
+    test('有进度时报第几段，并说明只合改动过的部分', () {
+      final text = previewAudioNotice(
+          PreviewAudioState.building, null, progress: (7, 46));
+
+      expect(text, contains('7/46'));
+      expect(text, contains('下次进来直接就能播'));
+    });
+
+    test('没有进度时退回原来那句，不显示一个假的 0/0', () {
+      expect(previewAudioNotice(PreviewAudioState.building, null),
+          '正在合成预览音轨（配乐/配音），稍后就能听到');
     });
   });
 }

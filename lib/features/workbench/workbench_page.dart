@@ -200,6 +200,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     super.initState();
     _tasks = ref.read(taskListProvider.notifier);
     _mediaCache = _buildMediaCache();
+    _bgmMediaCache = _buildBgmMediaCache()?..addListener(_onMediaCacheChanged);
+    _mediaCache?.addListener(_onMediaCacheChanged);
     final task = widget.task;
     final units = task.units;
     final videoInfo = task.videoInfo;
@@ -217,6 +219,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _editor = editor;
     _replacements = task.replacements;
     _consequenceBaseline = units;
+    // 进工作台就把方案里的配乐固定住——只在「选完」时才下的话，
+    // 打开一条早就配好乐的任务什么都不会发生
+    _pinBgm();
 
     final playback = _resolvePlayback();
     _playback = playback;
@@ -329,8 +334,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _previewAudio?.removeListener(_onPreviewAudioChanged);
     _previewAudio?.dispose();
     // 离开工作台时做一次配额回收：固定住的一律不动，只淘汰没人用的
-    final cache = _mediaCache;
-    if (cache != null) {
+    for (final cache in [_mediaCache, _bgmMediaCache]) {
+      if (cache == null) continue;
+      cache.removeListener(_onMediaCacheChanged);
       cache.sweep();
       cache.dispose();
     }
@@ -638,6 +644,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   Future<void> _saveBgm(BgmPlan next) async {
     setState(() => _task = _task.copyWith(bgm: next));
+    // 选中就把曲子下到本地：素材库那边被删也不影响这条任务
+    _pinBgm();
     // 配乐变了，预览音轨要跟着重合——否则加完配乐播放还是原声
     _syncPreviewAudio();
     try {
@@ -915,6 +923,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 但固定集合是按任务来的——所以每个工作台各持一个实例
   PickedMediaCache? _mediaCache;
 
+  /// 配乐同理：选中就下到本地，别人在素材库那边删了也不影响这条任务。
+  /// 此前配乐是「用到才下」，从选完到导出中间同样有被删的窗口
+  PickedMediaCache? _bgmMediaCache;
+
   /// 下载动作来自 [materialFetcherProvider]（和导出读同一个缓存目录）；
   /// 没接（测试环境）就不固定
   PickedMediaCache? _buildMediaCache() {
@@ -927,6 +939,29 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
   }
 
+  /// 配乐的固定。曲子按 id 从当前方案里找——方案里存的就是完整的
+  /// [BgmMaterial]，不必再去库里查一次
+  PickedMediaCache? _buildBgmMediaCache() {
+    final fetch = ref.read(bgmFetcherProvider);
+    final dataDir = ref.read(dataDirProvider);
+    if (fetch == null || dataDir == null) return null;
+    return PickedMediaCache(
+      fetch: (id) {
+        final material = _task.bgm.materialById(id);
+        if (material == null) {
+          throw StateError('这首配乐已经不在方案里了');
+        }
+        return fetch(material);
+      },
+      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+    );
+  }
+
+  /// 把方案里用到的配乐固定住。选完、改完、刚进工作台都要调一次
+  void _pinBgm() {
+    _bgmMediaCache?.pinAll({for (final m in _task.bgm.materials) m.id});
+  }
+
   /// 首帧图落在任务数据目录下。没有数据目录（测试环境）就不落地——
   /// 托盘照样能画，只是重开就没了
   PickedMaterialStore? get _defaultPickedStore {
@@ -936,6 +971,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       dir: Directory(p.join(dataDir.path, 'picked_thumbs', widget.task.id)),
       fetch: httpBytes,
     );
+  }
+
+  /// 素材/配乐的落地状态变了就重画底部栏——导出按钮的可用性挂在它上面
+  void _onMediaCacheChanged() {
+    if (mounted) setState(() {});
   }
 
   ReplacementPlan get _plan => ReplacementPlan(_replacements ?? const []);
@@ -986,7 +1026,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             if (_retaggingCount > 0) RetaggingBanner(unitCount: _retaggingCount),
             if (previewAudioNotice(
                     _previewAudio?.state ?? PreviewAudioState.original,
-                    _previewAudio?.failure)
+                    _previewAudio?.failure,
+                    progress: _previewAudio?.progress)
                 case final notice?)
               PreviewAudioBanner(
                 text: notice,
@@ -1046,16 +1087,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         bottomNavigationBar: AnimatedBuilder(
           animation: editor,
           builder: (context, _) {
-            final cache = _mediaCache;
-            final notReady = cache?.notReady ?? const <int>[];
-            final blocked = exportBlockedReason(
-              _plan,
-              pendingMedia: notReady.length,
-              failedMedia: notReady
-                  .where((id) =>
-                      cache!.statusOf(id) == PickedMediaStatus.failed)
-                  .length,
-            );
+            // 画面素材与配乐用同一把闸：任何一样没落到本地都不给导出
+            var pending = 0;
+            var failed = 0;
+            for (final cache in [_mediaCache, _bgmMediaCache]) {
+              if (cache == null) continue;
+              for (final id in cache.notReady) {
+                pending++;
+                if (cache.statusOf(id) == PickedMediaStatus.failed) failed++;
+              }
+            }
+            final blocked = exportBlockedReason(_plan,
+                pendingMedia: pending, failedMedia: failed);
             return WorkbenchBottomBar(
               summaryText: _summaryText(editor),
               voiceCount: _task.voices.assignedUnits.length,

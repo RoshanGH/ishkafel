@@ -237,6 +237,21 @@ class BgmPlan {
   BgmSegment? segmentAt(int unitIndex) =>
       segments.firstWhereOrNull((s) => s.covers(unitIndex));
 
+  /// 方案里用到的全部曲子（同一首在多段出现只算一次）。
+  /// 「哪几首要固定到本地」就是它
+  List<BgmMaterial> get materials {
+    final seen = <int>{};
+    return List.unmodifiable([
+      for (final segment in segments)
+        for (final material in segment.materials)
+          if (seen.add(material.id)) material,
+    ]);
+  }
+
+  /// 按 id 找方案里的那首曲子；不在方案里返回 null
+  BgmMaterial? materialById(int id) =>
+      materials.firstWhereOrNull((m) => m.id == id);
+
   /// 差在这个范围内就当「刚好」。差 0.2 秒还写「会循环播放」是在吓唬用户。
   static const int fitToleranceMs = 500;
 

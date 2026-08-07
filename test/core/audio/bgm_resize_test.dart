@@ -82,6 +82,8 @@ void main() {
     });
   });
 
+  _materials();
+
   group('删除一段', () {
     test('按起点删掉指定的那一段，其余不动', () {
       final plan = _two().removeSegment(3);
@@ -103,6 +105,31 @@ void main() {
 
     test('认不出这一段时原样返回', () {
       expect(_two().removeSegment(99).segments, hasLength(2));
+    });
+  });
+}
+
+/// 方案里到底用到了哪几首曲子——「哪些要固定到本地」就是它
+void _materials() {
+  group('方案里用到的曲子', () {
+    test('去重：同一首铺在两段上只算一次', () {
+      final plan = BgmPlan.empty
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 1)
+          .assign(startUnit: 3, endUnit: 4, materials: [_a, _b], rangeMs: 1);
+
+      expect(plan.materials.map((m) => m.id), [1, 2]);
+    });
+
+    test('按 id 找得到；不在方案里返回 null', () {
+      final plan = BgmPlan.empty
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 1);
+
+      expect(plan.materialById(1)?.name, 'A');
+      expect(plan.materialById(99), isNull);
+    });
+
+    test('空方案不炸', () {
+      expect(BgmPlan.empty.materials, isEmpty);
     });
   });
 }

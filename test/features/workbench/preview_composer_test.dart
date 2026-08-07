@@ -185,4 +185,93 @@ void main() {
 
     expect(env.calls.any((a) => a.contains(audio.path)), isTrue);
   });
+
+  test('上次已经渲染好的切片直接用，不重跑 ffmpeg——哪怕换了一个新的合成器', () async {
+    final first = _make(temp);
+    await first.composer.compose(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      replacements: [
+        UnitReplacement.whole(const [71]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.keepOriginal(),
+      ],
+      audioPath: null,
+    );
+    expect(first.calls, isNotEmpty);
+
+    // 重开一次任务 = 一个全新的 PreviewComposer，内存缓存是空的。
+    // 真机上这会把四十多段全重渲染一遍，用户看到「正在合成预览音轨」
+    // 永远挂在那儿
+    final second = _make(temp);
+    await second.composer.compose(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      replacements: [
+        UnitReplacement.whole(const [71]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.keepOriginal(),
+      ],
+      audioPath: null,
+    );
+
+    // 只剩拼接那一步要重跑（拼接产物不是按段落指纹命名的）
+    final rerendered =
+        second.calls.where((a) => a.last.contains('pv_')).toList();
+    expect(rerendered, isEmpty, reason: '段落切片一个都不该重渲染');
+  });
+
+  test('渲染到一半留下的半截文件不会被当成好的用', () async {
+    final env = _make(temp);
+    // 上一次 ffmpeg 被杀掉，留下一个 .part
+    File('${temp.path}/pv_src_4000_8000.mp4.part').writeAsStringSync('半截');
+
+    await env.composer.compose(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      replacements: [
+        UnitReplacement.whole(const [71]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.keepOriginal(),
+      ],
+      audioPath: null,
+    );
+
+    expect(env.calls.any((a) => a.last.endsWith('pv_src_4000_8000.mp4.part')),
+        isTrue, reason: '半截文件要重渲染，不能直接拿来拼');
+    expect(File('${temp.path}/pv_src_4000_8000.mp4').existsSync(), isTrue);
+  });
+
+  test('渲染进度按段数报出来——四十多段跑几分钟，不能只说「稍后」', () async {
+    final ticks = <(int, int)>[];
+    final calls = <List<String>>[];
+    final composer = PreviewComposer(
+      run: (binary, args) async {
+        calls.add(args);
+        await File(args.last).writeAsString('mp4');
+        return ProcessResult(1, 0, '', '');
+      },
+      workDir: temp,
+      fetchMaterial: (id) async {
+        final f = File('${temp.path}/m$id.mp4')..writeAsStringSync('mp4');
+        return f.path;
+      },
+      probeDurationMs: (path) async => 5200,
+      onProgress: (done, total) => ticks.add((done, total)),
+    );
+
+    await composer.compose(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      replacements: [
+        UnitReplacement.whole(const [71]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.keepOriginal(),
+      ],
+      audioPath: null,
+    );
+
+    expect(ticks, isNotEmpty);
+    expect(ticks.last, (3, 3), reason: 'U1 整体替换算一段，U2/U3 各一个镜头');
+  });
 }

@@ -13,6 +13,11 @@ import 'bgm_audition.dart';
 /// 音频库检索入口（缺省走真实 miaoa CLI；测试注入假实现）
 final bgmLibraryProvider = Provider<BgmLibrary>((ref) => BgmLibrary());
 
+/// 把一首配乐取到本地，返回本地路径。和预览/导出用的是同一份缓存
+/// （见 `main.dart`）。为 null 表示这台机器上没接（测试环境）。
+final bgmFetcherProvider =
+    Provider<Future<String> Function(BgmMaterial)?>((ref) => null);
+
 /// 用户在配乐选择面板里的决定
 sealed class BgmChoice {
   const BgmChoice();
@@ -202,6 +207,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
+              _pickedStrip(),
               Expanded(child: _body()),
               _VolumeRow(
                 value: _volume,
@@ -249,6 +255,94 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
           ),
         ],
       );
+
+  /// 「已选」条：选了哪几首一直摆在列表上面。
+  ///
+  /// 和候选素材那边是同一个问题——列表一长就得往下滚，改个关键词整页结果
+  /// 还会换掉，选过的那几首立刻看不见了。用户原话：「BGM 如果数量多的话，
+  /// 比如说我选的是两三页以后的东西，我还是不知道」。
+  Widget _pickedStrip() {
+    if (_picked.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      key: const Key('bgm-picked-strip'),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _picked.length > 1
+                ? '已选 ${_picked.length} 首 · 导出时按这个次序轮流用，★ 的那首用于预览'
+                : '已选 1 首',
+            style: const TextStyle(
+                color: AppColors.textTertiary, fontSize: AppFontSize.micro),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Wrap(
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
+            children: [
+              for (var i = 0; i < _picked.length; i++) _pickedChip(i),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pickedChip(int index) {
+    final material = _picked[index];
+    final isPreview = index == _previewIndex;
+    return Container(
+      key: Key('bgm-picked-${material.id}'),
+      constraints: const BoxConstraints(maxWidth: 260),
+      padding: const EdgeInsets.only(left: AppSpacing.xs),
+      decoration: BoxDecoration(
+        color: AppColors.accentBlue.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.accentBlue.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('${index + 1}',
+              style: const TextStyle(
+                  color: AppColors.accentBlue,
+                  fontSize: AppFontSize.micro,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(width: AppSpacing.xs),
+          Flexible(
+            child: Text(material.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: AppFontSize.micro)),
+          ),
+          IconButton(
+            key: Key('bgm-picked-preview-${material.id}'),
+            onPressed: () => setState(() => _previewIndex = index),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(3),
+            constraints: const BoxConstraints(),
+            tooltip: isPreview ? '预览播的就是这一首' : '设为预览版',
+            icon: Icon(isPreview ? Icons.star : Icons.star_border,
+                size: 13,
+                color: isPreview ? AppColors.orange : AppColors.textSecondary),
+          ),
+          IconButton(
+            key: Key('bgm-picked-remove-${material.id}'),
+            onPressed: () => _toggle(material),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.all(3),
+            constraints: const BoxConstraints(),
+            tooltip: '取消选择',
+            icon: const Icon(Icons.close,
+                size: 13, color: AppColors.textSecondary),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _body() {
     if (_error case final e?) {

@@ -103,6 +103,25 @@ class PreviewAudioController extends ChangeNotifier {
   /// 正在合成的那一次的指纹，用于丢弃过期结果
   String? _buildingFingerprint;
 
+  /// 画面合成的进度（已完成段数 / 总段数）。四十多段要跑几分钟，
+  /// 只说「稍后就能听到」等于让用户干等着猜还有多久
+  int _progressDone = 0;
+  int _progressTotal = 0;
+
+  /// 合成进度；没在合成、或者这一次不用合画面时为 null
+  (int done, int total)? get progress =>
+      _progressTotal > 0 ? (_progressDone, _progressTotal) : null;
+
+  /// 每个任务只建一个合成器：它内部有段落级缓存，每次新建一个等于把缓存
+  /// 扔掉，同一批切片会被反复重渲染
+  PreviewComposer? _composer;
+
+  void _onProgress(int done, int total) {
+    _progressDone = done;
+    _progressTotal = total;
+    notifyListeners();
+  }
+
   /// 方案有任何变化时调用。与声音无关的变化会被指纹挡掉。
   void update({
     required RenewTask task,
@@ -169,6 +188,8 @@ class PreviewAudioController extends ChangeNotifier {
     }
     _buildingFingerprint = fingerprint;
     _failure = null;
+    _progressDone = 0;
+    _progressTotal = 0;
     _set(PreviewAudioState.building);
     try {
       final track = await make(task.id).build(
@@ -238,8 +259,10 @@ class PreviewAudioController extends ChangeNotifier {
   }) async {
     final makeComposer = composerFactory;
     if (makeComposer == null || replacements.isEmpty) return null;
+    final composer = _composer ??= makeComposer(task.id);
+    composer.onProgress = _onProgress;
     try {
-      final result = await makeComposer(task.id).compose(
+      final result = await composer.compose(
         sourcePath: task.sourcePath,
         units: units,
         replacements: replacements,
@@ -303,10 +326,20 @@ class PreviewAudioController extends ChangeNotifier {
 }
 
 /// 状态对应的那句话。不写出来的话，用户不知道自己听到的到底是原声还是成品。
-String? previewAudioNotice(PreviewAudioState state, String? failure) =>
+///
+/// [progress] 是画面合成的进度。一条 96 秒、51 个镜头的片子要跑几分钟，
+/// 一句「稍后就能听到」挂在那里，用户没法判断是在干活还是卡死了。
+String? previewAudioNotice(
+  PreviewAudioState state,
+  String? failure, {
+  (int done, int total)? progress,
+}) =>
     switch (state) {
       PreviewAudioState.original => null,
-      PreviewAudioState.building => '正在合成预览音轨（配乐/配音），稍后就能听到',
+      PreviewAudioState.building => progress == null
+          ? '正在合成预览音轨（配乐/配音），稍后就能听到'
+          : '正在合成预览（第 ${progress.$1}/${progress.$2} 段）'
+              '——只合改动过的部分，下次进来直接就能播',
       PreviewAudioState.ready => null,
       // 声音是能听的，只是少了几段垫乐——说成「不可用」会让人以为白干了
       // 底层的原因已经是人话了，这里只补一句「其余声音正常」——

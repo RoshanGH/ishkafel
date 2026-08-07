@@ -32,6 +32,12 @@ class ComposedPreview {
 ///
 /// **段落级缓存**：只有改动的那一段重渲染，其余复用。每改一次就把整条片子
 /// 重跑一遍的话，预览会慢到没法用。
+///
+/// 缓存**认磁盘上的文件**，不只认内存里那张表。真机上 51 个镜头合一遍要四
+/// 分钟，而每次合成都新建一个 [PreviewComposer]，内存表当场作废——于是重开
+/// 一次任务就把四十多段全重渲染一遍，用户看到的是「正在合成预览音轨」永远
+/// 挂在那儿。切片文件名由段落指纹决定，先写 `.part` 再改名，所以磁盘上存在
+/// 的那份一定是完整的，可以放心直接用。
 class PreviewComposer {
   final ProcessRunner run;
   final Directory workDir;
@@ -39,6 +45,13 @@ class PreviewComposer {
 
   /// 读候选素材有多长——整体替换要用它算成片时长，镜头替换要用它算变速倍率
   final Future<int?> Function(String path)? probeDurationMs;
+
+  /// 渲染进度（已完成段数 / 总段数）。四十多段要跑几分钟，只说「稍后就能
+  /// 听到」等于让用户干等着猜还有多久
+  void Function(int done, int total)? onProgress;
+
+  int _done = 0;
+  int _total = 0;
 
   /// 段落指纹 → 已渲染的切片。跨多次 compose 复用
   final Map<String, String> _clips = {};
@@ -48,6 +61,7 @@ class PreviewComposer {
     required this.workDir,
     required this.fetchMaterial,
     this.probeDurationMs,
+    this.onProgress,
   });
 
   Future<ComposedPreview> compose({
@@ -69,6 +83,8 @@ class PreviewComposer {
     workDir.createSync(recursive: true);
     final wholeDurations = <int, int>{};
     final parts = <String>[];
+    _done = 0;
+    _total = _segmentCount(units, picks, replacements);
 
     for (final unit in units) {
       final pick = picks[unit.index];
@@ -139,6 +155,20 @@ class PreviewComposer {
     );
   }
 
+  /// 这一次要出多少段。整体替换的单元算一段，其余按镜头数算
+  static int _segmentCount(
+    List<SemanticUnit> units,
+    Map<int, ({int candidateId, int? shotIndex})> picks,
+    List<UnitReplacement> replacements,
+  ) {
+    var total = 0;
+    for (final unit in units) {
+      final pick = picks[unit.index];
+      total += pick != null && pick.shotIndex == null ? 1 : unit.shots.length;
+    }
+    return total;
+  }
+
   /// 各单元的预览版（整体替换）。镜头层的走 [_shotPick]
   static Map<int, ({int candidateId, int? shotIndex})> _previewPicks(
       List<SemanticUnit> units, List<UnitReplacement> replacements) {
@@ -189,17 +219,34 @@ class PreviewComposer {
     if (hit != null && File(hit).existsSync()) return hit;
 
     final out = p.join(workDir.path, 'pv_$key.mp4');
-    var built = args(out);
+    // 上一次（甚至上一次开 app）已经渲染好的那份直接用
+    final existing = File(out);
+    if (existing.existsSync() && existing.lengthSync() > 0) {
+      _clips[key] = out;
+      return out;
+    }
+
+    // 先写 .part 再改名：ffmpeg 跑到一半被杀掉时留下的是半截文件，
+    // 下次启动照单全收的话，拼出来的预览会缺一段画面
+    final temp = '$out.part';
+    var built = args(temp);
     if (resolveSpeed != null && slotMs != null) {
       built = ExportCommands.fitCandidateVideo(
         input: resolveSpeed,
         durationMs: slotMs,
         candidateDurationMs: await _probe(resolveSpeed),
-        out: out,
+        out: temp,
       );
     }
-    await _ffmpeg(built, what);
+    try {
+      await _ffmpeg(built, what);
+      File(temp).renameSync(out);
+    } catch (e) {
+      if (File(temp).existsSync()) File(temp).deleteSync();
+      rethrow;
+    }
     _clips[key] = out;
+    onProgress?.call(++_done, _total);
     return out;
   }
 

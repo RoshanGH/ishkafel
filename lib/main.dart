@@ -41,6 +41,7 @@ import 'features/tasks/task_list_controller.dart';
 import 'features/workbench/voice_swap_runner.dart';
 import 'features/export/export_dialog.dart';
 import 'features/picking/picking_providers.dart';
+import 'features/workbench/bgm_picker_sheet.dart';
 import 'features/export/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
@@ -127,6 +128,8 @@ Future<void> main() async {
                     .duration
                     .inMilliseconds,
               )),
+      // 选中配乐就把它下到本地：和预览/导出读同一份缓存
+      bgmFetcherProvider.overrideWithValue(bgmCache(dataDir).fetch),
       // 挑素材时就把本体下到本地：和导出读同一个缓存目录，导出时不必再下
       materialFetcherProvider.overrideWithValue(MaterialDownloader(
         content: MiaoaContentService(binary: resolveMiaoaBinary()),

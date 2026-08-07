@@ -27,7 +27,9 @@ class _FakeLibrary implements BgmLibrary {
   final bool widened;
   final asked = <String?>[];
 
-  _FakeLibrary({this.items = const [], this.error, this.widened = false});
+  _FakeLibrary(
+      {List<BgmMaterial> items = const [], this.error, this.widened = false})
+      : items = List<BgmMaterial>.from(items);
 
   @override
   Future<BgmSearchPage> search({
@@ -509,6 +511,67 @@ void main() {
               matching: find.byType(Icon))).icon,
           Icons.star,
           reason: '预览版指的是第二首（_long）');
+    });
+  });
+
+  group('已选那几首一直摆在列表上面', () {
+    /// 和候选素材那边是同一个问题：列表一长就得往下滚，改个关键词整页结果
+    /// 还会换掉，选过的那几首立刻看不见了。用户原话：「BGM 如果数量多的话，
+    /// 比如说我选的是两三页以后的东西，我还是不知道」。
+    testWidgets('选了就出现在「已选」条里，带着轮用次序', (tester) async {
+      await _open(tester,
+          library: _FakeLibrary(items: const [_long, _short, _withUrl]));
+      await tester.tap(find.text('三十秒垫乐'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('五秒音效'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('bgm-picked-strip')), findsOneWidget);
+      expect(find.byKey(const Key('bgm-picked-1')), findsOneWidget);
+      expect(find.byKey(const Key('bgm-picked-2')), findsOneWidget);
+      expect(find.textContaining('已选 2 首'), findsOneWidget);
+      expect(find.textContaining('轮流用'), findsOneWidget);
+    });
+
+    testWidgets('换了关键词、整页结果都变了，已选条还在', (tester) async {
+      final library = _FakeLibrary(items: const [_long, _short]);
+      await _open(tester, library: library);
+      await tester.tap(find.text('三十秒垫乐'));
+      await tester.pumpAndSettle();
+
+      // 换关键词重搜（假库这次返回一批完全不同的曲子）
+      library.items.clear();
+      library.items.add(_withUrl);
+      await tester.enterText(find.byKey(const Key('bgm-search')), '别的');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+
+      expect(find.text('三十秒垫乐'), findsOneWidget,
+          reason: '列表里已经没有它了，但「已选」条里必须还在');
+      expect(find.byKey(const Key('bgm-picked-1')), findsOneWidget);
+    });
+
+    testWidgets('已选条上能直接取消，也能改预览版', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long, _short]));
+      await tester.tap(find.text('三十秒垫乐'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('五秒音效'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('bgm-picked-preview-2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('bgm-picked-remove-1')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('bgm-picked-1')), findsNothing);
+      expect(find.byKey(const Key('bgm-picked-2')), findsOneWidget);
+      expect(find.textContaining('已选 1 首'), findsOneWidget);
+    });
+
+    testWidgets('一首都没选时不占地方', (tester) async {
+      await _open(tester, library: _FakeLibrary(items: const [_long]));
+
+      expect(find.byKey(const Key('bgm-picked-strip')), findsNothing);
     });
   });
 }
