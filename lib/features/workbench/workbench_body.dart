@@ -69,6 +69,10 @@ class WorkbenchBody extends StatefulWidget {
   /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）。时间线上标出来，
   /// 用户才知道成片总长已经变了
   final Map<int, int> composedDurations;
+
+  /// 拖段落边界改长度 / 点 × 删掉一段
+  final void Function(int startUnit, int newStart, int newEnd)? onBgmResize;
+  final void Function(int startUnit)? onBgmDelete;
   final void Function(int unitIndex)? onChangeVoice;
 
   /// 试听某个单元已生成的配音；返回 null 表示这一句还没生成
@@ -94,6 +98,8 @@ class WorkbenchBody extends StatefulWidget {
     this.voices = VoicePlan.empty,
     this.replacements = const [],
     this.composedDurations = const {},
+    this.onBgmResize,
+    this.onBgmDelete,
     this.onChangeVoice,
     this.previewVoice,
     this.bgm = BgmPlan.empty,
@@ -386,6 +392,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   composedDurations: widget.composedDurations,
                   onReplacementBadgeTap: _jumpToReplacement,
                   onBgmRangeSelected: widget.onBgmRangeSelected,
+                  onBgmResize: widget.onBgmResize,
+                  onBgmDelete: widget.onBgmDelete,
                   onBgmSegmentTap: widget.onBgmSegmentTap,
                   readOnly: widget.readOnly,
                 );

@@ -42,6 +42,8 @@ SegmentationEditorController _editor() => SegmentationEditorController(
 
 late List<(int, int)> ranges;
 late List<BgmSegment> tapped;
+late List<(int, int, int)> resized;
+late List<int> deleted;
 
 const _track = BgmMaterial(
     id: 1, name: '轻快垫乐', durationMs: 8000, previewUrl: null);
@@ -53,6 +55,8 @@ Future<void> _pump(
 }) async {
   ranges = [];
   tapped = [];
+  resized = [];
+  deleted = [];
   final playhead = ValueNotifier<int>(0);
   addTearDown(playhead.dispose);
 
@@ -76,6 +80,8 @@ Future<void> _pump(
           bgm: bgm,
           onBgmRangeSelected: (from, to) => ranges.add((from, to)),
           onBgmSegmentTap: tapped.add,
+          onBgmResize: (start, from, to) => resized.add((start, from, to)),
+          onBgmDelete: deleted.add,
         ),
       ),
     ),
@@ -90,6 +96,7 @@ double get _bgmY => TimelineTracks.bgmTop + TimelineTracks.bgmH / 2;
 Offset _at(double x) => Offset(x, _bgmY);
 
 void main() {
+  _bgmEditing();
   _voiceMarks();
 
   group('在配乐轨上横向拖选一段连续镜头', () {
@@ -228,5 +235,74 @@ void _voiceMarks() {
         reason: '换了音色却不重画，时间线上永远看不到那道标记');
     expect(plain.shouldRepaint(plain), isFalse,
         reason: '没变还重画的话，播放时每秒白重画 30 次整条时间线');
+  });
+
+}
+
+void _bgmEditing() {
+  group('段落边界可以拖、× 可以删——不用每次都开素材库浮层', () {
+    // U1 = 0~5000、U2 = 5000~10000；视口 500px 对应 10000ms
+    BgmPlan covering() => BgmPlan.empty.assign(
+        startUnit: 0, endUnit: 1, materials: [_track], rangeMs: 10000);
+
+    testWidgets('拖右边界把这一段缩短', (tester) async {
+      await _pump(tester, bgm: covering());
+
+      // 右边界画在 x=500，往左拖到 U1 里
+      await tester.dragFrom(_at(498), const Offset(-450, 0));
+      await tester.pumpAndSettle();
+
+      expect(resized, hasLength(1));
+      expect(resized.single.$1, 0, reason: '改的是起点为 U1 的那一段');
+      expect(resized.single.$3, 0, reason: '右边界落到 U1');
+    });
+
+    testWidgets('拖左边界把起点往前挪', (tester) async {
+      // 只铺在 U2 上：左边界画在 x=250，不贴视口边缘
+      await _pump(tester,
+          bgm: BgmPlan.empty.assign(
+              startUnit: 1, endUnit: 1, materials: [_track], rangeMs: 5000));
+
+      await tester.dragFrom(_at(252), const Offset(-150, 0));
+      await tester.pumpAndSettle();
+
+      expect(resized, hasLength(1));
+      expect(resized.single.$2, 0, reason: '左边界落到 U1');
+      expect(resized.single.$3, 1, reason: '右边界不动');
+    });
+
+    testWidgets('点块体中间是「换曲子」，不是改长度', (tester) async {
+      await _pump(tester, bgm: covering());
+
+      await tester.tapAt(_at(250));
+      await tester.pumpAndSettle();
+
+      expect(tapped, hasLength(1));
+      expect(resized, isEmpty);
+      expect(deleted, isEmpty);
+    });
+
+    testWidgets('点右上角的 × 直接删掉这一段', (tester) async {
+      await _pump(tester, bgm: covering());
+
+      // 右边缘往里 6px 是手柄，再往里 14px 是删除按钮
+      await tester.tapAt(Offset(500 - 6 - 7, TimelineTracks.bgmTop + 9));
+      await tester.pumpAndSettle();
+
+      expect(deleted, [0]);
+      expect(tapped, isEmpty, reason: '点 × 不该顺带把浮层也开出来');
+    });
+
+    testWidgets('只读回看时既不能拖也不能删', (tester) async {
+      await _pump(tester, bgm: covering(), readOnly: true);
+
+      await tester.dragFrom(_at(498), const Offset(-450, 0));
+      await tester.pumpAndSettle();
+      await tester.tapAt(Offset(500 - 6 - 7, TimelineTracks.bgmTop + 9));
+      await tester.pumpAndSettle();
+
+      expect(resized, isEmpty);
+      expect(deleted, isEmpty);
+    });
   });
 }

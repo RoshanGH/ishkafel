@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'bgm_edge_hit.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/log/app_log.dart';
@@ -88,6 +89,13 @@ class TimelineView extends StatefulWidget {
   /// 点了配乐轨上已有的一段（用于换曲/移除）
   final void Function(BgmSegment segment)? onBgmSegmentTap;
 
+  /// 拖段落边界改长度：把起点是 [startUnit] 的那一段改成 [newStart]..[newEnd]
+  final void Function(int startUnit, int newStart, int newEnd)? onBgmResize;
+
+  /// 删掉起点是 [startUnit] 的那一段。此前删一段要先点开素材库浮层再点移除，
+  /// 太重了
+  final void Function(int startUnit)? onBgmDelete;
+
   /// 判定双击窗口用的时钟。测试注入——`tester.pump(Duration)` 推进的是框架的
   /// 假时钟，`DateTime.now()` 纹丝不动，不注入就没法验证「隔太久不算双击」。
   final DateTime Function() clock;
@@ -116,6 +124,8 @@ class TimelineView extends StatefulWidget {
     this.onReplacementBadgeTap,
     this.onBgmRangeSelected,
     this.onBgmSegmentTap,
+    this.onBgmResize,
+    this.onBgmDelete,
     DateTime Function()? clock,
     this.readOnly = false,
   }) : clock = clock ?? DateTime.now;
@@ -131,6 +141,9 @@ class _TimelineViewState extends State<TimelineView> {
   /// 正在配乐轨上框选的镜头区间（起点下标 / 当前下标）。
   /// 非空即表示这次拖拽是在选配乐区间，不是拖边界也不是滚动。
   ({int from, int to})? _bgmSelecting;
+
+  /// 正在拖某一段的边界：(这一段的起点, 拖的是哪一头, 当前的另一头)
+  ({int startUnit, BgmEdge edge, int from, int to})? _bgmResizing;
 
   /// 本次拖拽是「拖播放头」而不是「拖时间线」
   bool _scrubbing = false;
@@ -265,6 +278,22 @@ class _TimelineViewState extends State<TimelineView> {
     // 替换数量徽标优先命中：它压在块体上，先判它才点得到
     if (_hitReplacementBadge(position)) return;
     if (_isOnBgmTrack(position)) {
+      // 删除按钮优先：它压在块体上，先判它才点得到
+      for (final span in bgmSpans(widget.bgm, widget.controller.units)) {
+        if (!hitsBgmDelete(
+            dx: position.dx,
+            dy: position.dy,
+            left: widget.geometry.msToPx(span.startMs),
+            right: widget.geometry.msToPx(span.endMs),
+            top: TimelineTracks.bgmTop,
+            bottom: TimelineTracks.bgmBottom)) {
+          continue;
+        }
+        if (!widget.readOnly) {
+          widget.onBgmDelete?.call(span.segment.startUnit);
+        }
+        return;
+      }
       final at = _unitIndexAtX(position.dx);
       final segment = at == null ? null : widget.bgm.segmentAt(at);
       if (segment != null) widget.onBgmSegmentTap?.call(segment);
@@ -327,6 +356,13 @@ class _TimelineViewState extends State<TimelineView> {
     // 配乐轨上横向拖拽 = 框选一段连续镜头。判定放在边界命中之前：配乐轨
     // 上本来就没有边界手柄，不会打架。
     if (!widget.readOnly && _isOnBgmTrack(details.localPosition)) {
+      // 先判「拖已有段落的边界」——那是改长度；判不中才是「框选一段新的」
+      final grabbed = _grabBgmEdge(details.localPosition.dx);
+      if (grabbed != null) {
+        setState(() => _bgmResizing = grabbed);
+        _dragHit = null;
+        return;
+      }
       final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null) {
         setState(() => _bgmSelecting = (from: at, to: at));
@@ -415,7 +451,33 @@ class _TimelineViewState extends State<TimelineView> {
   int? _unitIndexAtX(double dx) => unitIndexAtMs(
       widget.controller.units, widget.geometry.pxToMs(dx));
 
+  /// 光标是不是抓在某一段的边界手柄上
+  ({int startUnit, BgmEdge edge, int from, int to})? _grabBgmEdge(double dx) {
+    for (final span in bgmSpans(widget.bgm, widget.controller.units)) {
+      final left = widget.geometry.msToPx(span.startMs);
+      final right = widget.geometry.msToPx(span.endMs);
+      final edge = bgmEdgeAt(dx: dx, left: left, right: right);
+      if (edge == null) continue;
+      return (
+        startUnit: span.segment.startUnit,
+        edge: edge,
+        from: span.segment.startUnit,
+        to: span.segment.endUnit,
+      );
+    }
+    return null;
+  }
+
   void _handleDragUpdate(DragUpdateDetails details) {
+    if (_bgmResizing case final rs?) {
+      final at = _unitIndexAtX(details.localPosition.dx);
+      if (at != null) {
+        setState(() => _bgmResizing = rs.edge == BgmEdge.start
+            ? (startUnit: rs.startUnit, edge: rs.edge, from: at, to: rs.to)
+            : (startUnit: rs.startUnit, edge: rs.edge, from: rs.from, to: at));
+      }
+      return;
+    }
     if (_bgmSelecting case final sel?) {
       final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null && at != sel.to) {
@@ -446,6 +508,11 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _endDrag() {
+    if (_bgmResizing case final rs?) {
+      setState(() => _bgmResizing = null);
+      widget.onBgmResize?.call(rs.startUnit, rs.from, rs.to);
+      return;
+    }
     if (_bgmSelecting case final sel?) {
       setState(() => _bgmSelecting = null);
       widget.onBgmRangeSelected?.call(

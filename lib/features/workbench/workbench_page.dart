@@ -558,6 +558,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _syncPreviewAudio();
   }
 
+  /// 拖段落边界改长度。只改长度——曲子、备选、音量、预览版都不动
+  Future<void> _resizeBgm(int startUnit, int newStart, int newEnd) =>
+      _saveBgm(_task.bgm
+          .resize(startUnit: startUnit, newStart: newStart, newEnd: newEnd));
+
+  /// 点段落上的 × 删掉它。此前删一段要点开素材库浮层再点移除，太重
+  Future<void> _deleteBgm(int startUnit) =>
+      _saveBgm(_task.bgm.removeSegment(startUnit));
+
   /// 被整体替换的单元在成片里的时长。预览合成完才知道（要读候选素材），
   /// 没合成过时为空
   Map<int, int> get _composedDurations {
@@ -934,6 +943,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               child: WorkbenchBody(
                 // 整体替换后这一段在成片里多长——时间线上标出来
                 composedDurations: _composedDurations,
+                onBgmResize: _isEditable ? _resizeBgm : null,
+                onBgmDelete: _isEditable ? _deleteBgm : null,
                 editor: editor,
                 playback: playback,
                 videoWidget: _videoWidget,

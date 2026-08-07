@@ -413,6 +413,52 @@ class BgmPlan {
             s,
       ]));
 
+  /// 拖段落边界改长度。**只改长度**——曲子、备选、音量、预览版都不动。
+  ///
+  /// [startUnit] 用来认段（拖之前的起点）。新边界会被夹住：不许越过相邻段落
+  /// （两段抢同一个单元时，播放器不知道该放哪一首），也不许起点越过终点。
+  BgmPlan resize({
+    required int startUnit,
+    required int newStart,
+    required int newEnd,
+  }) {
+    final at = segments.indexWhere((s) => s.startUnit == startUnit);
+    if (at < 0) return this;
+
+    // 相邻段落的边界就是这一段能伸到的极限
+    final floor = at == 0 ? 0 : segments[at - 1].endUnit + 1;
+    final ceiling = at == segments.length - 1
+        ? 1 << 30
+        : segments[at + 1].startUnit - 1;
+
+    var from = newStart < floor ? floor : newStart;
+    var to = newEnd > ceiling ? ceiling : newEnd;
+    // 拖过头把起点甩到终点后面时不翻转，缩成一个单元
+    if (from > to) from = to;
+
+    final next = <BgmSegment>[
+      for (var i = 0; i < segments.length; i++)
+        if (i == at)
+          segments[i].copyWith(startUnit: from, endUnit: to)
+        else
+          segments[i],
+    ]..sort((a, b) => a.startUnit.compareTo(b.startUnit));
+    return _merged(next);
+  }
+
+  /// 删掉起点是 [startUnit] 的那一段。
+  ///
+  /// 与 [removeAt] 的区别是「按段的起点认」而不是「按落在哪个单元认」——
+  /// 时间线上用户点的就是那一段本身。
+  BgmPlan removeSegment(int startUnit) {
+    final next = [
+      for (final s in segments)
+        if (s.startUnit != startUnit) s,
+    ];
+    if (next.length == segments.length) return this;
+    return _merged(next);
+  }
+
   /// 移除覆盖 [unitIndex] 的那一段；没有就原样返回
   BgmPlan removeAt(int unitIndex) {
     final target = segmentAt(unitIndex);

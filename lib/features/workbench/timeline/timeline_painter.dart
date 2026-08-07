@@ -13,6 +13,7 @@ import 'package:ishkafel/app/theme/app_spacing.dart';
 import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'bgm_edge_hit.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
@@ -427,6 +428,22 @@ class TimelinePainter extends CustomPainter {
       // 「裁」两个字太省，会让人以为素材被改了——其实只是播到段尾就停
       final short = span.segment.fit.shortLabel;
       final fit = short.isEmpty ? '' : ' · $short';
+      // 段落上直接给一个删除按钮：此前删一段要点开素材库浮层再点移除，太重
+      if (rect.width >= bgmDeleteMinWidth) {
+        final boxRight = rect.right - bgmEdgeHitRadius;
+        final boxTop = rect.top + 2;
+        final center =
+            Offset(boxRight - bgmDeleteSize / 2, boxTop + bgmDeleteSize / 2);
+        canvas.drawCircle(
+            center, bgmDeleteSize / 2, Paint()..color = const Color(0x66000000));
+        final cross = Paint()
+          ..color = AppColors.textPrimary
+          ..strokeWidth = 1.2
+          ..strokeCap = StrokeCap.round;
+        const r = 3.0;
+        canvas.drawLine(center.translate(-r, -r), center.translate(r, r), cross);
+        canvas.drawLine(center.translate(r, -r), center.translate(-r, r), cross);
+      }
       _drawText(
         canvas,
         '${span.segment.previewMaterial.name}$fit',
