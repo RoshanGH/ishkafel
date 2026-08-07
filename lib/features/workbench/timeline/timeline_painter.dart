@@ -125,7 +125,11 @@ class TimelinePainter extends CustomPainter {
     final entries = <(double, String, String)>[
       (TimelineTracks.unitsLabelTop, '台词语义单元', '拖大边界调整'),
       (TimelineTracks.shotsLabelTop, '视觉镜头', '拖小边界调整，限制在所属单元内'),
-      (TimelineTracks.bgmLabelTop, '配乐', '在这条轨上横向拖选一段连续镜头'),
+      (
+        TimelineTracks.bgmLabelTop,
+        '配乐',
+        '横向拖选一段连续的台词语义单元；拖两端改长度，点 × 删除'
+      ),
       (TimelineTracks.thumbsLabelTop, '画面', ''),
       (TimelineTracks.waveLabelTop, '音频', ''),
     ];
@@ -381,15 +385,16 @@ class TimelinePainter extends CustomPainter {
       Paint()..color = AppColors.surfaceCard.withValues(alpha: 0.5),
     );
 
-    // 正在框选：先画预览，让用户看到自己圈到了哪几个镜头
+    // 正在框选：先画预览，让用户看到自己圈到了哪几个**台词语义单元**。
+    // 这里曾经拿单元下标去查打平后的镜头，圈一个单元只画出第一个镜头那一
+    // 小块——看着就是「拉不动」
     if (bgmSelecting case final sel?) {
-      final flat = flattenShots(units);
-      if (flat.isNotEmpty) {
-        final last = flat.length - 1;
+      if (units.isNotEmpty) {
+        final last = units.length - 1;
         final lo = math.min(sel.from, sel.to).clamp(0, last);
         final hi = math.max(sel.from, sel.to).clamp(0, last);
-        final rect = Rect.fromLTRB(geometry.msToPx(flat[lo].startMs), top,
-            geometry.msToPx(flat[hi].endMs), bottom);
+        final rect = Rect.fromLTRB(geometry.msToPx(units[lo].startMs), top,
+            geometry.msToPx(units[hi].endMs), bottom);
         canvas.drawRect(
             rect, Paint()..color = AppColors.accentBlue.withValues(alpha: 0.3));
         canvas.drawRect(
@@ -428,6 +433,13 @@ class TimelinePainter extends CustomPainter {
       // 「裁」两个字太省，会让人以为素材被改了——其实只是播到段尾就停
       final short = span.segment.fit.shortLabel;
       final fit = short.isEmpty ? '' : ' · $short';
+      // 选了几首备选就标几——和 U/S 两层的徽标一个意思：导出时这一段会
+      // 轮流用这几首
+      if (span.segment.materials.length > 1) {
+        _drawBadge(canvas, ReplacementBadges.bgmBadgeRect(rect),
+            '${span.segment.materials.length}');
+      }
+
       // 段落上直接给一个删除按钮：此前删一段要点开素材库浮层再点移除，太重
       if (rect.width >= bgmDeleteMinWidth) {
         final boxRight = rect.right - bgmEdgeHitRadius;
@@ -670,6 +682,14 @@ class ReplacementBadges {
     if (block.width < width + inset * 2) return null;
     return Rect.fromLTWH(block.right - width - inset, block.top + inset, width,
         height);
+  }
+
+  /// 配乐段的备选数量徽标画在**左上角**——右上角让给删除按钮。
+  /// 两个挤在一起的话，想删的时候多半点到徽标上
+  static Rect? bgmBadgeRect(Rect block) {
+    if (block.width < width + inset * 2 + bgmDeleteSize) return null;
+    return Rect.fromLTWH(
+        block.left + inset, block.top + inset, width, height);
   }
 
   /// 镜头块右上角。镜头块通常更窄，徽标也更小
