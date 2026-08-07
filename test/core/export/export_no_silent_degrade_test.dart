@@ -7,6 +7,7 @@ import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/export/export_runner.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 
 const _bgm = BgmMaterial(
     id: 1, name: '尤克里里', durationMs: 30000, previewUrl: 'https://o/a.mp3');
@@ -134,6 +135,56 @@ void main() {
       replacements: const [],
       outputDir: Directory('${temp.path}/out'),
       vocalsPath: null,
+    );
+
+    expect(results.every((r) => r.failure == null), isTrue);
+  });
+
+  test('同一个单元既整体替换又换音色时中止——两边都想决定这段说什么', () async {
+    final vocals = File('${temp.path}/vocals.wav')..writeAsStringSync('v');
+    final voice = File('${temp.path}/u0.wav')..writeAsStringSync('a');
+    final runner = _runner(temp, resolveBgm: (m) async => '/local/1.mp3');
+
+    final results = await runner.exportAll(
+      sourcePath: '/v/a.mp4',
+      units: _units(),
+      replacements: [UnitReplacement.whole(const [77])],
+      outputDir: Directory('${temp.path}/out'),
+      vocalsPath: vocals.path,
+      voices: VoicePlan.empty
+          .assign([0], const VoiceRef(id: 'v1', name: '音色甲')),
+      voiceAudio: {0: voice.path},
+    );
+
+    expect(results.every((r) => r.failure != null), isTrue,
+        reason: '整体替换用候选自己的口播，换音色用 TTS 合成的口播，'
+            '同一段两者矛盾；静默取其一正是用户反对的');
+    expect(results.first.failure, contains('U1'));
+  });
+
+  test('整体替换在别的单元、换音色在这个单元，互不冲突', () async {
+    final vocals = File('${temp.path}/vocals.wav')..writeAsStringSync('v');
+    final voice = File('${temp.path}/u1.wav')..writeAsStringSync('a');
+    final runner = _runner(temp, resolveBgm: (m) async => '/local/1.mp3');
+
+    final results = await runner.exportAll(
+      sourcePath: '/v/a.mp4',
+      units: [
+        _units().first,
+        SemanticUnit(
+          index: 1,
+          startMs: 4000,
+          endMs: 8000,
+          transcript: '第二句',
+          shots: [Shot(startMs: 4000, endMs: 8000)],
+        ),
+      ],
+      replacements: [UnitReplacement.whole(const [77])],
+      outputDir: Directory('${temp.path}/out'),
+      vocalsPath: vocals.path,
+      voices: VoicePlan.empty
+          .assign([1], const VoiceRef(id: 'v1', name: '音色甲')),
+      voiceAudio: {1: voice.path},
     );
 
     expect(results.every((r) => r.failure == null), isTrue);

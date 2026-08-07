@@ -23,10 +23,20 @@ class BgmCache {
   /// 注入下载动作：这一层要能在不联网的情况下测
   final Future<void> Function(String url, File to) download;
 
+  /// 校验缓存里的文件还能不能用（真实实现走 ffprobe）。
+  ///
+  /// 光看「文件在不在、是不是空的」不够：上一次下到一半、或者存的其实是一段
+  /// 403 的 HTML，文件都非空。不验的话要等导出时 ffmpeg 报一个看不懂的错。
+  final Future<bool> Function(String path)? verify;
+
+  /// 这次会话里已经验过的，不再重复 ffprobe
+  final Set<String> _verified = {};
+
   BgmCache({
     required this.library,
     required this.cacheDir,
     Future<void> Function(String url, File to)? download,
+    this.verify,
   }) : download = download ?? _httpDownload;
 
   /// 拿到这条配乐的本地路径，必要时下载。
@@ -34,7 +44,11 @@ class BgmCache {
     cacheDir.createSync(recursive: true);
     final file = File(p.join(cacheDir.path, '${material.id}.mp3'));
     // 空文件视为上次没下完，重下
-    if (file.existsSync() && file.lengthSync() > 0) return file.path;
+    if (file.existsSync() && file.lengthSync() > 0) {
+      if (await _usable(file.path)) return file.path;
+      AppLog.warn('缓存里的配乐「${material.name}」解不出来，删掉重下');
+      file.deleteSync();
+    }
 
     final url =
         await library.freshPreviewUrl(material.id) ?? material.previewUrl;
@@ -47,6 +61,15 @@ class BgmCache {
     try {
       await download(url, temp);
       temp.renameSync(file.path);
+      // 重下之后还是坏的就别往下传了——交出去只会让 ffmpeg 报一个看不懂的错
+      if (!await _usable(file.path)) {
+        file.deleteSync();
+        throw BgmUnavailableException(
+            '配乐「${material.name}」下下来是坏的（可能是地址失效后返回的错误页），'
+            '请重新选一次这一段的配乐');
+      }
+    } on BgmUnavailableException {
+      rethrow;
     } catch (e) {
       // 半截文件会让 ffmpeg 报一个完全看不懂的错，不如直接删掉重来
       if (temp.existsSync()) temp.deleteSync();
@@ -54,6 +77,16 @@ class BgmCache {
       rethrow;
     }
     return file.path;
+  }
+
+  /// 验一次就记下来：同一次会话里反复用同一首曲子，每次都 ffprobe 是浪费
+  Future<bool> _usable(String path) async {
+    final check = verify;
+    if (check == null) return true;
+    if (_verified.contains(path)) return true;
+    final ok = await check(path);
+    if (ok) _verified.add(path);
+    return ok;
   }
 
   static Future<void> _httpDownload(String url, File to) async {

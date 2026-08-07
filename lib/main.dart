@@ -138,6 +138,17 @@ Future<void> main() async {
 BgmCache bgmCache(Directory dataDir) => BgmCache(
       library: BgmLibrary(binary: resolveMiaoaBinary()),
       cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+      // 缓存里可能躺着上次下崩的半截文件、或者地址失效时返回的错误页——
+      // 解不出来就删掉重下，别等到导出时 ffmpeg 报一个看不懂的错
+      verify: (path) async {
+        try {
+          await FfprobeService(run: const ResolvingProcessRunner().call)
+              .probe(path);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      },
     );
 
 AnalysisPipeline? _buildAnalysisPipeline(

@@ -108,7 +108,23 @@ class ExportRunner {
     required String? vocalsPath,
     required VoicePlan voices,
     required Map<int, String> voiceAudio,
+    List<UnitReplacement> replacements = const [],
   }) {
+    // 整体替换用的是候选素材自己的口播，换音色用的是 TTS 合成的口播——
+    // 同一个单元两者矛盾，静默取其一正是用户反对的
+    final conflict = [
+      for (final index in voices.assignedUnits)
+        if (index < replacements.length &&
+            replacements[index].mode == ReplacementMode.whole &&
+            replacements[index].wholeCandidateIds.isNotEmpty)
+          'U${index + 1}',
+    ];
+    if (conflict.isNotEmpty) {
+      return '${conflict.join('、')} 既做了整体替换又选了音色。'
+          '整体替换会用候选素材自己的口播，换音色会用合成的口播，'
+          '同一段只能要一个——请取消其中一项';
+    }
+
     // 有配乐却没有分离出来的人声轨：新配乐只能叠在原混音上，原片自带的
     // 背景音还在，成片里两首曲子一起响
     if (bgm.segments.isNotEmpty &&
@@ -174,7 +190,8 @@ class ExportRunner {
             bgm: bgm,
             vocalsPath: vocalsPath,
             voices: voices,
-            voiceAudio: voiceAudio);
+            voiceAudio: voiceAudio,
+            replacements: replacements);
     if (blocker != null) {
       AppLog.warn('导出前置检查未通过：$blocker');
       return [
