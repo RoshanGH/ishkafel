@@ -83,7 +83,17 @@ class BgmSegment {
   /// 以后只能整段铺或整段不铺）。垫乐本来就是大段铺的，这个粒度够用。
   final int startUnit;
   final int endUnit;
-  final BgmMaterial material;
+
+  /// 这一段选中的曲子们，**互为备选**（不是叠着放）。
+  ///
+  /// 导出时各段各自按变体序号轮流取（见 [materialFor]）：总变体数只由画面
+  /// 替换决定，配乐不做乘法——一段选 4 首，6 条变体就是 A/B/C/D/A/B。
+  final List<BgmMaterial> materials;
+
+  /// 预览播的是哪一首（[materials] 的下标）。预览只能放一个，
+  /// 而导出会把备选都用上
+  final int previewIndex;
+
   final BgmFit fit;
 
   /// 这一段配乐压到原始音量的几成（0~1）。
@@ -103,11 +113,21 @@ class BgmSegment {
   const BgmSegment({
     required this.startUnit,
     required this.endUnit,
-    required this.material,
+    required this.materials,
     required this.fit,
+    this.previewIndex = 0,
     this.volume = defaultVolume,
     this.legacyShotRange = false,
   });
+
+  /// 第 [variantIndex] 条变体该用哪一首。轮流，用完一轮回到头
+  BgmMaterial materialFor(int variantIndex) =>
+      materials[variantIndex % materials.length];
+
+  /// 预览播的那一首。下标越界时夹回第一个——方案是存在盘上的，
+  /// 用户删掉几首备选之后下标可能就指不到了
+  BgmMaterial get previewMaterial =>
+      materials[previewIndex.clamp(0, materials.length - 1)];
 
   /// 夹回 0~1。构造函数是 const 的（很多地方直接 `const BgmSegment(...)`），
   /// 夹取只能放在入口：来自界面的滑块、来自存档的脏数据。
@@ -119,19 +139,35 @@ class BgmSegment {
 
   bool covers(int unitIndex) => unitIndex >= startUnit && unitIndex <= endUnit;
 
-  BgmSegment copyWith({int? startUnit, int? endUnit, double? volume}) =>
+  BgmSegment copyWith(
+          {int? startUnit,
+          int? endUnit,
+          double? volume,
+          List<BgmMaterial>? materials,
+          int? previewIndex}) =>
       BgmSegment(
         startUnit: startUnit ?? this.startUnit,
         endUnit: endUnit ?? this.endUnit,
-        material: material,
+        materials: materials ?? this.materials,
+        previewIndex: previewIndex ?? this.previewIndex,
         fit: fit,
         volume: volume ?? this.volume,
       );
 
+  /// 两段的备选是不是同一组（顺序也要一样——轮流的次序有意义）
+  bool sameAlternatives(BgmSegment other) {
+    if (materials.length != other.materials.length) return false;
+    for (var i = 0; i < materials.length; i++) {
+      if (materials[i].id != other.materials[i].id) return false;
+    }
+    return true;
+  }
+
   Map<String, dynamic> toJson() => {
         'startUnit': startUnit,
         'endUnit': endUnit,
-        'material': material.toJson(),
+        'materials': [for (final m in materials) m.toJson()],
+        'previewIndex': previewIndex,
         'fit': fit.name,
         'volume': volume,
       };
@@ -145,15 +181,24 @@ class BgmSegment {
     final start = raw[legacy ? 'startShot' : 'startUnit'];
     final end = raw[legacy ? 'endShot' : 'endUnit'];
     if (start is! int || end is! int || end < start) return null;
-    final material = BgmMaterial.tryFromJson(raw['material']);
-    if (material == null) return null;
+    // 老存档一段只存一首曲子（`material`），新的是一组备选（`materials`）
+    final list = raw['materials'];
+    final materials = <BgmMaterial>[
+      if (list is List)
+        for (final item in list) ?BgmMaterial.tryFromJson(item)
+      else
+        ?BgmMaterial.tryFromJson(raw['material']),
+    ];
+    if (materials.isEmpty) return null;
     final fit = BgmFit.values.firstWhereOrNull((f) => f.name == raw['fit']);
     final volume = raw['volume'];
     return BgmSegment(
       startUnit: start,
       endUnit: end,
+      materials: List.unmodifiable(materials),
+      previewIndex:
+          raw['previewIndex'] is int ? raw['previewIndex'] as int : 0,
       legacyShotRange: legacy,
-      material: material,
       fit: fit ?? BgmFit.exact,
       // 老存档没有这个字段；脏数据由构造函数夹回 0~1
       volume: volume is num ? clampVolume(volume.toDouble()) : defaultVolume,
@@ -202,10 +247,13 @@ class BgmPlan {
   BgmPlan assign({
     required int startUnit,
     required int endUnit,
-    required BgmMaterial material,
+    required List<BgmMaterial> materials,
     required int rangeMs,
     double volume = BgmSegment.defaultVolume,
+    int previewIndex = 0,
   }) {
+    // 一首都没选等于没铺这一段
+    if (materials.isEmpty) return this;
     // 用户可能从右往左拖
     final from = startUnit <= endUnit ? startUnit : endUnit;
     final to = startUnit <= endUnit ? endUnit : startUnit;
@@ -227,11 +275,15 @@ class BgmPlan {
         next.add(old.copyWith(startUnit: to + 1));
       }
     }
+    final preview =
+        materials[previewIndex.clamp(0, materials.length - 1)];
     next.add(BgmSegment(
       startUnit: from,
       endUnit: to,
-      material: material,
-      fit: fitFor(materialDurationMs: material.durationMs, rangeMs: rangeMs),
+      materials: List.unmodifiable(materials),
+      previewIndex: previewIndex.clamp(0, materials.length - 1),
+      // 「裁还是循环」按预览那一首算——时间线上显示的就是它
+      fit: fitFor(materialDurationMs: preview.durationMs, rangeMs: rangeMs),
       volume: BgmSegment.clampVolume(volume),
     ));
     next.sort((a, b) => a.startUnit.compareTo(b.startUnit));
@@ -293,7 +345,7 @@ class BgmPlan {
         continue;
       }
       if (s.startUnit >= unitOfShot.length) {
-        AppLog.warn('配乐「${s.material.name}」的镜头区间已越界，迁移时丢弃');
+        AppLog.warn('配乐「${s.previewMaterial.name}」的镜头区间已越界，迁移时丢弃');
         continue;
       }
       final from = unitOfShot[s.startUnit.clamp(0, unitOfShot.length - 1)];
@@ -301,7 +353,8 @@ class BgmPlan {
       next.add(BgmSegment(
         startUnit: from,
         endUnit: to,
-        material: s.material,
+        materials: s.materials,
+        previewIndex: s.previewIndex,
         fit: s.fit,
         volume: s.volume,
       ));
@@ -320,8 +373,9 @@ class BgmPlan {
     var changedVolume = false;
     for (final s in sorted) {
       final last = out.isEmpty ? null : out.last;
+      // 合并的条件是「备选列表完全相同」——顺序也算，轮流的次序有意义
       if (last != null &&
-          last.material.id == s.material.id &&
+          last.sameAlternatives(s) &&
           last.endUnit + 1 == s.startUnit) {
         final volume = winningVolume ?? last.volume;
         if (last.volume != volume || s.volume != volume) changedVolume = true;

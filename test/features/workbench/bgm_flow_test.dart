@@ -151,7 +151,7 @@ void main() {
 
     final saved = await repo.findById('bgm-1');
     expect(saved!.bgm.segments, hasLength(1));
-    expect(saved.bgm.segments.single.material.name, '轻快垫乐');
+    expect(saved.bgm.segments.single.previewMaterial.name, '轻快垫乐');
     expect(saved.bgm.segments.single.startUnit, 0);
   });
 
@@ -162,8 +162,8 @@ void main() {
         BgmSegment(
           startUnit: 0,
           endUnit: 1,
-          material: BgmMaterial(
-              id: 1, name: '轻快垫乐', durationMs: 30000, previewUrl: null),
+          materials: [BgmMaterial(
+              id: 1, name: '轻快垫乐', durationMs: 30000, previewUrl: null)],
           fit: BgmFit.cut,
         ),
       ]),

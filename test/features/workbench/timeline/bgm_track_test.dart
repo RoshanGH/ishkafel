@@ -81,8 +81,8 @@ void main() {
       final plan = const BgmPlan([]).assign(
         startUnit: 1,
         endUnit: 1,
-        material: const BgmMaterial(
-            id: 1, name: '垫乐', durationMs: 6000, previewUrl: null),
+        materials: [const BgmMaterial(
+            id: 1, name: '垫乐', durationMs: 6000, previewUrl: null)],
         rangeMs: 4000,
       );
 
@@ -91,7 +91,7 @@ void main() {
       expect(spans, hasLength(1));
       expect(spans.single.startMs, 6000);
       expect(spans.single.endMs, 10000, reason: 'U2 的起止');
-      expect(spans.single.segment.material.name, '垫乐');
+      expect(spans.single.segment.previewMaterial.name, '垫乐');
     });
 
     test('方案里引用了已经不存在的单元下标时跳过那一段', () {
@@ -99,8 +99,8 @@ void main() {
         BgmSegment(
           startUnit: 10,
           endUnit: 12,
-          material: BgmMaterial(
-              id: 1, name: '垫乐', durationMs: 1000, previewUrl: null),
+          materials: [BgmMaterial(
+              id: 1, name: '垫乐', durationMs: 1000, previewUrl: null)],
           fit: BgmFit.loop,
         ),
       ]);
@@ -115,8 +115,8 @@ void main() {
         BgmSegment(
           startUnit: 1,
           endUnit: 99,
-          material: BgmMaterial(
-              id: 1, name: '垫乐', durationMs: 1000, previewUrl: null),
+          materials: [BgmMaterial(
+              id: 1, name: '垫乐', durationMs: 1000, previewUrl: null)],
           fit: BgmFit.loop,
         ),
       ]);

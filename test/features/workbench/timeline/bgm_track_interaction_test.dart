@@ -158,14 +158,14 @@ void main() {
         tester,
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 0, endUnit: 1, material: _track, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 1, materials: [_track], fit: BgmFit.cut),
         ]),
       );
 
       await tester.tapAt(_at(50));
       await tester.pumpAndSettle();
 
-      expect(tapped.single.material.name, '轻快垫乐');
+      expect(tapped.single.previewMaterial.name, '轻快垫乐');
     });
 
     testWidgets('点在没有配乐的地方什么都不发生', (tester) async {
@@ -173,7 +173,7 @@ void main() {
         tester,
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 0, endUnit: 0, material: _track, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, materials: [_track], fit: BgmFit.cut),
         ]),
       );
 

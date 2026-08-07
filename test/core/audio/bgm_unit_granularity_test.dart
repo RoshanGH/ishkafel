@@ -45,7 +45,7 @@ void main() {
   group('配乐按台词语义单元对齐，不再按镜头', () {
     test('铺在 U1~U2 上', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 10000);
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 10000);
 
       expect(plan.segments.single.startUnit, 0);
       expect(plan.segments.single.endUnit, 1);
@@ -53,21 +53,21 @@ void main() {
 
     test('换算成毫秒时直接取单元的起止——镜头在整体替换后就不存在了', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 1, endUnit: 2, material: _a, rangeMs: 10000);
+          .assign(startUnit: 1, endUnit: 2, materials: [_a], rangeMs: 10000);
 
       expect(BgmPlan.unitRangeOf(_units(), plan.segments.single), (4000, 14000));
     });
 
     test('单元下标越界时返回 null，不炸', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 9, endUnit: 9, material: _a, rangeMs: 1000);
+          .assign(startUnit: 9, endUnit: 9, materials: [_a], rangeMs: 1000);
 
       expect(BgmPlan.unitRangeOf(_units(), plan.segments.single), isNull);
     });
 
     test('整体替换掉 U2：配乐劈成 U1 和 U3', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 2, material: _a, rangeMs: 14000)
+          .assign(startUnit: 0, endUnit: 2, materials: [_a], rangeMs: 14000)
           .carveOutUnits(1, 1);
 
       expect(plan.segments, hasLength(2));
@@ -77,9 +77,9 @@ void main() {
 
     test('把 U2 的配乐重新选回同一首时，三段并成一段', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 2, material: _a, rangeMs: 14000)
+          .assign(startUnit: 0, endUnit: 2, materials: [_a], rangeMs: 14000)
           .carveOutUnits(1, 1)
-          .assign(startUnit: 1, endUnit: 1, material: _a, rangeMs: 6000);
+          .assign(startUnit: 1, endUnit: 1, materials: [_a], rangeMs: 6000);
 
       expect(plan.segments, hasLength(1),
           reason: '用户描述的流程：抠掉之后重选同一首，接得上就合并');
@@ -109,7 +109,7 @@ void main() {
 
     test('已经是单元格式的不再动它', () {
       final plan = BgmPlan.empty
-          .assign(startUnit: 1, endUnit: 2, material: _a, rangeMs: 10000);
+          .assign(startUnit: 1, endUnit: 2, materials: [_a], rangeMs: 10000);
 
       final again = plan.migrateShotsToUnits(_units());
 

@@ -201,36 +201,45 @@ class ExportRunner {
     }
 
     onProgress?.call(0, total, '准备声音');
-    final AudioTrack track;
+    // 配乐每段只有一首时，所有变体的声音一模一样，合一次就够；
+    // 有备选（导出时轮流用）就得逐条合——那是变体之间唯一不同的地方
+    final perVariant = bgm.segments.any((s) => s.materials.length > 1);
+    final audioOf = <int, String>{};
     try {
-      track = await AudioTrackBuilder(
-        run: run,
-        workDir: workDir,
-        resolveBgm: resolveBgm,
-      ).build(
-        sourcePath: sourcePath,
-        units: units,
-        vocalsPath: vocalsPath,
-        bgm: bgm,
-        voiceAudio: voiceAudio,
-      );
+      for (var i = 0; i < (perVariant ? combos.length : 1); i++) {
+        final track = await AudioTrackBuilder(
+          run: run,
+          // 逐条合时各用各的目录，否则中间产物互相覆盖
+          workDir: perVariant
+              ? Directory(p.join(workDir.path, 'audio_v$i'))
+              : workDir,
+          resolveBgm: resolveBgm,
+        ).build(
+          sourcePath: sourcePath,
+          units: units,
+          vocalsPath: vocalsPath,
+          bgm: bgm,
+          voiceAudio: voiceAudio,
+          variantIndex: i,
+        );
+        // 配乐没铺上就是错的成片。预览那边是降级，这里必须失败
+        if (track.bgmWarnings.isNotEmpty) {
+          final why = track.bgmWarnings.join('；');
+          AppLog.warn('导出中止：$why');
+          return [
+            for (final c in combos)
+              ExportOutcome(
+                  index: c.index, failure: '配乐没能铺上，已中止导出：$why'),
+          ];
+        }
+        audioOf[i] = track.path;
+      }
     } catch (e) {
       AppLog.warn('导出：声音合成失败：$e');
-      // 声音是所有组合共用的，它挂了就没有哪条能成——如实把同一条原因给每一条
+      // 声音挂了就没有哪条能成——如实把同一条原因给每一条
       return [
         for (final c in combos)
           ExportOutcome(index: c.index, failure: '声音合成失败：$e'),
-      ];
-    }
-
-    // 配乐没铺上就是错的成片。预览那边是降级，这里必须失败
-    if (track.bgmWarnings.isNotEmpty) {
-      final why = track.bgmWarnings.join('；');
-      AppLog.warn('导出中止：$why');
-      return [
-        for (final c in combos)
-          ExportOutcome(
-              index: c.index, failure: '配乐没能铺上，已中止导出：$why'),
       ];
     }
 
@@ -242,7 +251,7 @@ class ExportRunner {
         final path = await _composeOne(
           combo: combo,
           sourcePath: sourcePath,
-          audio: track.path,
+          audio: audioOf[perVariant ? out.length : 0]!,
           outputDir: outputDir,
           clips: clips,
         );

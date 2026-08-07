@@ -12,7 +12,7 @@ BgmPlan _plan(List<(int, int, BgmMaterial, double)> segs) {
     plan = plan.assign(
         startUnit: from,
         endUnit: to,
-        material: m,
+        materials: [m],
         rangeMs: 5000,
         volume: v);
   }
@@ -84,7 +84,7 @@ void main() {
       final after = before.assign(
           startUnit: 6,
           endUnit: 10,
-          material: _a,
+          materials: [_a],
           rangeMs: 5000,
           volume: 0.4);
 
@@ -145,7 +145,7 @@ void main() {
     test('抠完之后如果两段又挨上了，仍然合并', () {
       // S6 单独一段 A，两边也是 A；把 S6 抠掉再补回来的情形
       final plan = _plan([(0, 5, _a, 0.25), (7, 10, _a, 0.25)])
-          .assign(startUnit: 6, endUnit: 6, material: _a, rangeMs: 1000);
+          .assign(startUnit: 6, endUnit: 6, materials: [_a], rangeMs: 1000);
 
       expect(plan.segments, hasLength(1));
       expect(plan.segments.single.startUnit, 0);

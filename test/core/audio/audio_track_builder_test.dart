@@ -81,7 +81,7 @@ void main() {
         // 只盖住全片第一个镜头（U1 的 S1，0~2000）
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 0, endUnit: 0, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, materials: [_bgmTrack], fit: BgmFit.cut),
         ]),
       );
 
@@ -104,7 +104,7 @@ void main() {
         vocalsPath: '/v/vocals.wav',
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 1, endUnit: 1, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 1, endUnit: 1, materials: [_bgmTrack], fit: BgmFit.cut),
         ]),
       );
 
@@ -123,7 +123,7 @@ void main() {
         units: _units(),
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 0, endUnit: 0, material: _bgmTrack, fit: BgmFit.cut),
+              startUnit: 0, endUnit: 0, materials: [_bgmTrack], fit: BgmFit.cut),
         ]),
       );
 
@@ -173,7 +173,7 @@ void main() {
         vocalsPath: '/v/vocals.wav',
         bgm: const BgmPlan([
           BgmSegment(
-              startUnit: 1, endUnit: 2, material: _bgmTrack, fit: BgmFit.loop),
+              startUnit: 1, endUnit: 2, materials: [_bgmTrack], fit: BgmFit.loop),
         ]),
       );
 
@@ -193,8 +193,8 @@ void main() {
           BgmSegment(
             startUnit: 0,
             endUnit: 0,
-            material: BgmMaterial(
-                id: 1, name: '过期的', durationMs: 1000, previewUrl: null),
+            materials: [BgmMaterial(
+                id: 1, name: '过期的', durationMs: 1000, previewUrl: null)],
             fit: BgmFit.cut,
           ),
         ]),

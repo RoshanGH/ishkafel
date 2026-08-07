@@ -11,7 +11,7 @@ void main() {
   group('每一段配乐各有各的音量', () {
     test('不指定时用默认值——压到四分之一，别盖过口播', () {
       final plan = BgmPlan.empty.assign(
-          startUnit: 0, endUnit: 2, material: _a, rangeMs: 5000);
+          startUnit: 0, endUnit: 2, materials: [_a], rangeMs: 5000);
 
       expect(plan.segments.single.volume, BgmSegment.defaultVolume);
       expect(BgmSegment.defaultVolume, 0.25);
@@ -22,13 +22,13 @@ void main() {
           .assign(
               startUnit: 0,
               endUnit: 2,
-              material: _a,
+              materials: [_a],
               rangeMs: 5000,
               volume: 0.4)
           .assign(
               startUnit: 5,
               endUnit: 7,
-              material: _b,
+              materials: [_b],
               rangeMs: 5000,
               volume: 0.1);
 
@@ -39,19 +39,19 @@ void main() {
 
     test('只改音量不换曲子', () {
       final plan = BgmPlan.empty.assign(
-          startUnit: 0, endUnit: 2, material: _a, rangeMs: 5000);
+          startUnit: 0, endUnit: 2, materials: [_a], rangeMs: 5000);
 
       final louder = plan.withVolume(startUnit: 0, volume: 0.6);
 
       expect(louder.segments.single.volume, 0.6);
-      expect(louder.segments.single.material.id, 1, reason: '曲子不能被换掉');
+      expect(louder.segments.single.previewMaterial.id, 1, reason: '曲子不能被换掉');
       expect(plan.segments.single.volume, BgmSegment.defaultVolume,
           reason: '不能就地改——撤销就没得撤了');
     });
 
     test('改一个不存在的段落时原样返回，不炸', () {
       final plan = BgmPlan.empty.assign(
-          startUnit: 0, endUnit: 2, material: _a, rangeMs: 5000);
+          startUnit: 0, endUnit: 2, materials: [_a], rangeMs: 5000);
 
       expect(plan.withVolume(startUnit: 99, volume: 0.6).segments.single.volume,
           BgmSegment.defaultVolume);
@@ -61,7 +61,7 @@ void main() {
       final plan = BgmPlan.empty.assign(
           startUnit: 0,
           endUnit: 2,
-          material: _a,
+          materials: [_a],
           rangeMs: 5000,
           volume: 0.4);
 
@@ -72,7 +72,7 @@ void main() {
       final plan = BgmPlan.empty.assign(
           startUnit: 0,
           endUnit: 2,
-          material: _a,
+          materials: [_a],
           rangeMs: 5000,
           volume: 9.0);
 
@@ -87,7 +87,7 @@ void main() {
       final plan = BgmPlan.empty.assign(
           startUnit: 0,
           endUnit: 2,
-          material: _a,
+          materials: [_a],
           rangeMs: 5000,
           volume: 0.4);
 

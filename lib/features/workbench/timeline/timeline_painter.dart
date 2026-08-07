@@ -416,7 +416,7 @@ class TimelinePainter extends CustomPainter {
           : ' · ${span.segment.fit == BgmFit.cut ? "裁" : "循环"}';
       _drawText(
         canvas,
-        '${span.segment.material.name}$fit',
+        '${span.segment.previewMaterial.name}$fit',
         Offset(rect.left + _shotLabelPadding, rect.top + 5),
         AppColors.textPrimary,
         fontSize: AppFontSize.micro,

@@ -63,6 +63,10 @@ class AudioTrackBuilder {
     String? vocalsPath,
     BgmPlan bgm = BgmPlan.empty,
     Map<int, String> voiceAudio = const {},
+
+    /// 这是第几条导出变体。配乐每一段可以选多首**备选**，按这个序号轮流取
+    /// （见 [BgmSegment.materialFor]）。预览传 null，那时用各段的预览版
+    int? variantIndex,
   }) async {
     workDir.createSync(recursive: true);
     final covered = bgmCoveredRanges(units, bgm);
@@ -96,20 +100,23 @@ class AudioTrackBuilder {
     // 垫乐是静默的错，交付出去没人会发现。
     for (var i = 0; i < bgm.segments.length; i++) {
       final segment = bgm.segments[i];
+      final material = variantIndex == null
+          ? segment.previewMaterial
+          : segment.materialFor(variantIndex);
       final range = BgmPlan.unitRangeOf(units, segment);
       if (range == null) {
-        AppLog.warn('配乐「${segment.material.name}」找不到对应的镜头范围，这一段跳过');
+        AppLog.warn('配乐「${material.name}」找不到对应的镜头范围，这一段跳过');
         continue;
       }
       final String source;
       try {
-        source = await _resolve(segment.material);
+        source = await _resolve(material);
       } catch (e) {
         // 底层已经把原因说成人话了，不要再套一层——真机上套出来的那句
         // 「配乐「X」这次取不到（配乐「X」下下来是坏的…）」曲名重复、长得没法读。
         // 但也不能假设它一定带了曲名：没提到就补一次，提到了就原样用
         final raw = e is BgmUnavailableException ? e.message : '$e';
-        final name = segment.material.name;
+        final name = material.name;
         final message = raw.contains(name) ? raw : '配乐「$name」：$raw';
         AppLog.warn('配乐取不到：$message');
         degraded.add(message);
@@ -128,10 +135,10 @@ class AudioTrackBuilder {
             // 这里改了两边一起变
             bgmVolume: segment.volume,
           ),
-          '配乐「${segment.material.name}」',
+          '配乐「${material.name}」',
         );
       } catch (e) {
-        final message = '配乐「${segment.material.name}」这一段没铺上：$e';
+        final message = '配乐「${material.name}」这一段没铺上：$e';
         AppLog.warn(message);
         degraded.add(message);
         continue;

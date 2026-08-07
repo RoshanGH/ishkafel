@@ -59,8 +59,8 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000)
-          .assign(startUnit: 3, endUnit: 4, material: _b, rangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 2000)
+          .assign(startUnit: 3, endUnit: 4, materials: [_b], rangeMs: 2000),
     );
 
     expect(out.path, isNotEmpty, reason: '整条作废的话，用户连人声和换过的音色都听不到');
@@ -76,7 +76,7 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 2000),
     );
 
     expect(out.bgmWarnings.single, contains('尤克里里'));
@@ -90,8 +90,8 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000)
-          .assign(startUnit: 3, endUnit: 4, material: _b, rangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 2000)
+          .assign(startUnit: 3, endUnit: 4, materials: [_b], rangeMs: 2000),
     );
 
     expect(out.path, isNotEmpty);
@@ -113,7 +113,7 @@ void main() {
       sourcePath: '/v/a.mp4',
       units: _units(),
       bgm: BgmPlan.empty
-          .assign(startUnit: 0, endUnit: 1, material: _a, rangeMs: 2000),
+          .assign(startUnit: 0, endUnit: 1, materials: [_a], rangeMs: 2000),
     );
 
     expect(ran.where((c) => c.contains('https://o/a.mp3')), hasLength(1));

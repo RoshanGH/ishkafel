@@ -182,7 +182,7 @@ class PreviewAudioController extends ChangeNotifier {
   }) {
     final bgm = [
       for (final s in task.bgm.segments)
-        '${s.startUnit}-${s.endUnit}-${s.material.id}-${s.volume}',
+        '${s.startUnit}-${s.endUnit}-${s.previewMaterial.id}-${s.volume}',
     ].join(',');
     final voices = [
       for (final a in task.voices.assignments)
