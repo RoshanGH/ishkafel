@@ -52,6 +52,10 @@ Future<void> showExportDialog(
 
   /// 记录导出时刻。测试注入可控时钟
   DateTime Function()? now,
+
+  /// 这个项目以前导过哪几次。摆在确认页上——正要导之前，先看看上次导到
+  /// 哪儿、导了几条
+  List<ExportRecord> exports = const [],
 }) =>
     showDialog<void>(
       context: context,
@@ -71,6 +75,7 @@ Future<void> showExportDialog(
         revealDirectory: revealDirectory ?? revealInFinder,
         onExported: onExported,
         now: now ?? DateTime.now,
+        exports: exports,
       ),
     );
 
@@ -81,6 +86,13 @@ Future<String?> pickExportDirectory() => getDirectoryPath(
 String? _defaultInitialDir() {
   final home = Platform.environment['HOME'];
   return home == null ? null : p.join(home, 'Movies');
+}
+
+/// 把家目录缩成 `~`。导出路径通常很长，全写出来会把这一行挤没
+String shortenPath(String path) {
+  final home = Platform.environment['HOME'];
+  if (home == null || home.isEmpty || !path.startsWith(home)) return path;
+  return '~${path.substring(home.length)}';
 }
 
 /// 在访达里显示。**用 `open` 而不是自己拼 AppleScript**：前者是 macOS 的
@@ -109,6 +121,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
 
   /// 记录导出时刻。测试注入可控时钟
   final DateTime Function() now;
+  final List<ExportRecord> exports;
 
   const _ExportDialog({
     required this.taskId,
@@ -125,6 +138,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.revealDirectory,
     this.onExported,
     this.now = DateTime.now,
+    this.exports = const [],
   });
 
   @override
@@ -136,6 +150,9 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
 
   /// 导到哪儿。可以在开始之前改
   late Directory _outputDir = widget.outputDir;
+
+  /// 这个项目导过哪几次。跑完会把这一次追加进来，用户当场就能看到
+  late List<ExportRecord> _exports = List.of(widget.exports);
   (int done, int total, String what)? _progress;
   List<ExportOutcome>? _results;
   String? _failure;
@@ -171,12 +188,14 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
       if (!mounted) return;
       setState(() => _results = results);
       // 记进项目：项目没有终态，**导出才是那件有始有终的事**
-      await widget.onExported?.call(ExportRecord(
+      final record = ExportRecord(
         at: widget.now(),
         total: results.length,
         succeeded: results.where((r) => r.ok).length,
         outputDir: _outputDir.path,
-      ));
+      );
+      setState(() => _exports = [..._exports, record]);
+      await widget.onExported?.call(record);
     } catch (e) {
       if (mounted) setState(() => _failure = '导出失败：$e');
     } finally {
@@ -193,9 +212,11 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
   }
 
   /// 在访达里显示这个目录。导完不知道片子在哪，等于没导
-  Future<void> _reveal() async {
+  Future<void> _reveal() => _revealPath(_outputDir.path);
+
+  Future<void> _revealPath(String path) async {
     try {
-      await widget.revealDirectory(_outputDir.path);
+      await widget.revealDirectory(path);
     } catch (e) {
       if (!mounted) return;
       setState(() => _failure = '打不开这个目录：$e');
@@ -237,6 +258,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                   const SizedBox(height: AppSpacing.md),
                   _resultList(r),
                 ],
+                _history(),
               ],
             ),
           ),
@@ -312,6 +334,95 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
             style: TextStyle(
                 color: AppColors.textTertiary, fontSize: AppFontSize.micro)),
       ],
+    );
+  }
+
+  /// 这个项目的导出历史。**放在确认页上**：正要导之前先看一眼上次导到哪儿、
+  /// 导了几条，比另开一个界面顺手得多（用户原话：「每一个项目点导出的时候，
+  /// 它不是最后还要确认一下吗？你可以在那个页面里展示出这个项目之前导出的
+  /// 这个历史。」）
+  ///
+  /// 倒序、只列最近五次——更早的写个条数就够了，把确认页撑长反而看不清
+  /// 这一次要导什么。
+  Widget _history() {
+    if (_exports.isEmpty) return const SizedBox.shrink();
+    final recent = _exports.reversed.toList();
+    final shown = recent.take(_historyLimit).toList();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('这个项目导出过 ${_exports.length} 次',
+              key: const Key('export-history-title'),
+              style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: AppFontSize.caption,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: AppSpacing.xs),
+          for (final record in shown) _historyRow(record),
+          if (recent.length > shown.length)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text('另有 ${recent.length - shown.length} 次更早的导出',
+                  style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: AppFontSize.micro)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static const int _historyLimit = 5;
+
+  Widget _historyRow(ExportRecord record) {
+    final failed = record.total - record.succeeded;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Row(
+        children: [
+          Text(
+            '${record.at.month}月${record.at.day}日 '
+            '${record.at.hour.toString().padLeft(2, '0')}:'
+            '${record.at.minute.toString().padLeft(2, '0')}',
+            style: const TextStyle(
+                color: AppColors.textTertiary, fontSize: AppFontSize.micro),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Text(
+            failed > 0 ? '${record.succeeded} 条（$failed 条失败）'
+                : '${record.succeeded} 条',
+            style: TextStyle(
+                color: failed > 0 ? AppColors.orange : AppColors.textSecondary,
+                fontSize: AppFontSize.micro),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Tooltip(
+              message: record.outputDir,
+              child: Text(
+                shortenPath(record.outputDir),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppColors.textTertiary, fontSize: AppFontSize.micro),
+              ),
+            ),
+          ),
+          // 每一条都能直接打开——历史的用处就是「回去找那批片子」
+          InkWell(
+            key: Key('export-history-open-${record.at.toIso8601String()}'),
+            onTap: () => _revealPath(record.outputDir),
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.all(3),
+              child: Icon(Icons.folder_open,
+                  size: 13, color: AppColors.accentBlue),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -932,6 +932,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           ? outputDir
           : Directory(_task.exports.last.outputDir),
       onExported: _recordExport,
+      exports: _task.exports,
     );
   }
 
