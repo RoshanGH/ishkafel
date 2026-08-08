@@ -101,7 +101,7 @@ void main() {
     );
 
     final voiceMixes =
-        env.calls.where((a) => a.last.endsWith('mix_voice.wav')).length;
+        env.calls.where((a) => a.last.contains('mix_voice_')).length;
     expect(voiceMixes, 2, reason: '两条变体的声音不一样，不能共用一条');
   });
 }

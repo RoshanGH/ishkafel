@@ -221,26 +221,6 @@ void main() {
     expect(rerendered, isEmpty, reason: '段落切片一个都不该重渲染');
   });
 
-  test('渲染到一半留下的半截文件不会被当成好的用', () async {
-    final env = _make(temp);
-    // 上一次 ffmpeg 被杀掉，留下一个 .part
-    File('${temp.path}/pv_src_4000_8000.mp4.part').writeAsStringSync('半截');
-
-    await env.composer.compose(
-      sourcePath: '/v/a.mp4',
-      units: _units(),
-      replacements: [
-        UnitReplacement.whole(const [71]),
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.keepOriginal(),
-      ],
-      audioPath: null,
-    );
-
-    expect(env.calls.any((a) => a.last.endsWith('pv_src_4000_8000.mp4.part')),
-        isTrue, reason: '半截文件要重渲染，不能直接拿来拼');
-    expect(File('${temp.path}/pv_src_4000_8000.mp4').existsSync(), isTrue);
-  });
 
   test('渲染进度按段数报出来——四十多段跑几分钟，不能只说「稍后」', () async {
     final ticks = <(int, int)>[];

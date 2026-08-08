@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:path/path.dart' as p;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -74,6 +77,7 @@ class PreviewAudioController extends ChangeNotifier {
     required this.playback,
     required this.factory,
     this.composerFactory,
+    this.workDirOf,
     this.debounce = const Duration(milliseconds: 700),
   });
 
@@ -116,6 +120,10 @@ class PreviewAudioController extends ChangeNotifier {
   /// 扔掉，同一批切片会被反复重渲染
   PreviewComposer? _composer;
 
+  /// 这个任务的预览工作目录（存档就放在里面）。为空表示不落地——
+  /// 每次进来都要重合一遍，只在测试环境里可以接受
+  final Directory? Function(String taskId)? workDirOf;
+
   void _onProgress(int done, int total) {
     _progressDone = done;
     _progressTotal = total;
@@ -152,6 +160,10 @@ class PreviewAudioController extends ChangeNotifier {
       return;
     }
 
+    // 先看盘上那份存档：方案一个字没改的话，上一次合出来的成片还在，
+    // 直接挂上去就完了——一次 ffmpeg 都不用跑，横幅根本不出现
+    if (_adopt(task: task, units: units, fingerprint: fingerprint)) return;
+
     _timer = Timer(debounce, () {
       unawaited(_build(
           fingerprint: fingerprint,
@@ -160,6 +172,41 @@ class PreviewAudioController extends ChangeNotifier {
           voiceAudio: voiceAudio,
           replacements: replacements));
     });
+  }
+
+  /// 认领上一次合好的成片。
+  ///
+  /// **为什么必须落地**：「已经合好了」此前只记在内存里，而每次进工作台都是
+  /// 一个新的控制器，那条记录必然是空的——于是方案一个字没改，也要把
+  /// 51 段人声、配乐、拼接、混音整套重跑一遍（真机实测 56 次 ffmpeg）。
+  ///
+  /// 认领前逐项核对：指纹一致、成片文件还在。任何一条不满足就照常重合——
+  /// 认错一次的代价是用户看着一条不是自己方案的片子。
+  bool _adopt({
+    required RenewTask task,
+    required List<SemanticUnit> units,
+    required String fingerprint,
+  }) {
+    final saved = PreviewState.read(_stateFile(task.id));
+    if (saved == null || saved.fingerprint != fingerprint) return false;
+    if (!File(saved.videoPath).existsSync()) return false;
+
+    _timeline =
+        ComposedTimeline.of(units: units, wholeDurations: saved.wholeDurations);
+    _composedPath = saved.videoPath;
+    _builtFingerprint = fingerprint;
+    _buildingFingerprint = null;
+    _failure = saved.warnings.isEmpty ? null : saved.warnings.join('；');
+    unawaited(playback.open(saved.videoPath));
+    _set(saved.warnings.isEmpty
+        ? PreviewAudioState.ready
+        : PreviewAudioState.degraded);
+    return true;
+  }
+
+  File? _stateFile(String taskId) {
+    final dir = workDirOf?.call(taskId);
+    return dir == null ? null : File(p.join(dir.path, 'preview_state.json'));
   }
 
   /// 回到「播原片」：替换全撤掉之后要把播放源换回去，否则还停在上一次
@@ -219,6 +266,13 @@ class PreviewAudioController extends ChangeNotifier {
         await playback.open(composed.videoPath!);
         _builtFingerprint = fingerprint;
         _buildingFingerprint = null;
+        // 落地：下次进来直接认领，不必重跑
+        PreviewState(
+          fingerprint: fingerprint,
+          videoPath: composed.videoPath!,
+          wholeDurations: composed.timeline.wholeDurations,
+          warnings: track.bgmWarnings,
+        ).write(_stateFile(task.id));
         _failure =
             track.bgmWarnings.isEmpty ? null : track.bgmWarnings.join('；');
         _set(track.bgmWarnings.isEmpty
@@ -261,6 +315,9 @@ class PreviewAudioController extends ChangeNotifier {
     if (makeComposer == null || replacements.isEmpty) return null;
     final composer = _composer ??= makeComposer(task.id);
     composer.onProgress = _onProgress;
+    // 清理陈旧渲染产物时别把存档一起删了
+    final state = _stateFile(task.id);
+    composer.protectedPaths = state == null ? const {} : {state.path};
     try {
       final result = await composer.compose(
         sourcePath: task.sourcePath,
@@ -322,6 +379,78 @@ class PreviewAudioController extends ChangeNotifier {
   void dispose() {
     _timer?.cancel();
     super.dispose();
+  }
+}
+
+/// 「上一次合出来的预览是按什么方案合的」——落到盘上的那一份。
+///
+/// 只有它落地了，重开工作台才能在方案没变时**一次 ffmpeg 都不跑**。
+class PreviewState {
+  final String fingerprint;
+  final String videoPath;
+
+  /// 被整体替换的单元在成片里有多长。时间轴由它 + 当前单元现算，
+  /// 不必整个存下来
+  final Map<int, int> wholeDurations;
+
+  /// 上一次有哪几段配乐没铺上（认领时要一并恢复，否则降级提示会凭空消失）
+  final List<String> warnings;
+
+  const PreviewState({
+    required this.fingerprint,
+    required this.videoPath,
+    this.wholeDurations = const {},
+    this.warnings = const [],
+  });
+
+  void write(File? file) {
+    if (file == null) return;
+    try {
+      file.parent.createSync(recursive: true);
+      file.writeAsStringSync(jsonEncode({
+        'fingerprint': fingerprint,
+        'videoPath': videoPath,
+        'wholeDurations': {
+          for (final e in wholeDurations.entries) '${e.key}': e.value,
+        },
+        'warnings': warnings,
+      }));
+    } catch (e) {
+      // 写不下最多是下次要重合一遍，不该影响这一次的预览
+      AppLog.warn('预览存档写入失败 ${file.path}：$e');
+    }
+  }
+
+  /// 读不出来一律当没有——宁可重合一遍，也不能拿一份来路不明的存档
+  /// 去认领一条不是用户方案的片子
+  static PreviewState? read(File? file) {
+    if (file == null || !file.existsSync()) return null;
+    try {
+      final json = jsonDecode(file.readAsStringSync());
+      if (json is! Map) return null;
+      final fingerprint = json['fingerprint'];
+      final videoPath = json['videoPath'];
+      if (fingerprint is! String || videoPath is! String) return null;
+      final durations = json['wholeDurations'];
+      return PreviewState(
+        fingerprint: fingerprint,
+        videoPath: videoPath,
+        wholeDurations: {
+          if (durations is Map)
+            for (final e in durations.entries)
+              if (int.tryParse('${e.key}') case final k?)
+                if (e.value is int) k: e.value as int,
+        },
+        warnings: [
+          if (json['warnings'] case final List list)
+            for (final w in list)
+              if (w is String) w,
+        ],
+      );
+    } catch (e) {
+      AppLog.warn('预览存档读取失败 ${file.path}：$e');
+      return null;
+    }
   }
 }
 

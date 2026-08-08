@@ -1,10 +1,9 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
 import '../export/composed_timeline.dart';
 import '../export/export_commands.dart';
 import '../ffmpeg/process_runner.dart';
+import '../ffmpeg/rendered_cache.dart';
 import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
 import 'bgm_cache.dart';
@@ -54,6 +53,11 @@ class AudioTrackBuilder {
     this.resolveBgm,
   });
 
+  /// 每一件产物按**内容指纹**命名并复用。没有它的时候，每进一次工作台就要
+  /// 把 51 段人声、配乐、拼接、混音整套重跑一遍（真机实测 56 次 ffmpeg），
+  /// 而方案一个字都没改
+  late final RenderedCache _cache = RenderedCache(dir: workDir, run: run);
+
   /// 合成整条音轨，返回落地的 WAV 路径。
   ///
   /// [vocalsPath] 是分离出来的纯人声轨；为 null（没装分离工具或分离失败）时，
@@ -85,6 +89,7 @@ class AudioTrackBuilder {
     final covered = bgmCoveredRanges(units, bgm);
     final degraded = <String>[];
 
+    _cache.resetTouched();
     final parts = <String>[];
     for (final unit in units) {
       parts.addAll(await _unitParts(
@@ -97,11 +102,20 @@ class AudioTrackBuilder {
       ));
     }
 
-    final listFile = File(p.join(workDir.path, 'mix_list.txt'))
-      ..writeAsStringSync(ExportCommands.concatList(parts));
-    var out = p.join(workDir.path, 'mix_voice.wav');
-    await _ffmpeg(
-        ExportCommands.concat(listFile: listFile.path, out: out), '拼接声音');
+    // 拼接产物由「拼了哪几段」唯一决定
+    var key = 'concat|${parts.join('|')}';
+    final listFile = _cache.writeText(
+        key: key,
+        prefix: 'mix_list',
+        extension: 'txt',
+        content: ExportCommands.concatList(parts));
+    var out = await _cache.render(
+      key: key,
+      prefix: 'mix_voice',
+      extension: 'wav',
+      args: (dest) => ExportCommands.concat(listFile: listFile, out: dest),
+      what: '拼接声音',
+    );
 
     // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓。
     //
@@ -137,20 +151,26 @@ class AudioTrackBuilder {
         degraded.add(message);
         continue;
       }
-      final mixed = p.join(workDir.path, 'mix_bgm_$i.wav');
+      // 叠配乐是链式的：这一段的内容由「上一层是什么 + 这一段铺的是谁」决定
+      final mixedKey =
+          'bgm|$key|${material.id}|${range.$1}|${range.$2}|${segment.volume}';
+      final String mixed;
       try {
-        await _ffmpeg(
-          ExportCommands.mixBgm(
+        mixed = await _cache.render(
+          key: mixedKey,
+          prefix: 'mix_bgm',
+          extension: 'wav',
+          args: (dest) => ExportCommands.mixBgm(
             voice: out,
             bgm: source,
-            out: mixed,
+            out: dest,
             startMs: range.$1,
             durationMs: range.$2 - range.$1,
             // 每段自己的音量（见 [BgmSegment.volume]）——预览和导出走同一条路，
             // 这里改了两边一起变
             bgmVolume: segment.volume,
           ),
-          '配乐「${material.name}」',
+          what: '配乐「${material.name}」',
         );
       } catch (e) {
         final message = '配乐「${material.name}」这一段没铺上：$e';
@@ -159,7 +179,10 @@ class AudioTrackBuilder {
         continue;
       }
       out = mixed;
+      key = mixedKey;
     }
+    // 指纹命名意味着换一次方案就多攒一套，不清就只增不减
+    _cache.keepOnly();
     return AudioTrack(path: out, bgmWarnings: List.unmodifiable(degraded));
   }
 
@@ -191,23 +214,30 @@ class AudioTrackBuilder {
   }) async {
     // 整体替换优先于换音色——同一个单元两者都设时导出前置检查已经拦下了
     if (wholeAudio != null && File(wholeAudio).existsSync()) {
-      final out = p.join(workDir.path, 'mix_u${unit.index}_whole.wav');
-      await _ffmpeg(
-        ExportCommands.wholeReplacementAudio(input: wholeAudio, out: out),
-        'U${unit.index + 1} 的替换声音',
-      );
-      return [out];
+      return [
+        await _cache.render(
+          key: 'whole|$wholeAudio',
+          prefix: 'mix_u${unit.index}_whole',
+          extension: 'wav',
+          args: (dest) =>
+              ExportCommands.wholeReplacementAudio(input: wholeAudio, out: dest),
+          what: 'U${unit.index + 1} 的替换声音',
+        )
+      ];
     }
 
     final voice = voiceAudio[unit.index];
     if (voice != null && File(voice).existsSync()) {
-      final out = p.join(workDir.path, 'mix_u${unit.index}_voice.wav');
-      await _ffmpeg(
-        ExportCommands.fitVoiceAudio(
-            input: voice, durationMs: unit.durationMs, out: out),
-        'U${unit.index + 1} 的配音',
-      );
-      return [out];
+      return [
+        await _cache.render(
+          key: 'voice|$voice|${unit.durationMs}',
+          prefix: 'mix_u${unit.index}_voice',
+          extension: 'wav',
+          args: (dest) => ExportCommands.fitVoiceAudio(
+              input: voice, durationMs: unit.durationMs, out: dest),
+          what: 'U${unit.index + 1} 的配音',
+        )
+      ];
     }
 
     final pieces = <String>[];
@@ -218,18 +248,19 @@ class AudioTrackBuilder {
       final (start, end) = ranges[i];
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
       final needsClean = _overlaps(covered, start, end) && vocalsPath != null;
-      final out =
-          p.join(workDir.path, 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}.wav');
-      await _ffmpeg(
-        ExportCommands.trimOriginalAudio(
-          source: needsClean ? vocalsPath : sourcePath,
+      final source = needsClean ? vocalsPath : sourcePath;
+      pieces.add(await _cache.render(
+        key: 'trim|$source|$start|$end',
+        prefix: 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}',
+        extension: 'wav',
+        args: (dest) => ExportCommands.trimOriginalAudio(
+          source: source,
           startMs: start,
           endMs: end,
-          out: out,
+          out: dest,
         ),
-        'U${unit.index + 1} 的声音',
-      );
-      pieces.add(out);
+        what: 'U${unit.index + 1} 的声音',
+      ));
     }
     return pieces;
   }
@@ -248,13 +279,4 @@ class AudioTrackBuilder {
         for (final segment in bgm.segments) ?BgmPlan.unitRangeOf(units, segment),
       ];
 
-  Future<void> _ffmpeg(List<String> args, String what) async {
-    final result = await run('ffmpeg', args);
-    if (result.exitCode != 0) {
-      // ffmpeg 的 stderr 动辄几百行，真正的原因总在末尾
-      final lines = '${result.stderr}'.trim().split('\n');
-      final tail = lines.length > 3 ? lines.sublist(lines.length - 3) : lines;
-      throw Exception('$what 失败：${tail.join(' / ')}');
-    }
-  }
 }

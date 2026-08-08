@@ -103,8 +103,8 @@ void main() {
     var audioBuilds = 0;
     final runner = ExportRunner(
       run: (binary, args) async {
-        // 拼接声音那一步会写 mix_voice.wav
-        if (args.last.endsWith('mix_voice.wav')) audioBuilds++;
+        // 拼接声音那一步的产物叫 mix_voice_<指纹>.wav（先写 .part 再改名）
+        if (args.last.contains('mix_voice_')) audioBuilds++;
         await File(args.last).writeAsString('out');
         return ProcessResult(1, 0, '', '');
       },

@@ -68,6 +68,7 @@ RenewTask _task({
 const _noDebounce = Duration.zero;
 
 void main() {
+  _adoptSaved();
   _composerReuse();
   group('没配乐也没换音色', () {
     test('什么都不做，用原片自带的声音', () async {
@@ -225,32 +226,48 @@ void main() {
   });
 
   group('取不到配乐时要能就地重试', () {
-    test('invalidate 之后同一份方案会重新合成一遍', () async {
-      final mixer = _mixer();
+    test('先失败、点重试之后真的重来一遍', () async {
+      // 产物按内容指纹缓存，所以「成功之后再重试」本来就不该重跑 ffmpeg。
+      // 重试真正要保证的是**失败那一次不会被当成已经合好**——上一次没产出
+      // 文件，指纹也不该被记成已完成，否则重试等于没点。
+      final dir = Directory.systemTemp.createTempSync('ishkafel_retry_');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      var broken = true;
+      final builds = <int>[];
       final c = PreviewAudioController(
-          playback: FakePlaybackController(),
-          factory: mixer.factory,
-          debounce: _noDebounce);
+        playback: FakePlaybackController(),
+        factory: (taskId) => AudioTrackBuilder(
+          workDir: dir,
+          run: (bin, args) async {
+            builds.add(1);
+            if (broken) return ProcessResult(1, 1, '', '合不出来');
+            File(args.last).writeAsStringSync('x');
+            return ProcessResult(1, 0, '', '');
+          },
+        ),
+        debounce: _noDebounce,
+      );
       final task = _task(bgm: BgmPlan.empty.assign(
           startUnit: 0, endUnit: 0, materials: [_track], rangeMs: 4000));
 
       c.update(task: task, units: _units(), voiceAudio: const {});
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      final first = mixer.builds.length;
-      expect(first, greaterThan(0));
+      expect(c.state, PreviewAudioState.failed);
+      final failedAt = builds.length;
 
-      // 方案没变：不该重复合成
+      // 方案没变、上一次也没成：再 update 一次不该白跑
       c.update(task: task, units: _units(), voiceAudio: const {});
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(mixer.builds, hasLength(first));
 
-      // 点了「重试」
+      // 点了「重试」，这次底层好了
+      broken = false;
       c.invalidate();
       c.update(task: task, units: _units(), voiceAudio: const {});
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      expect(mixer.builds.length, greaterThan(first),
+      expect(builds.length, greaterThan(failedAt),
           reason: '不清指纹的话重试等于没点——方案没变就直接跳过了');
+      expect(c.state, isNot(PreviewAudioState.failed));
     });
   });
 }
@@ -316,6 +333,158 @@ void _composerReuse() {
     test('没有进度时退回原来那句，不显示一个假的 0/0', () {
       expect(previewAudioNotice(PreviewAudioState.building, null),
           '正在合成预览音轨（配乐/配音），稍后就能听到');
+    });
+  });
+}
+
+void _adoptSaved() {
+  group('方案没改就一次 ffmpeg 都不跑', () {
+    /// 用户原话：「这个东西为什么每次进入都要转一圈啊？…没有改动的情况下
+    /// 就落地。」——「已经合好了」此前只记在内存里，每次进工作台都是新的
+    /// 控制器，那条记录必然是空的，于是 51 段人声 + 配乐 + 拼接 + 混音整套
+    /// 重跑一遍（真机实测 56 次 ffmpeg）。
+    late Directory work;
+    setUp(() {
+      work = Directory.systemTemp.createTempSync('ishkafel_adopt_');
+      addTearDown(() => work.deleteSync(recursive: true));
+    });
+
+    PreviewAudioController make({
+      required AudioTrackBuilderFactory factory,
+      required FakePlaybackController playback,
+      required List<int> composes,
+    }) =>
+        PreviewAudioController(
+          playback: playback,
+          factory: factory,
+          debounce: _noDebounce,
+          workDirOf: (_) => work,
+          composerFactory: (taskId) => PreviewComposer(
+            run: (binary, args) async {
+              composes.add(1);
+              await File(args.last).writeAsString('mp4');
+              return ProcessResult(1, 0, '', '');
+            },
+            workDir: work,
+            fetchMaterial: (id) async {
+              final f = File('${work.path}/m$id.mp4')..writeAsStringSync('mp4');
+              return f.path;
+            },
+          ),
+        );
+
+    RenewTask task() => _task(bgm: BgmPlan.empty.assign(
+        startUnit: 0, endUnit: 0, materials: [_track], rangeMs: 4000));
+
+    List<UnitReplacement> plan() => [UnitReplacement.whole(const [71])];
+
+    test('重开工作台时直接认领上一次的成片', () async {
+      final mixer = _mixer();
+      final composes = <int>[];
+      final first = make(
+          factory: mixer.factory,
+          playback: FakePlaybackController(),
+          composes: composes);
+      first.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: plan());
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(first.state, PreviewAudioState.ready);
+      expect(composes, isNotEmpty);
+      first.dispose();
+
+      // 关掉再打开：全新的控制器，内存里什么都没有
+      final playback = FakePlaybackController();
+      final again = <int>[];
+      final second = make(
+          factory: mixer.factory, playback: playback, composes: again);
+      second.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: plan());
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(again, isEmpty, reason: '方案一个字没改，不该重跑任何一步');
+      expect(second.state, PreviewAudioState.ready,
+          reason: '直接就绪，横幅根本不该出现');
+      expect(playback.calls.where((c) => c.startsWith('open(')), isNotEmpty,
+          reason: '认领之后要把成片挂上播放器，不能还停在原片上');
+      second.dispose();
+    });
+
+    test('方案变了就照常重合', () async {
+      final mixer = _mixer();
+      final first = make(
+          factory: mixer.factory,
+          playback: FakePlaybackController(),
+          composes: <int>[]);
+      first.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: plan());
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      first.dispose();
+
+      final again = <int>[];
+      final second = make(
+          factory: mixer.factory,
+          playback: FakePlaybackController(),
+          composes: again);
+      second.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          // 换了个候选
+          replacements: [UnitReplacement.whole(const [72])]);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(again, isNotEmpty);
+      second.dispose();
+    });
+
+    test('存档指向的成片被删了就重合，不认领一个不存在的文件', () async {
+      final mixer = _mixer();
+      final first = make(
+          factory: mixer.factory,
+          playback: FakePlaybackController(),
+          composes: <int>[]);
+      first.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: plan());
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      first.dispose();
+
+      for (final f in work.listSync().whereType<File>()) {
+        if (f.path.endsWith('.mp4')) f.deleteSync();
+      }
+
+      final again = <int>[];
+      final second = make(
+          factory: mixer.factory,
+          playback: FakePlaybackController(),
+          composes: again);
+      second.update(
+          task: task(),
+          units: _units(),
+          voiceAudio: const {},
+          replacements: plan());
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(again, isNotEmpty);
+      second.dispose();
+    });
+
+    test('存档坏了当没有——宁可重合，也不能认领一条不是用户方案的片子', () {
+      final broken = File('${work.path}/preview_state.json')
+        ..writeAsStringSync('{这不是 JSON');
+
+      expect(PreviewState.read(broken), isNull);
     });
   });
 }

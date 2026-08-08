@@ -245,6 +245,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       playback: playback,
       factory: ref.read(audioTrackBuilderFactoryProvider),
       composerFactory: ref.read(previewComposerFactoryProvider),
+      workDirOf: _previewWorkDirOf,
     )..addListener(_onPreviewAudioChanged);
     _syncPreviewAudio();
   }
@@ -971,6 +972,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       dir: Directory(p.join(dataDir.path, 'picked_thumbs', widget.task.id)),
       fetch: httpBytes,
     );
+  }
+
+  /// 预览产物落在哪儿。存档（「这份预览是按什么方案合的」）就放在同一个
+  /// 目录里，重开工作台时靠它决定要不要重合
+  Directory? _previewWorkDirOf(String taskId) {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return Directory(p.join(dataDir.path, 'preview_video', taskId));
   }
 
   /// 素材/配乐的落地状态变了就重画底部栏——导出按钮的可用性挂在它上面

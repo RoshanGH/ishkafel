@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
 
 import '../../core/export/composed_timeline.dart';
 import '../../core/export/export_commands.dart';
 import '../../core/ffmpeg/process_runner.dart';
+import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/replacement/replacement_plan.dart';
@@ -53,8 +53,8 @@ class PreviewComposer {
   int _done = 0;
   int _total = 0;
 
-  /// 段落指纹 → 已渲染的切片。跨多次 compose 复用
-  final Map<String, String> _clips = {};
+  /// 每一件产物按**内容指纹**命名并复用（见 [RenderedCache]）
+  late final RenderedCache _cache = RenderedCache(dir: workDir, run: run);
 
   PreviewComposer({
     required this.run,
@@ -81,6 +81,7 @@ class PreviewComposer {
     }
 
     workDir.createSync(recursive: true);
+    _cache.resetTouched();
     final wholeDurations = <int, int>{};
     final parts = <String>[];
     _done = 0;
@@ -94,7 +95,8 @@ class PreviewComposer {
         final ms = await _probe(path);
         if (ms != null) wholeDurations[unit.index] = ms;
         parts.add(await _clip(
-          key: 'whole_${unit.index}_${pick.candidateId}',
+          key: 'whole|$path',
+          prefix: 'pv_whole_${unit.index}',
           args: (out) =>
               ExportCommands.wholeReplacementVideo(input: path, out: out),
           what: 'U${unit.index + 1} 的整体替换画面',
@@ -107,7 +109,8 @@ class PreviewComposer {
         final shotPick = _shotPick(replacements, unit.index, s);
         if (shotPick == null) {
           parts.add(await _clip(
-            key: 'src_${shot.startMs}_${shot.endMs}',
+            key: 'src|$sourcePath|${shot.startMs}|${shot.endMs}',
+            prefix: 'pv_src_${shot.startMs}_${shot.endMs}',
             args: (out) => ExportCommands.trimOriginalVideo(
                 source: sourcePath,
                 startMs: shot.startMs,
@@ -118,35 +121,52 @@ class PreviewComposer {
           continue;
         }
         final path = await fetchMaterial(shotPick);
+        final slotMs = shot.endMs - shot.startMs;
+        final candidateMs = await _probe(path);
         parts.add(await _clip(
-          key: 'shot_${shot.startMs}_${shot.endMs}_$shotPick',
+          key: 'shot|$path|$slotMs|$candidateMs',
+          prefix: 'pv_shot_${shot.startMs}_${shot.endMs}',
           args: (out) => ExportCommands.fitCandidateVideo(
             input: path,
-            durationMs: shot.endMs - shot.startMs,
-            candidateDurationMs: null,
+            durationMs: slotMs,
+            // 变速倍率要用候选的真实时长；探不出来就退回裁/冻帧
+            candidateDurationMs: candidateMs,
             out: out,
           ),
           what: 'U${unit.index + 1} 的镜头替换画面',
-          // 变速倍率要用候选的真实时长；探不出来就退回裁/冻帧
-          resolveSpeed: path,
-          slotMs: shot.endMs - shot.startMs,
         ));
       }
     }
 
-    final listFile = File(p.join(workDir.path, 'preview_list.txt'))
-      ..writeAsStringSync(ExportCommands.concatList(parts));
-    final silent = p.join(workDir.path, 'preview_silent.mp4');
-    await _ffmpeg(
-        ExportCommands.concat(listFile: listFile.path, out: silent), '拼接预览画面');
+    final concatKey = 'concat|${parts.join('|')}';
+    final listFile = _cache.writeText(
+        key: concatKey,
+        prefix: 'preview_list',
+        extension: 'txt',
+        content: ExportCommands.concatList(parts));
+    final silent = await _cache.render(
+      key: concatKey,
+      prefix: 'preview_silent',
+      extension: 'mp4',
+      args: (out) => ExportCommands.concat(listFile: listFile, out: out),
+      what: '拼接预览画面',
+    );
 
     var video = silent;
     if (audioPath != null && File(audioPath).existsSync()) {
-      video = p.join(workDir.path, 'preview.mp4');
-      await _ffmpeg(
-          ExportCommands.mux(video: silent, audio: audioPath, out: video),
-          '预览画面与声音合成');
+      video = await _cache.render(
+        key: 'mux|$concatKey|$audioPath',
+        prefix: 'preview',
+        extension: 'mp4',
+        args: (out) =>
+            ExportCommands.mux(video: silent, audio: audioPath, out: out),
+        what: '预览画面与声音合成',
+      );
     }
+
+    // 换一次方案就多攒一套，不清就只增不减；「这份预览是按什么方案合的」
+    // 那份存档不能删（它就在这个目录里）
+    _cache.keepOnly(protect: protectedPaths);
 
     return ComposedPreview(
       videoPath: video,
@@ -210,51 +230,18 @@ class PreviewComposer {
   /// 其余段落不该重渲染
   Future<String> _clip({
     required String key,
+    required String prefix,
     required List<String> Function(String out) args,
     required String what,
-    String? resolveSpeed,
-    int? slotMs,
   }) async {
-    final hit = _clips[key];
-    if (hit != null && File(hit).existsSync()) return hit;
-
-    final out = p.join(workDir.path, 'pv_$key.mp4');
-    // 上一次（甚至上一次开 app）已经渲染好的那份直接用
-    final existing = File(out);
-    if (existing.existsSync() && existing.lengthSync() > 0) {
-      _clips[key] = out;
-      return out;
-    }
-
-    // 先写 .part 再改名：ffmpeg 跑到一半被杀掉时留下的是半截文件，
-    // 下次启动照单全收的话，拼出来的预览会缺一段画面
-    final temp = '$out.part';
-    var built = args(temp);
-    if (resolveSpeed != null && slotMs != null) {
-      built = ExportCommands.fitCandidateVideo(
-        input: resolveSpeed,
-        durationMs: slotMs,
-        candidateDurationMs: await _probe(resolveSpeed),
-        out: temp,
-      );
-    }
-    try {
-      await _ffmpeg(built, what);
-      File(temp).renameSync(out);
-    } catch (e) {
-      if (File(temp).existsSync()) File(temp).deleteSync();
-      rethrow;
-    }
-    _clips[key] = out;
-    onProgress?.call(++_done, _total);
-    return out;
+    final before = _cache.touched.length;
+    final path = await _cache.render(
+        key: key, prefix: prefix, extension: 'mp4', args: args, what: what);
+    // 命中缓存的不算进度——那一段本来就不用等
+    if (_cache.touched.length > before) onProgress?.call(++_done, _total);
+    return path;
   }
 
-  Future<void> _ffmpeg(List<String> args, String what) async {
-    final result = await run('ffmpeg', args);
-    if (result.exitCode != 0) {
-      final tail = '${result.stderr}'.trim().split('\n').take(3).join(' / ');
-      throw FfmpegException('$what 失败：$tail');
-    }
-  }
+  /// 清理时要保护的文件（调用方放在同一个目录里的存档）
+  Set<String> protectedPaths = const {};
 }
