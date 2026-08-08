@@ -16,15 +16,31 @@ class ExportSegment {
   final int unitIndex;
   final int? shotIndex;
 
+  /// **整体替换**时这一段在成片里真正占多长。
+  ///
+  /// 整体替换是「原样接上」——时长跟候选走，不裁不补（见四种替换的导出
+  /// 规格）。而 [startMs]~[endMs] 记的是原片那一段的位置，两者不再相等。
+  /// 不区分的话，确认页会按原片长度报「每条约 96.2s」，而实际导出来的是
+  /// 97.2s——用户当场就能看出对不上。
+  ///
+  /// 为 null 表示与原片同长（保留原片、镜头替换都属于这一类：镜头替换是
+  /// 变速对齐原坑位，时长不变）。
+  final int? composedMs;
+
   const ExportSegment({
     required this.startMs,
     required this.endMs,
     required this.unitIndex,
     this.shotIndex,
     this.candidateId,
+    this.composedMs,
   });
 
-  int get durationMs => endMs - startMs;
+  /// 这一段在**成片**里占多长
+  int get durationMs => composedMs ?? (endMs - startMs);
+
+  /// 这一段在**原片**里的跨度（切原片时用）
+  int get sourceDurationMs => endMs - startMs;
   bool get isOriginal => candidateId == null;
 
   @override
@@ -34,11 +50,12 @@ class ExportSegment {
       other.endMs == endMs &&
       other.candidateId == candidateId &&
       other.unitIndex == unitIndex &&
-      other.shotIndex == shotIndex;
+      other.shotIndex == shotIndex &&
+      other.composedMs == composedMs;
 
   @override
-  int get hashCode =>
-      Object.hash(startMs, endMs, candidateId, unitIndex, shotIndex);
+  int get hashCode => Object.hash(
+      startMs, endMs, candidateId, unitIndex, shotIndex, composedMs);
 
   @override
   String toString() => 'ExportSegment(U${unitIndex + 1}'
@@ -77,13 +94,19 @@ class ExportPlanner {
     required List<SemanticUnit> units,
     required List<UnitReplacement> replacements,
     int limit = ReplacementPlan.maxCombinations,
+
+    /// 候选素材各有多长（候选 id → 毫秒）。**整体替换的段落靠它算成片时长**
+    /// ——那一层是原样接上，时长跟候选走。取不到的按原单元长度算，
+    /// 宁可报得保守，也不拿 0 顶
+    Map<int, int> materialDurations = const {},
   }) {
     if (units.isEmpty || limit <= 0) return const [];
 
     // 每个单元的「可选项」列表：每一项是这个单元的一种排法
     final choicesPerUnit = <List<List<ExportSegment>>>[
       for (var i = 0; i < units.length; i++)
-        _choicesFor(units[i], i < replacements.length ? replacements[i] : null),
+        _choicesFor(units[i], i < replacements.length ? replacements[i] : null,
+            materialDurations),
     ];
 
     final out = <ExportCombination>[];
@@ -109,8 +132,8 @@ class ExportPlanner {
   }
 
   /// 这个单元有几种排法，每种排法由哪些段组成
-  static List<List<ExportSegment>> _choicesFor(
-      SemanticUnit unit, UnitReplacement? replacement) {
+  static List<List<ExportSegment>> _choicesFor(SemanticUnit unit,
+      UnitReplacement? replacement, Map<int, int> materialDurations) {
     final original = [
       ExportSegment(
           startMs: unit.startMs, endMs: unit.endMs, unitIndex: unit.index),
@@ -132,6 +155,9 @@ class ExportPlanner {
                 endMs: unit.endMs,
                 unitIndex: unit.index,
                 candidateId: id,
+                // 整体替换是原样接上，成片时长跟候选走。探不出来就按原单元
+                // 算——报得保守好过拿 0 顶（那会把总时长算成一团）
+                composedMs: materialDurations[id],
               ),
             ],
         ];

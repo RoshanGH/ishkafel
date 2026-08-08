@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../../core/export/export_commands.dart';
+import '../../core/ffmpeg/media_spec.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/semantic_unit.dart';
@@ -26,12 +27,35 @@ class SpeedFitter extends ChangeNotifier {
   /// 读候选素材的真实时长——变速倍率要用它算
   final Future<int?> Function(String path) probeDurationMs;
 
+  /// 原片的解码规格。切片必须编成同一个规格：预览是把原片与这段切片拼成
+  /// 一条 EDL 播，中间换一次编码播放器就要重建解码器——用户看到的是
+  /// 「突然加速、突然变慢」。为 null 表示读不出来，那就不强求
+  final Future<MediaSpec?> Function()? targetSpec;
+
   /// 已经渲染好的：镜头 key（见 [TrackPlanBuilder.shotKey]）→ 本地切片
   final Map<String, String> _fitted = {};
   final Set<String> _running = {};
   bool _disposed = false;
 
-  SpeedFitter({required this.cache, required this.probeDurationMs});
+  SpeedFitter({
+    required this.cache,
+    required this.probeDurationMs,
+    this.targetSpec,
+  });
+
+  MediaSpec? _target;
+  bool _targetResolved = false;
+
+  Future<MediaSpec?> _resolveTarget() async {
+    if (_targetResolved) return _target;
+    _targetResolved = true;
+    try {
+      _target = await targetSpec?.call();
+    } catch (e) {
+      AppLog.warn('读不出原片规格，变速切片按默认编码：$e');
+    }
+    return _target;
+  }
 
   /// 当前可用的变速切片。还没渲染好的不在里面——上层据此把那一段先播原片，
   /// 渲染好了会 notify，再换上去
@@ -93,7 +117,8 @@ class SpeedFitter extends ChangeNotifier {
   }) async {
     if (_running.contains(key)) return;
     final candidateMs = await probeDurationMs(candidatePath);
-    final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs';
+    final target = await _resolveTarget();
+    final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs|$target';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -117,6 +142,8 @@ class SpeedFitter extends ChangeNotifier {
           durationMs: slotMs,
           candidateDurationMs: candidateMs,
           out: dest,
+          // 和原片一个规格，播放器换段时才不用重建解码器
+          target: target,
         ),
         what: '把替换镜头变速对齐坑位',
       );

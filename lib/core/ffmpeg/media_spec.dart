@@ -44,6 +44,9 @@ class MediaSpec {
       height == other.height &&
       _fps(frameRate) == _fps(other.frameRate);
 
+  /// 帧率的数值形式。`30000/1001` 这种分数写法也认，读不出来时是 0
+  double get fps => _fps(frameRate);
+
   static double _fps(String raw) {
     final parts = raw.split('/');
     if (parts.length != 2) return double.tryParse(raw) ?? 0;

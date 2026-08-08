@@ -179,4 +179,90 @@ void main() {
       expect(_fingerprint(combos.single), [11, null]);
     });
   });
+
+  group('整体替换会改变成片时长', () {
+    /// 真机上确认页写「每条约 96.2s」，而底部摘要写「97.2s（原片 96.2s）」
+    /// ——用户当场就能看出对不上。整体替换是「原样接上」，时长跟候选走。
+    List<SemanticUnit> units() => const [
+          SemanticUnit(
+              index: 0, startMs: 0, endMs: 4000, transcript: 'U1', shots: []),
+          SemanticUnit(
+              index: 1, startMs: 4000, endMs: 10000, transcript: 'U2', shots: []),
+        ];
+
+    test('候选比原单元长，成片就更长', () {
+      final combos = ExportPlanner.enumerate(
+        units: units(),
+        replacements: [UnitReplacement.whole(const [71])],
+        materialDurations: const {71: 5200},
+      );
+
+      expect(combos.single.durationMs, 11200,
+          reason: '5200（候选）+ 6000（U2 原片），不是 4000 + 6000');
+    });
+
+    test('候选比原单元短，成片就更短', () {
+      final combos = ExportPlanner.enumerate(
+        units: units(),
+        replacements: [UnitReplacement.whole(const [71])],
+        materialDurations: const {71: 2500},
+      );
+
+      expect(combos.single.durationMs, 8500);
+    });
+
+    test('探不出候选时长就按原单元算——报得保守好过拿 0 顶', () {
+      final combos = ExportPlanner.enumerate(
+        units: units(),
+        replacements: [UnitReplacement.whole(const [71])],
+      );
+
+      expect(combos.single.durationMs, 10000);
+    });
+
+    test('每条变体各按自己那个候选算', () {
+      final combos = ExportPlanner.enumerate(
+        units: units(),
+        replacements: [UnitReplacement.whole(const [71, 72])],
+        materialDurations: const {71: 5200, 72: 2500},
+      );
+
+      expect(combos.map((c) => c.durationMs), [11200, 8500]);
+    });
+
+    test('原片区间不受影响——切原片仍按原片毫秒', () {
+      final combos = ExportPlanner.enumerate(
+        units: units(),
+        replacements: [UnitReplacement.whole(const [71])],
+        materialDurations: const {71: 5200},
+      );
+      final segment = combos.single.segments.first;
+
+      expect(segment.startMs, 0);
+      expect(segment.endMs, 4000);
+      expect(segment.sourceDurationMs, 4000);
+      expect(segment.durationMs, 5200);
+    });
+
+    test('镜头替换不改时长——那一层是变速对齐原坑位', () {
+      const withShots = [
+        SemanticUnit(index: 0, startMs: 0, endMs: 4000, transcript: 'U1', shots: [
+          Shot(startMs: 0, endMs: 2000),
+          Shot(startMs: 2000, endMs: 4000),
+        ]),
+      ];
+
+      final combos = ExportPlanner.enumerate(
+        units: withShots,
+        replacements: [
+          UnitReplacement.perShot(const {
+            0: [71]
+          })
+        ],
+        materialDurations: const {71: 9000},
+      );
+
+      expect(combos.single.durationMs, 4000);
+    });
+  });
 }

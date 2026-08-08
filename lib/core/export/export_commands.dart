@@ -1,3 +1,4 @@
+import '../ffmpeg/media_spec.dart';
 import 'speed_fit.dart';
 
 /// 导出用的 ffmpeg 命令行拼装（纯函数，不起进程）。
@@ -21,7 +22,8 @@ class ExportCommands {
 
   /// 一段该有多少帧。时长不是帧长的整数倍时四舍五入——同一段的画面与声音
   /// 都按这个帧数对齐，两边就不会各走各的。
-  static int frameCount(int durationMs) => (durationMs * fps / 1000).round();
+  static int frameCount(int durationMs, {double? atFps}) =>
+      (durationMs * ((atFps ?? 0) > 0 ? atFps! : fps) / 1000).round();
 
   /// 这一段实际会有多长（帧数决定的真实时长，毫秒）
   static double exactSeconds(int durationMs) => frameCount(durationMs) / fps;
@@ -88,6 +90,13 @@ class ExportCommands {
     required int durationMs,
     required String out,
     int? candidateDurationMs,
+
+    /// 编成什么规格。**预览必须传原片的规格**：预览是把原片与这段切片拼成
+    /// 一条 EDL 播，中间换一次编码，播放器就要重建一次解码器——用户看到的
+    /// 是「突然加速、突然变慢」（真机实测，与素材规格不一致时同一个毛病）。
+    ///
+    /// 导出不用传：那一批所有段落统一编成 libx264，本来就是一致的。
+    MediaSpec? target,
   }) {
     final factor = candidateDurationMs == null
         ? 1.0
@@ -102,13 +111,30 @@ class ExportCommands {
       '-i', input,
       '-an',
       '-vf',
-      '${_scalePad()}$speed'
+      '${_scalePad(target)}$speed'
           ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}',
-      '-r', '$fps',
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
-      '-pix_fmt', 'yuv420p',
-      '-frames:v', '${frameCount(durationMs)}',
+      '-r', target == null ? '$fps' : target.frameRate,
+      ..._encoder(target),
+      '-frames:v', '${frameCount(durationMs, atFps: target?.fps)}',
       out,
+    ];
+  }
+
+  /// 编码参数。不给目标规格时是导出那一套（统一 libx264）；给了就向它看齐
+  static List<String> _encoder(MediaSpec? target) {
+    if (target == null) {
+      return const [
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-pix_fmt', 'yuv420p',
+      ];
+    }
+    return [
+      '-c:v', target.codec == 'h264' ? 'h264_videotoolbox' : 'hevc_videotoolbox',
+      if (target.profile.isNotEmpty)
+        ...['-profile:v', target.profile.toLowerCase().replaceAll(' ', '')],
+      '-pix_fmt', target.pixelFormat.contains('10') ? 'p010le' : 'yuv420p',
+      '-b:v', '8M',
+      if (target.codec == 'hevc') ...['-tag:v', 'hvc1'],
     ];
   }
 
@@ -232,10 +258,14 @@ class ExportCommands {
         out,
       ];
 
-  /// 统一画面规格：缩放到 1080×1920，比例不同的补黑边（不拉伸变形）
-  static String _scalePad() =>
-      'scale=$width:$height:force_original_aspect_ratio=decrease,'
-      'pad=$width:$height:(ow-iw)/2:(oh-ih)/2:black,setsar=1';
+  /// 统一画面规格：缩放到目标画幅，比例不同的补黑边（不拉伸变形）。
+  /// 给了 [target] 就按原片的分辨率，否则按成片标准的 1080×1920
+  static String _scalePad([MediaSpec? target]) {
+    final w = target?.width ?? width;
+    final h = target?.height ?? height;
+    return 'scale=$w:$h:force_original_aspect_ratio=decrease,'
+        'pad=$w:$h:(ow-iw)/2:(oh-ih)/2:black,setsar=1';
+  }
 
   static List<String> _videoNormalize() => [
         '-vf', _scalePad(),

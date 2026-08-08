@@ -56,6 +56,9 @@ Future<void> showExportDialog(
   /// 这个项目以前导过哪几次。摆在确认页上——正要导之前，先看看上次导到
   /// 哪儿、导了几条
   List<ExportRecord> exports = const [],
+
+  /// 候选素材各有多长（候选 id → 毫秒）。整体替换的成片时长靠它算
+  Map<int, int> materialDurations = const {},
 }) =>
     showDialog<void>(
       context: context,
@@ -76,6 +79,7 @@ Future<void> showExportDialog(
         onExported: onExported,
         now: now ?? DateTime.now,
         exports: exports,
+        materialDurations: materialDurations,
       ),
     );
 
@@ -123,6 +127,9 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final DateTime Function() now;
   final List<ExportRecord> exports;
 
+  /// 候选素材各有多长（候选 id → 毫秒）。整体替换的成片时长靠它算
+  final Map<int, int> materialDurations;
+
   const _ExportDialog({
     required this.taskId,
     required this.taskName,
@@ -139,6 +146,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     this.onExported,
     this.now = DateTime.now,
     this.exports = const [],
+    this.materialDurations = const {},
   });
 
   @override
@@ -158,7 +166,9 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
   String? _failure;
 
   late final List<ExportCombination> _combos = ExportPlanner.enumerate(
-      units: widget.units, replacements: widget.replacements);
+      units: widget.units,
+      replacements: widget.replacements,
+      materialDurations: widget.materialDurations);
 
   Future<void> _start() async {
     final factory = ref.read(exportRunnerFactoryProvider);
@@ -314,13 +324,16 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         Row(
           children: [
             Expanded(
-              child: Text('导出到：${_outputDir.path}',
+              child: Tooltip(
+                message: _outputDir.path,
+                child: Text('导出到：${shortenPath(_outputDir.path)}',
                   key: const Key('export-output-dir'),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       color: AppColors.textTertiary,
                       fontSize: AppFontSize.caption)),
+              ),
             ),
             TextButton(
               key: const Key('export-pick-dir'),
