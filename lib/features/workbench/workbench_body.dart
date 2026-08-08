@@ -134,10 +134,59 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   bool _resumeAfterScrub = false;
 
   @override
+  void initState() {
+    super.initState();
+    widget.editor.addListener(_reportBlockedEdit);
+  }
+
+  @override
+  void didUpdateWidget(WorkbenchBody old) {
+    super.didUpdateWidget(old);
+    if (old.editor != widget.editor) {
+      old.editor.removeListener(_reportBlockedEdit);
+      widget.editor.addListener(_reportBlockedEdit);
+    }
+  }
+
+  @override
   void dispose() {
+    widget.editor.removeListener(_reportBlockedEdit);
     _segment.dispose();
     super.dispose();
   }
+
+  /// 刚才那一下被「已选替换素材」的锁挡下来了：说清是哪个、为什么，
+  /// 并直接给一条去移除素材的路。
+  ///
+  /// 集中在编辑器变化这一处报，而不是逐个操作入口报——拆分、合并、拖边界、
+  /// ±帧步进有十来个调用点，散着写迟早漏掉一个，而漏掉的那个对用户就是
+  /// 「点了没反应」。
+  void _reportBlockedEdit() {
+    final reason = widget.editor.takeBlockedReason();
+    if (reason == null || !mounted) return;
+    // 拖拽会连着撞很多次，同一句话不重复刷屏
+    if (reason == _blockedReason) return;
+    _blockedReason = reason;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(reason),
+        backgroundColor: AppColors.surfaceCard,
+        duration: _blockedNoticeFor,
+        action: SnackBarAction(
+          label: '去看素材',
+          textColor: AppColors.accentBlueLight,
+          onPressed: () => setState(() => _sideTab = SidePanelTab.candidates),
+        ),
+      ));
+    // 说完就忘：下次再撞同一处仍然要说
+    Future<void>.delayed(_blockedNoticeFor, () {
+      if (mounted && _blockedReason == reason) _blockedReason = null;
+    });
+  }
+
+  String? _blockedReason;
+  static const _blockedNoticeFor = Duration(seconds: 4);
 
   /// 拖动播放头期间必须暂停：画面还在自己往前走的话，用户根本对不准位置。
   /// 同时作废「只播这一段」的约束——他已经自己接管定位了。

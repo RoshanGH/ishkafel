@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
+import '../../core/editing/edit_locks.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
@@ -229,6 +230,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     editor.addListener(_onEditorChanged);
     _editor = editor;
     _replacements = task.replacements;
+    _syncEditLocks();
     _consequenceBaseline = units;
     // 进工作台就把方案里的配乐固定住——只在「选完」时才下的话，
     // 打开一条早就配好乐的任务什么都不会发生
@@ -983,10 +985,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     Navigator.of(context).maybePop();
   }
 
+  /// 把「哪些单元/镜头挑过替换素材」推给编辑器——挑过的就钉死切分。
+  ///
+  /// 为什么必须钉：替换方案按下标记。切一刀、并一次，下标全变，原本钉在
+  /// S6 上的素材就跑到别的镜头上去了；改边界则会让已经按旧时长变速好的
+  /// 切片全部作废，而用户毫不知情。见 [EditLocks]
+  void _syncEditLocks() =>
+      _editor?.locks = EditLocks.of(_replacements ?? const []);
+
   /// 右栏改了替换方案：立刻落库，并让底部栏的组合数与 tab 角标跟着更新
   Future<void> _onReplacementsChanged(List<UnitReplacement> next) async {
     if (!_isEditable) return;
     setState(() => _replacements = next);
+    _syncEditLocks();
     try {
       await _tasks!.savePickingPlan(_task, next);
       _task = _task.copyWith(replacements: next);

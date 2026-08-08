@@ -301,7 +301,8 @@ class _TimelineViewState extends State<TimelineView> {
     }
 
     final hit = TimelineHitTester.hitTest(
-        position, widget.controller.units, widget.geometry);
+        position, widget.controller.units, widget.geometry,
+        locks: widget.controller.locks);
     switch (hit) {
       case RulerHit(:final ms):
         widget.onSeek(ms);
@@ -375,7 +376,8 @@ class _TimelineViewState extends State<TimelineView> {
     final hit = widget.readOnly
         ? null
         : TimelineHitTester.hitTest(
-            details.localPosition, widget.controller.units, widget.geometry);
+            details.localPosition, widget.controller.units, widget.geometry,
+            locks: widget.controller.locks);
     _dragHit = hit;
     if (hit is UnitBoundaryHit || hit is ShotBoundaryHit) {
       widget.controller.beginDragSession();

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart' show Offset;
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
+import '../../../core/editing/edit_locks.dart';
 
 /// 时间线命中结果基类（sealed 以强制完整分支处理）
 sealed class TimelineHit {
@@ -201,11 +202,15 @@ class TimelineHitTester {
   /// - 单元轨：返回 [UnitBoundaryHit] 或 [UnitBlockHit]
   /// - 镜头轨：返回 [UnitBoundaryHit]（单元交界边界属单元层）、[ShotBoundaryHit] 或 [ShotBlockHit]
   /// - 轨道外：返回 null
+  /// [locks] 里的单元/镜头挑过替换素材，**它们的边界不接受拖拽**（见
+  /// [EditLocks]）。锁住的边界不是"点了没反应"——命中会顺延成块体命中，
+  /// 于是那一段被选中，右栏立刻说明为什么动不了、怎么解开。
   static TimelineHit? hitTest(
     Offset localPos,
     List<SemanticUnit> units,
-    TimelineGeometry geometry,
-  ) {
+    TimelineGeometry geometry, {
+    EditLocks locks = EditLocks.none,
+  }) {
     final x = localPos.dx;
     final y = localPos.dy;
 
@@ -217,16 +222,30 @@ class TimelineHitTester {
 
     // 单元轨：y in [24, 68]
     if (y >= TimelineTracks.unitsTop && y < TimelineTracks.unitsBottom) {
-      return _hitTestUnitTrack(x, units, geometry);
+      return _hitTestUnitTrack(x, units, geometry, locks);
     }
 
     // 镜头轨：y in [72, 98]
     if (y >= TimelineTracks.shotsTop && y < TimelineTracks.shotsBottom) {
-      return _hitTestShotTrack(x, units, geometry);
+      return _hitTestShotTrack(x, units, geometry, locks);
     }
 
     // 轨道外
     return null;
+  }
+
+  /// 第 [i] 与第 [i+1] 个单元之间那条边界能不能拖。
+  /// 与 [SegmentationEditorController.moveUnitBoundary] 的判断保持一致：
+  /// 这次移动会改到两侧单元的尾/首镜头，任何一处钉住就不许拖
+  static bool _unitBoundaryLocked(
+      int i, List<SemanticUnit> units, EditLocks locks) {
+    for (final u in [i, i + 1]) {
+      if (u < 0 || u >= units.length) continue;
+      if (locks.isUnitLocked(u)) return true;
+      final shot = u == i ? units[u].shots.length - 1 : 0;
+      if (shot >= 0 && locks.isShotLocked(u, shot)) return true;
+    }
+    return false;
   }
 
   /// 单元轨命中判定
@@ -236,6 +255,7 @@ class TimelineHitTester {
     double x,
     List<SemanticUnit> units,
     TimelineGeometry geometry,
+    EditLocks locks,
   ) {
     if (units.isEmpty) return null;
 
@@ -249,6 +269,8 @@ class TimelineHitTester {
       );
 
       if (tolerance > 0 && (x - boundaryPx).abs() <= tolerance) {
+        // 锁住的边界让给块体：拖不动的东西不该长出一个能拖的手柄
+        if (_unitBoundaryLocked(i, units, locks)) break;
         return UnitBoundaryHit(leftUnitIndex: i);
       }
     }
@@ -286,6 +308,7 @@ class TimelineHitTester {
     double x,
     List<SemanticUnit> units,
     TimelineGeometry geometry,
+    EditLocks locks,
   ) {
     if (units.isEmpty) return null;
     final blocks = _flattenShots(units, geometry);
@@ -301,10 +324,17 @@ class TimelineHitTester {
 
       if (tolerance <= 0 || (x - left.endPx).abs() > tolerance) continue;
 
-      return left.endsUnit
-          ? UnitBoundaryHit(leftUnitIndex: left.unitIndex)
-          : ShotBoundaryHit(
-              unitIndex: left.unitIndex, leftShotIndex: left.shotIndex);
+      if (left.endsUnit) {
+        if (_unitBoundaryLocked(left.unitIndex, units, locks)) break;
+        return UnitBoundaryHit(leftUnitIndex: left.unitIndex);
+      }
+      // 这一刀改的是两侧镜头的时长，任一侧钉住就不许拖
+      if (locks.isShotLocked(left.unitIndex, left.shotIndex) ||
+          locks.isShotLocked(right.unitIndex, right.shotIndex)) {
+        break;
+      }
+      return ShotBoundaryHit(
+          unitIndex: left.unitIndex, leftShotIndex: left.shotIndex);
     }
 
     // 边界未命中，检查块体

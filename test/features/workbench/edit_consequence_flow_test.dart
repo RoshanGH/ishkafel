@@ -73,15 +73,26 @@ RenewTask _task() => RenewTask(
           tags: ['卖点'],
           shots: [Shot(startMs: 10000, endMs: 20000, tags: ['中景'])],
         ),
+        SemanticUnit(
+          index: 2,
+          startMs: 20000,
+          endMs: 30000,
+          transcript: '第三句台词',
+          tags: ['促单'],
+          shots: [Shot(startMs: 20000, endMs: 30000, tags: ['远景'])],
+        ),
       ],
+      // U1 挑过素材——它现在是钉死的（见 EditLocks），所有改切分的用例都
+      // 只能落在 U2/U3 上
       replacements: [
         UnitReplacement.whole(const [101, 102]),
+        UnitReplacement.keepOriginal(),
         UnitReplacement.keepOriginal(),
       ],
       videoInfo: const VideoInfo(
         width: 1080,
         height: 1920,
-        duration: Duration(milliseconds: 20000),
+        duration: Duration(milliseconds: 30000),
         fps: 30,
         fileSizeBytes: 1000,
       ),
@@ -157,8 +168,13 @@ Future<_Repo> _open(WidgetTester tester, {TaggingService? tagging}) async {
 }
 
 /// 把 U1 的结束边界往回拖若干帧（每点一次步进按钮 = 1 帧 ≈ 33ms）
-Future<void> _shrinkFirstUnit(WidgetTester tester, {required int frames}) async {
-  await tester.tap(find.byKey(const Key('unit-row-0')));
+/// 缩 U2 的结束边界（= 动 U2|U3 那条线）。
+///
+/// **不能拿 U1 做这件事**：U1 挑过替换素材，切分已经钉死（见 EditLocks）。
+/// 这也是这个消费流程如今唯一还活着的场景——改的必然是没挑过素材的段，
+/// 所以要问的只剩「标签要不要重打」。
+Future<void> _shrinkSecondUnit(WidgetTester tester, {required int frames}) async {
+  await tester.tap(find.byKey(const Key('unit-row-1')));
   await tester.pump();
   for (var i = 0; i < frames; i++) {
     await tester.tap(find.byKey(const Key('inspector-end-minus')));
@@ -176,7 +192,7 @@ void main() {
   testWidgets('改动很小时也会问，但两项都默认不勾', (tester) async {
     await _open(tester);
 
-    await _shrinkFirstUnit(tester, frames: 1);
+    await _shrinkSecondUnit(tester, frames: 1);
     await _settleConsequence(tester);
 
     expect(find.byKey(const Key('consequence-confirm')), findsOneWidget);
@@ -185,11 +201,11 @@ void main() {
         reason: '只挪了一帧，默认勾上会让用户白白重挑一遍素材');
   });
 
-  testWidgets('大改动默认勾上；确认后清掉这个单元挑好的素材并落库', (tester) async {
+  testWidgets('大改动默认勾上；确认后把改到的单元标成「标签待重打」并落库', (tester) async {
     final repo = await _open(tester);
 
     // 10 秒的单元砍掉 30 帧（约 1 秒，10%），超过「改得多」的阈值
-    await _shrinkFirstUnit(tester, frames: 30);
+    await _shrinkSecondUnit(tester, frames: 30);
     await _settleConsequence(tester);
 
     final boxes = tester.widgetList<Checkbox>(find.byType(Checkbox)).toList();
@@ -199,18 +215,17 @@ void main() {
     await tester.pumpAndSettle();
 
     final saved = await repo.findById('ec-1');
-    expect(saved!.replacements![0].mode, ReplacementMode.keepOriginal,
-        reason: '用户点了「清除」，就必须真的清掉并落库');
-    expect(saved.units![0].tagsStale, isTrue,
+    expect(saved!.units![1].tagsStale, isTrue,
         reason: '标签标记为过期，而不是抹掉——重打是异步的');
-    expect(saved.units![0].tags, ['促销'],
-        reason: '标记过期不等于把标签删了');
+    expect(saved.units![1].tags, ['卖点'], reason: '标记过期不等于把标签删了');
+    expect(saved.replacements![0].wholeCandidateIds, [101, 102],
+        reason: '钉死的 U1 根本没被这次编辑碰到，它的素材一条都不能少');
   });
 
   testWidgets('点「都不用」：素材与标签原样保留', (tester) async {
     final repo = await _open(tester);
 
-    await _shrinkFirstUnit(tester, frames: 30);
+    await _shrinkSecondUnit(tester, frames: 30);
     await _settleConsequence(tester);
 
     await tester.tap(find.byKey(const Key('consequence-skip')));
@@ -218,7 +233,7 @@ void main() {
 
     final saved = await repo.findById('ec-1');
     expect(saved!.replacements![0].wholeCandidateIds, [101, 102]);
-    expect(saved.units![0].tagsStale, isFalse);
+    expect(saved.units![1].tagsStale, isFalse);
   });
 
   testWidgets('点了「重新打标」就真的送去打标，且只打改到的那几个单元', (tester) async {
@@ -230,31 +245,31 @@ void main() {
           workDir: Directory.systemTemp.createTempSync('ishkafel_retag_'),
         ));
 
-    await _shrinkFirstUnit(tester, frames: 30);
+    await _shrinkSecondUnit(tester, frames: 30);
     await _settleConsequence(tester);
     await tester.tap(find.byKey(const Key('consequence-confirm')));
     await tester.pumpAndSettle();
 
-    // 拖 U1 的结束边界同时改了 U2 的开始（无缝覆盖），两个单元的画面都变了
-    expect(tagger.asked, ['第一句台词', '第二句台词']);
+    // 拖 U2 的结束边界同时改了 U3 的开始（无缝覆盖），两个单元的画面都变了
+    expect(tagger.asked, ['第二句台词', '第三句台词']);
 
     final saved = await repo.findById('ec-1');
-    expect(saved!.units![0].tags, ['重打出来的']);
-    expect(saved.units![0].tagsStale, isFalse,
+    expect(saved!.units![1].tags, ['重打出来的']);
+    expect(saved.units![1].tagsStale, isFalse,
         reason: '打完要把「待重打」标记清掉，否则界面上一直挂着「已过期」');
   });
 
   testWidgets('没配 AI 服务时如实说明，而不是假装打过了', (tester) async {
     final repo = await _open(tester);
 
-    await _shrinkFirstUnit(tester, frames: 30);
+    await _shrinkSecondUnit(tester, frames: 30);
     await _settleConsequence(tester);
     await tester.tap(find.byKey(const Key('consequence-confirm')));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('尚未配置 AI 服务'), findsOneWidget);
     final saved = await repo.findById('ec-1');
-    expect(saved!.units![0].tagsStale, isTrue,
+    expect(saved!.units![1].tagsStale, isTrue,
         reason: '打不成就得让标记留着，用户才知道这份标签还没更新');
   });
 
@@ -278,7 +293,7 @@ void main() {
       await tester.tap(find.byKey(const Key('task-tag-groups-save')));
       await tester.pumpAndSettle();
 
-      expect(tagger.asked, ['第一句台词', '第二句台词'],
+      expect(tagger.asked, ['第一句台词', '第二句台词', '第三句台词'],
           reason: '换词表等于把整份标签作废了，只重打其中几个没有意义');
       final saved = await repo.findById('ec-1');
       expect(saved!.units!.every((u) => u.tags.contains('重打出来的')), isTrue);
@@ -345,7 +360,7 @@ void main() {
   testWidgets('问过一次之后不翻旧账：没有新改动就不再弹', (tester) async {
     await _open(tester);
 
-    await _shrinkFirstUnit(tester, frames: 30);
+    await _shrinkSecondUnit(tester, frames: 30);
     await _settleConsequence(tester);
     await tester.tap(find.byKey(const Key('consequence-skip')));
     await tester.pumpAndSettle();

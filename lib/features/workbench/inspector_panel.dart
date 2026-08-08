@@ -8,6 +8,7 @@ import 'inspector_widgets.dart';
 import '../../core/audio/voice_plan.dart';
 import 'tag_trace_section.dart';
 import 'voice_card.dart';
+import '../../core/editing/edit_locks.dart';
 
 /// 把毫秒时间戳格式化为 `mm:ss.ff`（ff 为两位帧号，前补 0）。
 ///
@@ -162,6 +163,53 @@ class _InspectorPanelState extends State<InspectorPanel> {
     );
   }
 
+  /// 「这一段为什么改不动了」。
+  ///
+  /// 控件置灰而不说原因，用户只会以为软件坏了。这里点名是谁被钉住、
+  /// 为什么钉、以及怎么解开——解开是用户自己的决定，软件不替他做。
+  ///
+  /// [shotIndex] 为 null 时说的是整个单元。返回 null 表示这一处没被钉。
+  Widget? _lockNoteFor(EditLocks locks, int unitIndex, int? shotIndex) {
+    final String detail;
+    if (shotIndex != null) {
+      if (!locks.isShotLocked(unitIndex, shotIndex)) return null;
+      detail = locks.isUnitLocked(unitIndex)
+          ? '这个单元已整体替换，里面的镜头在成片里已经不存在了。'
+          : '这个镜头已选替换素材。';
+    } else if (locks.isUnitLocked(unitIndex)) {
+      detail = '这个单元已选整体替换素材。';
+    } else {
+      final shots = locks.lockedShotsIn(unitIndex);
+      if (shots.isEmpty) return null;
+      detail = '这个单元里的 ${shots.map((s) => 'S${s + 1}').join('、')} 已选替换素材。';
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: inspectorCard([
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.lock_outline_rounded,
+                size: 14, color: AppColors.purple),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                '$detail切分已锁定：改边界会让已经按原时长做好的素材对不上，'
+                '拆分或合并会让替换方案错位到别的镜头上。'
+                '要调整切分，请先移除它的替换素材。',
+                style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  height: 1.5,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ]),
+    );
+  }
+
   Widget _buildPlaceholder() {
     return const Center(
       child: Text(
@@ -178,8 +226,19 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final unit = units[unitIndex];
     // 首单元没有前一个单元可合并边界，末单元没有后一个单元可合并边界；
     // 只读模式下一律禁用（回看不允许改写已确认的结构）。
-    final canNudgeStart = unitIndex > 0 && !widget.readOnly;
-    final canNudgeEnd = unitIndex < units.length - 1 && !widget.readOnly;
+    // 挑过替换素材就钉死切分（见 EditLocks）：边界一动，已经按旧时长变速好
+    // 的素材全对不上；拆分/合并更会让替换方案的下标整体错位
+    final locks = widget.controller.locks;
+    final lockedNote = _lockNoteFor(locks, unitIndex, null);
+    final structureLocked = locks.unitHasAnyLock(unitIndex);
+    final canNudgeStart = unitIndex > 0 &&
+        !widget.readOnly &&
+        !locks.isUnitLocked(unitIndex) &&
+        !locks.isUnitLocked(unitIndex - 1);
+    final canNudgeEnd = unitIndex < units.length - 1 &&
+        !widget.readOnly &&
+        !locks.isUnitLocked(unitIndex) &&
+        !locks.isUnitLocked(unitIndex + 1);
 
     return SingleChildScrollView(
       child: Column(
@@ -216,6 +275,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 '时长', '${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
           ]),
+          ?lockedNote,
           const SizedBox(height: 10),
           TagTraceSection(
             title: '台词语义单元标签',
@@ -241,10 +301,10 @@ class _InspectorPanelState extends State<InspectorPanel> {
           inspectorActionsRow(
             splitLabel: '✂ 在游标处拆分单元',
             mergeLabel: '⇧ 并入上一单元',
-            onSplit: widget.readOnly
+            onSplit: widget.readOnly || structureLocked
                 ? null
                 : () => widget.onSplitAtPlayhead?.call(),
-            onMerge: widget.readOnly
+            onMerge: widget.readOnly || structureLocked
                 ? null
                 : widget.controller.mergeSelectedWithPrevious,
           ),
@@ -261,8 +321,17 @@ class _InspectorPanelState extends State<InspectorPanel> {
     if (shotIndex < 0 || shotIndex >= shots.length) return _buildPlaceholder();
     final shot = shots[shotIndex];
     // 单元内首/末镜头同理没有对应方向的相邻边界可调；只读模式下同样禁用。
-    final canNudgeStart = shotIndex > 0 && !widget.readOnly;
-    final canNudgeEnd = shotIndex < shots.length - 1 && !widget.readOnly;
+    final locks = widget.controller.locks;
+    final lockedNote = _lockNoteFor(locks, unitIndex, shotIndex);
+    final selfLocked = locks.isShotLocked(unitIndex, shotIndex);
+    final canNudgeStart = shotIndex > 0 &&
+        !widget.readOnly &&
+        !selfLocked &&
+        !locks.isShotLocked(unitIndex, shotIndex - 1);
+    final canNudgeEnd = shotIndex < shots.length - 1 &&
+        !widget.readOnly &&
+        !selfLocked &&
+        !locks.isShotLocked(unitIndex, shotIndex + 1);
 
     return SingleChildScrollView(
       child: Column(
@@ -300,6 +369,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             inspectorInfoRow(
                 '时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),
           ]),
+          ?lockedNote,
           const SizedBox(height: 10),
           TagTraceSection(
             title: '视觉镜头标签',
@@ -312,10 +382,13 @@ class _InspectorPanelState extends State<InspectorPanel> {
           inspectorActionsRow(
             splitLabel: '✂ 在游标处拆分镜头',
             mergeLabel: '⇧ 并入前一镜头',
-            onSplit: widget.readOnly
+            onSplit: widget.readOnly || selfLocked
                 ? null
                 : () => widget.onSplitAtPlayhead?.call(),
-            onMerge: widget.readOnly
+            // 并入前一镜头会让前一个消失：自己或前一个被钉都不行
+            onMerge: widget.readOnly ||
+                    selfLocked ||
+                    locks.isShotLocked(unitIndex, shotIndex - 1)
                 ? null
                 : widget.controller.mergeSelectedWithPrevious,
           ),
