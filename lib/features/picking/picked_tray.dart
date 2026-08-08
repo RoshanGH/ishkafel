@@ -76,26 +76,24 @@ class PickedTray extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (items.isEmpty) return const SizedBox.shrink();
+    // 小结和胶囊挤在同一行：右栏的高度全是候选区的本钱，一行说明文字
+    // 就是小半张预览图
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      child: Wrap(
+        spacing: AppSpacing.sm,
+        runSpacing: AppSpacing.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+          Tooltip(
+            message: _detail(),
             child: Text(
-              _summary(),
+              '已选 ${items.length}',
               style: const TextStyle(
                   color: AppColors.textTertiary, fontSize: AppFontSize.micro),
             ),
           ),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
-            children: [
-              for (final item in items) _chip(item),
-            ],
-          ),
+          for (final item in items) _chip(item),
         ],
       ),
     );
@@ -103,8 +101,8 @@ class PickedTray extends StatelessWidget {
 
   Widget _chip(PickedItem item) => Container(
         key: Key('picked-chip-${item.candidateId}'),
-        width: 260,
-        height: 36,
+        width: 220,
+        height: 26,
         padding: const EdgeInsets.symmetric(horizontal: 4),
         decoration: BoxDecoration(
           color: AppColors.purple.withValues(alpha: 0.14),
@@ -155,8 +153,9 @@ class PickedTray extends StatelessWidget {
         ),
       );
 
-  /// 顶上那行小结：选了几条、素材落地到什么程度了
-  String _summary() {
+  /// 悬停才看的详情：素材落地到什么程度、★ 是干什么的。
+  /// 这些第一次看有用，之后就是噪音，不该常驻在眼前
+  String _detail() {
     final plain = items.length > 1
         ? '已选 ${items.length} 条 · ★ 的那条用于预览，导出时每条各出一版'
         : '已选 1 条';
@@ -242,8 +241,8 @@ class PickedTray extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(3),
       child: SizedBox(
-        width: 18,
-        height: 30,
+        width: 13,
+        height: 22,
         child: path == null || path.isEmpty
             ? Container(color: AppColors.stageBackground)
             : Image.file(File(path),

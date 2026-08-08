@@ -74,7 +74,9 @@ class PickingSegmented extends StatelessWidget {
         behavior: HitTestBehavior.opaque,
         onTap: option.onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          // 5pt 而不是 8pt：右栏的高度全是候选区的本钱，一行分段按钮
+          // 高一点就少看小半张预览图
+          padding: const EdgeInsets.symmetric(vertical: 5),
           decoration: BoxDecoration(
             color: selected ? activeColor : Colors.transparent,
             borderRadius: BorderRadius.circular(AppRadius.sm),

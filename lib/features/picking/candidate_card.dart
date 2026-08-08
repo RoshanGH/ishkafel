@@ -57,36 +57,49 @@ class CandidateCard extends StatelessWidget {
     this.onSetPreview,
   });
 
+  /// 窄到这个宽度以下就只留画面与最要紧的一个数字。
+  ///
+  /// 候选区会按可用高度决定排几行（见 [CandidatePanel]），排两行时一张卡只有
+  /// 六七十宽——素材名在那儿只剩一个字，毫无用处，而底部那排「时长 + 时长差
+  /// + 命中标签」会直接把卡片撑破（真机上卡片右侧竖着印出了一串
+  /// `OVERFLOWED BY 7.6 PIXELS`）。
+  static const double compactBelowWidth = 100;
+
   @override
   Widget build(BuildContext context) {
     final material = entry.material;
-    return GestureDetector(
-      key: Key('picking-candidate-${material.id}'),
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.stageBackground,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(
-            color: selected ? AppColors.purple : AppColors.border,
-            width: selected ? AppStroke.emphasis : AppStroke.hairline,
+    return LayoutBuilder(builder: (context, box) {
+      final compact = box.maxWidth < compactBelowWidth;
+      return GestureDetector(
+        key: Key('picking-candidate-${material.id}'),
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.stageBackground,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: selected ? AppColors.purple : AppColors.border,
+              width: selected ? AppStroke.emphasis : AppStroke.hairline,
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _thumbnail(material.thumbnailUrl),
+              // 名字与复制按钮在窄卡上占地方又读不出来——想看名字放大卡片，
+              // 或者用鼠标悬停在画面上
+              if (!compact) _topRow(context, material.id, material.name),
+              _bottomBadge(compact: compact),
+              _checkMark(),
+              _previewMark(),
+              _playButton(),
+            ],
           ),
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _thumbnail(material.thumbnailUrl),
-            _topRow(context, material.id, material.name),
-            _bottomBadge(),
-            _checkMark(),
-            _previewMark(),
-            _playButton(),
-          ],
-        ),
-      ),
-    );
+      );
+    });
   }
 
   /// 远程缩略图：加载中给占位、失败给可辨认的兜底图标（都不阻塞 build）
@@ -172,7 +185,7 @@ class CandidateCard extends StatelessWidget {
 
   /// 时长与时长差。探测中显示占位；探测失败则连时长都没有——此时不显示徽标，
   /// 用户仍可凭画面与标签挑选。
-  Widget _bottomBadge() {
+  Widget _bottomBadge({bool compact = false}) {
     if (entry.probing) return _pill(const Text(probingSpecLabel, style: _pillStyle));
     final spec = entry.spec;
     final delta = spec == null
@@ -190,9 +203,17 @@ class CandidateCard extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(candidateDurationText(spec.durationMs), style: _pillStyle),
+              // 窄卡只留时长差——「比坑位长多少/短多少」才是挑素材时真正看的，
+              // 绝对时长可以放大卡片再看
+              if (!compact || delta == null)
+                Flexible(
+                  child: Text(candidateDurationText(spec.durationMs),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: _pillStyle),
+                ),
               if (delta != null) ...[
-                const SizedBox(width: AppSpacing.xs),
+                if (!compact) const SizedBox(width: AppSpacing.xs),
                 Text(
                   delta,
                   key: Key('picking-duration-delta-${entry.material.id}'),
@@ -212,7 +233,10 @@ class CandidateCard extends StatelessWidget {
             message: '命中 ${hits.length}/${queryTags.length} 个标签：'
                 '${hits.join('、')}',
             child: Text(
-              '${hits.length}/${queryTags.length} ${hits.join('·')}',
+              // 窄卡只给个数，标签名放不下——悬停仍能看到是哪几个
+              compact
+                  ? '${hits.length}/${queryTags.length}'
+                  : '${hits.length}/${queryTags.length} ${hits.join('·')}',
               key: Key('picking-hits-${entry.material.id}'),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -228,12 +252,12 @@ class CandidateCard extends StatelessWidget {
       color: AppColors.textPrimary, fontSize: AppFontSize.micro);
 
   Widget _pill(Widget child) => Positioned(
-        left: AppSpacing.sm,
-        right: AppSpacing.sm,
-        bottom: AppSpacing.sm,
+        left: AppSpacing.xs,
+        right: AppSpacing.xs,
+        bottom: AppSpacing.xs,
         child: Container(
           padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm, vertical: 2),
+              horizontal: AppSpacing.xs, vertical: 2),
           decoration: BoxDecoration(
             color: AppColors.stageBackground.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(999),

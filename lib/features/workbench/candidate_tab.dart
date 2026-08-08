@@ -126,6 +126,10 @@ class CandidateTabState extends State<CandidateTab> {
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
 
+  /// 候选卡默认小图：挑素材是「扫一眼过一批」的活，一屏二十几张比八张顺手。
+  /// 想看清哪一条就切成大图，或者直接点播放键试看
+  bool _compactCards = true;
+
   /// 逐个标签的命中数：只在搜不到东西、且用户主动点了的时候才去数
   late final TagHitProbe _tagHitProbe =
       TagHitProbe(widget.contentService ?? MiaoaContentService());
@@ -585,6 +589,8 @@ class CandidateTabState extends State<CandidateTab> {
               ? null
               : widget.mediaCache!.retry,
           pickedMediaTracked: widget.mediaCache != null,
+          compactCards: _compactCards,
+          onCompactCardsChanged: (v) => setState(() => _compactCards = v),
         ),
       );
 }

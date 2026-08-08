@@ -202,7 +202,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      expect(find.text('U2 · 候选素材'), findsOneWidget);
+      expect(find.text('U2'), findsOneWidget);
     });
 
     testWidgets('保持原片时不打网络', (tester) async {
@@ -287,12 +287,12 @@ void _workbenchIntegration() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('U1 · 候选素材'), findsOneWidget);
+    expect(find.text('U1'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('host-select-1')));
     await tester.pumpAndSettle();
 
-    expect(find.text('U2 · 候选素材'), findsOneWidget,
+    expect(find.text('U2'), findsOneWidget,
         reason: '右栏是同一个工作台的另一个视图，选中权在时间线/单元列表');
   });
 }

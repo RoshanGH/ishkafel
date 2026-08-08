@@ -15,6 +15,7 @@ import 'dart:io';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/features/picking/picked_media_cache.dart';
+import 'package:ishkafel/features/picking/candidate_card.dart';
 import 'package:ishkafel/features/picking/candidate_row.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
@@ -487,7 +488,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('picked-chip-100')), findsOneWidget);
-      expect(find.text('已选 1 条'), findsOneWidget);
+      expect(find.text('已选 1'), findsOneWidget,
+          reason: '小结和胶囊挤同一行——一行说明文字就是小半张预览图');
     });
 
     testWidgets('翻到下一页也还在——它和这一页搜到什么无关', (tester) async {
@@ -675,6 +677,37 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('picked-chip-100')), findsNothing);
+    });
+  });
+
+  group('大图 / 小图随手切', () {
+    /// 挑素材有两种节奏：「扫一眼过一批」要小图，「看清这条到底行不行」
+    /// 要大图。不该替用户做单选题。
+    testWidgets('默认小图——一屏二十几张比八张顺手', (tester) async {
+      await _pump(tester);
+      await _whole(tester);
+      await tester.tap(find.byKey(const Key('picking-view-gallery')));
+      await tester.pumpAndSettle();
+
+      final small = tester
+          .widgetList<CandidateCard>(find.byType(CandidateCard))
+          .length;
+
+      await tester.tap(find.byKey(const Key('picking-card-density')));
+      await tester.pumpAndSettle();
+
+      // 切成大图之后每张更高，同样的高度里放得下的更少
+      final large = tester
+          .widgetList<CandidateCard>(find.byType(CandidateCard))
+          .length;
+      expect(large, lessThanOrEqualTo(small));
+      expect(find.byKey(const Key('picking-card-density')), findsOneWidget,
+          reason: '开关本身要一直在，切回去也得点得到');
+    });
+
+    testWidgets('窄卡上不画素材名——那儿只剩一个字，还会把卡片撑破', (tester) async {
+      // 真机上卡片右侧竖着印出过一串 OVERFLOWED BY 7.6 PIXELS
+      expect(CandidateCard.compactBelowWidth, greaterThan(0));
     });
   });
 }
