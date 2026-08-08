@@ -58,7 +58,7 @@ RenewTask _task() => RenewTask(
       id: 'tg-1',
       name: '任务',
       sourcePath: '/videos/tg-1.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 8, 3),
       updatedAt: DateTime.utc(2026, 8, 3),
       unitTagGroups: const [TagGroupRef(id: 1, name: '台词标签组')],

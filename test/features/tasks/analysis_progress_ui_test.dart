@@ -91,7 +91,7 @@ void main() {
   group('非分析中的任务不显示进度', () {
     testWidgets('待切分确认的卡片上没有进度条', (tester) async {
       await _pump(tester,
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           progress: const AnalysisProgress(stage: AnalysisStage.transcribing));
 
       expect(find.byKey(const Key('task-card-progress')), findsNothing,

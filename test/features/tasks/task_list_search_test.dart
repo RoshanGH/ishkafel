@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
+import 'package:ishkafel/core/models/export_record.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
@@ -24,22 +25,29 @@ class _Repo implements TaskRepository {
 }
 
 RenewTask _task(String id, String name, RenewTaskStatus status,
-        {String? error}) =>
+        {String? error, List<ExportRecord> exports = const []}) =>
     RenewTask(
       id: id,
       name: name,
       sourcePath: '/v/$id.mp4',
       status: status,
       analysisError: error,
+      exports: exports,
       createdAt: DateTime.utc(2026, 7, 31),
       updatedAt: DateTime.utc(2026, 7, 31),
     );
 
 Future<void> _pump(WidgetTester tester) async {
   final repo = _Repo();
-  await repo.save(_task('hkv1', '滴露_植源喷雾', RenewTaskStatus.editing));
-  await repo.save(_task('hkv2', '卫仕洗衣液', RenewTaskStatus.editing));
-  await repo.save(_task('hkv3', '舒肤佳', RenewTaskStatus.exported));
+  await repo.save(_task('hkv1', '滴露_植源喷雾', RenewTaskStatus.ready));
+  await repo.save(_task('hkv2', '卫仕洗衣液', RenewTaskStatus.ready));
+  await repo.save(_task('hkv3', '舒肤佳', RenewTaskStatus.ready, exports: [
+    ExportRecord(
+        at: DateTime.utc(2026, 8, 8),
+        total: 6,
+        succeeded: 6,
+        outputDir: '/out'),
+  ]));
 
   await tester.pumpWidget(ProviderScope(
     overrides: [
@@ -85,10 +93,10 @@ void main() {
   });
 
   group('状态筛选', () {
-    testWidgets('点「已完成」只剩已导出的任务', (tester) async {
+    testWidgets('点「导出过」只剩导出过的项目——回去找片子的入口', (tester) async {
       await _pump(tester);
 
-      await tester.tap(find.text('已完成 1'));
+      await tester.tap(find.text('导出过 1'));
       await tester.pumpAndSettle();
 
       expect(find.text('舒肤佳'), findsOneWidget);
@@ -98,8 +106,7 @@ void main() {
     testWidgets('筛选标签上带数量，不点进去也知道有没有东西', (tester) async {
       await _pump(tester);
 
-      expect(find.text('待处理 2'), findsOneWidget);
-      expect(find.text('已完成 1'), findsOneWidget);
+      expect(find.text('导出过 1'), findsOneWidget);
     });
 
     testWidgets('某一类一条都没有时给说明，而不是空白', (tester) async {

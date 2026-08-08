@@ -1,3 +1,4 @@
+import '../../core/models/export_record.dart';
 import '../../core/models/renew_task.dart';
 
 /// 任务卡上的一行「下一步做什么」。
@@ -14,9 +15,20 @@ String taskCardHint(RenewTask task, {bool sourceMissing = false}) {
   final scale = _scale(task);
   return switch (task.status) {
     RenewTaskStatus.analyzing => '正在自动分析，完成后会自动进入下一步',
-    RenewTaskStatus.editing => '$scale点击进入工作台，调整切分并替换素材',
-    RenewTaskStatus.exported => '已完成导出，不再修改',
+    // 导过一次不代表这个项目结束了——原片放在那儿，换一批素材还能再导
+    RenewTaskStatus.ready => task.exports.isEmpty
+        ? '$scale点击进入工作台，调整切分并替换素材'
+        : '$scale${lastExportSummary(task.exports)}，可继续换素材再导',
   };
+}
+
+/// 最近一次导出：「8月8日导出 6 条」。没导过时返回空串
+String lastExportSummary(List<ExportRecord> exports) {
+  if (exports.isEmpty) return '';
+  final last = exports.last;
+  final failed = last.total - last.succeeded;
+  final tail = failed > 0 ? '（$failed 条失败）' : '';
+  return '${last.at.month}月${last.at.day}日导出 ${last.succeeded} 条$tail';
 }
 
 /// 「共 N 个台词语义单元 · 」；还没有切分结果时给空串——写「共 0 个」

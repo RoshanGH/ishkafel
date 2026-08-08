@@ -52,7 +52,7 @@ RenewTask _task() => RenewTask(
       id: 'ec-1',
       name: '滴露_植源喷雾',
       sourcePath: '/videos/ec-1.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 8, 3),
       updatedAt: DateTime.utc(2026, 8, 3),
       unitTagGroups: const [TagGroupRef(id: 1, name: '台词标签组')],

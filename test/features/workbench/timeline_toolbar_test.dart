@@ -38,7 +38,7 @@ RenewTask _task() => RenewTask(
         fps: 30,
         fileSizeBytes: 1,
       ),
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime(2026, 7, 31),
       updatedAt: DateTime(2026, 7, 31),
       units: const [

@@ -67,7 +67,7 @@ RenewTask makeHeavyTask(String id) {
       fileSizeBytes: 41234567,
     ),
     coverPath: '/Users/x/Library/ishkafel/covers/$id.jpg',
-    status: RenewTaskStatus.editing,
+    status: RenewTaskStatus.ready,
     createdAt: DateTime.utc(2026, 7, 20, 10),
     updatedAt: DateTime.utc(2026, 7, 20, 11).add(Duration(seconds: id.hashCode % 1000)),
     units: units,
@@ -163,7 +163,7 @@ void main() {
         '"createdAt":"2026-01-01T00:00:00.000Z","updatedAt":"2026-01-01T00:00:00.000Z"}');
     final parsed = await repo.findById('x');
     expect(parsed, isNotNull);
-    expect(parsed!.status, RenewTaskStatus.editing);
+    expect(parsed!.status, RenewTaskStatus.ready);
   });
 
   group('单个文件的 I/O 异常只跳过那一个文件（Important 7）', () {

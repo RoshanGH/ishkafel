@@ -107,7 +107,7 @@ void main() {
     final mid = await repo.findById('L1');
 
     expect(readyAt, isNotNull, reason: '要通知上层「可以进去干活了」');
-    expect(mid!.status, RenewTaskStatus.editing,
+    expect(mid!.status, RenewTaskStatus.ready,
         reason: '还挂在「分析中」的话，用户根本点不进去');
     expect(mid.units, isNotNull);
     expect(mid.units!.first.tags, isEmpty, reason: '这一刻标签还没打，是正常的');

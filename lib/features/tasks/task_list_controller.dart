@@ -10,6 +10,7 @@ import '../../core/models/project_ref.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/models/export_record.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
@@ -436,6 +437,17 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       RenewTask task, List<UnitReplacement> replacements) async {
     final updated = task.copyWith(
       replacements: replacements,
+      updatedAt: DateTime.now(),
+    );
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 记下一次导出。**追加**而不是覆盖：项目会被反复导出，每一次都是一条
+  /// 独立的记录（哪天、导了几条、成了几条、在哪个目录）
+  Future<void> addExportRecord(RenewTask task, ExportRecord record) async {
+    final updated = task.copyWith(
+      exports: [...task.exports, record],
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);

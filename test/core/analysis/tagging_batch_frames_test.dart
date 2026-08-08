@@ -55,7 +55,7 @@ RenewTask _task(int shotCount, {int durationMs = 96233}) => RenewTask(
       id: 'T1',
       name: 'a',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 8, 6),
       updatedAt: DateTime.utc(2026, 8, 6),
       shotTagGroups: const [TagGroupRef(id: 1, name: '镜头组')],

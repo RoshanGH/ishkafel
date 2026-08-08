@@ -63,7 +63,7 @@ RenewTask _task({BgmPlan bgm = BgmPlan.empty}) => RenewTask(
       id: 'bgm-1',
       name: '滴露',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 8, 4),
       updatedAt: DateTime.utc(2026, 8, 4),
       bgm: bgm,

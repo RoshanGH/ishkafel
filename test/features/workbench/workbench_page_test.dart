@@ -89,7 +89,7 @@ List<SemanticUnit> _unitsWithSliverTail() => const [
       ),
     ];
 
-RenewTask _fixtureTask({RenewTaskStatus status = RenewTaskStatus.editing}) =>
+RenewTask _fixtureTask({RenewTaskStatus status = RenewTaskStatus.ready}) =>
     RenewTask(
       id: 'wb-1',
       name: '滴露_植源喷雾',
@@ -238,7 +238,7 @@ void main() {
   });
 
   testWidgets('④已导出的任务返回不写回仓库', (tester) async {
-    final exported = _fixtureTask(status: RenewTaskStatus.exported);
+    final exported = _fixtureTask(status: RenewTaskStatus.ready);
     await repo.save(exported);
     await tester.pumpWidget(
         _wrapWithNavigator(task: exported, repo: repo, playback: playback));
@@ -250,7 +250,7 @@ void main() {
 
     expect(find.text('列表页占位'), findsOneWidget);
     final saved = await repo.findById('wb-1');
-    expect(saved!.status, RenewTaskStatus.exported);
+    expect(saved!.status, RenewTaskStatus.ready);
     expect(saved.units, exported.units);
   });
 
@@ -404,7 +404,7 @@ void main() {
       id: 'wb-broken',
       name: '未分析任务',
       sourcePath: '/videos/wb-broken.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 7, 29),
       updatedAt: DateTime.utc(2026, 7, 29),
     );
@@ -510,66 +510,12 @@ void main() {
     });
   });
 
-  group('只读回看模式（已导出的任务不能再改）', () {
-    testWidgets('检查器步进/台词/拆分/合并按钮禁用', (tester) async {
-      final pickingTask = _fixtureTask(status: RenewTaskStatus.exported);
-      await repo.save(pickingTask);
-      await tester.pumpWidget(
-          _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
-      await tester.tap(find.byKey(const Key('open-workbench')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('unit-row-0')));
-      await tester.pump();
-
-      final endPlus = tester
-          .widget<InkWell>(find.byKey(const Key('inspector-end-plus')));
-      expect(endPlus.onTap, isNull, reason: '只读模式下步进按钮应禁用');
-
-      final field = tester.widget<TextField>(
-          find.byKey(const Key('inspector-transcript-field')));
-      expect(field.enabled, isFalse, reason: '只读模式下台词框应禁用');
-
-      final splitBtn =
-          tester.widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
-      expect(splitBtn.onTap, isNull, reason: '只读模式下拆分按钮应禁用');
-
-      await tester.tap(find.byKey(const Key('workbench-back-btn')));
-      await tester.pumpAndSettle();
-      expect(find.text('列表页占位'), findsOneWidget);
-    });
-
-    // 注：本用例只覆盖"点选列表行浏览 + 返回不写回仓库"这一行为——它
-    // 不做任何拖拽，标题曾误写为"时间线拖拽边界不改变仓库中的 units"，
-    // 名不副实（评审 Minor D）。真正的"只读模式下拖拽边界不改变 units"
-    // 覆盖在 timeline_view_test.dart 的 readOnly 分组（4 条用例），此处
-    // 不重复。
-    testWidgets('只读模式下浏览（点选列表行）不写回仓库 units', (tester) async {
-      final pickingTask = _fixtureTask(status: RenewTaskStatus.exported);
-      await repo.save(pickingTask);
-      await tester.pumpWidget(
-          _wrapWithNavigator(task: pickingTask, repo: repo, playback: playback));
-      await tester.tap(find.byKey(const Key('open-workbench')));
-      await tester.pumpAndSettle();
-
-      // 仍可点选列表行（回看要能浏览）
-      await tester.tap(find.byKey(const Key('unit-row-1')));
-      await tester.pump();
-      expect(find.byType(InspectorPanel), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('workbench-back-btn')));
-      await tester.pumpAndSettle();
-
-      final saved = await repo.findById('wb-1');
-      expect(saved!.units, pickingTask.units);
-    });
-  });
 
   // 真机缺陷回归：时间线上存在亚像素宽的单元块体时，绘制在 paint() 中途抛出
   // AssertionError，本帧后续所有绘制指令（镜头/抽帧/波形轨，以及 Scaffold 在
   // body 之后才绘制的顶栏与底部栏）全部丢失——控件在树里、布局正确、命中测试
   // 也正常，但屏幕上什么都看不到。这里断言"这一帧没有绘制异常"。
-  for (final status in [RenewTaskStatus.editing, RenewTaskStatus.exported]) {
+  for (final status in [RenewTaskStatus.ready, RenewTaskStatus.ready]) {
     testWidgets('存在亚像素宽单元时绘制不抛异常（status=${status.name}）', (tester) async {
       final sliverTask = _fixtureTask(status: status).copyWith(
         units: _unitsWithSliverTail(),

@@ -71,7 +71,7 @@ class _FakePipeline extends AnalysisPipeline {
     if (failWith != null) throw failWith!;
     if (shouldFail) throw StateError('分析失败（模拟）');
     final updated =
-        task.copyWith(status: RenewTaskStatus.editing, updatedAt: DateTime.now());
+        task.copyWith(status: RenewTaskStatus.ready, updatedAt: DateTime.now());
     await repo.save(updated);
     return updated;
   }
@@ -282,7 +282,7 @@ void main() {
 
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
-    expect(task.status, RenewTaskStatus.editing);
+    expect(task.status, RenewTaskStatus.ready);
   });
 
   test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {
@@ -441,7 +441,7 @@ void main() {
 
     test('非「分析中」状态的任务不受影响', () async {
       await repo.save(makeAnalyzing('done').copyWith(
-          status: RenewTaskStatus.editing, units: const []));
+          status: RenewTaskStatus.ready, units: const []));
 
       final tasks = await container.read(taskListProvider.future);
 
@@ -475,7 +475,7 @@ void main() {
           id: id,
           name: '任务$id',
           sourcePath: '/v/$id.mp4',
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           createdAt: DateTime.utc(2026, 7, 29),
           updatedAt: DateTime.utc(2026, 7, 29),
           units: const [],
@@ -537,7 +537,7 @@ void main() {
       await container.read(taskListProvider.future);
       // 重命名对话框停留期间后台分析完成，磁盘上多了 units 与新状态
       final analyzed = makeTask('r3').copyWith(
-        status: RenewTaskStatus.editing,
+        status: RenewTaskStatus.ready,
         units: [
           SemanticUnit(
             index: 0,
@@ -558,7 +558,7 @@ void main() {
       final saved = await repo.findById('r3');
       expect(saved!.name, '新名字');
       expect(saved.units, hasLength(1), reason: '重命名不该抹掉后台分析的成果');
-      expect(saved.status, RenewTaskStatus.editing);
+      expect(saved.status, RenewTaskStatus.ready);
     });
 
     test('renameTask 空名称被拒绝，原名保留', () async {
@@ -582,7 +582,7 @@ void main() {
           id: id,
           name: '任务$id',
           sourcePath: '/v/$id.mp4',
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           createdAt: DateTime.utc(2026, 7, 29),
           updatedAt: DateTime.utc(2026, 7, 29),
           units: const [],
@@ -628,7 +628,7 @@ void main() {
           .read(taskListProvider)
           .value!
           .firstWhere((t) => t.id == 'b');
-      expect(inMemory.status, RenewTaskStatus.editing,
+      expect(inMemory.status, RenewTaskStatus.ready,
           reason: '内存态落后磁盘且不自愈：用户再进审片台会以旧 units 为基线，'
               '再保存就把上一次确认的切分永久覆盖');
       expect(inMemory.units, makeUnits());
@@ -736,7 +736,7 @@ void main() {
           id: id,
           name: '任务$id',
           sourcePath: '/v/$id.mp4',
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           createdAt: DateTime.utc(2026, 7, 29),
           updatedAt: DateTime.utc(2026, 7, 29),
           units: const [],
@@ -900,7 +900,7 @@ void main() {
 
       final tasks = pipelineContainer.read(taskListProvider).value!;
       final updated = tasks.firstWhere((t) => t.id == 'fail-1');
-      expect(updated.status, RenewTaskStatus.editing);
+      expect(updated.status, RenewTaskStatus.ready);
       expect(updated.analysisError, isNull);
     });
 
@@ -963,7 +963,7 @@ void main() {
 
       final updated = pipelineContainer.read(taskListProvider).value!
           .firstWhere((t) => t.id == 'fail-1');
-      expect(updated.status, RenewTaskStatus.editing);
+      expect(updated.status, RenewTaskStatus.ready);
     });
 
     test('落库失败时并发守卫必须释放，否则该任务本次会话再也无法重试（Critical 2）',
@@ -1012,7 +1012,7 @@ void main() {
           id: 'cut-1',
           name: '待切分任务',
           sourcePath: '/v/cut-1.mp4',
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           createdAt: DateTime.utc(2026, 7, 29),
           updatedAt: DateTime.utc(2026, 7, 29),
           units: const [],
@@ -1029,7 +1029,7 @@ void main() {
           .saveSegmentationDraft(task, units);
 
       final saved = await repo.findById('cut-1');
-      expect(saved!.status, RenewTaskStatus.editing);
+      expect(saved!.status, RenewTaskStatus.ready);
       expect(saved.units, units);
     });
   });
@@ -1042,7 +1042,7 @@ void main() {
           id: id,
           name: '任务$id',
           sourcePath: '/v/$id.mp4',
-          status: RenewTaskStatus.editing,
+          status: RenewTaskStatus.ready,
           createdAt: DateTime.utc(2026, 7, 1),
           updatedAt: updatedAt,
           units: const [],
@@ -1085,7 +1085,7 @@ void main() {
       final tasks = localContainer.read(taskListProvider).value!;
       expect(tasks.length, 3);
       final updated = tasks.firstWhere((t) => t.id == 'a');
-      expect(updated.status, RenewTaskStatus.editing);
+      expect(updated.status, RenewTaskStatus.ready);
       expect(updated.units, makeUnits());
     });
 
@@ -1101,7 +1101,7 @@ void main() {
       final tasks = localContainer.read(taskListProvider).value!;
       expect(tasks.firstWhere((t) => t.id == 'b').units, makeUnits());
       expect(tasks.firstWhere((t) => t.id == 'b').status,
-          RenewTaskStatus.editing);
+          RenewTaskStatus.ready);
     });
 
     test('局部更新后列表排序与全量重读一致（按 updatedAt 倒序）', () async {

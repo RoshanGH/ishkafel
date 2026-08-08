@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/models/export_record.dart';
 import 'package:ishkafel/core/export/export_runner.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
@@ -40,12 +41,20 @@ List<SemanticUnit> _units() => const [
       ),
     ];
 
+/// 这一轮里对话框往外报了什么
+final _recorded = <ExportRecord>[];
+final _revealed = <String>[];
+
 Future<void> _open(
   WidgetTester tester, {
   required List<UnitReplacement> replacements,
   ExportRunnerFactory? factory,
   bool withFactory = true,
+  String? pickedDir,
+  Future<void> Function(String)? reveal,
 }) async {
+  _recorded.clear();
+  _revealed.clear();
   final work = Directory.systemTemp.createTempSync('ishkafel_ed_work_');
   final out = Directory.systemTemp.createTempSync('ishkafel_ed_out_');
   addTearDown(() {
@@ -83,6 +92,10 @@ Future<void> _open(
                 units: _units(),
                 replacements: replacements,
                 outputDir: out,
+                pickDirectory: () async => pickedDir,
+                revealDirectory: reveal ?? (path) async => _revealed.add(path),
+                onExported: (r) async => _recorded.add(r),
+                now: () => DateTime.utc(2026, 8, 9, 10, 30),
               ),
               child: const Text('打开'),
             ),
@@ -172,5 +185,122 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('未检测到 ffmpeg'), findsOneWidget);
+  });
+
+  group('导完要知道片子在哪', () {
+    /// 用户原话：「导出以后能让我直接知道在哪个地方，能让我看到它。现在导出
+    /// 以后我点关闭，我就不知道在哪了。」
+    testWidgets('开始之前能换导出位置', (tester) async {
+      final elsewhere =
+          Directory.systemTemp.createTempSync('ishkafel_ed_pick_');
+      addTearDown(() => elsewhere.deleteSync(recursive: true));
+
+      await _open(tester,
+          replacements: [UnitReplacement.whole(const [11])],
+          pickedDir: elsewhere.path);
+
+      await tester.tap(find.byKey(const Key('export-pick-dir')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining(elsewhere.path), findsOneWidget);
+    });
+
+    testWidgets('选择框里取消就保持原样，不要把已填好的位置清掉', (tester) async {
+      await _open(tester,
+          replacements: [UnitReplacement.whole(const [11])],
+          pickedDir: null);
+      final before = tester
+          .widget<Text>(find.byKey(const Key('export-output-dir')))
+          .data;
+
+      await tester.tap(find.byKey(const Key('export-pick-dir')));
+      await tester.pumpAndSettle();
+
+      expect(
+          tester
+              .widget<Text>(find.byKey(const Key('export-output-dir')))
+              .data,
+          before);
+    });
+
+    testWidgets('跑完给「在访达中显示」，点了就打开那个目录', (tester) async {
+      await _open(tester, replacements: [UnitReplacement.whole(const [11])]);
+      expect(find.byKey(const Key('export-reveal')), findsNothing,
+          reason: '还没导就摆一个「打开目录」是空指望');
+
+      await tester.tap(find.byKey(const Key('export-start')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('export-reveal')));
+      await tester.pumpAndSettle();
+
+      expect(_revealed, hasLength(1));
+    });
+
+    testWidgets('打不开时说清楚，而不是点了没反应', (tester) async {
+      await _open(tester,
+          replacements: [UnitReplacement.whole(const [11])],
+          reveal: (_) async => throw StateError('没这个目录'));
+
+      await tester.tap(find.byKey(const Key('export-start')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('export-reveal')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('打不开这个目录'), findsOneWidget);
+    });
+  });
+
+  group('每一次导出都记进项目', () {
+    /// 项目没有终态——原片放在那儿，明天换一批素材还能再导。有始有终的是
+    /// 每一次导出：哪天、导了几条、成了几条、在哪个目录。
+    testWidgets('跑完就报一条记录', (tester) async {
+      await _open(tester, replacements: [
+        UnitReplacement.whole(const [11, 12]),
+        UnitReplacement.keepOriginal(),
+      ]);
+
+      await tester.tap(find.byKey(const Key('export-start')));
+      await tester.pumpAndSettle();
+
+      expect(_recorded, hasLength(1));
+      expect(_recorded.single.at, DateTime.utc(2026, 8, 9, 10, 30));
+      expect(_recorded.single.total, 2);
+      expect(_recorded.single.succeeded, 2);
+      expect(_recorded.single.outputDir, isNotEmpty);
+    });
+
+    testWidgets('有失败的照样记，成功数如实报', (tester) async {
+      final work = Directory.systemTemp.createTempSync('ishkafel_ed_rec_');
+      addTearDown(() {
+        if (work.existsSync()) work.deleteSync(recursive: true);
+      });
+      await _open(
+        tester,
+        replacements: [
+          UnitReplacement.whole(const [11, 12]),
+          UnitReplacement.keepOriginal(),
+        ],
+        factory: (taskId) => ExportRunner(
+          run: (binary, args) async {
+            // 第二条的素材取不到
+            await File(args.last).writeAsString('out');
+            return ProcessResult(1, 0, '', '');
+          },
+          workDir: work,
+          fetchMaterial: (id) async {
+            if (id == 12) throw StateError('素材读不出来');
+            final f = File('${work.path}/m$id.mp4')..writeAsStringSync('m');
+            return f.path;
+          },
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('export-start')));
+      await tester.pumpAndSettle();
+
+      expect(_recorded, hasLength(1));
+      expect(_recorded.single.succeeded, lessThan(_recorded.single.total));
+      expect(_recorded.single.allSucceeded, isFalse);
+    });
   });
 }

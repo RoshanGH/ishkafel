@@ -24,8 +24,8 @@ void main() {
   );
 
   test('copyWith 返回新对象且不改原对象（不可变）', () {
-    final updated = task.copyWith(status: RenewTaskStatus.editing);
-    expect(updated.status, RenewTaskStatus.editing);
+    final updated = task.copyWith(status: RenewTaskStatus.ready);
+    expect(updated.status, RenewTaskStatus.ready);
     expect(task.status, RenewTaskStatus.analyzing);
     expect(updated.id, task.id);
     expect(identical(updated, task), false);
@@ -44,15 +44,19 @@ void main() {
 
   test('status 序列化为稳定字符串（存储契约，不许改名）', () {
     expect(RenewTaskStatus.analyzing.name, 'analyzing');
-    expect(RenewTaskStatus.editing.name, 'editing');
-    expect(RenewTaskStatus.exported.name, 'exported');
+    expect(RenewTaskStatus.ready.name, 'ready');
+    expect(RenewTaskStatus.values, hasLength(2),
+        reason: '项目只有「分析中 → 可编辑」两个阶段，没有终态——'
+            '有始有终的是每一次导出');
   });
 
-  test('旧库里的 awaitingCut / picking 一律读成 editing，不是让任务消失', () {
-    for (final legacy in ['awaitingCut', 'picking']) {
+  test('旧库里那些已经废掉的状态一律读成 ready，不是让任务消失', () {
+    // exported 曾经存在但**从来没有一处代码把它设上过**；
+    // awaitingCut / picking 对应的是已经合并掉的两个页面
+    for (final legacy in ['awaitingCut', 'picking', 'editing', 'exported']) {
       final json = task.toJson()..['status'] = legacy;
       final parsed = RenewTask.fromJson(json);
-      expect(parsed.status, RenewTaskStatus.editing,
+      expect(parsed.status, RenewTaskStatus.ready,
           reason: '这两个状态对应的是已经合并掉的两个页面，'
               '但用户硬盘上的任务不该因此打不开');
       expect(parsed.units, task.units);
@@ -62,15 +66,15 @@ void main() {
   test('未知 status（新版本写入的状态）回退到安全值而不是让整条任务消失', () {
     final json = task.toJson()..['status'] = 'exporting';
     final parsed = RenewTask.fromJson(json);
-    expect(parsed.status, RenewTaskStatus.editing);
+    expect(parsed.status, RenewTaskStatus.ready);
     expect(parsed.id, task.id);
   });
 
   test('status 字段缺失或类型不对时同样回退，不抛异常', () {
     final missing = task.toJson()..remove('status');
-    expect(RenewTask.fromJson(missing).status, RenewTaskStatus.editing);
+    expect(RenewTask.fromJson(missing).status, RenewTaskStatus.ready);
     final wrongType = task.toJson()..['status'] = 42;
-    expect(RenewTask.fromJson(wrongType).status, RenewTaskStatus.editing);
+    expect(RenewTask.fromJson(wrongType).status, RenewTaskStatus.ready);
   });
 
   test('旧 JSON（无 units 键）解析为 units == null（向后兼容）', () {

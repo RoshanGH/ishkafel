@@ -2,6 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_selector/file_selector.dart';
+import 'package:path/path.dart' as p;
+
+import '../../core/models/export_record.dart';
+
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -35,6 +40,18 @@ Future<void> showExportDialog(
   /// 分离出来的纯人声轨：被配乐覆盖的段落要用它
   String? vocalsPath,
   required Directory outputDir,
+
+  /// 让用户挑一个目录；返回 null 表示他取消了。注入而不是内建：单测不弹系统框
+  Future<String?> Function()? pickDirectory,
+
+  /// 在访达里显示这个目录
+  Future<void> Function(String path)? revealDirectory,
+
+  /// 导完之后把这一次记进项目（哪天、导了几条、成了几条、在哪儿）
+  Future<void> Function(ExportRecord record)? onExported,
+
+  /// 记录导出时刻。测试注入可控时钟
+  DateTime Function()? now,
 }) =>
     showDialog<void>(
       context: context,
@@ -50,8 +67,30 @@ Future<void> showExportDialog(
         voices: voices,
         vocalsPath: vocalsPath,
         outputDir: outputDir,
+        pickDirectory: pickDirectory ?? pickExportDirectory,
+        revealDirectory: revealDirectory ?? revealInFinder,
+        onExported: onExported,
+        now: now ?? DateTime.now,
       ),
     );
+
+/// 系统目录选择框
+Future<String?> pickExportDirectory() => getDirectoryPath(
+    confirmButtonText: '导出到这里', initialDirectory: _defaultInitialDir());
+
+String? _defaultInitialDir() {
+  final home = Platform.environment['HOME'];
+  return home == null ? null : p.join(home, 'Movies');
+}
+
+/// 在访达里显示。**用 `open` 而不是自己拼 AppleScript**：前者是 macOS 的
+/// 标准入口，路径里有空格、中文、`&` 都不会出事
+Future<void> revealInFinder(String path) async {
+  final result = await Process.run('open', [path]);
+  if (result.exitCode != 0) {
+    throw StateError('${result.stderr}'.trim());
+  }
+}
 
 class _ExportDialog extends ConsumerStatefulWidget {
   final String taskId;
@@ -64,6 +103,12 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final VoicePlan voices;
   final String? vocalsPath;
   final Directory outputDir;
+  final Future<String?> Function() pickDirectory;
+  final Future<void> Function(String path) revealDirectory;
+  final Future<void> Function(ExportRecord record)? onExported;
+
+  /// 记录导出时刻。测试注入可控时钟
+  final DateTime Function() now;
 
   const _ExportDialog({
     required this.taskId,
@@ -76,6 +121,10 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.voices,
     required this.vocalsPath,
     required this.outputDir,
+    required this.pickDirectory,
+    required this.revealDirectory,
+    this.onExported,
+    this.now = DateTime.now,
   });
 
   @override
@@ -84,6 +133,9 @@ class _ExportDialog extends ConsumerStatefulWidget {
 
 class _ExportDialogState extends ConsumerState<_ExportDialog> {
   bool _running = false;
+
+  /// 导到哪儿。可以在开始之前改
+  late Directory _outputDir = widget.outputDir;
   (int done, int total, String what)? _progress;
   List<ExportOutcome>? _results;
   String? _failure;
@@ -107,7 +159,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         sourcePath: widget.sourcePath,
         units: widget.units,
         replacements: widget.replacements,
-        outputDir: widget.outputDir,
+        outputDir: _outputDir,
         bgm: widget.bgm,
         voiceAudio: widget.voiceAudio,
         voices: widget.voices,
@@ -116,11 +168,37 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
           if (mounted) setState(() => _progress = (d, t, w));
         },
       );
-      if (mounted) setState(() => _results = results);
+      if (!mounted) return;
+      setState(() => _results = results);
+      // 记进项目：项目没有终态，**导出才是那件有始有终的事**
+      await widget.onExported?.call(ExportRecord(
+        at: widget.now(),
+        total: results.length,
+        succeeded: results.where((r) => r.ok).length,
+        outputDir: _outputDir.path,
+      ));
     } catch (e) {
       if (mounted) setState(() => _failure = '导出失败：$e');
     } finally {
       if (mounted) setState(() => _running = false);
+    }
+  }
+
+  /// 换导出目录。取消（返回 null）就保持原样——不要把选择框一关就把
+  /// 已经填好的位置清掉
+  Future<void> _pickDir() async {
+    final picked = await widget.pickDirectory();
+    if (picked == null || !mounted) return;
+    setState(() => _outputDir = Directory(picked));
+  }
+
+  /// 在访达里显示这个目录。导完不知道片子在哪，等于没导
+  Future<void> _reveal() async {
+    try {
+      await widget.revealDirectory(_outputDir.path);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _failure = '打不开这个目录：$e');
     }
   }
 
@@ -169,6 +247,14 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
             onPressed: _running ? null : () => Navigator.of(context).pop(),
             child: Text(_results == null ? '取消' : '关闭'),
           ),
+          // 导完了先给「打开目录」，再给「关闭」——用户此刻要的是去看片子，
+          // 而不是把这个框关掉之后再自己找
+          if (_results != null)
+            FilledButton(
+              key: const Key('export-reveal'),
+              onPressed: _reveal,
+              child: const Text('在访达中显示'),
+            ),
           if (_results == null)
             FilledButton(
               key: const Key('export-start'),
@@ -201,9 +287,26 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               color: AppColors.textTertiary, fontSize: AppFontSize.caption),
         ),
         const SizedBox(height: AppSpacing.xs),
-        Text('导出到：${widget.outputDir.path}',
-            style: const TextStyle(
-                color: AppColors.textTertiary, fontSize: AppFontSize.caption)),
+        // 导到哪儿要能改，也要能一眼看见——此前是写死在「影片」下的一个
+        // 子目录，用户点完关闭就不知道片子在哪了
+        Row(
+          children: [
+            Expanded(
+              child: Text('导出到：${_outputDir.path}',
+                  key: const Key('export-output-dir'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: AppFontSize.caption)),
+            ),
+            TextButton(
+              key: const Key('export-pick-dir'),
+              onPressed: _running ? null : _pickDir,
+              child: const Text('换个位置'),
+            ),
+          ],
+        ),
         const SizedBox(height: AppSpacing.xs),
         const Text('画面来自替换素材，声音沿用原片（换过音色的用生成的配音）',
             style: TextStyle(

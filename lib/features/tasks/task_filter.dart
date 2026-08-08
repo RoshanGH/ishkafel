@@ -2,15 +2,16 @@ import '../../core/models/renew_task.dart';
 
 /// 任务列表的状态筛选。
 ///
-/// 分组依据是「用户此刻想找什么」，不是状态枚举本身：他要么想找**该我动手
-/// 的**，要么想看**还在跑的**，要么在排查**出问题的**。把四个状态原样列成
-/// 四个筛选项，反而要他自己在脑子里做这层翻译。
+/// 分组依据是「用户此刻想找什么」，不是状态枚举本身。
+///
+/// **没有「待处理 / 已完成」这两项**：项目是常驻的，一条原片放在那儿反复出
+/// 不同组合，可编辑是常态而不是待办；导出也不是终态——导过一次还能换一批
+/// 素材再导。剩下三项各有各的用处：还在跑的、出问题的、想回去找片子的。
 enum TaskFilter {
   all('全部'),
-  todo('待处理'),
-  running('进行中'),
+  running('分析中'),
   failed('有问题'),
-  done('已完成');
+  exported('导出过');
 
   final String label;
 
@@ -24,8 +25,8 @@ enum TaskFilter {
       TaskFilter.all => true,
       TaskFilter.failed => failed,
       TaskFilter.running => !failed && task.status == RenewTaskStatus.analyzing,
-      TaskFilter.todo => !failed && task.status == RenewTaskStatus.editing,
-      TaskFilter.done => !failed && task.status == RenewTaskStatus.exported,
+      // 「导出过」不是终态，只是一个找片子的入口：想回去看昨天导的那批
+      TaskFilter.exported => !failed && task.exports.isNotEmpty,
     };
   }
 }

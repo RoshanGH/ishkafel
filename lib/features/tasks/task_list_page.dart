@@ -137,10 +137,6 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
           .showSnackBar(const SnackBar(content: Text('任务分析中，请稍候')));
       return;
     }
-    if (task.status == RenewTaskStatus.exported) {
-      _showSnackBar(context, '已导出的任务不再支持进入审片台');
-      return;
-    }
     // 历史遗留数据兜底：帧率非法（旧版本把 ffprobe 的 0/0 解析成 0 后落了库）
     // 时审片台按帧计算会得到 Infinity/整除零而红屏，这里拦在入口
     final fps = task.videoInfo?.fps ?? 0;

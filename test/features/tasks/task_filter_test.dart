@@ -1,23 +1,31 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/models/export_record.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/features/tasks/task_filter.dart';
 
 RenewTask _task(String id, String name, RenewTaskStatus status,
-        {String? error}) =>
+        {String? error, List<ExportRecord> exports = const []}) =>
     RenewTask(
       id: id,
       name: name,
       sourcePath: '/v/$id.mp4',
       status: status,
       analysisError: error,
+      exports: exports,
       createdAt: DateTime.utc(2026, 7, 31),
       updatedAt: DateTime.utc(2026, 7, 31),
     );
 
 final _tasks = [
-  _task('hkv1', '滴露_植源喷雾_XCT', RenewTaskStatus.editing),
-  _task('hkv2', '卫仕洗衣液_ZJD', RenewTaskStatus.editing),
-  _task('hkv3', '舒肤佳_内核', RenewTaskStatus.exported),
+  _task('hkv1', '滴露_植源喷雾_XCT', RenewTaskStatus.ready),
+  _task('hkv2', '卫仕洗衣液_ZJD', RenewTaskStatus.ready),
+  _task('hkv3', '舒肤佳_内核', RenewTaskStatus.ready, exports: [
+    ExportRecord(
+        at: DateTime.utc(2026, 8, 8),
+        total: 6,
+        succeeded: 6,
+        outputDir: '/out'),
+  ]),
   _task('hkv4', '滴露_消毒液', RenewTaskStatus.analyzing),
   _task('hkv5', '立白_卫仕', RenewTaskStatus.analyzing, error: '网络超时'),
 ];
@@ -55,11 +63,6 @@ void main() {
       expect(_filter(filter: TaskFilter.all), hasLength(5));
     });
 
-    test('待处理 = 待切分确认 + 选材中（该我动手的）', () {
-      expect(_filter(filter: TaskFilter.todo).map((t) => t.id),
-          ['hkv1', 'hkv2']);
-    });
-
     test('进行中只包含真正在跑的，不含已失败的', () {
       final ids = _filter(filter: TaskFilter.running).map((t) => t.id);
 
@@ -72,15 +75,22 @@ void main() {
       expect(_filter(filter: TaskFilter.failed).map((t) => t.id), ['hkv5']);
     });
 
-    test('已完成 = 已导出', () {
-      expect(_filter(filter: TaskFilter.done).map((t) => t.id), ['hkv3']);
+    test('「导出过」不是终态，只是回去找片子的入口', () {
+      expect(_filter(filter: TaskFilter.exported).map((t) => t.id), ['hkv3']);
+    });
+
+    test('没有「待处理 / 已完成」——可编辑是常态，导出也不是终点', () {
+      final labels = TaskFilter.values.map((f) => f.label);
+
+      expect(labels, isNot(contains('待处理')));
+      expect(labels, isNot(contains('已完成')));
     });
   });
 
   group('搜索与筛选叠加', () {
     test('两个条件同时生效', () {
-      expect(_filter(query: '滴露', filter: TaskFilter.todo).map((t) => t.id),
-          ['hkv1']);
+      expect(_filter(query: '滴露', filter: TaskFilter.running).map((t) => t.id),
+          ['hkv4']);
     });
   });
 
@@ -92,9 +102,9 @@ void main() {
       }
     });
 
-    test('顺序按「我最常看什么」排：全部 → 待处理 在最前', () {
+    test('顺序按「我最常看什么」排：全部在最前', () {
       expect(TaskFilter.values.first, TaskFilter.all);
-      expect(TaskFilter.values[1], TaskFilter.todo);
+      expect(TaskFilter.values[1], TaskFilter.running);
     });
   });
 

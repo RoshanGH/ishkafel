@@ -11,12 +11,16 @@ import 'task_card_hint.dart';
 import 'task_metrics.dart';
 import 'source_availability.dart';
 
-/// 状态徽标文案与配色
-({String label, Color color}) statusBadge(RenewTaskStatus status) =>
+/// 状态徽标文案与配色。
+///
+/// **可编辑不是一个状态，是常态**——一个永远不会结束的「编辑中」写在卡片上
+/// 只是噪音（用户原话：「编辑中这个状态有没有结束那一刻呢？如果没有的话，
+/// 那就不用写出来了吧？」）。所以只有真的在跑的时候才挂徽标；剩下的位置
+/// 让给「上次导出」这种真正有用的信息。
+({String label, Color color})? statusBadge(RenewTaskStatus status) =>
     switch (status) {
       RenewTaskStatus.analyzing => (label: '分析中', color: AppColors.accentBlue),
-      RenewTaskStatus.editing => (label: '编辑中', color: AppColors.orange),
-      RenewTaskStatus.exported => (label: '已导出', color: AppColors.green),
+      RenewTaskStatus.ready => null,
     };
 
 class TaskCard extends ConsumerWidget {
@@ -67,7 +71,9 @@ class TaskCard extends ConsumerWidget {
               children: [
                 _Cover(coverPath: task.coverPath),
                 if (sourceMissing) const _MissingSourceOverlay(),
-                Positioned(
+                // 徽标为 null = 可编辑，那是常态，不该占一块位置常驻
+                if (badge != null)
+                  Positioned(
                   right: 8,
                   bottom: 8,
                   child: Container(

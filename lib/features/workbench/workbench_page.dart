@@ -14,6 +14,7 @@ import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
 import '../../core/audio/voice_swap_service.dart';
 import '../../core/log/app_log.dart';
+import '../../core/models/export_record.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/net/http_bytes.dart';
 import '../../core/miaoa/candidate_probe.dart';
@@ -198,11 +199,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// true 时页面顶部常驻一条用户可见的提示条，而不是静默显示占位图标
   bool _playbackDegraded = false;
 
-  /// 只有已导出的任务才只读。
+  /// 项目**永远可编辑**。
   ///
-  /// 切分与选材合并成一个工作台后，「确认切分」这道闸门连同它带来的只读态
-  /// 一起取消了——挑着素材发现这刀切得不对，就该直接回来拖一下。
-  bool get _isEditable => widget.task.status != RenewTaskStatus.exported;
+  /// 一条原片放在那儿反复出不同组合：今天挑两个导出去，明天换两个再导。
+  /// 没有「导完就锁住」这回事——那个 `exported` 状态从来没有一处代码把它
+  /// 设上过，只读回看整套逻辑一直是死的。
+  bool get _isEditable => true;
 
   @override
   void initState() {
@@ -925,8 +927,29 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 导出前要核对「选了音色的单元是不是都生成了配音」——少了会静默出原声
       voices: _task.voices,
       vocalsPath: _task.vocalsPath,
-      outputDir: outputDir,
+      // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片
+      outputDir: _task.exports.isEmpty
+          ? outputDir
+          : Directory(_task.exports.last.outputDir),
+      onExported: _recordExport,
     );
+  }
+
+  /// 把这一次导出记进项目。
+  ///
+  /// 项目没有终态（原片放在那儿，明天换一批素材还能再导），有始有终的是每
+  /// 一次导出——「哪天、导了几条、成了几条、在哪个目录」。
+  Future<void> _recordExport(ExportRecord record) async {
+    try {
+      await _tasks!.addExportRecord(_task, record);
+      if (mounted) {
+        setState(() =>
+            _task = _task.copyWith(exports: [..._task.exports, record]));
+      }
+    } catch (e) {
+      // 记不上不该影响已经导好的片子，但要留痕
+      AppLog.warn('导出记录落库失败（taskId=${widget.task.id}）：$e');
+    }
   }
 
   /// 任务名会进文件路径，斜杠与冒号在 macOS 上都是雷

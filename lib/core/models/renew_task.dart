@@ -9,16 +9,24 @@ import '../replacement/replacement_plan.dart';
 import 'project_ref.dart';
 import 'tag_group_ref.dart';
 import 'video_info.dart';
+import 'export_record.dart';
 import 'semantic_unit.dart';
 
-/// 任务状态：分析中 / 编辑中 / 已导出
+/// 项目状态：**分析中 → 可编辑**。就这两个，没有「完成」。
 ///
-/// 曾经有 awaitingCut（待切分确认）与 picking（选材中）两个状态，对应
-/// 「先确认切分、再进入替换选材」两个页面。两个页面合并成一个工作台后，
-/// 这两个状态之间已没有任何行为差异——切分与选材在同一个页面里交替进行，
-/// 再分成两个状态只会让任务卡显示一个用户无法据以行动的假区分。
-/// 旧记录里的这两个名字由 [parseStatus] 兜底落到 [editing]。
-enum RenewTaskStatus { analyzing, editing, exported }
+/// 这个产品的对象是一条原片放在那儿、反复出不同组合：今天挑两个导出去，
+/// 明天换两个再导。**项目本身没有终态**，有始有终的是每一次导出
+/// （见 [ExportRecord]）。用户原话：「编辑中这个状态有没有结束那一刻呢？
+/// 如果没有的话，那就不用写出来了吧？」
+///
+/// 曾经有 `exported`（已导出），但**代码里从来没有一处把它设上过**——
+/// 于是「编辑中」永远不会结束、「已完成」筛选永远是空的、只读回看那一整套
+/// 逻辑是死代码。老存档里的 `exported` 由 [parseStatus] 落到 [ready]。
+///
+/// 也曾有 awaitingCut（待切分确认）与 picking（选材中），对应「先确认切分、
+/// 再进入替换选材」两个页面；两个页面合并成一个工作台后它们之间已无行为
+/// 差异，同样由 [parseStatus] 兜底。
+enum RenewTaskStatus { analyzing, ready }
 
 /// 翻新任务实体（不可变）
 class RenewTask {
@@ -87,6 +95,10 @@ class RenewTask {
   /// 选过没有」这个事实抹掉。
   final List<UnitReplacement>? replacements;
 
+  /// 每一次导出的记录（时间倒序由读取方决定，这里按发生顺序追加）。
+  /// 项目没有终态，**导出才是那件有始有终的事**——见 [ExportRecord]
+  final List<ExportRecord> exports;
+
   /// 已挑中的素材，落到盘上的那一份（按 [replacements] 里出现过的候选 id
   /// 收敛，不再被引用的会被清掉）。见 [PickedMaterial]。
   ///
@@ -135,6 +147,7 @@ class RenewTask {
     this.analysisError,
     List<UnitReplacement>? replacements,
     List<PickedMaterial> pickedMaterials = const [],
+    List<ExportRecord> exports = const [],
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.firstReadyMs,
@@ -142,6 +155,7 @@ class RenewTask {
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
         pickedMaterials = List.unmodifiable(pickedMaterials),
+        exports = List.unmodifiable(exports),
         replacements =
             replacements == null ? null : List.unmodifiable(replacements);
 
@@ -212,6 +226,7 @@ class RenewTask {
     bool clearAnalysisError = false,
     List<UnitReplacement>? replacements,
     List<PickedMaterial>? pickedMaterials,
+    List<ExportRecord>? exports,
     BgmPlan? bgm,
     VoicePlan? voices,
     int? firstReadyMs,
@@ -240,6 +255,7 @@ class RenewTask {
             clearAnalysisError ? null : (analysisError ?? this.analysisError),
         replacements: replacements ?? this.replacements,
         pickedMaterials: pickedMaterials ?? this.pickedMaterials,
+        exports: exports ?? this.exports,
         bgm: bgm ?? this.bgm,
         voices: voices ?? this.voices,
         firstReadyMs: firstReadyMs ?? this.firstReadyMs,
@@ -272,6 +288,7 @@ class RenewTask {
         'analysisError': analysisError,
         'replacements': replacements?.map((r) => r.toJson()).toList(),
         'pickedMaterials': pickedMaterials.map((m) => m.toJson()).toList(),
+        'exports': exports.map((e) => e.toJson()).toList(),
         'bgm': bgm.toJson(),
         'voices': voices.toJson(),
         'firstReadyMs': firstReadyMs,
@@ -311,6 +328,7 @@ class RenewTask {
         analysisError: json['analysisError'] as String?,
         replacements: parseReplacements(json['replacements']),
         pickedMaterials: PickedMaterial.parseList(json['pickedMaterials']),
+        exports: ExportRecord.parseList(json['exports']),
         // 老存档里配乐是按**镜头**记区间的，读出来后按单元换算一次
         // （见 [BgmPlan.migrateShotsToUnits]）——直接丢掉的话用户已经选好的
         // 配乐会凭空消失
@@ -349,11 +367,12 @@ class RenewTask {
     final matched =
         RenewTaskStatus.values.firstWhereOrNull((s) => s.name == name);
     if (matched != null) return matched;
-    AppLog.warn('任务状态「$name」无法识别，按 ${fallbackStatus.name} 处理');
+    // 老存档里的 editing / exported / awaitingCut / picking 一律落到 ready：
+    // 它们现在都是同一件事——「可以进去干活」
     return fallbackStatus;
   }
 
-  static const fallbackStatus = RenewTaskStatus.editing;
+  static const fallbackStatus = RenewTaskStatus.ready;
 
   @override
   bool operator ==(Object other) =>

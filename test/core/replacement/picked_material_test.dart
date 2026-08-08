@@ -6,7 +6,7 @@ RenewTask _task({List<PickedMaterial> picked = const []}) => RenewTask(
       id: 't1',
       name: '任务',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime(2026, 8, 7),
       updatedAt: DateTime(2026, 8, 7),
       pickedMaterials: picked,

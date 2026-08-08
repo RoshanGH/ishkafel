@@ -270,7 +270,7 @@ class AnalysisPipeline {
     // 用户进工作台第一件事是看切分对不对、拖边界，那些都不需要标签。
     final ready = task.copyWith(
       units: _withBoundaryTrace(units),
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       updatedAt: clock(),
       asrSentences: sentences,
       vocalsPath: stems?.vocalsPath,

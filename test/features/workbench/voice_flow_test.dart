@@ -52,7 +52,7 @@ RenewTask _task({VoicePlan voices = VoicePlan.empty}) => RenewTask(
       id: 'v-1',
       name: '滴露',
       sourcePath: '/v/a.mp4',
-      status: RenewTaskStatus.editing,
+      status: RenewTaskStatus.ready,
       createdAt: DateTime.utc(2026, 8, 4),
       updatedAt: DateTime.utc(2026, 8, 4),
       voices: voices,
