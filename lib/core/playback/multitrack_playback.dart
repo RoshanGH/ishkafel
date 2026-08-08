@@ -62,7 +62,13 @@ class MultitrackPlayback implements PlaybackController {
     final at = video.positionMs;
 
     final videoEdl = Edl.of(plan.video);
-    if (videoEdl != null) await video.open(videoEdl);
+    if (videoEdl != null) {
+      await video.open(videoEdl);
+      // 画面轨一律静音：它播的可能是候选素材，而那条素材自带的声音该不该出
+      // 由口播轨按替换规格决定（整体替换要、镜头替换不要）。这里出声只会
+      // 变成两份声音重叠
+      await video.setMuted(true);
+    }
     await voice.load(Edl.of(plan.voice));
 
     // 换源之后位置回到 0，把它拉回用户原来看的地方

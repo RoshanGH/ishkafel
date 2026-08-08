@@ -24,6 +24,14 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
+import '../../core/ffmpeg/ffprobe_service.dart';
+import '../../core/ffmpeg/process_runner.dart';
+import '../../core/ffmpeg/rendered_cache.dart';
+import '../../core/playback/media_kit_follower.dart';
+import '../../core/playback/multitrack_playback.dart';
+import 'preview_tracks.dart';
+import 'speed_fitter.dart';
+
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/editing/edit_consequence.dart';
@@ -48,7 +56,6 @@ import 'timeline_media_builder.dart';
 import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
-import 'preview_audio.dart';
 import '../export/export_dialog.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
@@ -172,7 +179,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   AudioPreview? _preview;
 
   /// 预览音轨：让工作台里听到的就是导出后的声音（配音替换 + 配乐叠加）
-  PreviewAudioController? _previewAudio;
+  PreviewTracks? _tracks;
 
   /// 任务列表控制器。在 initState 里就抓住：dispose 时 `ref` 已经失效，
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
@@ -222,18 +229,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // 进工作台就把方案里的配乐固定住——只在「选完」时才下的话，
     // 打开一条早就配好乐的任务什么都不会发生
     _pinBgm();
+    // 素材已经在本地、但落地记录里缺时长的，补一次（整体替换靠它算长度）
+    unawaited(_backfillDurations());
 
     final playback = _resolvePlayback();
     _playback = playback;
-    if (playback is MediaKitPlaybackController) {
-      _videoWidget = playback.buildVideoWidget();
-    }
+    _videoWidget = switch (playback) {
+      MultitrackPlayback() => playback.buildVideoWidget(),
+      MediaKitPlaybackController() => playback.buildVideoWidget(),
+      _ => null,
+    };
     // 只更新 notifier，不触发页面重建；重复值直接丢弃（mpv 会重复上报同一毫秒）
     _positionSub = playback.positionMsStream.listen((ms) {
       if (!mounted) return;
       // 预览播的可能是**合成出来的成片**（整体替换会改变时长），而时间线画的
       // 是原片切分——播放头要换算回原片时刻，否则整体替换之后指针就飘了
-      final at = _previewAudio?.timeline?.toSourceMs(ms) ?? ms;
+      final at = _tracks?.toSourceMs(ms) ?? ms;
       if (_playhead.value == at) return;
       _playhead.value = at;
     });
@@ -241,30 +252,59 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     unawaited(_loadMedia());
     _restoreVoiceAudio();
 
-    _previewAudio = PreviewAudioController(
-      playback: playback,
-      factory: ref.read(audioTrackBuilderFactoryProvider),
-      composerFactory: ref.read(previewComposerFactoryProvider),
-      workDirOf: _previewWorkDirOf,
-    )..addListener(_onPreviewAudioChanged);
+    if (playback is MultitrackPlayback) {
+      _tracks = PreviewTracks(
+        playback: playback,
+        materials: _mediaCache,
+        bgmMedia: _bgmMediaCache,
+        speedFitter: _buildSpeedFitter(),
+      )
+        ..addListener(_onTracksChanged)
+        ..onNeedsRebuild = _syncPreviewAudio;
+    }
     _syncPreviewAudio();
   }
 
-  void _onPreviewAudioChanged() {
+  /// 变速切片的渲染器。没有数据目录（测试环境）就不做变速——
+  /// 那一段先播原片，其余照旧
+  SpeedFitter? _buildSpeedFitter() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return SpeedFitter(
+      cache: RenderedCache(
+        dir: Directory(p.join(dataDir.path, 'speed_fit', widget.task.id)),
+        run: const ResolvingProcessRunner().call,
+      ),
+      probeDurationMs: (path) async =>
+          (await FfprobeService(run: const ResolvingProcessRunner().call)
+                  .probe(path))
+              .duration
+              .inMilliseconds,
+    );
+  }
+
+  /// 三条轨：画面（主时钟，静音）+ 口播 + 配乐（循环）
+  static PlaybackController _multitrack() => MultitrackPlayback(
+        video: MediaKitPlaybackController(),
+        voice: MediaKitFollower(),
+        bgm: MediaKitFollower(loop: true),
+      );
+
+  void _onTracksChanged() {
     if (mounted) setState(() {});
   }
 
-  /// 方案变了就重算预览音轨。与声音无关的改动会被它自己的指纹挡掉。
+  /// 方案变了就重推轨道。与画面/声音无关的改动会被轨道指纹挡掉。
   void _syncPreviewAudio() {
     final editor = _editor;
     if (editor == null) return;
-    _previewAudio?.update(
+    unawaited(_tracks?.update(
       task: _task,
       units: editor.units,
       voiceAudio: _voiceAudio,
-      // 有替换时预览要把画面也合出来——各槽位取标了 ★ 的那个候选
+      // 各槽位取标了 ★ 的那个候选
       replacements: _replacements ?? const [],
-    );
+    ));
   }
 
   /// 打开原片。失败要让用户看见——文件被移走/改名时，静默失败的表现是
@@ -309,7 +349,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 图标却不说明原因），并保留原始异常到日志（按消息文本对已知的"未
   /// 初始化"情形单独给出更精确的措辞）。
   PlaybackController _resolvePlayback() {
-    final factory = widget.playbackFactory ?? MediaKitPlaybackController.new;
+    // 缺省是**三条独立轨**：画面主时钟 + 口播 + 配乐（见 [MultitrackPlayback]）。
+    // 测试注入 FakePlaybackController，不碰 libmpv
+    final factory = widget.playbackFactory ?? _multitrack;
     try {
       return factory();
     } on Exception catch (e) {
@@ -332,8 +374,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _playhead.dispose();
     unawaited(_playback?.dispose());
     unawaited(_preview?.dispose());
-    _previewAudio?.removeListener(_onPreviewAudioChanged);
-    _previewAudio?.dispose();
+    _tracks?.removeListener(_onTracksChanged);
+    _tracks?.dispose();
     // 离开工作台时做一次配额回收：固定住的一律不动，只淘汰没人用的
     for (final cache in [_mediaCache, _bgmMediaCache]) {
       if (cache == null) continue;
@@ -574,12 +616,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return true;
   }
 
-  /// 重新合成预览音轨。
-  ///
-  /// 配乐取不到最常见的两个原因是网络抖动和登录过期——重试一次多半就好了，
-  /// 而此前用户只能去重新选一首曲子，那根本不是他的问题。
+  /// 重新推一次轨道。配乐/素材取不到最常见的两个原因是网络抖动和登录过期，
+  /// 重试一次多半就好了——而此前用户只能去重新选一遍
   void _retryPreviewAudio() {
-    _previewAudio?.invalidate();
+    for (final cache in [_mediaCache, _bgmMediaCache]) {
+      for (final id in cache?.notReady ?? const <int>[]) {
+        cache!.retry(id);
+      }
+    }
     _syncPreviewAudio();
   }
 
@@ -592,14 +636,27 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   Future<void> _deleteBgm(int startUnit) =>
       _saveBgm(_task.bgm.removeSegment(startUnit));
 
-  /// 被整体替换的单元在成片里的时长。预览合成完才知道（要读候选素材），
-  /// 没合成过时为空
+  /// 被整体替换的单元在成片里的时长（时间线上要标出「15.3s → 11.3s」）。
+  /// 直接从画面轨读——每个整体替换单元就是轨上的一段
   Map<int, int> get _composedDurations {
-    final timeline = _previewAudio?.timeline;
-    if (timeline == null) return const {};
-    return {
-      for (final e in timeline.wholeDurations.entries) e.key: e.value,
-    };
+    final tracks = _tracks;
+    if (tracks == null) return const {};
+    final units = _editor?.units ?? const [];
+    final out = <int, int>{};
+    for (var i = 0; i < units.length && i < (_replacements?.length ?? 0); i++) {
+      final replacement = _replacements![i];
+      if (replacement.mode != ReplacementMode.whole) continue;
+      final id = replacement.wholePreviewId;
+      final path = id == null ? null : _mediaCache?.localPathOf(id);
+      if (path == null) continue;
+      for (final segment in tracks.plan.video) {
+        if (segment.source == path) {
+          out[i] = segment.durationMs;
+          break;
+        }
+      }
+    }
+    return out;
   }
 
   /// 传给 miaoa CLI 的 `--projects`；不限项目时为空
@@ -975,18 +1032,66 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
   }
 
-  /// 预览产物落在哪儿。存档（「这份预览是按什么方案合的」）就放在同一个
-  /// 目录里，重开工作台时靠它决定要不要重合
-  Directory? _previewWorkDirOf(String taskId) {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return null;
-    return Directory(p.join(dataDir.path, 'preview_video', taskId));
-  }
 
   /// 素材/配乐的落地状态变了就重画底部栏——导出按钮的可用性挂在它上面
   void _onMediaCacheChanged() {
     if (mounted) setState(() {});
+    unawaited(_backfillDurations());
   }
+
+  /// 补齐已选素材的时长。
+  ///
+  /// 勾选那一刻规格可能还在探测中，落地记录里就存了个空——而整体替换要靠它
+  /// 算「这一段在成片里有多长」。缺了的话会按原坑位长度铺，EDL 里写的
+  /// length 比候选本身还长，播到候选结尾那一段就没东西了（真机上就这么错的）。
+  ///
+  /// 素材本来就固定在本地，ffprobe 一次几十毫秒，补完写回任务，之后不再探。
+  Future<void> _backfillDurations() async {
+    final cache = _mediaCache;
+    if (cache == null || _backfillingDurations) return;
+    final missing = [
+      for (final m in _task.pickedMaterials)
+        if (m.durationMs == null && cache.localPathOf(m.id) != null) m,
+    ];
+    if (missing.isEmpty) return;
+
+    _backfillingDurations = true;
+    try {
+      final probe = FfprobeService(run: const ResolvingProcessRunner().call);
+      final updated = <int, int>{};
+      for (final m in missing) {
+        try {
+          final ms = (await probe.probe(cache.localPathOf(m.id)!))
+              .duration
+              .inMilliseconds;
+          if (ms > 0) updated[m.id] = ms;
+        } catch (e) {
+          // 探不出来就先空着，下次进来再试；不要用 0 顶——那会把后面所有
+          // 段落挤成一团
+          AppLog.warn('补取已选素材 ${m.id} 的时长失败：$e');
+        }
+      }
+      if (updated.isEmpty || !mounted) return;
+      await _onPickedMaterialsChanged([
+        for (final m in _task.pickedMaterials)
+          updated.containsKey(m.id)
+              ? PickedMaterial(
+                  id: m.id,
+                  name: m.name,
+                  voiceover: m.voiceover,
+                  sceneDescription: m.sceneDescription,
+                  thumbPath: m.thumbPath,
+                  durationMs: updated[m.id],
+                )
+              : m,
+      ]);
+      _syncPreviewAudio();
+    } finally {
+      _backfillingDurations = false;
+    }
+  }
+
+  bool _backfillingDurations = false;
 
   ReplacementPlan get _plan => ReplacementPlan(_replacements ?? const []);
 
@@ -1034,14 +1139,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           children: [
             if (_playbackDegraded) const PlaybackDegradedBanner(),
             if (_retaggingCount > 0) RetaggingBanner(unitCount: _retaggingCount),
-            if (previewAudioNotice(
-                    _previewAudio?.state ?? PreviewAudioState.original,
-                    _previewAudio?.failure,
-                    progress: _previewAudio?.progress)
-                case final notice?)
+            // 多轨播放不需要「正在合成」——只有变速切片和取不到的配乐
+            // 才有话要说
+            if (_tracks?.notice case final notice?)
               PreviewAudioBanner(
                 text: notice,
-                building: _previewAudio?.state == PreviewAudioState.building,
+                building: (_tracks?.speedFitter?.pending ?? 0) > 0,
                 onRetry: _retryPreviewAudio,
               ),
             if (missingVocalsNotice(

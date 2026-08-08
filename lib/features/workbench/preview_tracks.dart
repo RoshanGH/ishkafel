@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/voice_plan.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/playback/multitrack_playback.dart';
@@ -108,8 +111,7 @@ class PreviewTracks extends ChangeNotifier {
     }
     final bgmPaths = <int, String>{
       for (final material in task.bgm.materials)
-        if (bgmMedia?.localPathOf(material.id) case final path?)
-          material.id: path,
+        material.id: ?bgmMedia?.localPathOf(material.id),
     };
 
     return TrackPlanBuilder.build(
@@ -156,4 +158,15 @@ class PreviewTracks extends ChangeNotifier {
     speedFitter?.removeListener(_onFitterChanged);
     super.dispose();
   }
+}
+
+/// 有配乐或配音、但没有分离出来的人声轨时的提醒。
+///
+/// 这种情况下新配乐只能叠在原声上，原片自带的背景音还在——两首曲子一起响。
+/// 用户听到的东西不对，必须说清是为什么。
+String? missingVocalsNotice(BgmPlan bgm, VoicePlan voices, String? vocalsPath) {
+  if (bgm.segments.isEmpty) return null;
+  if (vocalsPath != null && File(vocalsPath).existsSync()) return null;
+  return '没有分离出纯人声轨，新配乐会与原片自带的背景音叠在一起。'
+      '装好人声分离工具后重新分析可解决';
 }

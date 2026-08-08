@@ -47,9 +47,6 @@ import 'features/export/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
 import 'core/audio/vocal_separator.dart';
-import 'core/audio/audio_track_builder.dart';
-import 'features/workbench/preview_audio.dart';
-import 'features/workbench/preview_composer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -107,31 +104,6 @@ Future<void> main() async {
       // 矩阵导出：真实 ffmpeg + 真实下载。素材缓存按任务分目录，
       // 清理缓存时能整目录带走
       // 预览音轨：与导出共用同一个混音器，听到的就是要交付的
-      audioTrackBuilderFactoryProvider
-          .overrideWithValue((taskId) => AudioTrackBuilder(
-                run: const ResolvingProcessRunner().call,
-                workDir:
-                    Directory(p.join(dataDir.path, 'preview_audio', taskId)),
-                // 配乐走本地缓存：miaoa 的签名地址隔天就 403，直接拿存在任务
-                // 里的那个去请求，昨天选好的配乐今天就放不出来
-                resolveBgm: bgmCache(dataDir).fetch,
-              )),
-      // 预览合成：有替换时把画面也拼出来，看到的就是那一条变体
-      previewComposerFactoryProvider
-          .overrideWithValue((taskId) => PreviewComposer(
-                run: const ResolvingProcessRunner().call,
-                workDir:
-                    Directory(p.join(dataDir.path, 'preview_video', taskId)),
-                fetchMaterial: MaterialDownloader(
-                  content: MiaoaContentService(binary: resolveMiaoaBinary()),
-                  cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
-                ).fetch,
-                probeDurationMs: (path) async => (await FfprobeService(
-                        run: const ResolvingProcessRunner().call)
-                    .probe(path))
-                    .duration
-                    .inMilliseconds,
-              )),
       // 选中配乐就把它下到本地：和预览/导出读同一份缓存
       bgmFetcherProvider.overrideWithValue(bgmCache(dataDir).fetch),
       // 挑素材时就把本体下到本地：和导出读同一个缓存目录，导出时不必再下
