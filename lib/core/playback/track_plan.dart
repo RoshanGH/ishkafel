@@ -158,18 +158,32 @@ class TrackPlan {
     return video.isEmpty ? composedMs : video.last.sourceMsAt(video.last.endMs - 1);
   }
 
-  /// 原片时刻 → 这一套轨上的成片时刻（[toSourceMs] 的逆）
+  /// 原片时刻 → 这一套轨上的成片时刻（[toSourceMs] 的逆）。
+  ///
+  /// 落不进任何一段时**取最近的那一段的边界**，而不是一律甩到片尾。这条
+  /// 兜底以前写的是「非 0 即 totalMs」，一旦哪条轨在原片轴上留了空洞
+  /// （见 [TrackPlanBuilder] 里变速切片那段的说明），用户正看着的位置就会
+  /// 被一脚踢到片子结尾——那是最糟的一种失败方式：看上去像播放器发疯。
   int toComposedMs(int sourceMs) {
+    var bestMs = 0;
+    var bestGap = -1;
     for (final segment in video) {
       final from = segment.sourceStartMs;
       final to = from + segment.sourceSpanMs;
-      if (sourceMs < from || sourceMs >= to) continue;
-      final into = sourceMs - from;
-      if (segment.sourceSpanMs <= 0) return segment.atMs;
-      return segment.atMs +
-          (into * segment.durationMs / segment.sourceSpanMs).round();
+      if (sourceMs >= from && sourceMs < to) {
+        if (segment.sourceSpanMs <= 0) return segment.atMs;
+        final into = sourceMs - from;
+        return segment.atMs +
+            (into * segment.durationMs / segment.sourceSpanMs).round();
+      }
+      // 离得多远：在这一段之前就是 from-sourceMs，之后就是 sourceMs-(to-1)
+      final gap = sourceMs < from ? from - sourceMs : sourceMs - to + 1;
+      if (bestGap < 0 || gap < bestGap) {
+        bestGap = gap;
+        bestMs = sourceMs < from ? segment.atMs : segment.endMs;
+      }
     }
-    return sourceMs <= 0 ? 0 : totalMs;
+    return bestMs.clamp(0, totalMs);
   }
 
   /// [ms] 时刻该播哪一段配乐；没有就返回 null

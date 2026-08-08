@@ -83,7 +83,17 @@ class TrackPlanBuilder {
             : speedFitted[shotKey(unit.index, shotIndex)];
         video.add(fitted != null
             // 变速切片已经是坑位那么长了，从头播就行
-            ? TrackSegment(atMs: at, durationMs: slotMs, source: fitted)
+            ? TrackSegment(
+                atMs: at,
+                durationMs: slotMs,
+                source: fitted,
+                // 它在**原片轴**上占的还是这个镜头的坑位。不写这两项的话
+                // sourceStartMs 会默认取 inMs（=0），这一段就变成「对应原片
+                // 开头几秒」，同时把它真正占着的原片区间挖成一个空洞——换轨
+                // 那一刻按逻辑位置回原处会谁都不命中，一路兜到片尾
+                sourceStartMs: shotStart,
+                sourceSpanMs: slotMs,
+              )
             : TrackSegment(
                 atMs: at,
                 durationMs: slotMs,
@@ -213,6 +223,10 @@ class TrackPlanBuilder {
           durationMs: last.durationMs + segment.durationMs,
           source: last.source,
           inMs: last.inMs,
+          // 原片坐标显式带上：靠 inMs 兜底只对「播的就是原片」的段成立，
+          // 而这个判断不该埋在默认值里
+          sourceStartMs: last.sourceStartMs,
+          sourceSpanMs: last.durationMs + segment.durationMs,
         );
         continue;
       }
