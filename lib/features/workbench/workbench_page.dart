@@ -25,6 +25,7 @@ import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
+import '../../core/ffmpeg/media_spec.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/playback/media_kit_follower.dart';
@@ -47,6 +48,7 @@ import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import '../picking/picked_material_store.dart';
+import '../picking/material_normalizer.dart';
 import '../picking/picked_media_cache.dart';
 import '../picking/picking_providers.dart';
 import 'edit_consequence_dialog.dart';
@@ -991,10 +993,33 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final fetch = ref.read(materialFetcherProvider);
     final dataDir = ref.read(dataDirProvider);
     if (fetch == null || dataDir == null) return null;
+    // 下完顺手规格化成和原片一致——规格不一致的话播放器在替换点要重建
+    // 解码器，画面会停一下（见 [MaterialNormalizer]）
+    final normalizer = MaterialNormalizer(
+      cache: RenderedCache(
+        dir: Directory(p.join(dataDir.path, 'material_normalized')),
+        run: const ResolvingProcessRunner().call,
+      ),
+      run: const ResolvingProcessRunner().call,
+      targetSpec: _sourceSpec,
+    );
     return PickedMediaCache(
-      fetch: fetch,
+      fetch: (id) async => normalizer.normalize(await fetch(id)),
       cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
     );
+  }
+
+  /// 原片的解码规格——素材要向它看齐
+  Future<MediaSpec?> _sourceSpec() async {
+    try {
+      final result = await const ResolvingProcessRunner()
+          .call('ffprobe', MediaSpec.probeArgs(widget.task.sourcePath));
+      if (result.exitCode != 0) return null;
+      return MediaSpec.tryParse('${result.stdout}');
+    } catch (e) {
+      AppLog.warn('读不出原片规格，素材不做规格化：$e');
+      return null;
+    }
   }
 
   /// 配乐的固定。曲子按 id 从当前方案里找——方案里存的就是完整的

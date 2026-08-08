@@ -54,6 +54,9 @@ class PickedMediaCache extends ChangeNotifier {
   /// 多轨播放要直接把本地路径喂给播放器，得知道文件叫什么
   final String extension;
 
+  /// 每条素材**最终可播的**本地路径。可能不是 `<id>.<ext>`——素材规格与原片
+  /// 不一致时会先规格化一次（见 [MaterialNormalizer]），产物在别处
+  final Map<int, String> _paths = {};
   final Map<int, PickedMediaStatus> _status = {};
   final Map<int, String> _failure = {};
   final Set<int> _pinned = {};
@@ -74,6 +77,10 @@ class PickedMediaCache extends ChangeNotifier {
   /// 多轨播放直接播本地文件，所以「在不在本地」就是「这一段能不能播」——
   /// 取不到时上层把这一段当没选，播原片，而不是播一个空洞。
   String? localPathOf(int id) {
+    final resolved = _paths[id];
+    if (resolved != null && File(resolved).existsSync()) return resolved;
+    // 这一轮还没取过（比如刚重开 app，固定还在排队）：退回约定路径。
+    // 规格化好之后会通知一次，那时再换上真正该播的那一份
     final file = File(p.join(cacheDir.path, '$id.$extension'));
     return file.existsSync() && file.lengthSync() > 0 ? file.path : null;
   }
@@ -142,7 +149,7 @@ class PickedMediaCache extends ChangeNotifier {
 
   Future<void> _download(int id) async {
     try {
-      await fetch(id);
+      _paths[id] = await fetch(id);
       // 下载期间可能已经被取消勾选了，状态照记——文件确实在本地，
       // 下次再勾上就是秒好
       _status[id] = PickedMediaStatus.ready;

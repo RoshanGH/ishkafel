@@ -95,6 +95,7 @@ class MediaKitPlaybackController implements PlaybackController {
     }
   }
 
+
   /// 多轨模式下画面轨要静音——声音全部走口播轨与配乐轨
   Future<void> setMuted(bool muted) =>
       _gate.run(() => player.setVolume(muted ? 0 : 100));
