@@ -18,19 +18,41 @@ class TrackSegment {
   /// 从这个文件的什么位置开始播
   final int inMs;
 
+  /// 这一段在**原片时间轴**上对应哪一段（起点，时长）。
+  ///
+  /// 时间线画的是原片切分，播放头要靠它换算回去。绝大多数段落就是自己
+  /// （播的就是原片那一段），只有**整体替换**不同：播的是另一条素材，
+  /// 原片时刻在那儿根本不存在，但时间线上那个格子还是按原单元的长度画的。
+  final int sourceStartMs;
+  final int sourceSpanMs;
+
   const TrackSegment({
     required this.atMs,
     required this.durationMs,
     required this.source,
     this.inMs = 0,
-  });
+    int? sourceStartMs,
+    int? sourceSpanMs,
+  })  : sourceStartMs = sourceStartMs ?? inMs,
+        sourceSpanMs = sourceSpanMs ?? durationMs;
 
   int get endMs => atMs + durationMs;
 
   bool covers(int ms) => ms >= atMs && ms < endMs;
 
-  /// 成片时刻 [ms] 对应源文件里的哪一刻
-  int sourceMsAt(int ms) => inMs + (ms - atMs);
+  /// 成片时刻 [ms] 对应原片的哪一刻。
+  ///
+  /// **整体替换段按比例映射**：候选 11.3 秒顶掉原来的 15.1 秒，1:1 映射会让
+  /// 播放头走到格子的 3/4 处就到头，下一拍直接跳到下一个单元——用户看到的
+  /// 是「还剩 1/5 就跳过去了」。按比例走才能匀速走完整个格子，而且语义上也
+  /// 对：那一段播的是别的素材，本来就没有一一对应的原片时刻。
+  int sourceMsAt(int ms) {
+    final into = ms - atMs;
+    if (sourceSpanMs == durationMs || durationMs <= 0) {
+      return sourceStartMs + into;
+    }
+    return sourceStartMs + (into * sourceSpanMs / durationMs).round();
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -38,10 +60,13 @@ class TrackSegment {
       other.atMs == atMs &&
       other.durationMs == durationMs &&
       other.source == source &&
-      other.inMs == inMs;
+      other.inMs == inMs &&
+      other.sourceStartMs == sourceStartMs &&
+      other.sourceSpanMs == sourceSpanMs;
 
   @override
-  int get hashCode => Object.hash(atMs, durationMs, source, inMs);
+  int get hashCode =>
+      Object.hash(atMs, durationMs, source, inMs, sourceStartMs, sourceSpanMs);
 
   @override
   String toString() => 'TrackSegment($atMs+$durationMs ← $source@$inMs)';

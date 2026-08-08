@@ -55,7 +55,13 @@ class TrackPlanBuilder {
         // 整体替换：画面与声音都来自候选，整段原样接上，时长跟候选走
         final durationMs = whole.durationMs ?? unit.durationMs;
         video.add(TrackSegment(
-            atMs: at, durationMs: durationMs, source: whole.path));
+          atMs: at,
+          durationMs: durationMs,
+          source: whole.path,
+          // 时间线上这个格子还是按原单元画的，播放头要按比例走完它
+          sourceStartMs: unit.startMs,
+          sourceSpanMs: unit.durationMs,
+        ));
         voice.add(TrackSegment(
             atMs: at, durationMs: durationMs, source: whole.path));
         at += durationMs;
@@ -198,7 +204,10 @@ class TrackPlanBuilder {
       if (last != null &&
           last.source == segment.source &&
           last.endMs == segment.atMs &&
-          last.inMs + last.durationMs == segment.inMs) {
+          last.inMs + last.durationMs == segment.inMs &&
+          // 时长被替换改过的段不能并进来——它的播放头映射是按比例的
+          last.sourceSpanMs == last.durationMs &&
+          segment.sourceSpanMs == segment.durationMs) {
         out[out.length - 1] = TrackSegment(
           atMs: last.atMs,
           durationMs: last.durationMs + segment.durationMs,

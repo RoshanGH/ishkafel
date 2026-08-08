@@ -72,8 +72,9 @@ void main() {
         materials: {71: const LocalMaterial(path: '/m/71.mp4', durationMs: 2500)},
       );
 
-      expect(plan.video.first,
-          const TrackSegment(atMs: 0, durationMs: 2500, source: '/m/71.mp4'));
+      expect(plan.video.first.durationMs, 2500);
+      expect(plan.video.first.source, '/m/71.mp4');
+      expect(plan.video.first.inMs, 0, reason: '候选从头播');
       expect(plan.video[1].atMs, 2500, reason: 'U1 短了 1.5 秒，U2 跟着前移');
       expect(plan.video[1].inMs, 4000, reason: 'U2 播的还是原片那一段');
       expect(plan.totalMs, 8500);
@@ -234,6 +235,58 @@ void main() {
 
       expect(plan.bgmAt(1000), isNull);
       expect(plan.bgmAt(5000)?.clip.source, '/local/9.mp3');
+    });
+  });
+
+
+  group('播放头换算回原片时刻', () {
+    /// 用户原话：「播放到那个轨道，最后可能还剩 1/5，就直接跳到下一个台词
+    /// 语义单元开始播放了。」——时间线上 U1 那个格子是按原片 4000ms 画的，
+    /// 而成片里它只有 2000ms。1:1 映射会让播放头走到格子的一半就到头，
+    /// 下一拍直接跳过去。
+    test('整体替换段按比例走完整个格子，不提前跳走', () {
+      final plan = build(
+        replacements: [UnitReplacement.whole(const [71])],
+        materials: {71: const LocalMaterial(path: '/m/71.mp4', durationMs: 2000)},
+      );
+      final whole = plan.video.first;
+
+      expect(whole.durationMs, 2000, reason: '成片里只有 2 秒');
+      expect(whole.sourceMsAt(0), 0);
+      expect(whole.sourceMsAt(1000), 2000,
+          reason: '走到成片一半时，播放头该在原片格子（0~4000）的一半');
+      expect(whole.sourceMsAt(1999), 3998,
+          reason: '走到成片末尾时该正好走到格子末尾，而不是停在 2000 再跳');
+    });
+
+    test('没被替换的段落还是一一对应，不做任何缩放', () {
+      final plan = build();
+      final segment = plan.video.single;
+
+      expect(segment.sourceMsAt(0), 0);
+      expect(segment.sourceMsAt(5000), 5000);
+      expect(segment.sourceMsAt(9999), 9999);
+    });
+
+    test('整体替换之后的段落，播放头回到真实的原片时刻', () {
+      final plan = build(
+        replacements: [UnitReplacement.whole(const [71])],
+        materials: {71: const LocalMaterial(path: '/m/71.mp4', durationMs: 2000)},
+      );
+
+      // U2 在成片里从 2000 开始，播的是原片 4000~10000
+      final next = plan.video[1];
+      expect(next.sourceMsAt(2000), 4000);
+      expect(next.sourceMsAt(3000), 5000);
+    });
+
+    test('按比例的段不会被并进相邻段——并了映射就错了', () {
+      final plan = build(
+        replacements: [UnitReplacement.whole(const [71])],
+        materials: {71: const LocalMaterial(path: '/m/71.mp4', durationMs: 2000)},
+      );
+
+      expect(plan.video, hasLength(2));
     });
   });
 
