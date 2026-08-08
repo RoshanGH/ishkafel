@@ -7,8 +7,9 @@ import 'track_plan.dart';
 /// 抽成接口是为了让下面那套「什么时候该 load / seek / 校正」的判断能脱离
 /// media_kit 单测——多轨同步是这套架构唯一的技术风险，不能只靠真机手感。
 abstract class FollowerTrack {
-  /// 换源。[edl] 为 null 表示这一轨这次没东西可播
-  Future<void> load(String? edl);
+  /// 换源。[edl] 为 null 表示这一轨这次没东西可播。
+  /// 返回 true 表示**真的换了**——没换的话调用方不必重新定位
+  Future<bool> load(String? edl);
 
   Future<void> play();
   Future<void> pause();

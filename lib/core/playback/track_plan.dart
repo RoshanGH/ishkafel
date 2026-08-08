@@ -148,6 +148,30 @@ class TrackPlan {
   /// 成片总长（按画面轨算——它才是片子的长度）
   int get totalMs => video.isEmpty ? 0 : video.last.endMs;
 
+  /// 成片时刻 → 原片时刻。**换方案时要靠它记住「我停在哪儿」**：
+  /// 直接记成片毫秒的话，新方案的总长一变，同一个毫秒对应的内容就完全不是
+  /// 同一处了——用户点一下 ★ 就被扔到片子的别处。
+  int toSourceMs(int composedMs) {
+    for (final segment in video) {
+      if (segment.covers(composedMs)) return segment.sourceMsAt(composedMs);
+    }
+    return video.isEmpty ? composedMs : video.last.sourceMsAt(video.last.endMs - 1);
+  }
+
+  /// 原片时刻 → 这一套轨上的成片时刻（[toSourceMs] 的逆）
+  int toComposedMs(int sourceMs) {
+    for (final segment in video) {
+      final from = segment.sourceStartMs;
+      final to = from + segment.sourceSpanMs;
+      if (sourceMs < from || sourceMs >= to) continue;
+      final into = sourceMs - from;
+      if (segment.sourceSpanMs <= 0) return segment.atMs;
+      return segment.atMs +
+          (into * segment.durationMs / segment.sourceSpanMs).round();
+    }
+    return sourceMs <= 0 ? 0 : totalMs;
+  }
+
   /// [ms] 时刻该播哪一段配乐；没有就返回 null
   BgmTrackSegment? bgmAt(int ms) {
     for (final segment in bgm) {

@@ -9,7 +9,7 @@ import 'playback_controller.dart';
 import 'playback_gate.dart';
 
 /// media_kit 实现（薄封装 [Player]）；`Video` 组件由 player_panel 使用。
-class MediaKitPlaybackController implements PlaybackController {
+class MediaKitPlaybackController implements MasterTrack {
   MediaKitPlaybackController({Player? player})
       : player = player ?? Player() {
     _videoController = VideoController(this.player);
@@ -97,6 +97,7 @@ class MediaKitPlaybackController implements PlaybackController {
 
 
   /// 多轨模式下画面轨要静音——声音全部走口播轨与配乐轨
+  @override
   Future<void> setMuted(bool muted) =>
       _gate.run(() => player.setVolume(muted ? 0 : 100));
 

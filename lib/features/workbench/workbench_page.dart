@@ -1128,6 +1128,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         dirty: editor.dirty,
         hasTagGroups: widget.task.unitTagGroup != null ||
             widget.task.shotTagGroup != null,
+        composedMs: _tracks?.plan.totalMs,
       );
 
   @override

@@ -25,20 +25,24 @@ class MediaKitFollower implements FollowerTrack {
       : player = player ?? Player();
 
   @override
-  Future<void> load(String? edl) => _gate.run(() async {
-        if (edl == _loaded) return;
-        _loaded = edl;
-        if (edl == null) {
-          await player.stop();
-          return;
-        }
-        await player.open(Media(edl), play: false);
-        // 播到结尾停住而不是卸载，否则位置会归零、纠偏逻辑会把主时钟拉回去
-        await _setMpv('keep-open', 'yes');
-        await _setMpv('loop-file', loop ? 'inf' : 'no');
-        // 这一轨只要声音。不关视频解码的话，同一份画面会被解两遍白烧 CPU
-        await _setMpv('vid', 'no');
-      });
+  Future<bool> load(String? edl) async =>
+      await _gate.run(() => _load(edl)) ?? false;
+
+  Future<bool> _load(String? edl) async {
+    if (edl == _loaded) return false;
+    _loaded = edl;
+    if (edl == null) {
+      await player.stop();
+      return true;
+    }
+    await player.open(Media(edl), play: false);
+    // 播到结尾停住而不是卸载，否则位置会归零、纠偏逻辑会把主时钟拉回去
+    await _setMpv('keep-open', 'yes');
+    await _setMpv('loop-file', loop ? 'inf' : 'no');
+    // 这一轨只要声音。不关视频解码的话，同一份画面会被解两遍白烧 CPU
+    await _setMpv('vid', 'no');
+    return true;
+  }
 
   @override
   Future<void> play() => _gate.run(player.play);

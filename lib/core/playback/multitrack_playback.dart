@@ -28,7 +28,7 @@ import 'track_plan.dart';
 /// 不该为了多轨再踩一遍。
 class MultitrackPlayback implements PlaybackController {
   /// 画面轨兼主时钟
-  final MediaKitPlaybackController video;
+  final MasterTrack video;
   final FollowerTrack voice;
   final FollowerTrack bgm;
 
@@ -40,6 +40,9 @@ class MultitrackPlayback implements PlaybackController {
   StreamSubscription<bool>? _playingSub;
   Timer? _syncTimer;
   BgmCue _bgmCue = BgmCue.silent;
+
+  /// 画面轨当前加载的那条 EDL。没变就不重新 open——open 会闪一下黑
+  String? _videoEdl;
   bool _disposed = false;
 
   MultitrackPlayback({
@@ -54,28 +57,52 @@ class MultitrackPlayback implements PlaybackController {
 
   TrackPlan get plan => _plan;
 
-  /// 换一套轨。**位置保持不变**——用户改了个候选就被弹回片头是不能接受的。
+  /// 换一套轨。
   ///
-  /// 画面轨为空（一处替换都没有、且没拿到原片）时什么都不做。
+  /// 用户点一下 ★、取消一个勾选，走的就是这里。三条**必须**守住的规矩：
+  /// - **画面轨没变就一帧都不动**。改配乐、改音量、改别的单元的候选时，
+  ///   画面轨往往一模一样——无条件重新 open 会让画面白闪一下黑；
+  /// - **保持播放状态**。正在播的时候点一下 ★ 就停住，是不能接受的；
+  /// - **按逻辑位置恢复**。记的是「我停在原片的哪一刻」，不是「第几毫秒」
+  ///   ——取消整体替换之后成片总长会变，同一个毫秒对应的内容完全不是同一处。
   Future<void> setPlan(TrackPlan plan) async {
-    _plan = plan;
-    final at = video.positionMs;
+    final wasPlaying = video.isPlaying;
+    // 换之前先记下逻辑位置（用旧的那套轨换算）
+    final sourceMs = _plan.video.isEmpty
+        ? null
+        : _plan.toSourceMs(video.positionMs);
 
+    _plan = plan;
     final videoEdl = Edl.of(plan.video);
-    if (videoEdl != null) {
+    final videoChanged = videoEdl != null && videoEdl != _videoEdl;
+    if (videoChanged) {
+      _videoEdl = videoEdl;
       await video.open(videoEdl);
       // 画面轨一律静音：它播的可能是候选素材，而那条素材自带的声音该不该出
       // 由口播轨按替换规格决定（整体替换要、镜头替换不要）。这里出声只会
       // 变成两份声音重叠
       await video.setMuted(true);
     }
-    await voice.load(Edl.of(plan.voice));
+    final voiceChanged = await voice.load(Edl.of(plan.voice));
 
-    // 换源之后位置回到 0，把它拉回用户原来看的地方
-    if (at > 0 && at < plan.totalMs) {
-      await video.seekMs(at);
-      await voice.seekMs(at);
+    if (videoChanged || voiceChanged) {
+      // 换源之后位置回到 0，按逻辑位置拉回用户原来看的地方
+      final at = sourceMs == null
+          ? 0
+          : plan.toComposedMs(sourceMs).clamp(0, plan.totalMs);
+      if (at > 0) {
+        await video.seekMs(at);
+        await voice.seekMs(at);
+      }
+      await _applyBgm(at, force: true);
+      // 换源前在播的话，换完接着播——点一下 ★ 就把播放停住是不能接受的
+      if (wasPlaying) {
+        await video.play();
+        await _syncPlaying(true);
+      }
+      return;
     }
+    // 画面与口播都没变（改的是配乐/音量）：只把配乐那一路对齐，画面不动
     await _applyBgm(video.positionMs, force: true);
   }
 
@@ -222,5 +249,11 @@ class MultitrackPlayback implements PlaybackController {
     await video.dispose();
   }
 
-  Widget buildVideoWidget() => video.buildVideoWidget();
+  /// 画面组件。非 media_kit 的实现（测试替身）返回 null
+  Widget? buildVideoWidget() {
+    final master = video;
+    return master is MediaKitPlaybackController
+        ? master.buildVideoWidget()
+        : null;
+  }
 }

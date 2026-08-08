@@ -61,8 +61,20 @@ abstract class PlaybackController {
   Future<void> dispose();
 }
 
+/// 多轨里的**画面轨**：比普通播放器多一个静音开关。
+///
+/// 画面轨播的可能是候选素材，那条素材自带的声音该不该出由口播轨按替换规格
+/// 决定（整体替换要、镜头替换不要）——画面轨出声只会变成两份声音重叠。
+///
+/// 抽成接口不只是为了整齐：换方案时「画面没变就一帧不动、正在播就接着播、
+/// 按逻辑位置恢复」这三条规矩全在 [MultitrackPlayback.setPlan] 里，
+/// 不能注入替身就只能靠反复戳界面去验，那不是验证。
+abstract class MasterTrack implements PlaybackController {
+  Future<void> setMuted(bool muted);
+}
+
 /// 测试替身：内存位置模拟，记录调用，零 libmpv 依赖。
-class FakePlaybackController implements PlaybackController {
+class FakePlaybackController implements MasterTrack {
   final List<String> calls = [];
 
   final StreamController<int> _positionController =
@@ -72,6 +84,15 @@ class FakePlaybackController implements PlaybackController {
 
   int _positionMs = 0;
   bool _isPlaying = false;
+
+  /// 静音状态（测试断言用）
+  bool muted = false;
+
+  @override
+  Future<void> setMuted(bool value) async {
+    muted = value;
+    calls.add('setMuted:$value');
+  }
 
   @override
   Future<bool> setExternalAudio(String path) async {

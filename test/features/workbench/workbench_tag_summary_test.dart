@@ -73,6 +73,7 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
 }
 
 void main() {
+  _composedDuration();
   group('顶栏第二行显示两个标签组（设计稿：标签组 衣清.消毒液 / 画面类型）', () {
     testWidgets('两个标签组都选了时按「单元组 / 镜头组」显示名字而不是 id',
         (tester) async {
@@ -188,6 +189,44 @@ void main() {
           reason: '工作台里每次改动都直接落库，还挂着「有未保存的修改」'
               '只会让用户去找一个不存在的保存按钮');
       expect(text, contains('已自动保存'));
+    });
+  });
+}
+
+/// 时间线画的已经是成片了，底部这一行也得跟上
+void _composedDuration() {
+  List<SemanticUnit> units() => const [
+        SemanticUnit(
+            index: 0, startMs: 0, endMs: 15090, transcript: 'U1', shots: []),
+      ];
+
+  String summary({int? composedMs}) => workbenchSummaryText(
+        units: units(),
+        durationMs: 96200,
+        dirty: false,
+        hasTagGroups: false,
+        composedMs: composedMs,
+      );
+
+  group('成片时长与原片时长', () {
+    test('替换让长度变了就两个都写出来——只报原片会让人以为哪儿算错了', () {
+      final text = summary(composedMs: 92460);
+
+      expect(text, contains('时长 92.5s'));
+      expect(text, contains('原片 96.2s'));
+    });
+
+    test('没变时只写一个，不制造多余信息', () {
+      expect(summary(composedMs: 96200), contains('时长 96.2s'));
+      expect(summary(composedMs: 96200), isNot(contains('原片')));
+    });
+
+    test('差得极小（不到 0.1 秒）也当没变——转码的零头不该显示成两个数', () {
+      expect(summary(composedMs: 96250), isNot(contains('原片')));
+    });
+
+    test('还没算出成片时长时按原片报，不留空', () {
+      expect(summary(), contains('时长 96.2s'));
     });
   });
 }

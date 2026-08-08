@@ -10,11 +10,22 @@ String workbenchSummaryText({
   required int durationMs,
   required bool dirty,
   required bool hasTagGroups,
+
+  /// 替换之后成片有多长。与 [durationMs]（原片时长）不同时两个都写出来——
+  /// 时间线画的已经是成片了，这一行还只报原片时长，用户会以为哪儿算错了
+  int? composedMs,
 }) {
   final totalShots = units.fold<int>(0, (sum, u) => sum + u.shots.length);
   final durationSec = (durationMs / 1000).toStringAsFixed(1);
-  final base = '共 ${units.length} 个台词语义单元 · $totalShots 个视觉镜头 · '
-      '时长 ${durationSec}s';
+  final changed = composedMs != null &&
+      composedMs > 0 &&
+      (composedMs - durationMs).abs() >= 100;
+  final duration = changed
+      ? '时长 ${(composedMs / 1000).toStringAsFixed(1)}s'
+          '（原片 ${durationSec}s）'
+      : '时长 ${durationSec}s';
+  final base =
+      '共 ${units.length} 个台词语义单元 · $totalShots 个视觉镜头 · $duration';
   return '$base${_taggingPart(units, totalShots, hasTagGroups)}'
       // 工作台里每次改动都直接落库，没有「未保存」这回事。这里曾经写
       // 「有未保存的修改」，会让用户去找一个不存在的保存按钮。
