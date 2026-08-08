@@ -179,6 +179,7 @@ class TrackPlanBuilder {
           source: path,
         ),
         volume: segment.volume,
+        sourceDurationMs: material.durationMs,
       ));
     }
     out.sort((a, b) => a.clip.atMs.compareTo(b.clip.atMs));

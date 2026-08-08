@@ -50,6 +50,10 @@ class PickedMediaCache extends ChangeNotifier {
   /// 缓存上限（字节）。超了就按最久未用淘汰未固定的
   final int quotaBytes;
 
+  /// 缓存文件的扩展名（画面素材 `mp4`、配乐 `mp3`）。
+  /// 多轨播放要直接把本地路径喂给播放器，得知道文件叫什么
+  final String extension;
+
   final Map<int, PickedMediaStatus> _status = {};
   final Map<int, String> _failure = {};
   final Set<int> _pinned = {};
@@ -62,7 +66,17 @@ class PickedMediaCache extends ChangeNotifier {
     required this.cacheDir,
     this.concurrency = 2,
     this.quotaBytes = 10 * 1024 * 1024 * 1024,
+    this.extension = 'mp4',
   });
+
+  /// 这条素材在本地的路径；还没下下来（或下了个空文件）时返回 null。
+  ///
+  /// 多轨播放直接播本地文件，所以「在不在本地」就是「这一段能不能播」——
+  /// 取不到时上层把这一段当没选，播原片，而不是播一个空洞。
+  String? localPathOf(int id) {
+    final file = File(p.join(cacheDir.path, '$id.$extension'));
+    return file.existsSync() && file.lengthSync() > 0 ? file.path : null;
+  }
 
   PickedMediaStatus statusOf(int id) => _status[id] ?? PickedMediaStatus.absent;
 

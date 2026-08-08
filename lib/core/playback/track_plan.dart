@@ -47,20 +47,39 @@ class TrackSegment {
   String toString() => 'TrackSegment($atMs+$durationMs ← $source@$inMs)';
 }
 
-/// 配乐段落多带一个音量——每段独立（见 [BgmSegment.volume]）
+/// 配乐段落多带音量与曲子本身的长度——每段音量独立（见 [BgmSegment.volume]）；
+/// 曲长用来算「不够长就循环」时该从曲子的哪一刻接上
 @immutable
 class BgmTrackSegment {
   final TrackSegment clip;
   final double volume;
 
-  const BgmTrackSegment({required this.clip, required this.volume});
+  /// 这首曲子本身有多长。为 0 表示不知道，那就不循环、播完即止
+  final int sourceDurationMs;
+
+  const BgmTrackSegment({
+    required this.clip,
+    required this.volume,
+    this.sourceDurationMs = 0,
+  });
+
+  /// 成片时刻 [ms] 该播这首曲子的哪一刻。曲子比这一段短就绕回开头
+  /// （「时长不够就循环」——产品定的配乐原则）
+  int sourceMsAt(int ms) {
+    final offset = ms - clip.atMs;
+    if (sourceDurationMs <= 0) return offset;
+    return offset % sourceDurationMs;
+  }
 
   @override
   bool operator ==(Object other) =>
-      other is BgmTrackSegment && other.clip == clip && other.volume == volume;
+      other is BgmTrackSegment &&
+      other.clip == clip &&
+      other.volume == volume &&
+      other.sourceDurationMs == sourceDurationMs;
 
   @override
-  int get hashCode => Object.hash(clip, volume);
+  int get hashCode => Object.hash(clip, volume, sourceDurationMs);
 }
 
 /// 预览要播的东西——**三条各自独立的轨**，谁到点了谁播自己那一段。

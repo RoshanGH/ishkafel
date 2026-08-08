@@ -947,6 +947,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final dataDir = ref.read(dataDirProvider);
     if (fetch == null || dataDir == null) return null;
     return PickedMediaCache(
+      extension: 'mp3',
       fetch: (id) {
         final material = _task.bgm.materialById(id);
         if (material == null) {
