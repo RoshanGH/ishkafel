@@ -1,8 +1,11 @@
 // test/features/workbench/timeline/timeline_geometry_test.dart
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/export/composed_timeline.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 
 void main() {
+  _composedAxis();
   test('fit 让全片恰好铺满视口', () {
     final g = TimelineGeometry.fit(durationMs: 96000, viewportWidthPx: 960);
     expect(g.msPerPx, 100);
@@ -123,6 +126,75 @@ void _resizeRegressions() {
 
       expect(fitted.resizedTo(oldViewportWidthPx: 1455, newViewportWidthPx: 0),
           same(fitted));
+    });
+  });
+}
+
+/// 时间线画的是**成片**：整体替换之后那一格按新长度画，后面的跟着挪
+void _composedAxis() {
+  /// U1 = 0~4000（被换成 2 秒的候选）、U2 = 4000~10000
+  ComposedTimeline axis() => ComposedTimeline.of(
+        units: const [
+          SemanticUnit(
+              index: 0, startMs: 0, endMs: 4000, transcript: 'U1', shots: []),
+          SemanticUnit(
+              index: 1, startMs: 4000, endMs: 10000, transcript: 'U2', shots: []),
+        ],
+        wholeDurations: const {0: 2000},
+      );
+
+  group('成片时间轴', () {
+    test('总长按成片算——时间线的宽度就是成片的长度', () {
+      final geometry = TimelineGeometry.fit(
+          durationMs: 10000, viewportWidthPx: 800, axis: axis());
+
+      expect(geometry.durationMs, 8000);
+      expect(geometry.msPerPx, 10, reason: '8000ms 铺满 800px');
+    });
+
+    test('原片刻度画在成片位置上——那一格变窄，后面的左移', () {
+      final geometry = TimelineGeometry.fit(
+          durationMs: 10000, viewportWidthPx: 800, axis: axis());
+
+      expect(geometry.msToPx(0), 0);
+      expect(geometry.msToPx(4000), 200, reason: 'U1 只剩 2 秒 = 200px');
+      expect(geometry.msToPx(10000), 800);
+    });
+
+    test('点在画布上换算回原片刻度——选中的是原片切分里的单元', () {
+      final geometry = TimelineGeometry.fit(
+          durationMs: 10000, viewportWidthPx: 800, axis: axis());
+
+      expect(geometry.pxToMs(200), 4000);
+      expect(geometry.pxToMs(400), 6000, reason: 'U2 内部一一对应');
+    });
+
+    test('定位给播放器的是成片刻度——播放器跑在成片上', () {
+      final geometry = TimelineGeometry.fit(
+          durationMs: 10000, viewportWidthPx: 800, axis: axis());
+
+      expect(geometry.pxToComposedMs(200), 2000);
+      expect(geometry.composedMsToPx(2000), 200);
+    });
+
+    test('换一套轴时保持缩放与滚动——改个候选就被弹回片头是不能接受的', () {
+      final zoomed = TimelineGeometry(
+          durationMs: 10000, msPerPx: 5, scrollPx: 300, axis: null);
+
+      final next = zoomed.withAxis(axis());
+
+      expect(next.msPerPx, 5);
+      expect(next.scrollPx, 300);
+      expect(next.durationMs, 8000);
+    });
+
+    test('没有整体替换时和原来完全一样', () {
+      final plain =
+          TimelineGeometry.fit(durationMs: 10000, viewportWidthPx: 800);
+
+      expect(plain.durationMs, 10000);
+      expect(plain.msToPx(4000), 320);
+      expect(plain.pxToMs(320), 4000);
     });
   });
 }

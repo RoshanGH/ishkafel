@@ -64,8 +64,36 @@ class ComposedTimeline {
     return (_starts[lo], _starts[hi] + _durations[hi]);
   }
 
-  /// 成片上的某一刻对应原片的哪一刻。**播放头要用**：时间线画的是原片切分，
-  /// 而预览播的是成片。
+  /// 这个单元被整体替换了吗。时间线上它要画成一整块（原来的那些视觉镜头
+  /// 在成片里已经不存在了——整段换成了另一条素材）
+  bool isReplaced(int unitIndex) {
+    final replaced = wholeDurations[unitIndex];
+    if (replaced == null || replaced <= 0) return false;
+    if (unitIndex < 0 || unitIndex >= units.length) return false;
+    return replaced != units[unitIndex].endMs - units[unitIndex].startMs;
+  }
+
+  /// 原片的某一刻画在成片时间轴的哪儿。**时间线要用**：格子按成片长度画，
+  /// 整体替换之后那一格就该变窄/变宽，后面的跟着挪——用户看到的宽度就是
+  /// 它在成片里真实的长度，不必在脑子里再换算一次。
+  int toComposedMs(int sourceMs) {
+    if (units.isEmpty) return 0;
+    if (sourceMs <= units.first.startMs) return 0;
+    if (sourceMs >= units.last.endMs) return totalMs;
+    for (var i = 0; i < units.length; i++) {
+      if (sourceMs >= units[i].endMs) continue;
+      final into = sourceMs - units[i].startMs;
+      final sourceLen = units[i].endMs - units[i].startMs;
+      if (sourceLen <= 0 || _durations[i] == sourceLen) {
+        return _starts[i] + into;
+      }
+      return _starts[i] + (into * _durations[i] / sourceLen).round();
+    }
+    return totalMs;
+  }
+
+  /// 成片上的某一刻对应原片的哪一刻。**命中测试要用**：用户点在成片轴上，
+  /// 而选中的是原片切分里的单元/镜头。
   ///
   /// 落在被整体替换的单元里时按比例映射——那一段的画面根本不是原片的，
   /// 只能给一个「大致在这个单元的百分之几」的位置。

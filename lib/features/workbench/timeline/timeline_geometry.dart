@@ -1,20 +1,46 @@
-/// 时间线视口（不可变）：缩放与滚动状态 + ms↔px 换算
+import '../../../core/export/composed_timeline.dart';
+
+/// 时间线视口（不可变）：缩放与滚动状态 + ms↔px 换算。
+///
+/// **时间线画的是成片，不是原片。** 整体替换把一个 15.1 秒的单元换成 11.3 秒
+/// 的候选之后，那一格就该窄成 11.3 秒、后面的跟着左移——用户看到的宽度就是
+/// 它在成片里真实的长度。此前格子按原片画、播放头按比例走，播到格子的 3/4
+/// 就跳到下一格，用户得在脑子里再换算一次才明白发生了什么。
+///
+/// 换算这一层内建在这里，所以**调用方一行都不用改**：传进来的、返回出去的
+/// 仍然是原片毫秒（切分数据本来就按原片记），只有内部多走一次 [axis] 映射。
+/// 刻度尺是唯一的例外——它标的是成片时刻，走 [composedMsToPx]。
 class TimelineGeometry {
+  /// 时间轴总长。有 [axis] 时是**成片**总长
   final int durationMs;
   final double msPerPx; // 缩放：每像素毫秒数（越小越放大）
   final double scrollPx; // 水平滚动（像素）
+
+  /// 原片刻度 ↔ 成片刻度的映射。为 null 表示没有整体替换，两者相同
+  final ComposedTimeline? axis;
 
   const TimelineGeometry({
     required this.durationMs,
     required this.msPerPx,
     this.scrollPx = 0,
+    this.axis,
   });
 
-  /// 毫秒转像素坐标
-  double msToPx(int ms) => ms / msPerPx - scrollPx;
+  /// **原片**毫秒转像素坐标
+  double msToPx(int ms) => composedMsToPx(axis?.toComposedMs(ms) ?? ms);
 
-  /// 像素坐标转毫秒，有界 [0, durationMs]
-  int pxToMs(double px) => ((px + scrollPx) * msPerPx).round().clamp(0, durationMs);
+  /// **成片**毫秒转像素坐标（刻度尺、播放头用）
+  double composedMsToPx(int composedMs) => composedMs / msPerPx - scrollPx;
+
+  /// 像素坐标转**原片**毫秒
+  int pxToMs(double px) {
+    final composed = pxToComposedMs(px);
+    return axis?.toSourceMs(composed) ?? composed;
+  }
+
+  /// 像素坐标转**成片**毫秒，有界 [0, durationMs]
+  int pxToComposedMs(double px) =>
+      ((px + scrollPx) * msPerPx).round().clamp(0, durationMs);
 
   /// 总时长对应的像素宽度
   double get totalWidthPx => durationMs / msPerPx;
@@ -25,6 +51,7 @@ class TimelineGeometry {
       durationMs: durationMs,
       msPerPx: msPerPx ?? this.msPerPx,
       scrollPx: scrollPx ?? this.scrollPx,
+      axis: axis,
     );
   }
 
@@ -66,6 +93,7 @@ class TimelineGeometry {
       durationMs: durationMs,
       msPerPx: newMsPerPx,
       scrollPx: clampedScrollPx,
+      axis: axis,
     );
   }
 
@@ -79,6 +107,7 @@ class TimelineGeometry {
       durationMs: durationMs,
       msPerPx: msPerPx,
       scrollPx: clampedScrollPx,
+      axis: axis,
     );
   }
 
@@ -101,16 +130,37 @@ class TimelineGeometry {
         zoomLevel(viewportWidthPx: oldViewportWidthPx) <= 1.0001;
     return wasFit
         ? TimelineGeometry.fit(
-            durationMs: durationMs, viewportWidthPx: newViewportWidthPx)
+            durationMs: durationMs,
+            viewportWidthPx: newViewportWidthPx,
+            axis: axis)
         : scrolledBy(0, viewportWidthPx: newViewportWidthPx);
   }
 
-  static TimelineGeometry fit({required int durationMs, required double viewportWidthPx}) {
-    final msPerPx = durationMs / viewportWidthPx;
+  /// 换一套成片时间轴（整体替换的候选变了/时长探出来了），**保持缩放与
+  /// 滚动**——用户改了个候选就被弹回片头是不能接受的
+  TimelineGeometry withAxis(ComposedTimeline? next) {
+    final total = next?.totalMs ?? durationMs;
+    if (total <= 0) return this;
     return TimelineGeometry(
-      durationMs: durationMs,
+      durationMs: total,
+      msPerPx: msPerPx,
+      scrollPx: scrollPx,
+      axis: next,
+    );
+  }
+
+  static TimelineGeometry fit({
+    required int durationMs,
+    required double viewportWidthPx,
+    ComposedTimeline? axis,
+  }) {
+    final total = axis?.totalMs ?? durationMs;
+    final msPerPx = total / viewportWidthPx;
+    return TimelineGeometry(
+      durationMs: total,
       msPerPx: msPerPx,
       scrollPx: 0,
+      axis: axis,
     );
   }
 

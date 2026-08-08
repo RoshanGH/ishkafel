@@ -393,13 +393,14 @@ class _TimelineViewState extends State<TimelineView> {
         position.dy < TimelineTracks.rulerBottom) {
       return true;
     }
-    final playheadX = widget.geometry.msToPx(widget.playhead.value);
+    // 播放头是**成片**位置（播放器直接给的），不走原片映射
+    final playheadX = widget.geometry.composedMsToPx(widget.playhead.value);
     return (position.dx - playheadX).abs() <= _playheadGrabPx;
   }
 
-  /// 像素 → 毫秒（[TimelineGeometry.pxToMs] 已夹在 [0, durationMs]，
-  /// 拖出两端不会出现负数或超长）
-  void _seekTo(double dx) => widget.onSeek(widget.geometry.pxToMs(dx));
+  /// 像素 → **成片**毫秒。定位是给播放器的，而播放器跑在成片上；
+  /// 已夹在 [0, durationMs]，拖出两端不会出现负数或超长
+  void _seekTo(double dx) => widget.onSeek(widget.geometry.pxToComposedMs(dx));
 
   /// 点在某个替换数量徽标上了吗？是的话跳到右栏对应的那一段。
   bool _hitReplacementBadge(Offset position) {

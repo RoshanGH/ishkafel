@@ -246,9 +246,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted) return;
       // 预览播的可能是**合成出来的成片**（整体替换会改变时长），而时间线画的
       // 是原片切分——播放头要换算回原片时刻，否则整体替换之后指针就飘了
-      final at = _tracks?.toSourceMs(ms) ?? ms;
-      if (_playhead.value == at) return;
-      _playhead.value = at;
+      // 时间线现在画的就是成片，播放头直接用播放器位置——不必再换算回
+      // 原片时刻（那一步在整体替换段上是按比例估的，本来就不精确）
+      if (_playhead.value == ms) return;
+      _playhead.value = ms;
     });
     unawaited(_openSource(playback, task.sourcePath));
     unawaited(_loadMedia());

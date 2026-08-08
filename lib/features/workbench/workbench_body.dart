@@ -7,6 +7,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
+import '../../core/export/composed_timeline.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
@@ -159,6 +160,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   TimelineGeometry? _geometry;
   double _timelineViewportWidth = 0;
 
+  /// 当前的成片时间轴。**所有交给播放器的位置都要过它**——时间线与切分
+  /// 数据用原片刻度，而播放器跑在成片上，整体替换之后两者不再相等
+  ComposedTimeline? _axis;
+
+  /// 原片时刻 → 播放器该定位到的成片时刻
+  int _composed(int sourceMs) => _axis?.toComposedMs(sourceMs) ?? sourceMs;
+
   /// 缩放倍数一律从 geometry 反推，不维护独立字段——滚轮/触控板/跟随播放头
   /// 都只更新 geometry，滑块若自己记历史值就会与实际缩放脱节，下一次拖动
   /// 以错误基准算 factor，出现「往左拖想缩小、画面反而放大」。
@@ -204,7 +212,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           onRedo: editor.redo,
           onShuttle: _shuttle,
           onSeekEdge: (toStart) => playback
-              .seekMs(toStart ? 0 : editor.durationMs),
+              .seekMs(toStart ? 0 : (_axis?.totalMs ?? editor.durationMs)),
           onSelectAdjacent: (delta) => _selectAdjacent(editor, playback, delta),
         ),
         child: Column(
@@ -233,7 +241,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     width: widths.left,
                     child: UnitListPanel(
                       controller: editor,
-                      onUnitTap: (unit) => playback.seekMs(unit.startMs),
+                      onUnitTap: (unit) =>
+                          playback.seekMs(_composed(unit.startMs)),
                     ),
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
@@ -300,7 +309,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       SegmentationEditorController editor, PlaybackController playback, int delta) {
     editor.selectAdjacent(delta);
     final startMs = editor.selectedStartMs;
-    if (startMs != null) playback.seekMs(startMs);
+    if (startMs != null) playback.seekMs(_composed(startMs));
   }
 
   /// JKL 走带：L 正向播放、K 停、J 反向。
@@ -357,13 +366,24 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
+                // 时间线画的是**成片**：整体替换之后那一格按新长度画，
+                // 后面的跟着挪。轴变了就换掉，但保持缩放与滚动
+                final axis = ComposedTimeline.of(
+                    units: editor.units,
+                    wholeDurations: widget.composedDurations);
+                _axis = axis;
+                if (_geometry != null && _geometry!.axis?.totalMs != axis.totalMs) {
+                  _geometry = _geometry!.withAxis(axis);
+                }
                 if (width != _timelineViewportWidth) {
                   final geometry = _geometry;
                   // 窗口 resize：适应窗口状态下跟着重新铺满，放大状态下保持
                   // 缩放并把滚动夹回合法范围（判定要用**变化前**的宽度）
                   _geometry = geometry == null
                       ? TimelineGeometry.fit(
-                          durationMs: editor.durationMs, viewportWidthPx: width)
+                          durationMs: editor.durationMs,
+                          viewportWidthPx: width,
+                          axis: axis)
                       : geometry.resizedTo(
                           oldViewportWidthPx: _timelineViewportWidth,
                           newViewportWidthPx: width);
@@ -384,7 +404,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   onScrubStart: _onScrubStart,
                   onScrubEnd: _onScrubEnd,
                   onPlaySegment: (start, end) =>
-                      unawaited(_segment.play(start, end, editor.fps)),
+                      unawaited(_segment.play(
+                          _composed(start), _composed(end), editor.fps)),
                   clock: widget.clock ?? DateTime.now,
                   bgm: widget.bgm,
                   voices: widget.voices,

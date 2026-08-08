@@ -211,7 +211,8 @@ class TimelineHitTester {
 
     // 刻度轨：y in [0, 20]
     if (y >= TimelineTracks.rulerTop && y < TimelineTracks.rulerBottom) {
-      return RulerHit(ms: geometry.pxToMs(x));
+      // 点刻度尺是要定位，交给播放器的必须是**成片**毫秒
+      return RulerHit(ms: geometry.pxToComposedMs(x));
     }
 
     // 单元轨：y in [24, 68]

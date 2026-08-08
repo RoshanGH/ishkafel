@@ -59,6 +59,7 @@ class TimelinePainter extends CustomPainter {
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
   final List<double>? waveEnvelope;
+  /// 播放头位置——**成片**毫秒（播放器直接给的那个值）
   final int playheadMs;
 
   /// 抽帧/波形的就绪状态，决定未就绪时画什么占位
@@ -166,11 +167,13 @@ class TimelinePainter extends CustomPainter {
       linePaint,
     );
 
-    final startMs = geometry.pxToMs(0);
-    final endMs = geometry.pxToMs(size.width);
+    // 刻度标的是**成片**时刻：格子按成片长度画，刻度也得按成片走，
+    // 否则整体替换之后刻度间距会忽宽忽窄
+    final startMs = geometry.pxToComposedMs(0);
+    final endMs = geometry.pxToComposedMs(size.width);
     final firstTick = (startMs ~/ stepMs) * stepMs;
     for (var ms = firstTick; ms <= endMs; ms += stepMs) {
-      final x = geometry.msToPx(ms);
+      final x = geometry.composedMsToPx(ms);
       if (x < -40 || x > size.width + 40) continue;
       canvas.drawLine(
         Offset(x, TimelineTracks.rulerBottom - 6),
@@ -181,6 +184,37 @@ class TimelinePainter extends CustomPainter {
           AppColors.textSecondary,
           fontSize: AppFontSize.micro);
     }
+  }
+
+  /// 整体替换的单元在镜头轨上画成一整块，写明「整段已替换」
+  void _paintReplacedShotSpan(
+      Canvas canvas, Size size, SemanticUnit unit, Color unitColor) {
+    final left = geometry.msToPx(unit.startMs);
+    final right = geometry.msToPx(unit.endMs);
+    if (right < 0 || left > size.width) return;
+    final rect = Rect.fromLTRB(left + _shotGap / 2, TimelineTracks.shotsTop,
+        right - _shotGap / 2, TimelineTracks.shotsBottom);
+    if (rect.width <= 0) return;
+
+    canvas.drawRect(
+        rect, Paint()..color = AppColors.purple.withValues(alpha: 0.18));
+    canvas.drawRect(
+      rect,
+      Paint()
+        ..color = AppColors.purple.withValues(alpha: 0.55)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = AppStroke.hairline,
+    );
+    final maxWidth = rect.width - _shotLabelPadding * 2;
+    if (maxWidth <= 0) return;
+    _drawText(
+      canvas,
+      '整段已替换',
+      Offset(rect.left + _shotLabelPadding, rect.top + 4),
+      AppColors.purple,
+      fontSize: AppFontSize.micro,
+      maxWidth: maxWidth,
+    );
   }
 
   String _formatMs(int ms) {
@@ -312,6 +346,12 @@ class TimelinePainter extends CustomPainter {
   void _paintShotsTrack(Canvas canvas, Size size) {
     for (final unit in units) {
       final unitColor = _unitColors[unit.index % _unitColors.length];
+      // 被整体替换的单元：原来那些视觉镜头在成片里已经不存在了（整段换成了
+      // 另一条素材）。还按原样画一排小格子，等于让用户去点一批点不动的东西
+      if (geometry.axis?.isReplaced(unit.index) ?? false) {
+        _paintReplacedShotSpan(canvas, size, unit, unitColor);
+        continue;
+      }
       for (var s = 0; s < unit.shots.length; s++) {
         final shot = unit.shots[s];
         final left = geometry.msToPx(shot.startMs);
@@ -609,7 +649,8 @@ class TimelinePainter extends CustomPainter {
   }
 
   void _paintPlayhead(Canvas canvas, Size size) {
-    final x = geometry.msToPx(playheadMs);
+    // 播放头拿的是**成片**位置（播放器就在成片上跑），不走原片映射
+    final x = geometry.composedMsToPx(playheadMs);
     if (x < 0 || x > size.width) return;
     canvas.drawLine(
       Offset(x, 0),
