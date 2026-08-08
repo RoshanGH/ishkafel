@@ -45,6 +45,13 @@ class MultitrackPlayback implements PlaybackController {
   String? _videoEdl;
   bool _disposed = false;
 
+  /// 纠偏 seek 实测要多久。见 [_correctDrift]：没有它，每纠一次就制造下一次
+  int _seekCostMs = 0;
+
+  /// 上一次纠偏还没落地。定时器不等前一次跑完就再触发的话，
+  /// 两次 seek 会叠在一起，谁也纠不准
+  bool _correcting = false;
+
   MultitrackPlayback({
     required this.video,
     required this.voice,
@@ -77,13 +84,20 @@ class MultitrackPlayback implements PlaybackController {
     final videoChanged = videoEdl != null && videoEdl != _videoEdl;
     if (videoChanged) {
       _videoEdl = videoEdl;
+      // 换了什么必须留痕：这套「谁在什么时候播哪个文件的哪一段」是产品的核心，
+      // 出问题时没有它就只能靠猜
+      AppLog.info('画面轨换源，共 ${plan.video.length} 段：$videoEdl');
       await video.open(videoEdl);
       // 画面轨一律静音：它播的可能是候选素材，而那条素材自带的声音该不该出
       // 由口播轨按替换规格决定（整体替换要、镜头替换不要）。这里出声只会
       // 变成两份声音重叠
       await video.setMuted(true);
     }
-    final voiceChanged = await voice.load(Edl.of(plan.voice));
+    final voiceEdl = Edl.of(plan.voice);
+    final voiceChanged = await voice.load(voiceEdl);
+    if (voiceChanged) {
+      AppLog.info('口播轨换源，共 ${plan.voice.length} 段：$voiceEdl');
+    }
 
     if (videoChanged || voiceChanged) {
       // 换源之后位置回到 0，按逻辑位置拉回用户原来看的地方
@@ -134,12 +148,35 @@ class MultitrackPlayback implements PlaybackController {
 
   /// 跟随轨漂了就拉回来。只在偏差超过容许值时动手——每次 seek 都是一次
   /// 可闻的接缝，被采样抖动骗着反复 seek 比漂几十毫秒难受得多。
+  ///
+  /// **必须往前多 seek 一点**：seek 不是瞬间完成的（真机实测 300~400ms）。
+  /// 拿发起那一刻的主时钟当目标，等 seek 落地时主时钟已经走远了同样多——
+  /// 于是每纠一次就精确地制造出下一次，声音每半秒被拽一下，听感就是「在
+  /// 快进」。真机日志里是稳定的 -400ms 死循环（目标 26333 → 27166 →
+  /// 28000，每次都差 -400）。所以目标要按上一次的实测耗时前瞻。
   Future<void> _correctDrift() async {
-    if (_disposed) return;
+    if (_disposed || _correcting) return;
     final masterMs = video.positionMs;
     if (needsResync(masterMs: masterMs, followerMs: voice.positionMs)) {
-      AppLog.info('口播轨偏了 ${voice.positionMs - masterMs}ms，纠回来');
-      await voice.seekMs(masterMs);
+      _correcting = true;
+      final before = voice.positionMs;
+      final watch = Stopwatch()..start();
+      // 停着的时候没有前瞻可言——主时钟不走，多跳一段就是错位
+      final lead = video.isPlaying ? _seekCostMs : 0;
+      try {
+        await voice.seekMs(masterMs + lead);
+      } finally {
+        watch.stop();
+        _correcting = false;
+      }
+      // 取上一次与这一次的均值，别被某一次的抖动带偏；封顶 1 秒，
+      // 免得一次异常的慢 seek 把之后所有纠偏都推到未来
+      _seekCostMs =
+          (((_seekCostMs + watch.elapsedMilliseconds) / 2).round()).clamp(0, 1000);
+      AppLog.info('口播轨偏了 ${before - masterMs}ms，纠回来：'
+          '目标 ${masterMs + lead}（前瞻 $lead）、'
+          'seek 耗时 ${watch.elapsedMilliseconds}ms、'
+          '现在跟随轨 ${voice.positionMs} / 主时钟 ${video.positionMs}');
     }
     final cue = _bgmCue;
     if (cue.source == null) return;

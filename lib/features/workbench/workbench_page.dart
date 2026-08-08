@@ -1094,6 +1094,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _onMediaCacheChanged() {
     if (mounted) setState(() {});
     unawaited(_backfillDurations());
+    // 素材刚落地/刚规格化完，轨道要换上真正该播的那一份。少了这一句，
+    // 预览会一直播启动那一刻的约定路径——也就是**没规格化过的原始下载**，
+    // 于是替换点照旧要重建解码器，规格化等于白做
+    _syncPreviewAudio();
   }
 
   /// 补齐已选素材的时长。
