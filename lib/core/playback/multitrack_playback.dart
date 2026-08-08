@@ -122,13 +122,49 @@ class MultitrackPlayback implements PlaybackController {
 
   void _onMasterPosition(int masterMs) {
     if (_disposed) return;
+    _checkPace(masterMs);
     unawaited(_applyBgm(masterMs));
   }
+
+  /// 画面轨的走时探针：每一拍走掉的**内容**，对得上真实过去的时间吗。
+  ///
+  /// 主时钟自己不会变速，但 EDL 段与段之间要打开新文件、精确 seek，这一下
+  /// 若卡住，播放器随后会丢帧把落下的补回来——用户看到的就是「画面明显
+  /// 加速了」，跟随轨也被一起拽。这种事只在完整播放里才撞得到，靠肉眼盯着
+  /// 复现不了，必须留下量得出来的痕迹。
+  void _checkPace(int masterMs) {
+    final wallMs = _pace.elapsedMilliseconds;
+    if (!video.isPlaying) {
+      _paceAtMs = masterMs;
+      _paceWallMs = wallMs;
+      return;
+    }
+    final wallDelta = wallMs - _paceWallMs;
+    // 攒够一段再判，否则单次上报的抖动会淹没真信号
+    if (wallDelta < _paceWindowMs) return;
+    final contentDelta = masterMs - _paceAtMs;
+    _paceAtMs = masterMs;
+    _paceWallMs = wallMs;
+    final rate = contentDelta / wallDelta;
+    if (rate > 1.25 || rate < 0.75) {
+      AppLog.warn('画面轨走时异常：${wallDelta}ms 里走掉了 ${contentDelta}ms 内容'
+          '（${rate.toStringAsFixed(2)}×），此刻 $masterMs');
+    }
+  }
+
+  final Stopwatch _pace = Stopwatch()..start();
+  int _paceAtMs = 0;
+  int _paceWallMs = 0;
+  static const int _paceWindowMs = 400;
 
   void _onMasterPlaying(bool playing) {
     if (_disposed) return;
     unawaited(_syncPlaying(playing));
     if (playing) {
+      // 刚开播：走时探针的基线要归零，否则第一段会拿「从 app 启动算起」
+      // 的挂钟去比，报一条没意义的 0.00×
+      _paceAtMs = video.positionMs;
+      _paceWallMs = _pace.elapsedMilliseconds;
       _syncTimer ??= Timer.periodic(syncInterval, (_) => _correctDrift());
     } else {
       _syncTimer?.cancel();

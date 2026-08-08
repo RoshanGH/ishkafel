@@ -96,10 +96,20 @@ class MediaKitPlaybackController implements MasterTrack {
   }
 
 
-  /// 多轨模式下画面轨要静音——声音全部走口播轨与配乐轨
+  /// 多轨模式下画面轨要静音——声音全部走口播轨与配乐轨。
+  ///
+  /// **必须真的把音频轨关掉，光把音量拧到 0 不行。** 音量 0 只是不出声，
+  /// mpv 照样解码音频、照样拿它当同步基准；而画面轨的 EDL 里，变速切片是
+  /// 无声的（声音归口播轨管），前后两段原片却有声——一条音频流在段之间
+  /// 消失又出现，同步基准跟着断一次，播放器随后丢帧追赶。真机探针量到的是
+  /// 从切片起点开始 1.67× 连跑 6.5 秒，把后面两三个镜头一起带跑了。
+  ///
+  /// 关掉之后画面轨只解码视频，段与段之间的轨道布局也就一致了。
   @override
-  Future<void> setMuted(bool muted) =>
-      _gate.run(() => player.setVolume(muted ? 0 : 100));
+  Future<void> setMuted(bool muted) => _gate.run(() async {
+        await player.setVolume(muted ? 0 : 100);
+        await _setMpv('aid', muted ? 'no' : 'auto');
+      });
 
   @override
   Future<void> play() => _gate.run(_play);

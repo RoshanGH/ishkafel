@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
+import 'edit_locks.dart';
 import 'segmentation_edit_ops.dart';
 
 /// 审片台当前选中对象：选中单元或选中单元内某个镜头
@@ -86,6 +87,37 @@ class SegmentationEditorController extends ChangeNotifier {
 
   /// 当前是否处于台词编辑会话中（与拖拽会话相互独立，见类文档）
   bool get inTextSession => _textSessionSnapshot != null;
+
+  /// 挑过替换素材的单元/镜头，切分钉死（见 [EditLocks]）。
+  /// 由上层在替换方案变化时推进来
+  EditLocks get locks => _locks;
+  EditLocks _locks = EditLocks.none;
+
+  set locks(EditLocks next) {
+    if (next == _locks) return;
+    _locks = next;
+    notifyListeners();
+  }
+
+  /// 上一次结构操作是被锁挡下来的吗；是的话这里是**能直接展示给用户**的原因。
+  ///
+  /// 单独开一个字段而不是把返回值改成结果对象：这些操作有几十个调用点和
+  /// 测试，为了一个提示语把签名全改一遍不划算。读完请调用方自己清掉。
+  String? get blockedReason => _blockedReason;
+  String? _blockedReason;
+
+  /// 取走并清空上一次的拦截原因——UI 弹完提示就该忘掉它
+  String? takeBlockedReason() {
+    final reason = _blockedReason;
+    _blockedReason = null;
+    return reason;
+  }
+
+  bool _block(String reason) {
+    _blockedReason = reason;
+    notifyListeners();
+    return false;
+  }
 
   /// 设置选中对象；若 [s] 越界（unitIndex/shotIndex 超出当前 units 结构）
   /// 则置为 null，而不是保留一个悬空的选中态（调用方可能传入过期下标，
@@ -219,11 +251,40 @@ class SegmentationEditorController extends ChangeNotifier {
     return true;
   }
 
-  bool moveUnitBoundary(int i, int rawMs) =>
-      _apply(SegmentationEditOps.moveUnitBoundary(_units, i, rawMs, fps: fps));
+  /// 移动第 [i] 与第 [i+1] 个单元之间的边界。两侧任一个挑过素材就不许动：
+  /// 边界一变，那一段的时长就变了，已经按旧时长变速好的素材全对不上
+  bool moveUnitBoundary(int i, int rawMs) {
+    final blocked = _unitBoundaryBlock(i);
+    if (blocked != null) return _block(blocked);
+    return _apply(SegmentationEditOps.moveUnitBoundary(_units, i, rawMs, fps: fps));
+  }
 
-  bool moveShotBoundary(int u, int s, int rawMs) => _apply(
-      SegmentationEditOps.moveShotBoundary(_units, u, s, rawMs, fps: fps));
+  /// 移动单元 [u] 内第 [s] 与第 [s+1] 个镜头之间的边界
+  bool moveShotBoundary(int u, int s, int rawMs) {
+    if (_locks.isUnitLocked(u)) return _block(LockWording.unit(u));
+    for (final shot in [s, s + 1]) {
+      if (_locks.isShotLocked(u, shot)) {
+        return _block(LockWording.shot(u, shot));
+      }
+    }
+    return _apply(
+        SegmentationEditOps.moveShotBoundary(_units, u, s, rawMs, fps: fps));
+  }
+
+  /// 单元边界两侧有没有钉死的东西。移动它会改到两侧单元的首/尾镜头，
+  /// 所以整段被换掉、或者贴着边界的那个镜头挑过素材，都不能动
+  String? _unitBoundaryBlock(int i) {
+    for (final u in [i, i + 1]) {
+      if (u < 0 || u >= _units.length) continue;
+      if (_locks.isUnitLocked(u)) return LockWording.unit(u);
+      // i 的尾镜头、i+1 的首镜头会被这次移动改到
+      final shot = u == i ? _units[u].shots.length - 1 : 0;
+      if (shot >= 0 && _locks.isShotLocked(u, shot)) {
+        return LockWording.shot(u, shot);
+      }
+    }
+    return null;
+  }
 
   /// 选中单元→splitUnitAt；选中镜头→splitShotAt；无选中→false
   ///
@@ -237,11 +298,28 @@ class SegmentationEditorController extends ChangeNotifier {
     if (sel == null) return false;
     final shotIndex = sel.shotIndex;
     if (shotIndex == null) {
+      // 单元一拆两半，里面的镜头下标全变——只要单元里有任何挑过素材的东西
+      // 都不能拆，否则钉在 S6 上的素材会跑到别的镜头上
+      final blocked = _unitStructureBlock(sel.unitIndex);
+      if (blocked != null) return _block(blocked);
       return _apply(SegmentationEditOps.splitUnitAt(_units, sel.unitIndex, rawMs,
           fps: fps, sentences: sentences));
     }
+    if (_locks.isShotLocked(sel.unitIndex, shotIndex)) {
+      return _block(_locks.isUnitLocked(sel.unitIndex)
+          ? LockWording.unit(sel.unitIndex)
+          : LockWording.shot(sel.unitIndex, shotIndex));
+    }
     return _apply(SegmentationEditOps.splitShotAt(_units, sel.unitIndex, rawMs,
         fps: fps, shotIndex: shotIndex));
+  }
+
+  /// 整个单元的结构要动（拆分/合并）时的拦截原因
+  String? _unitStructureBlock(int u) {
+    if (_locks.isUnitLocked(u)) return LockWording.unit(u);
+    final lockedShots = _locks.lockedShotsIn(u);
+    if (lockedShots.isNotEmpty) return LockWording.shotsInUnit(u, lockedShots);
+    return null;
   }
 
   /// 按选中层分派：选中单元→mergeUnitWithPrevious；选中镜头→mergeShotWithPrevious
@@ -253,11 +331,24 @@ class SegmentationEditorController extends ChangeNotifier {
     if (sel == null) return false;
     if (sel.shotIndex == null) {
       final u = sel.unitIndex;
+      // 两个单元并成一个，两边的镜头下标都会变，所以两边都要查
+      for (final target in [u - 1, u]) {
+        final blocked =
+            target < 0 ? null : _unitStructureBlock(target);
+        if (blocked != null) return _block(blocked);
+      }
       return _apply(SegmentationEditOps.mergeUnitWithPrevious(_units, u),
           remapSelection: () => EditorSelection.unit(u - 1));
     }
     final u = sel.unitIndex;
     final s = sel.shotIndex!;
+    if (_locks.isUnitLocked(u)) return _block(LockWording.unit(u));
+    // 被吞的和吞人的都动了：一个消失、一个变长
+    for (final shot in [s - 1, s]) {
+      if (shot >= 0 && _locks.isShotLocked(u, shot)) {
+        return _block(LockWording.shot(u, shot));
+      }
+    }
     return _apply(SegmentationEditOps.mergeShotWithPrevious(_units, u, s),
         remapSelection: () => EditorSelection.shot(u, s - 1));
   }
