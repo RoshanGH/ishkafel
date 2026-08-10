@@ -54,35 +54,41 @@ AirDrop 传过来的 app 都会被打上隔离标记，双击会被系统拦下�
 
 跑完就能正常双击了，这一步只需要做一次。
 
-## 3. 装三个外部命令行工具
+## 3. 装三个外部命令行工具——**在 app 里点就行**
 
-app 本身不含它们，需要各自装一次。
+打开 app → 右上角设置 → 运行环境。没装的工具旁边会有「安装」按钮，点一下
+就开始装，**下载走清华镜像**，安装过程逐行显示在下面（这些命令动辄几分钟，
+看得见进度才知道还活着）。
 
-### ffmpeg（必需——所有视频处理都靠它）
+| 工具 | 必需吗 | 说明 |
+|---|---|---|
+| ffmpeg / ffprobe | 必需 | 所有视频处理。需要机器上已有 Homebrew |
+| miaoa CLI | 必需 | 检索素材、读标签组。官方脚本，自带平台判断 |
+| audio-separator | 可选 | 只有「替换配乐」用得到。约 1GB，需要机器上已有 uv |
 
-    brew install ffmpeg
+**Homebrew 与 uv 本身不代装**——那是系统级的东西，app 不该替你动。缺了的话
+界面会直接告诉你先跑哪条命令（`brew install uv` 之类）。
 
-装完确认能找到：`which ffmpeg`
+如果你想手动装，命令是这三条（**注意镜像源，不加的话在国内基本装不上**）：
 
-### miaoa CLI（必需——检索素材、读标签组）
+    # ffmpeg
+    HOMEBREW_BOTTLE_DOMAIN=https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles \
+    HOMEBREW_API_DOMAIN=https://mirrors.tuna.tsinghua.edu.cn/homebrew-bottles/api \
+    HOMEBREW_NO_AUTO_UPDATE=1 brew install ffmpeg
 
+    # miaoa CLI
     curl -fsSL https://miaoa.mininglamp.com/api/cli/install.sh | bash -s -- --host https://miaoa.mininglamp.com
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
-    miaoa --version
 
-**登录不用敲命令**：打开 app → 右上角设置 → miaoa 账号 → 「登录 miaoa」，
-用手机号收验证码即可。登录状态存在这台电脑上（`~/.miaoa/`），
-所以每台机器都要各自登录一次。
+    # audio-separator（可选）
+    UV_DEFAULT_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    uv tool install "audio-separator[cpu]"
 
-### audio-separator（可选——只有「替换配乐」用得到）
+**miaoa 登录不用敲命令**：设置 → miaoa 账号 → 「登录 miaoa」，手机号收验证码
+即可。登录状态存在这台电脑上（`~/.miaoa/`），所以每台机器都要各自登录一次。
 
-    uv tool install audio-separator
-
-没装的话其余功能照常，只有换配乐那一步会说明缺什么。
-首次使用会自动下载约 700MB 的模型。
-
-⚠️ Intel Mac 上这一步没有 Metal 加速，同样一条片子可能要几分钟
-（Apple Silicon 上约 15 秒）。
+⚠️ Intel Mac 上 audio-separator 没有 Metal 加速，同样一条片子可能要几分钟
+（Apple Silicon 上约 15 秒）。首次使用还会自动下载约 700MB 的模型。
 
 ## 4. 确认环境
 

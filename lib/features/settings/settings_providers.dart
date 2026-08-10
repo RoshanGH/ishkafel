@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/diagnostics/environment_report.dart';
+import '../../core/diagnostics/tool_installer.dart';
 import '../../core/miaoa/miaoa_account_service.dart';
 import '../../core/miaoa/miaoa_auth_service.dart';
 import '../../core/storage/cache_usage.dart';
@@ -28,6 +29,10 @@ final miaoaAccountServiceProvider =
 /// 登录/登出。null 表示本次运行没接入——设置页那时退回「去终端登录」的引导，
 /// 而不是给一个点了没反应的按钮
 final miaoaAuthServiceProvider = Provider<MiaoaAuthService?>((ref) => null);
+
+/// 一键安装外部依赖。null 表示本次运行没接入——那时设置页退回「请在终端
+/// 执行……」的引导，而不是给一个点了没反应的按钮
+final toolInstallerProvider = Provider<ToolInstaller?>((ref) => null);
 
 final cacheScannerProvider = Provider<CacheScanner?>((ref) => null);
 

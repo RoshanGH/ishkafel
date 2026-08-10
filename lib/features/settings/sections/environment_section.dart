@@ -5,6 +5,8 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/diagnostics/environment_report.dart';
+import '../../../core/diagnostics/tool_installer.dart';
+import '../tool_install_panel.dart';
 import '../settings_providers.dart';
 import '../settings_widgets.dart';
 
@@ -83,13 +85,14 @@ class _Report extends StatelessWidget {
       );
 }
 
-class _ToolRow extends StatelessWidget {
+class _ToolRow extends ConsumerWidget {
+  /// 这个工具的安装面板；没有配方（或没接安装器）时不显示
   final ToolHealth tool;
 
   const _ToolRow({required this.tool});
 
   @override
-  Widget build(BuildContext context) => Padding(
+  Widget build(BuildContext context, WidgetRef ref) => Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -126,10 +129,28 @@ class _ToolRow extends StatelessWidget {
                             fontSize: AppFontSize.caption,
                             height: 1.6,
                             color: AppColors.orange)),
+                  // 没装就地给一个能点的按钮。只把「请在终端执行……」摆出来
+                  // 是让用户离开这个 app 去敲命令，再回来重启——到 C 软件不该这样
+                  if (!tool.installed) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    ?_installPanel(ref),
+                  ],
                 ],
               ),
             ),
           ],
         ),
       );
+
+  Widget? _installPanel(WidgetRef ref) {
+    final recipe = InstallRecipes.forTool(tool.name);
+    final installer = ref.watch(toolInstallerProvider);
+    if (recipe == null || installer == null) return null;
+    return ToolInstallPanel(
+      recipe: recipe,
+      installer: installer,
+      // 装好了立刻重新体检——不让用户自己去猜「现在算装上了吗」
+      onInstalled: () => ref.invalidate(environmentReportProvider),
+    );
+  }
 }
