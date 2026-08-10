@@ -36,6 +36,30 @@ class TaskArtifacts {
     'picked_thumbs', // 已选素材的首帧图
   ];
 
+  /// **跨任务共享**的缓存目录：里面按内容指纹命名，同一份内容只存一次，
+  /// 换任务、换候选都能命中。归不到某个任务名下，所以不进 [perTaskDirNames]，
+  /// 但占的是同一块盘，必须计入占用
+  static const sharedCacheDirNames = [
+    'preview_proxy', // 预览代理（原片与候选素材共用，见 ProxySpec）
+    'material_cache', // 候选素材的原始下载。**导出读这里**，不能当缓存清掉
+    'bgm_cache', // 配乐
+  ];
+
+  /// 已经废弃、但可能还躺在老用户盘上的目录。开机扫一遍清掉——
+  /// 磁盘上躺着的每一份数据都要有人读、有人删，没人读的就该走
+  static const retiredDirNames = [
+    // 「把素材转成原片规格」那套（MaterialNormalizer）已随代理方案退休，
+    // 产物改放 preview_proxy。真机上这里躺着 77MB
+    'material_normalized',
+  ];
+
+  /// 已经不会再有人读的那些目录（存在才返回）
+  List<FileSystemEntity> retired() => [
+        for (final name in retiredDirNames)
+          if (Directory(p.join(dataDir.path, name)).existsSync())
+            Directory(p.join(dataDir.path, name)),
+      ];
+
   /// 分析工作目录：任务产物**平铺**在这里（`<id>_thumbs.raw`、`<id>.pcm`…），
   /// 外加两个按任务分的子目录（`<id>_frames/`、`stems/<id>/`）
   Directory get workDir => Directory(p.join(dataDir.path, 'analysis_work'));

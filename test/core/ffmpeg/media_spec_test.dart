@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/ffmpeg/media_spec.dart';
-import 'package:ishkafel/features/picking/material_normalizer.dart';
+import 'package:ishkafel/core/ffmpeg/proxy_spec.dart';
 
 const _source = MediaSpec(
   codec: 'hevc',
@@ -88,29 +88,32 @@ r_frame_rate=30/1
   });
 
   group('转码参数', () {
-    test('10bit 目标用 p010le（videotoolbox 认这个，不认 yuv420p10le）', () {
-      final args = MaterialNormalizer.encodeArgs(
-          input: '/m/a.mp4', target: _source, out: '/m/out.mp4');
+    // 「向原片规格看齐」那套（MaterialNormalizer）已随代理方案退休：
+    // 它要求按原片的 HEVC Main 10 硬编，而 Intel Mac 的 VideoToolbox
+    // 绝大多数编不了 10bit。现在统一编成 ProxySpec，测试见
+    // test/core/export/export_uses_original_test.dart
+    test('代理规格一律软编、不碰 10bit', () {
+      final args = ProxySpec.encodeArgs(
+          input: '/m/a.mp4', frameRate: '30/1', out: '/m/out.mp4');
 
-      expect(args[args.indexOf('-pix_fmt') + 1], 'p010le');
-      expect(args[args.indexOf('-profile:v') + 1], 'main10',
-          reason: 'ffprobe 报「Main 10」，ffmpeg 要「main10」');
-      expect(args[args.indexOf('-c:v') + 1], 'hevc_videotoolbox');
-      expect(args, containsAllInOrder(['-tag:v', 'hvc1']));
+      expect(args[args.indexOf('-c:v') + 1], 'libx264');
+      expect(args[args.indexOf('-pix_fmt') + 1], 'yuv420p');
+      expect(args.join(' '), isNot(contains('videotoolbox')));
     });
 
     test('声音原样拷贝——重编会白损一道音质，和接缝顿挫无关', () {
-      final args = MaterialNormalizer.encodeArgs(
-          input: '/m/a.mp4', target: _source, out: '/m/out.mp4');
+      final args = ProxySpec.encodeArgs(
+          input: '/m/a.mp4', frameRate: '30/1', out: '/m/out.mp4');
 
       expect(args[args.indexOf('-c:a') + 1], 'copy');
     });
 
-    test('分辨率与帧率都对齐原片', () {
-      final args = MaterialNormalizer.encodeArgs(
-          input: '/m/a.mp4', target: _source, out: '/m/out.mp4');
+    test('画幅是代理的固定画幅，帧率跟着原片', () {
+      final args = ProxySpec.encodeArgs(
+          input: '/m/a.mp4', frameRate: '30/1', out: '/m/out.mp4');
 
-      expect(args[args.indexOf('-vf') + 1], 'scale=1080:1920');
+      expect(args[args.indexOf('-vf') + 1],
+          contains('scale=${ProxySpec.width}:${ProxySpec.height}'));
       expect(args[args.indexOf('-r') + 1], '30/1');
     });
   });

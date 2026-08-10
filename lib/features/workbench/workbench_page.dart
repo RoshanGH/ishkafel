@@ -27,8 +27,9 @@ import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
-import '../../core/ffmpeg/media_spec.dart';
 import '../../core/ffmpeg/process_runner.dart';
+import '../../core/ffmpeg/proxy_builder.dart';
+import '../../core/ffmpeg/proxy_spec.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/playback/media_kit_follower.dart';
 import '../../core/playback/multitrack_playback.dart';
@@ -50,7 +51,6 @@ import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
 import 'candidate_tab.dart';
 import '../picking/picked_material_store.dart';
-import '../picking/material_normalizer.dart';
 import '../picking/picked_media_cache.dart';
 import '../picking/picking_providers.dart';
 import 'edit_consequence_dialog.dart';
@@ -231,6 +231,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _editor = editor;
     _replacements = task.replacements;
     _syncEditLocks();
+    _pinMaterials();
     _consequenceBaseline = units;
     // 进工作台就把方案里的配乐固定住——只在「选完」时才下的话，
     // 打开一条早就配好乐的任务什么都不会发生
@@ -268,6 +269,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       )
         ..addListener(_onTracksChanged)
         ..onNeedsRebuild = _syncPreviewAudio;
+      // 后台转原片代理，转好了自动换上；这期间先播原片
+      unawaited(_buildSourceProxy());
     }
     _syncPreviewAudio();
   }
@@ -287,7 +290,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   .probe(path))
               .duration
               .inMilliseconds,
-      targetSpec: _sourceSpec,
+      // 切片也编成代理规格：预览链路上每一段规格一致，接缝处才不用重建解码器
+      targetSpec: () async => ProxySpec.at(_frameRateArg),
     );
   }
 
@@ -998,6 +1002,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (!_isEditable) return;
     setState(() => _replacements = next);
     _syncEditLocks();
+    _pinMaterials();
     try {
       await _tasks!.savePickingPlan(_task, next);
       _task = _task.copyWith(replacements: next);
@@ -1036,34 +1041,44 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final fetch = ref.read(materialFetcherProvider);
     final dataDir = ref.read(dataDirProvider);
     if (fetch == null || dataDir == null) return null;
-    // 下完顺手规格化成和原片一致——规格不一致的话播放器在替换点要重建
-    // 解码器，画面会停一下（见 [MaterialNormalizer]）
-    final normalizer = MaterialNormalizer(
-      cache: RenderedCache(
-        dir: Directory(p.join(dataDir.path, 'material_normalized')),
-        run: const ResolvingProcessRunner().call,
-      ),
-      run: const ResolvingProcessRunner().call,
-      targetSpec: _sourceSpec,
-    );
+    // 下完顺手转成预览代理——预览链路上每一段都是同一个规格，播放器在接缝处
+    // 才不必重建解码器（见 [ProxySpec]）。**导出不走这里**，它读的是
+    // material_cache 里的原始下载
     return PickedMediaCache(
-      fetch: (id) async => normalizer.normalize(await fetch(id)),
+      fetch: (id) async => _proxyBuilder(dataDir)
+          .build(path: await fetch(id), frameRate: _frameRateArg),
       cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
     );
   }
 
-  /// 原片的解码规格——素材要向它看齐
-  Future<MediaSpec?> _sourceSpec() async {
-    try {
-      final result = await const ResolvingProcessRunner()
-          .call('ffprobe', MediaSpec.probeArgs(widget.task.sourcePath));
-      if (result.exitCode != 0) return null;
-      return MediaSpec.tryParse('${result.stdout}');
-    } catch (e) {
-      AppLog.warn('读不出原片规格，素材不做规格化：$e');
-      return null;
-    }
+  /// 预览代理的生成器。原片与候选素材共用一条路、共用一份缓存目录：
+  /// 同一个内容指纹只转一次
+  ProxyBuilder _proxyBuilder(Directory dataDir) => ProxyBuilder(
+        cache: RenderedCache(
+          dir: Directory(p.join(dataDir.path, 'preview_proxy')),
+          run: const ResolvingProcessRunner().call,
+        ),
+        run: const ResolvingProcessRunner().call,
+      );
+
+  /// 代理跟着原片的帧率走——帧率一变，时间线上每一帧的位置都要重算，
+  /// 而本产品所有切分边界都是按帧对齐的
+  String get _frameRateArg =>
+      frameRateArg(widget.task.videoInfo?.fps ?? 30);
+
+  /// 原片的预览代理。转好之后重推轨道换上去；转不动就一直播原片
+  Future<void> _buildSourceProxy() async {
+    final dataDir = ref.read(dataDirProvider);
+    final tracks = _tracks;
+    if (dataDir == null || tracks == null) return;
+    final path = await _proxyBuilder(dataDir)
+        .build(path: widget.task.sourcePath, frameRate: _frameRateArg);
+    if (!mounted || path == widget.task.sourcePath) return;
+    tracks.proxyPath = path;
+    _syncPreviewAudio();
   }
+
+
 
   /// 配乐的固定。曲子按 id 从当前方案里找——方案里存的就是完整的
   /// [BgmMaterial]，不必再去库里查一次
@@ -1087,6 +1102,24 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 把方案里用到的配乐固定住。选完、改完、刚进工作台都要调一次
   void _pinBgm() {
     _bgmMediaCache?.pinAll({for (final m in _task.bgm.materials) m.id});
+  }
+
+  /// 把方案里用到的替换素材固定住——**打开工作台就做，不等用户点开选材面板**。
+  ///
+  /// 此前这一步只在「替换素材」那个 tab 里做。于是打开一条早就选好素材的任务、
+  /// 直接按播放，素材从没被固定过，预览读的是 material_cache 里**没有代理化**
+  /// 的原始下载：规格和别的段落对不上，接缝处照旧要重建解码器。配乐那边早就是
+  /// 进工作台就固定的，素材没有理由两样。
+  void _pinMaterials() {
+    final cache = _mediaCache;
+    final replacements = _replacements;
+    if (cache == null || replacements == null) return;
+    cache.pinAll({
+      for (final r in replacements) ...[
+        ...r.wholeCandidateIds,
+        for (final ids in r.shotCandidateIds.values) ...ids,
+      ],
+    });
   }
 
   /// 首帧图落在任务数据目录下。没有数据目录（测试环境）就不落地——

@@ -68,7 +68,11 @@ class CacheScanner {
   /// 删除孤儿产物，返回**实际**释放的字节数（删失败的不计入，不虚报）
   Future<int> purgeOrphans({required Set<String> knownTaskIds}) async {
     final artifacts = _artifacts;
-    return artifacts.delete(artifacts.orphans(knownTaskIds));
+    return artifacts.delete([
+      ...artifacts.orphans(knownTaskIds),
+      // 废弃目录一并带走：没人读的数据不该继续占着盘
+      ...artifacts.retired(),
+    ]);
   }
 
   int _bytesOf(Directory dir) =>
@@ -78,7 +82,10 @@ class CacheScanner {
   /// 它们才是大头（真机上预览画面切片 275M、预览音轨 88M）
   int _previewBytes() {
     var total = 0;
-    for (final name in TaskArtifacts.perTaskDirNames) {
+    for (final name in [
+      ...TaskArtifacts.perTaskDirNames,
+      ...TaskArtifacts.sharedCacheDirNames,
+    ]) {
       total += _bytesOf(Directory(p.join(dataDir.path, name)));
     }
     return total;
@@ -86,7 +93,10 @@ class CacheScanner {
 
   int _previewFileCount() {
     var total = 0;
-    for (final name in TaskArtifacts.perTaskDirNames) {
+    for (final name in [
+      ...TaskArtifacts.perTaskDirNames,
+      ...TaskArtifacts.sharedCacheDirNames,
+    ]) {
       total += _fileCount(Directory(p.join(dataDir.path, name)));
     }
     return total;

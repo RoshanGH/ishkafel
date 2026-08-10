@@ -114,29 +114,26 @@ class ExportCommands {
       '${_scalePad(target)}$speed'
           ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}',
       '-r', target == null ? '$fps' : target.frameRate,
-      ..._encoder(target),
+      ..._encoder(),
       '-frames:v', '${frameCount(durationMs, atFps: target?.fps)}',
       out,
     ];
   }
 
-  /// 编码参数。不给目标规格时是导出那一套（统一 libx264）；给了就向它看齐
-  static List<String> _encoder(MediaSpec? target) {
-    if (target == null) {
-      return const [
+  /// 编码参数。**一律软编 libx264**，不管是导出还是预览。
+  ///
+  /// 曾经有过一条「向原片规格看齐、用 videotoolbox 硬编」的分支，为的是让
+  /// 变速切片和原片规格一致、播放器不必在接缝处重建解码器。它在开发机上成立，
+  /// 换一台机器就崩——Intel Mac 的 VideoToolbox 绝大多数编不了 10bit HEVC。
+  ///
+  /// 代理方案（见 [ProxySpec]）从根上换了思路：预览链路上的每一段都转成**我们
+  /// 说了算的同一个规格**，而那个规格是 H.264 8bit，软编就够、且哪台机器上出来
+  /// 的都一模一样。于是那条硬编分支连同它的机器相关性一起退休。
+  static List<String> _encoder() => const [
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-profile:v', 'high',
         '-pix_fmt', 'yuv420p',
       ];
-    }
-    return [
-      '-c:v', target.codec == 'h264' ? 'h264_videotoolbox' : 'hevc_videotoolbox',
-      if (target.profile.isNotEmpty)
-        ...['-profile:v', target.profile.toLowerCase().replaceAll(' ', '')],
-      '-pix_fmt', target.pixelFormat.contains('10') ? 'p010le' : 'yuv420p',
-      '-b:v', '8M',
-      if (target.codec == 'hevc') ...['-tag:v', 'hvc1'],
-    ];
-  }
 
   /// 倍率写进滤镜串：去掉浮点尾巴，`PTS/1.5000000000000002` 既难读也没必要
   static String _trim(double v) {

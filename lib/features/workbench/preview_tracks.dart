@@ -65,6 +65,9 @@ class PreviewTracks extends ChangeNotifier {
   }
 
   /// 方案有任何变化时调用。与画面/声音无关的改动会被指纹挡掉。
+  /// 原片的预览代理。null 表示还没生成好，这一轮先播原片
+  String? proxyPath;
+
   Future<void> update({
     required RenewTask task,
     required List<SemanticUnit> units,
@@ -115,7 +118,10 @@ class PreviewTracks extends ChangeNotifier {
     };
 
     return TrackPlanBuilder.build(
-      sourcePath: task.sourcePath,
+      // 画面走代理（规格统一，接缝处不必重建解码器）；代理还没生成好就先播
+      // 原片。声音那一路始终读原片——音频解码不吃硬件，没理由多绕一层
+      sourcePath: proxyPath ?? task.sourcePath,
+      audioSourcePath: task.sourcePath,
       units: units,
       replacements: replacements,
       materials: local,

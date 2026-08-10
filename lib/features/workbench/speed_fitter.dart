@@ -115,7 +115,25 @@ class SpeedFitter extends ChangeNotifier {
     required String candidatePath,
     required int slotMs,
   }) async {
+    // **占位要在第一个 await 之前**：下面探时长、读规格都是异步的，
+    // 把占位放在它们之后，两次调用就能同时穿过这道检查，一起去渲染同一个
+    // key——先跑完的那个把 `.part` 文件改名走了，后跑完的扑空报
+    // 「Cannot rename … .part.mp4」。真机日志里出现过两次
     if (_running.contains(key)) return;
+    _running.add(key);
+    try {
+      await _fitLocked(key: key, candidatePath: candidatePath, slotMs: slotMs);
+    } finally {
+      _running.remove(key);
+      _notify();
+    }
+  }
+
+  Future<void> _fitLocked({
+    required String key,
+    required String candidatePath,
+    required int slotMs,
+  }) async {
     final candidateMs = await probeDurationMs(candidatePath);
     final target = await _resolveTarget();
     final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs|$target';
@@ -130,7 +148,6 @@ class SpeedFitter extends ChangeNotifier {
       return;
     }
 
-    _running.add(key);
     _notify();
     try {
       final out = await cache.render(
@@ -151,9 +168,6 @@ class SpeedFitter extends ChangeNotifier {
     } catch (e) {
       // 变速失败只影响这一段：它退回播原片，其余照旧
       AppLog.warn('镜头替换变速失败（$key）：$e');
-    } finally {
-      _running.remove(key);
-      _notify();
     }
   }
 

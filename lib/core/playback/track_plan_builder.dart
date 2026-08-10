@@ -1,5 +1,6 @@
 import '../audio/audio_track_builder.dart';
 import '../audio/bgm_plan.dart';
+import '../ffmpeg/proxy_spec.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 import 'track_plan.dart';
@@ -26,7 +27,15 @@ class TrackPlanBuilder {
   /// [speedFitted] 是镜头替换那几段**预先变速对齐好**的切片（镜头 key →
   /// 本地文件）。只有标了 ★ 的那条需要，其余候选到导出时才变速。
   static TrackPlan build({
+    /// 画面轨读的原片。**预览走代理**（见 [ProxySpec]）：段与段规格一致，
+    /// 播放器在接缝处才不用重建解码器。代理还没生成好时传原片路径，
+    /// 那一轮先按原样播
     required String sourcePath,
+
+    /// 口播轨读的原片。**始终是原片本身，不走代理**：音频解码不吃硬件，
+    /// 而代理是 `-c:a copy` 出来的、音质本就一样，没有理由多绕一层。
+    /// 为 null 时与 [sourcePath] 相同（没有代理的场景）
+    String? audioSourcePath,
     required List<SemanticUnit> units,
     required List<UnitReplacement> replacements,
     required Map<int, LocalMaterial> materials,
@@ -39,6 +48,7 @@ class TrackPlanBuilder {
     /// 并记进 [TrackPlan.bgmMissing]——预览可以少一段垫乐，但必须说出来
     Map<int, String> bgmPaths = const {},
   }) {
+    final audioSource = audioSourcePath ?? sourcePath;
     final video = <TrackSegment>[];
     final voice = <TrackSegment>[];
     // 成片时间轴上的游标：整体替换会改变段落长度，后面的全跟着挪
@@ -117,7 +127,7 @@ class TrackPlanBuilder {
           voice.add(TrackSegment(
             atMs: cursor,
             durationMs: slotMs,
-            source: clean ? vocalsPath : sourcePath,
+            source: clean ? vocalsPath : audioSource,
             inMs: shotStart,
           ));
           cursor += slotMs;
