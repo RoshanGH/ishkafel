@@ -34,6 +34,14 @@ class SpeedFitter extends ChangeNotifier {
 
   /// 已经渲染好的：镜头 key（见 [TrackPlanBuilder.shotKey]）→ 本地切片
   final Map<String, String> _fitted = {};
+
+  /// 每一段是**用什么渲染出来的**（候选路径 + 坑位长度）。
+  ///
+  /// 有了它，[sync] 再被调用时能一眼认出「这一段已经就绪、入参也没变」，
+  /// 从而**什么都不做**——既不占位也不通知。少了这一步就是个死循环：
+  /// 渲完 notify → 上层重推轨道 → 又调 sync → 又走一遍占位与 notify →
+  /// 再重推……界面上表现为「正在准备 1 段替换镜头」永远转下去。
+  final Map<String, String> _fittedFrom = {};
   final Set<String> _running = {};
   bool _disposed = false;
 
@@ -94,6 +102,7 @@ class SpeedFitter extends ChangeNotifier {
     for (final key in _fitted.keys.toList()) {
       if (!wanted.containsKey(key)) {
         _fitted.remove(key);
+        _fittedFrom.remove(key);
         changed = true;
       }
     }
@@ -115,6 +124,15 @@ class SpeedFitter extends ChangeNotifier {
     required String candidatePath,
     required int slotMs,
   }) async {
+    // 已经就绪且入参没变：什么都不做。**这一条是死循环的闸**，见 [_fittedFrom]
+    final from = '$candidatePath|$slotMs';
+    final ready = _fitted[key];
+    if (_fittedFrom[key] == from &&
+        ready != null &&
+        File(ready).existsSync()) {
+      return;
+    }
+
     // **占位要在第一个 await 之前**：下面探时长、读规格都是异步的，
     // 把占位放在它们之后，两次调用就能同时穿过这道检查，一起去渲染同一个
     // key——先跑完的那个把 `.part` 文件改名走了，后跑完的扑空报
@@ -145,6 +163,7 @@ class SpeedFitter extends ChangeNotifier {
         _fitted[key] = expected;
         _notify();
       }
+      _fittedFrom[key] = '$candidatePath|$slotMs';
       return;
     }
 
@@ -165,6 +184,7 @@ class SpeedFitter extends ChangeNotifier {
         what: '把替换镜头变速对齐坑位',
       );
       _fitted[key] = out;
+      _fittedFrom[key] = '$candidatePath|$slotMs';
     } catch (e) {
       // 变速失败只影响这一段：它退回播原片，其余照旧
       AppLog.warn('镜头替换变速失败（$key）：$e');

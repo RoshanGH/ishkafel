@@ -146,6 +146,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 实测每 tick 净开销 10~12ms，占满 60fps 预算的七成，播放与拖拽因此发顿。
   final ValueNotifier<int> _playhead = ValueNotifier<int>(0);
 
+  /// 留着引用只为离开时 [SpeedFitter.prune] 一次
+  SpeedFitter? _speedFitter;
+
   /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
   /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
   bool _lastDirty = false;
@@ -265,7 +268,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         playback: playback,
         materials: _mediaCache,
         bgmMedia: _bgmMediaCache,
-        speedFitter: _buildSpeedFitter(),
+        speedFitter: _speedFitter = _buildSpeedFitter(),
       )
         ..addListener(_onTracksChanged)
         ..onNeedsRebuild = _syncPreviewAudio;
@@ -388,6 +391,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     unawaited(_preview?.dispose());
     _tracks?.removeListener(_onTracksChanged);
     _tracks?.dispose();
+    // 变速切片也要回收：只留这一次方案还在用的那几段。
+    // 此前 prune 压根没人调，真机上 speed_fit 里堆了 6 个切片、4 个早就废了
+    _speedFitter?.prune();
     // 离开工作台时做一次配额回收：固定住的一律不动，只淘汰没人用的
     for (final cache in [_mediaCache, _bgmMediaCache]) {
       if (cache == null) continue;

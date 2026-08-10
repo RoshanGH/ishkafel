@@ -109,6 +109,10 @@ class MultitrackPlayback implements PlaybackController {
         await voice.seekMs(at);
       }
       await _applyBgm(at, force: true);
+      // 换源必然要重开文件、重新定位，这一下的停顿是**已知代价**，
+      // 不是异常。基线不重置的话，代理刚生成好那一刻的换源会被探针报成
+      // 「0.74×」「1.40×」，把真信号淹掉
+      _resetPace();
       // 换源前在播的话，换完接着播——点一下 ★ 就把播放停住是不能接受的
       if (wasPlaying) {
         await video.play();
@@ -152,6 +156,12 @@ class MultitrackPlayback implements PlaybackController {
     }
   }
 
+  /// 探针基线归零。开播、换源之后都要来一次
+  void _resetPace() {
+    _paceAtMs = video.positionMs;
+    _paceWallMs = _pace.elapsedMilliseconds;
+  }
+
   final Stopwatch _pace = Stopwatch()..start();
   int _paceAtMs = 0;
   int _paceWallMs = 0;
@@ -163,8 +173,7 @@ class MultitrackPlayback implements PlaybackController {
     if (playing) {
       // 刚开播：走时探针的基线要归零，否则第一段会拿「从 app 启动算起」
       // 的挂钟去比，报一条没意义的 0.00×
-      _paceAtMs = video.positionMs;
-      _paceWallMs = _pace.elapsedMilliseconds;
+      _resetPace();
       _syncTimer ??= Timer.periodic(syncInterval, (_) => _correctDrift());
     } else {
       _syncTimer?.cancel();

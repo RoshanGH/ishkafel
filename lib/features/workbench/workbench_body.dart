@@ -170,7 +170,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-        content: Text(reason),
+        // 必须显式给前景色：深色底上用 Material 的默认前景色，出来是一片
+        // 灰压灰，真机上根本读不出写的是什么
+        content: Text(reason,
+            style: const TextStyle(
+                fontSize: AppFontSize.body,
+                height: 1.5,
+                color: AppColors.textPrimary)),
         backgroundColor: AppColors.surfaceCard,
         duration: _blockedNoticeFor,
         action: SnackBarAction(
