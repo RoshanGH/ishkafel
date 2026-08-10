@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/diagnostics/environment_report.dart';
 import '../../core/miaoa/miaoa_account_service.dart';
+import '../../core/miaoa/miaoa_auth_service.dart';
 import '../../core/storage/cache_usage.dart';
 import '../../core/storage/task_repository.dart';
 import '../tasks/task_list_controller.dart';
@@ -23,6 +24,10 @@ const String miaoaLoginCommand = 'miaoa auth login';
 
 final miaoaAccountServiceProvider =
     Provider<MiaoaAccountService?>((ref) => null);
+
+/// 登录/登出。null 表示本次运行没接入——设置页那时退回「去终端登录」的引导，
+/// 而不是给一个点了没反应的按钮
+final miaoaAuthServiceProvider = Provider<MiaoaAuthService?>((ref) => null);
 
 final cacheScannerProvider = Provider<CacheScanner?>((ref) => null);
 

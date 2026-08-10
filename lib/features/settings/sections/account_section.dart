@@ -7,14 +7,22 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/log/app_log.dart';
 import '../../../core/miaoa/miaoa_account_service.dart';
+import '../../../core/miaoa/miaoa_auth_service.dart';
 import '../../../core/miaoa/miaoa_failure.dart';
+import '../miaoa_login_sheet.dart';
 import '../settings_providers.dart';
 import '../settings_widgets.dart';
 
-/// miaoa 账号分区：登录状态、租户、当前项目。
+/// miaoa 账号分区：登录状态、租户、当前项目、登录与退出。
 ///
-/// 只读不写——切换租户/项目、登录登出都由 miaoa CLI 完成，app 不代收凭据，
-/// 也不去改 CLI 的本地上下文（那会让终端里正在进行的操作莫名其妙地变样）。
+/// **凭据始终由 miaoa CLI 保存，app 不留任何一份。** 登录这一步是把手机号和
+/// 验证码转发给 CLI 跑一次（见 [MiaoaAuthService]）——自己再存一份 token 就
+/// 会有两份登录态，app 显示「已登录」而 CLI 那边早过期，一检索就 401。
+///
+/// 切换租户/项目仍然只读不写：那会让终端里正在进行的操作莫名其妙地变样。
+///
+/// 换一台电脑、或者换一个人用这个包，都要在本机登录一次——登录态是跟着
+/// miaoa CLI 走的，不在安装包里。
 class AccountSection extends ConsumerWidget {
   const AccountSection({super.key});
 
@@ -84,38 +92,120 @@ class _LoggedIn extends ConsumerWidget {
         ),
         const Divider(height: 1, color: AppColors.border),
         SettingsRow(label: '服务地址', value: status.endpoint),
+        if (ref.watch(miaoaAuthServiceProvider) != null) ...[
+          const Divider(height: 1, color: AppColors.border),
+          SettingsRow(
+            label: '退出登录',
+            content: const Text('退出后无法检索素材，需要重新用手机号登录',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary)),
+            trailing: TextButton(
+              key: const Key('settings-logout'),
+              onPressed: () => _confirmLogout(context, ref),
+              child: const Text('退出', style: TextStyle(color: AppColors.red)),
+            ),
+          ),
+        ],
         const SettingsNote('切换租户与项目请在终端使用 miaoa CLI 完成。'
             '本应用只读取上下文，不会替你改动它——否则终端里正在进行的操作会莫名变样。'),
       ]);
+
+  /// 退出是破坏性的（要重新收一次短信才能回来），先确认
+  Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
+    final service = ref.read(miaoaAuthServiceProvider);
+    if (service == null) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: const Text('退出 miaoa 登录？'),
+        content: const Text('退出后这台电脑上无法检索候选素材，也读不到标签组，'
+            '需要重新用手机号收一次验证码。已经下载到本地的素材不受影响。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消')),
+          TextButton(
+            key: const Key('settings-logout-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('退出', style: TextStyle(color: AppColors.red)),
+          ),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final result = await service.logout();
+    ref.invalidate(miaoaAccountProvider);
+    if (!context.mounted) return;
+    // 失败不能装作退了：CLI 那边可能还留着凭据
+    if (!result.ok) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(result.message)));
+    }
+  }
 }
 
 class _LoggedOut extends ConsumerWidget {
   const _LoggedOut();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => SettingsCard(children: [
-        const SettingsRow(
-          label: '登录状态',
-          content: StatusDot(ok: false, text: '未登录'),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        const Text('未登录时无法检索候选素材、也读不到标签组。请在终端运行下面这条命令完成登录'
-            '（手机号 + 短信验证码），完成后点「刷新」。',
-            style: TextStyle(
-                fontSize: AppFontSize.body,
-                height: 1.6,
-                color: AppColors.textPrimary)),
-        const SizedBox(height: AppSpacing.md),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final auth = ref.watch(miaoaAuthServiceProvider);
+    return SettingsCard(children: [
+      const SettingsRow(
+        label: '登录状态',
+        content: StatusDot(ok: false, text: '未登录'),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      Text(
+        auth == null
+            ? '未登录时无法检索候选素材、也读不到标签组。请在终端运行下面这条命令完成登录'
+                '（手机号 + 短信验证码），完成后点「刷新」。'
+            : '未登录时无法检索候选素材、也读不到标签组。用注册 miaoa 时的手机号'
+                '登录即可——登录状态存在这台电脑上，换一台电脑要再登一次。',
+        style: const TextStyle(
+            fontSize: AppFontSize.body,
+            height: 1.6,
+            color: AppColors.textPrimary),
+      ),
+      const SizedBox(height: AppSpacing.md),
+      // 接不到登录服务时（测试环境，或将来 CLI 不支持）退回教用户敲命令，
+      // 而不是摆一个点了没反应的按钮
+      if (auth == null) ...[
         const _CommandBox(command: miaoaLoginCommand),
         const SizedBox(height: AppSpacing.md),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton(
-            onPressed: () => ref.invalidate(miaoaAccountProvider),
-            child: const Text('刷新'),
-          ),
+      ],
+      Align(
+        alignment: Alignment.centerLeft,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (auth != null) ...[
+              FilledButton(
+                key: const Key('settings-login'),
+                onPressed: () => _login(context, ref, auth),
+                child: const Text('登录 miaoa'),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+            ],
+            OutlinedButton(
+              onPressed: () => ref.invalidate(miaoaAccountProvider),
+              child: const Text('刷新'),
+            ),
+          ],
         ),
-      ]);
+      ),
+    ]);
+  }
+
+  Future<void> _login(
+      BuildContext context, WidgetRef ref, MiaoaAuthService auth) async {
+    final ok = await MiaoaLoginSheet.show(context, auth);
+    if (ok != true) return;
+    // 登录成功后重新读一次状态：租户、项目、服务地址都要跟着刷新
+    ref.invalidate(miaoaAccountProvider);
+  }
 }
 
 /// 命令行片段 + 一键复制。让用户照着屏幕手打一条命令是最容易出错的一步。

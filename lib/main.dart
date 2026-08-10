@@ -28,6 +28,7 @@ import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
+import 'core/miaoa/miaoa_auth_service.dart';
 import 'core/miaoa/miaoa_locator.dart';
 import 'core/miaoa/miaoa_tag_service.dart';
 import 'core/diagnostics/environment_report.dart';
@@ -96,6 +97,7 @@ Future<void> main() async {
       environmentProbeProvider.overrideWithValue(defaultEnvironmentProbe(
           mediaTools: mediaTools, credentials: credentials)),
       miaoaAccountServiceProvider.overrideWithValue(MiaoaAccountService()),
+      miaoaAuthServiceProvider.overrideWithValue(MiaoaAuthService()),
       dataDirProvider.overrideWithValue(dataDir),
       // 「生成配音」：凭据齐了才给工厂，否则工作台把按钮禁用并说明原因，
       // 而不是让用户点了之后撞一个网络错误
