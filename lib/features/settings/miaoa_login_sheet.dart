@@ -7,6 +7,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/miaoa/miaoa_auth_service.dart';
+import 'workspace_picker_sheet.dart';
 
 /// 登录 miaoa：手机号 → 验证码 → 完成。
 ///
@@ -225,6 +226,8 @@ class _MiaoaLoginSheetState extends State<MiaoaLoginSheet> {
         .completeLogin(phone: _phone.text, code: _code.text);
     if (!mounted) return;
     if (result.ok) {
+      await _chooseTenant();
+      if (!mounted) return;
       Navigator.of(context).pop(true);
       return;
     }
@@ -234,6 +237,28 @@ class _MiaoaLoginSheetState extends State<MiaoaLoginSheet> {
       // 验证码过期就把它清掉：留在框里只会被再提交一次
       if (result.message.contains('过期')) _code.clear();
     });
+  }
+
+  /// 登录成功后**接着让用户选企业**。
+  ///
+  /// 一个账号可以属于多家企业，而标签组是企业级的。不选就落在 CLI 给的默认
+  /// 企业上——新建任务时选不到标签组，AI 没有受控词表打不出标签，到了挑替换
+  /// 素材那一步就是「没有标签」，而中间没有任何一步会报错。真机上就这么撞过。
+  ///
+  /// 只有一家时不打扰：那就没有可选的，弹出来只是多一次点击。
+  Future<void> _chooseTenant() async {
+    final tenants = await widget.service.listTenants();
+    if (!mounted || tenants.items.length < 2) return;
+    await WorkspacePickerSheet.show(
+      context,
+      title: '选择企业',
+      description: '这个账号能进多家企业。**标签组是按企业分的**——选错了，'
+          '新建任务时会选不到标签组，画面也就打不出标签。',
+      load: () async => tenants,
+      select: widget.service.selectTenant,
+      // 这一步不给跳过：跳过就是把人留在一个不确定的上下文里
+      dismissible: false,
+    );
   }
 
   void _startCooldown() {

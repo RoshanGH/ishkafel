@@ -10,6 +10,7 @@ import '../../../core/miaoa/miaoa_account_service.dart';
 import '../../../core/miaoa/miaoa_auth_service.dart';
 import '../../../core/miaoa/miaoa_failure.dart';
 import '../miaoa_login_sheet.dart';
+import '../workspace_picker_sheet.dart';
 import '../settings_providers.dart';
 import '../settings_widgets.dart';
 
@@ -82,13 +83,35 @@ class _LoggedIn extends ConsumerWidget {
           ),
         ),
         const Divider(height: 1, color: AppColors.border),
-        SettingsRow(label: '租户', value: status.tenantName),
+        SettingsRow(
+          label: '企业',
+          value: status.tenantName,
+          trailing: _switchButton(
+            context,
+            ref,
+            key: const Key('settings-switch-tenant'),
+            title: '切换企业',
+            description: '**标签组是按企业分的**。在错的企业下，新建任务时会选不到'
+                '标签组，画面也就打不出标签、挑替换素材时没有标签可用。',
+            load: (auth) => auth.listTenants(),
+            select: (auth, id) => auth.selectTenant(id),
+          ),
+        ),
         const Divider(height: 1, color: AppColors.border),
         SettingsRow(
           label: '当前项目',
           value: status.projectCount == null
               ? status.projectName
               : '${status.projectName ?? '未选择'}（${status.projectCount} 个可选）',
+          trailing: _switchButton(
+            context,
+            ref,
+            key: const Key('settings-switch-project'),
+            title: '切换项目',
+            description: '检索候选素材时会限定在当前项目下。',
+            load: (auth) => auth.listProjects(),
+            select: (auth, id) => auth.switchProject(id),
+          ),
         ),
         const Divider(height: 1, color: AppColors.border),
         SettingsRow(label: '服务地址', value: status.endpoint),
@@ -110,6 +133,35 @@ class _LoggedIn extends ConsumerWidget {
         const SettingsNote('切换租户与项目请在终端使用 miaoa CLI 完成。'
             '本应用只读取上下文，不会替你改动它——否则终端里正在进行的操作会莫名变样。'),
       ]);
+
+  /// 企业/项目的「切换」按钮。没接登录服务时不显示——那时这两项只能去终端改
+  Widget? _switchButton(
+    BuildContext context,
+    WidgetRef ref, {
+    required Key key,
+    required String title,
+    required String description,
+    required Future<MiaoaWorkspaceList> Function(MiaoaAuthService) load,
+    required Future<MiaoaAuthResult> Function(MiaoaAuthService, int) select,
+  }) {
+    final auth = ref.watch(miaoaAuthServiceProvider);
+    if (auth == null) return null;
+    return TextButton(
+      key: key,
+      onPressed: () async {
+        final switched = await WorkspacePickerSheet.show(
+          context,
+          title: title,
+          description: description,
+          load: () => load(auth),
+          select: (id) => select(auth, id),
+        );
+        // 切完整个上下文都变了：企业、项目、能读到的标签组
+        if (switched == true) ref.invalidate(miaoaAccountProvider);
+      },
+      child: const Text('切换'),
+    );
+  }
 
   /// 退出是破坏性的（要重新收一次短信才能回来），先确认
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {

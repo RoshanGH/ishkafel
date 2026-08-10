@@ -22,6 +22,32 @@ class MiaoaAuthResult {
   const MiaoaAuthResult.failure(this.kind, this.message) : ok = false;
 }
 
+/// 一个可切换的目标：企业（租户）或项目。
+class MiaoaWorkspace {
+  final int id;
+  final String name;
+
+  /// 当前就在这个上面吗
+  final bool current;
+
+  const MiaoaWorkspace({
+    required this.id,
+    required this.name,
+    this.current = false,
+  });
+}
+
+/// 列一批可选项的结果。失败时 [failure] 是能直接展示的中文
+class MiaoaWorkspaceList {
+  final List<MiaoaWorkspace> items;
+  final String? failure;
+
+  const MiaoaWorkspaceList(this.items) : failure = null;
+  const MiaoaWorkspaceList.failed(String this.failure) : items = const [];
+
+  bool get ok => failure == null;
+}
+
 /// 验证码登录之外还有的几种失败——CLI 只会在报文里说，这里认出来分开讲。
 ///
 /// 「验证码错」和「登录已失效」是两码事：前者重填一次就好，后者要重新走整个
@@ -114,6 +140,84 @@ class MiaoaAuthService {
       // CLI 可能退出码 0 却在 JSON 里说没成——那不能报喜
       requireLoggedIn: true,
     );
+  }
+
+  /// 这个账号能进哪几家企业。
+  ///
+  /// **登录之后必须让用户选一次**：一个账号可以属于多家企业，而
+  /// **标签组是企业级的**。落在错的企业上，新建任务时根本选不到标签组，
+  /// 于是没有受控词表、AI 打不出标签，到了挑替换素材那一步就是「没有标签」
+  /// ——而这中间没有任何一步会报错，全是静默的。
+  Future<MiaoaWorkspaceList> listTenants({int? currentId}) =>
+      _list(['tenant', 'list', '--json'], '读取企业列表', (json) {
+        final raw = json['tenants'];
+        if (raw is! List) return const [];
+        return [
+          for (final t in raw)
+            if (t is Map && t['tenantId'] is int)
+              MiaoaWorkspace(
+                id: t['tenantId'] as int,
+                name: '${t['tenantName'] ?? '未命名企业'}',
+                current: t['tenantId'] == currentId,
+              ),
+        ];
+      });
+
+  /// 切到这家企业。CLI 会顺带把本地凭证换成新会话
+  Future<MiaoaAuthResult> selectTenant(int tenantId) =>
+      _act(['tenant', 'select', '$tenantId', '--json'], '切换企业', '已切换企业');
+
+  /// 当前企业下有哪些项目
+  Future<MiaoaWorkspaceList> listProjects({int? currentId}) =>
+      _list(['project', 'list', '--json'], '读取项目列表', (json) {
+        final raw = json['records'];
+        if (raw is! List) return const [];
+        return [
+          for (final p in raw)
+            if (p is Map && p['id'] is int && p['isEnabled'] != false)
+              MiaoaWorkspace(
+                id: p['id'] as int,
+                name: '${p['name'] ?? '未命名项目'}',
+                current: p['id'] == currentId,
+              ),
+        ];
+      });
+
+  Future<MiaoaAuthResult> switchProject(int projectId) =>
+      _act(['project', 'switch', '$projectId', '--json'], '切换项目', '已切换项目');
+
+  Future<MiaoaWorkspaceList> _list(
+    List<String> args,
+    String what,
+    List<MiaoaWorkspace> Function(Map<String, dynamic>) parse,
+  ) async {
+    try {
+      final result = await run(resolveBinary(), args);
+      if (result.exitCode != 0) {
+        return MiaoaWorkspaceList.failed(
+            _authGuidance(classifyMiaoaFailure('${result.stderr}${result.stdout}'), what));
+      }
+      final decoded = jsonDecode('${result.stdout}'.trim());
+      if (decoded is! Map<String, dynamic>) {
+        return MiaoaWorkspaceList.failed('$what失败：读不懂返回内容');
+      }
+      return MiaoaWorkspaceList(parse(decoded));
+    } catch (e) {
+      AppLog.warn('miaoa $what 失败（${classifyMiaoaFailure(e)}）');
+      return MiaoaWorkspaceList.failed(
+          _authGuidance(classifyMiaoaFailure(e), what));
+    }
+  }
+
+  Future<MiaoaAuthResult> _act(
+      List<String> args, String what, String onSuccess) async {
+    try {
+      final result = await run(resolveBinary(), args);
+      if (result.exitCode == 0) return MiaoaAuthResult.success(onSuccess);
+      return _classify('${result.stderr}${result.stdout}', what);
+    } catch (e) {
+      return _classify(e, what);
+    }
   }
 
   /// 退出登录：由 CLI 吊销 token 并清掉本地凭据
