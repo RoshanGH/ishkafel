@@ -13,6 +13,8 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_riverpod: ^2.6.1
+  # CLI 依赖树上的 core 文件只用 @immutable，不能为它拖进整个 flutter
+  meta: ^1.16.0
   media_kit: ^1.2.6
   media_kit_libs_video: ^1.0.7
   media_kit_video: ^2.0.1

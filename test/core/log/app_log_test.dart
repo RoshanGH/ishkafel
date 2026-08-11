@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/app/flutter_error_bridge.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 
 void main() {
@@ -32,7 +33,7 @@ void main() {
       tearDown(() => FlutterError.onError = originalOnError);
 
       test('安装转发后，框架上报的异常会经 AppLog 输出', () {
-        AppLog.installFlutterErrorForwarding();
+        installFlutterErrorForwarding();
 
         FlutterError.reportError(FlutterErrorDetails(
           exception: Exception('绘制中途抛异常'),
@@ -51,7 +52,7 @@ void main() {
         var delegated = 0;
         FlutterError.onError = (_) => delegated++;
 
-        AppLog.installFlutterErrorForwarding();
+        installFlutterErrorForwarding();
         FlutterError.reportError(
             FlutterErrorDetails(exception: Exception('x')));
 

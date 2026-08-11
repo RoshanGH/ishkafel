@@ -26,6 +26,7 @@ import 'core/analysis/tag_vocabulary.dart';
 import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
+import 'app/flutter_error_bridge.dart';
 import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
 import 'core/diagnostics/tool_installer.dart';
@@ -53,7 +54,7 @@ import 'core/audio/vocal_separator.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // 尽早接管：框架异常默认经 debugPrint 输出，真机直接跑二进制时不可见
-  AppLog.installFlutterErrorForwarding();
+  installFlutterErrorForwarding();
   MediaKit.ensureInitialized();
   final supportDir = await getApplicationSupportDirectory();
   final dataDir = Directory(p.join(supportDir.path, 'ishkafel_data'));

@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:meta/meta.dart';
 
 /// 一条片子的**解码规格**：换段时播放器要不要重建解码器，就看这几项。
 ///
