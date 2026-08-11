@@ -44,7 +44,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 /// CLI 是纯 Dart 进程，没有 Flutter binding。这几个文件在 CLI 的依赖树上，
-/// 一旦 import 了 package:flutter，`dart compile exe` 直接失败。
+/// 一旦 import 了 package:flutter，编译 CLI 时直接失败（`dart build cli`）。
 ///
 /// 用测试钉住而不是靠人记得：这类 import 常常是顺手加的（要个 @immutable
 /// 就 import 了 foundation），而它坏掉的地方在另一个构建产物里。
@@ -73,7 +73,7 @@ void main() {
       }
     }
     expect(offenders, isEmpty,
-        reason: '这些文件在 CLI 依赖树上，import flutter 会让 dart compile exe 失败');
+        reason: '这些文件在 CLI 依赖树上，import flutter 会让 dart build cli 失败');
   });
 }
 ```
@@ -125,7 +125,7 @@ git add -A
 git commit -m "refactor: CLI 依赖树上的 core 文件脱离 Flutter
 
 CLI 是纯 Dart 进程，没有 Flutter binding——依赖树上任何一个 import
-package:flutter 都会让 dart compile exe 直接失败。
+package:flutter 都会让 dart build cli 直接失败。
 
 替换都是等价物：@immutable → package:meta，compute → Isolate.run，
 GUI 专属的 FlutterError 转发挪到 lib/app/。公开签名一个都没动。

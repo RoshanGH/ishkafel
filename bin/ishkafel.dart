@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
+import 'package:ishkafel/cli/commands/task_command.dart';
+import 'package:ishkafel/cli/data_dir.dart';
 
 /// ishkafel 的命令行入口。
 ///
@@ -36,7 +38,20 @@ Future<void> main(List<String> args) async {
   }
 
   final command = parsed.rest.first;
-  failWith('未知命令：$command\n\n${usageText(parser)}', code: exitBadUsage);
+  final rest = parsed.rest.skip(1).toList();
+
+  final Directory dataDir;
+  try {
+    dataDir = resolveDataDir(override: parsed['data-dir'] as String?);
+  } on StateError catch (e) {
+    failWith(e.message, code: exitBadUsage);
+  }
+
+  final code = switch (command) {
+    'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
+    _ => failWith('未知命令：$command\n\n${usageText(parser)}', code: exitBadUsage),
+  };
+  exit(code);
 }
 
 /// 用法说明。抽出来是为了让「没给命令」「命令不认识」「-h」三条路
@@ -47,7 +62,7 @@ ishkafel —— 成片翻新工具的命令行入口
 用法：ishkafel <命令> [参数]
 
 命令：
-  （后续任务逐个接入）
+  task <id>        任务全貌（单元、镜头、标签、导出历史）
 
 通用参数：
 ${parser.usage}
