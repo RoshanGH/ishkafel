@@ -12,8 +12,7 @@ import 'core/ai/volcano_asr_provider.dart';
 import 'core/ai/volcano_semantic_splitter.dart';
 import 'core/analysis/analysis_pipeline.dart';
 import 'core/analysis/batch_frame_extractor.dart';
-import 'core/audio/bgm_cache.dart';
-import 'core/audio/bgm_library.dart';
+import 'core/audio/bgm_cache_factory.dart';
 import 'core/analysis/audio_extractor.dart';
 import 'core/analysis/boundary_snapper.dart';
 import 'core/analysis/scene_detector.dart';
@@ -47,7 +46,7 @@ import 'features/workbench/voice_swap_runner.dart';
 import 'features/export/export_dialog.dart';
 import 'features/picking/picking_providers.dart';
 import 'features/workbench/bgm_picker_sheet.dart';
-import 'features/export/material_downloader.dart';
+import 'core/miaoa/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
 import 'core/audio/vocal_separator.dart';
@@ -168,17 +167,6 @@ Future<void> _sweepOrphans(FileTaskRepository repository, Directory dataDir) asy
 /// 两层打标在这里接通：taggers 走同一个 Ark 客户端（无状态，可共享），
 /// 受控词表走 [MiaoaTagVocabularySource]——按**任务自己选的**标签组现取，
 /// 而不是在这里写死一份全局词表。
-/// 配乐缓存：全应用共用一份（同一首曲子被多个任务用到时只下一次）
-BgmCache bgmCache(Directory dataDir) => BgmCache(
-      library: BgmLibrary(binary: resolveMiaoaBinary()),
-      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
-      // 缓存里可能躺着上次下崩的半截文件、或者地址失效时返回的错误页——
-      // 解不出来就删掉重下，别等到导出时 ffmpeg 报一个看不懂的错。
-      //
-      // 用 playable 而不是 probe：后者解析的是**视频**信息，纯音频文件会以
-      // 「没有视频流」抛错，把好好的配乐判成坏的
-      verify: FfprobeService(run: const ResolvingProcessRunner().call).playable,
-    );
 
 AnalysisPipeline? _buildAnalysisPipeline(
     AiCredentials credentials, Directory dataDir) {

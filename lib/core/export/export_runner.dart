@@ -172,6 +172,40 @@ class ExportRunner {
   }) async {
     final combos = ExportPlanner.enumerate(
         units: units, replacements: replacements, limit: limit);
+    return exportCombinations(
+      combos: combos,
+      sourcePath: sourcePath,
+      units: units,
+      replacements: replacements,
+      outputDir: outputDir,
+      bgm: bgm,
+      voiceAudio: voiceAudio,
+      voices: voices,
+      vocalsPath: vocalsPath,
+      onProgress: onProgress,
+    );
+  }
+
+  /// 导出**已经定好的那几条组合**，不再做笛卡尔积。
+  ///
+  /// [exportAll] 是「人挑候选 → 笛卡尔积」那条路；这条是给 Agent 用的——
+  /// 它提交的是一份完整方案列表，每条都是整体设计过的（见 spec 第四节：
+  /// 笛卡尔积隐含「任意搭配都成立」，与「挑的时候要看前后是否顺畅」冲突）。
+  ///
+  /// [replacements] 仍要传：交付前的检查（换过音色的单元有没有生成配音、
+  /// 被配乐盖住的段落有没有纯人声）是按它判的。
+  Future<List<ExportOutcome>> exportCombinations({
+    required List<ExportCombination> combos,
+    required String sourcePath,
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+    required Directory outputDir,
+    BgmPlan bgm = BgmPlan.empty,
+    Map<int, String> voiceAudio = const {},
+    VoicePlan voices = VoicePlan.empty,
+    String? vocalsPath,
+    ExportProgress? onProgress,
+  }) async {
     if (combos.isEmpty) return const [];
 
     workDir.createSync(recursive: true);

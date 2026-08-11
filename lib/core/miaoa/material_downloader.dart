@@ -2,9 +2,9 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../../core/log/app_log.dart';
-import '../../core/miaoa/miaoa_content_service.dart';
-import '../../core/miaoa/miaoa_tag_service.dart' show MiaoaException;
+import '../log/app_log.dart';
+import 'miaoa_content_service.dart';
+import 'miaoa_tag_service.dart' show MiaoaException;
 
 /// 把候选素材下载到本地，供 ffmpeg 读取。
 ///
