@@ -167,21 +167,59 @@ class MiaoaAuthService {
   Future<MiaoaAuthResult> selectTenant(int tenantId) =>
       _act(['tenant', 'select', '$tenantId', '--json'], '切换企业', '已切换企业');
 
-  /// 当前企业下有哪些项目
-  Future<MiaoaWorkspaceList> listProjects({int? currentId}) =>
-      _list(['project', 'list', '--json'], '读取项目列表', (json) {
-        final raw = json['records'];
-        if (raw is! List) return const [];
-        return [
-          for (final p in raw)
-            if (p is Map && p['id'] is int && p['isEnabled'] != false)
-              MiaoaWorkspace(
-                id: p['id'] as int,
-                name: '${p['name'] ?? '未命名项目'}',
-                current: p['id'] == currentId,
-              ),
-        ];
-      });
+  /// 一次拉多少个项目。CLI 默认只给 20，而真实企业里有几十上百个
+  static const int _pageSize = 100;
+
+  /// 最多翻几页。纯粹是防跑飞——真要有一万个项目，选择器也不是这么用的
+  static const int _maxPages = 20;
+
+  /// 当前企业下有哪些项目。**要翻页拉全**。
+  ///
+  /// 真机上撞过：CLI 默认 page-size=20，而这个企业有 69 个项目；再加上当时
+  /// 在客户端把停用的滤掉，界面上只剩 10 个。用户看到的是「项目列表不全」，
+  /// 而列表本身一声不吭——它并不知道自己只拿到了第一页。
+  ///
+  /// 停用的交给服务端过滤（`--enabled-only`）：在客户端滤会让每页拿到的条数
+  /// 参差不齐，翻页逻辑立刻就不准了。
+  Future<MiaoaWorkspaceList> listProjects({int? currentId}) async {
+    final items = <MiaoaWorkspace>[];
+    for (var page = 1; page <= _maxPages; page++) {
+      final result = await _list(
+        [
+          'project', 'list',
+          '--enabled-only',
+          '--page', '$page',
+          '--page-size', '$_pageSize',
+          '--json',
+        ],
+        '读取项目列表',
+        (json) => _parseProjects(json, currentId),
+      );
+      if (!result.ok) {
+        // 第一页就失败才算失败；后面某页断了，先把已经拿到的给用户用
+        return items.isEmpty ? result : MiaoaWorkspaceList(items);
+      }
+      items.addAll(result.items);
+      // 这一页没满，说明已经是最后一页
+      if (result.items.length < _pageSize) break;
+    }
+    return MiaoaWorkspaceList(items);
+  }
+
+  static List<MiaoaWorkspace> _parseProjects(
+      Map<String, dynamic> json, int? currentId) {
+    final raw = json['records'];
+    if (raw is! List) return const [];
+    return [
+      for (final p in raw)
+        if (p is Map && p['id'] is int)
+          MiaoaWorkspace(
+            id: p['id'] as int,
+            name: '${p['name'] ?? '未命名项目'}',
+            current: p['id'] == currentId,
+          ),
+    ];
+  }
 
   Future<MiaoaAuthResult> switchProject(int projectId) =>
       _act(['project', 'switch', '$projectId', '--json'], '切换项目', '已切换项目');

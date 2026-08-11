@@ -71,6 +71,25 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
   bool _busy = false;
   String? _error;
   int? _switching;
+  final _keyword = TextEditingController();
+
+  @override
+  void dispose() {
+    _keyword.dispose();
+    super.dispose();
+  }
+
+  /// 关键词过滤后的可选项。**本地过滤**：列表已经整个拉到手了，
+  /// 再往服务端跑一趟只会让每敲一个字都卡一下
+  List<MiaoaWorkspace> get _visible {
+    final all = _list?.items ?? const <MiaoaWorkspace>[];
+    final key = _keyword.text.trim();
+    if (key.isEmpty) return all;
+    return [
+      for (final w in all)
+        if (w.name.contains(key) || '${w.id}'.contains(key)) w,
+    ];
+  }
 
   @override
   void initState() {
@@ -128,6 +147,11 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
                     height: 1.5,
                     color: AppColors.textSecondary)),
             const SizedBox(height: AppSpacing.md),
+            // 几十上百个的时候，不给搜索这个列表就是不可用的
+            if ((_list?.items.length ?? 0) > _searchAbove) ...[
+              _searchField(),
+              const SizedBox(height: AppSpacing.sm),
+            ],
             Flexible(child: _body()),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
@@ -161,6 +185,35 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
         ),
       );
 
+  /// 超过这个数才出搜索框——两三个的时候摆一个空框只是噪音
+  static const int _searchAbove = 8;
+
+  Widget _searchField() => TextField(
+        key: const Key('workspace-search'),
+        controller: _keyword,
+        style: const TextStyle(
+            fontSize: AppFontSize.body, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: '搜索名称或 ID（共 ${_list?.items.length ?? 0} 个）',
+          hintStyle: const TextStyle(
+              fontSize: AppFontSize.body, color: AppColors.textTertiary),
+          prefixIcon:
+              const Icon(Icons.search, size: 16, color: AppColors.textTertiary),
+          filled: true,
+          fillColor: AppColors.surface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+        ),
+        onChanged: (_) => setState(() {}),
+      );
+
   Widget _body() {
     if (_busy) {
       return const Padding(
@@ -172,12 +225,16 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
                 child: CircularProgressIndicator(strokeWidth: 2))),
       );
     }
-    final items = _list?.items ?? const <MiaoaWorkspace>[];
+    final items = _visible;
     if (items.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
         child: Text(
-          _error != null ? '' : '这个账号下没有可选项。请联系 miaoa 管理员确认权限。',
+          _error != null
+              ? ''
+              : _keyword.text.trim().isNotEmpty
+                  ? '没有匹配「${_keyword.text.trim()}」的项。'
+                  : '这个账号下没有可选项。请联系 miaoa 管理员确认权限。',
           style: const TextStyle(
               fontSize: AppFontSize.body,
               height: 1.6,

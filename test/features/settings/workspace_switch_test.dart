@@ -54,10 +54,12 @@ void main() {
       expect(list.items.last.current, isFalse);
     });
 
-    test('停用的项目不列出来——点了也切不过去', () async {
+    test('停用的项目由**服务端**滤掉，客户端不再自己动手', () async {
+      // 在客户端滤会让每页拿到的条数参差不齐，翻页立刻就不准了
+      // ——真机上 69 个项目只显示 10 个，就是这么来的
       final f = fake({'project list': (code: 0, out: projectsJson)});
-      final list = await f.service.listProjects();
-      expect(list.items.map((p) => p.name), ['DDS便携消毒AI组']);
+      await f.service.listProjects();
+      expect(f.calls.single, contains('--enabled-only'));
     });
 
     test('切换命令带上 id', () async {
@@ -139,6 +141,152 @@ void main() {
       await pump(tester, f.service);
       await tester.pumpAndSettle();
       expect(find.textContaining('联系 miaoa 管理员'), findsOneWidget);
+    });
+  });
+
+  group('项目列表要拉全——真机上 69 个只显示了 10 个', () {
+    /// 按 page 参数回放分页数据
+    ({MiaoaAuthService service, List<List<String>> calls}) paged(int total) {
+      final calls = <List<String>>[];
+      return (
+        calls: calls,
+        service: MiaoaAuthService(
+          resolveBinary: () => 'miaoa',
+          run: (bin, args) async {
+            calls.add(args);
+            final page =
+                int.parse(args[args.indexOf('--page') + 1]);
+            final size = int.parse(args[args.indexOf('--page-size') + 1]);
+            final from = (page - 1) * size;
+            final records = [
+              for (var i = from; i < total && i < from + size; i++)
+                '{"id":${i + 1},"name":"项目${i + 1}","isEnabled":true}',
+            ];
+            return ProcessResult(
+                0, 0, '{"total":$total,"records":[${records.join(',')}]}', '');
+          },
+        ),
+      );
+    }
+
+    test('一页装不下就接着翻，直到拿全', () async {
+      final f = paged(69);
+      final list = await f.service.listProjects();
+      expect(list.items, hasLength(69));
+      expect(f.calls.length, 1, reason: 'page-size 给足时一页就够，不该白跑第二趟');
+    });
+
+    test('总数超过一页时真的翻页', () async {
+      final f = paged(250);
+      final list = await f.service.listProjects();
+      expect(list.items, hasLength(250));
+      expect(f.calls.length, greaterThan(1));
+      expect(f.calls[1], containsAllInOrder(['--page', '2']));
+    });
+
+    test('停用的交给服务端滤——在客户端滤会让每页条数参差，翻页立刻不准', () async {
+      final f = paged(5);
+      await f.service.listProjects();
+      expect(f.calls.single, contains('--enabled-only'));
+    });
+
+    test('翻到一半断了，先把已经拿到的给用户用', () async {
+      var call = 0;
+      final service = MiaoaAuthService(
+        resolveBinary: () => 'miaoa',
+        run: (bin, args) async {
+          call++;
+          if (call == 1) {
+            final records = [
+              for (var i = 0; i < 100; i++)
+                '{"id":${i + 1},"name":"项目${i + 1}","isEnabled":true}',
+            ];
+            return ProcessResult(
+                0, 0, '{"total":250,"records":[${records.join(',')}]}', '');
+          }
+          return ProcessResult(0, 1, '', 'error: connection reset');
+        },
+      );
+      final list = await service.listProjects();
+      expect(list.items, hasLength(100));
+      expect(list.ok, isTrue, reason: '拿到一部分总比什么都没有强');
+    });
+
+    test('第一页就失败才算失败', () async {
+      final f = fake({'project list': (code: 1, out: 'error: 401')});
+      final list = await f.service.listProjects();
+      expect(list.ok, isFalse);
+    });
+  });
+
+  group('几十个的时候要能搜', () {
+    testWidgets('超过阈值才出搜索框', (tester) async {
+      final many = [
+        for (var i = 0; i < 30; i++)
+          '{"id":$i,"name":"项目$i","isEnabled":true}',
+      ];
+      final f = fake({
+        'project list': (code: 0, out: '{"total":30,"records":[${many.join(',')}]}')
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: WorkspacePickerSheet(
+            title: '切换项目',
+            description: '',
+            load: f.service.listProjects,
+            select: f.service.switchProject,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('workspace-search')), findsOneWidget);
+
+      await tester.enterText(find.byKey(const Key('workspace-search')), '项目29');
+      await tester.pumpAndSettle();
+      // 输入框本身也渲染成一个 Text，所以列表里那条 + 输入框 = 2
+      expect(find.text('项目29'), findsNWidgets(2));
+      expect(find.text('项目1'), findsNothing);
+    });
+
+    testWidgets('只有两三个时不摆搜索框——那只是噪音', (tester) async {
+      final f = fake({'tenant list': (code: 0, out: tenantsJson)});
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: WorkspacePickerSheet(
+            title: '切换企业',
+            description: '',
+            load: f.service.listTenants,
+            select: f.service.selectTenant,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('workspace-search')), findsNothing);
+    });
+
+    testWidgets('搜不到时说清楚搜的是什么', (tester) async {
+      final many = [
+        for (var i = 0; i < 30; i++)
+          '{"id":$i,"name":"项目$i","isEnabled":true}',
+      ];
+      final f = fake({
+        'project list': (code: 0, out: '{"total":30,"records":[${many.join(',')}]}')
+      });
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: WorkspacePickerSheet(
+            title: '切换项目',
+            description: '',
+            load: f.service.listProjects,
+            select: f.service.switchProject,
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+          find.byKey(const Key('workspace-search')), '不存在的东西');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('没有匹配'), findsOneWidget);
     });
   });
 

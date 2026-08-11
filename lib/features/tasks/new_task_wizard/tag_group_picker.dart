@@ -128,7 +128,9 @@ class _PickerDialogState extends State<_PickerDialog> {
             ),
             Flexible(
               child: hits.isEmpty
-                  ? const _NoMatch()
+                  // 「搜不到」和「这个企业下压根没有标签组」是两码事：
+                  // 后者再怎么换关键词都是空的，真正的原因在四步之前
+                  ? _NoMatch(libraryEmpty: widget.groups.isEmpty)
                   : ListView.builder(
                       padding: const EdgeInsets.symmetric(
                           horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
@@ -174,15 +176,32 @@ class _PickerDialogState extends State<_PickerDialog> {
 }
 
 class _NoMatch extends StatelessWidget {
-  const _NoMatch();
+  /// 整个库就是空的（不是没搜到）。
+  ///
+  /// 这时候说「换个关键词试试」是**误导**——再怎么换都是空的。标签组是
+  /// **企业级**的，库空最常见的原因是当前企业选错了：真机上同事就是这么
+  /// 一路走到「挑替换素材时没有标签」的，而中间没有任何一步提过企业。
+  final bool libraryEmpty;
+
+  const _NoMatch({this.libraryEmpty = false});
 
   @override
-  Widget build(BuildContext context) => const Padding(
-        padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-        child: Text('没有匹配的标签组。可以试试标签名——比如「特写」「口播」。',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-                fontSize: AppFontSize.body, color: AppColors.textSecondary)),
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.xl),
+        child: Text(
+          libraryEmpty
+              ? '当前企业下没有任何标签组。\n\n'
+                  '标签组是按企业分的——多半是企业选错了。请到「设置 → miaoa 账号 → '
+                  '企业」切换后重试。\n\n'
+                  '没有标签组就没有打标用的词表，后面挑替换素材时会没有标签可用。'
+              : '没有匹配的标签组。可以试试标签名——比如「特写」「口播」。',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              fontSize: AppFontSize.body,
+              height: 1.7,
+              color: AppColors.textSecondary),
+        ),
       );
 }
 
