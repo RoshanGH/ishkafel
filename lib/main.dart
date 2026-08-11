@@ -6,33 +6,18 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'app/app.dart';
 import 'core/ai/ai_credentials.dart';
-import 'core/ai/ark_chat_client.dart';
-import 'core/ai/taggers.dart';
-import 'core/ai/volcano_asr_provider.dart';
-import 'core/ai/volcano_semantic_splitter.dart';
-import 'core/analysis/analysis_pipeline.dart';
-import 'core/analysis/batch_frame_extractor.dart';
 import 'core/audio/bgm_cache_factory.dart';
-import 'core/analysis/audio_extractor.dart';
-import 'core/analysis/boundary_snapper.dart';
-import 'core/analysis/scene_detector.dart';
-import 'core/analysis/boundary_reviewer.dart';
-import 'core/analysis/frame_signal_extractor.dart';
-import 'core/analysis/segmentation_builder.dart';
-import 'core/analysis/shot_boundary_finder.dart';
-import 'core/analysis/silence_detector.dart';
-import 'core/analysis/tag_vocabulary.dart';
 import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'app/flutter_error_bridge.dart';
+import 'app/service_wiring.dart';
 import 'cli/commands/open_command.dart';
 import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
 import 'core/diagnostics/tool_installer.dart';
 import 'core/miaoa/miaoa_auth_service.dart';
 import 'core/miaoa/miaoa_locator.dart';
-import 'core/miaoa/miaoa_tag_service.dart';
 import 'core/diagnostics/environment_report.dart';
 import 'core/storage/cache_usage.dart';
 import 'core/storage/task_artifacts.dart';
@@ -49,7 +34,6 @@ import 'features/workbench/bgm_picker_sheet.dart';
 import 'core/miaoa/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
-import 'core/audio/vocal_separator.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,7 +60,7 @@ Future<void> main(List<String> args) async {
     Directory('${Directory.current.path}/.secrets'),
     Directory('${dataDir.path}/credentials'),
   ]);
-  final analysisPipeline = _buildAnalysisPipeline(credentials, dataDir);
+  final analysisPipeline = buildAnalysisPipeline(credentials, dataDir);
 
   // 启动期预检 ffmpeg/ffprobe：GUI 进程 PATH 不含 Homebrew 目录，
   // 缺失时列表页常驻横幅引导安装，而不是等用户导入时撞见子进程异常
@@ -166,47 +150,3 @@ Future<void> _sweepOrphans(FileTaskRepository repository, Directory dataDir) asy
 ///
 /// 两层打标在这里接通：taggers 走同一个 Ark 客户端（无状态，可共享），
 /// 受控词表走 [MiaoaTagVocabularySource]——按**任务自己选的**标签组现取，
-/// 而不是在这里写死一份全局词表。
-
-AnalysisPipeline? _buildAnalysisPipeline(
-    AiCredentials credentials, Directory dataDir) {
-  if (!credentials.isComplete) {
-    AppLog.warn('AI 凭据不完整，跳过自动分析装配（导入后需手动触发）');
-    return null;
-  }
-  final chat = ArkChatClient(apiKey: credentials.arkApiKey);
-  return AnalysisPipeline(
-    audio: AudioExtractor(),
-    // 口播/背景音分离：模型落到数据目录（工具默认放 /tmp，系统一清就要重下
-    // 几百兆）。没装分离工具时这一步会失败，分析照常完成，只影响换配乐
-    separator: VocalSeparator(
-      binary: resolveVocalSeparatorBinary(),
-      modelDir: Directory(p.join(dataDir.path, 'separator_models')),
-    ),
-    silence: const SilenceDetector(),
-    scenes: SceneDetector(),
-    // 视觉镜头切点：双判据（画面差分 + 颜色直方图）+ 灰区画面复核。
-    // 复核用与视觉打标同一个 Ark 客户端，只看拿不准的那些、且有次数上限。
-    shotBoundaries: ShotBoundaryFinder(
-      extractor: FrameSignalExtractor(
-          workDir: Directory(p.join(dataDir.path, 'analysis_work'))),
-      reviewer: BoundaryReviewer(
-          chat: chat,
-          workDir: Directory(p.join(dataDir.path, 'analysis_work'))),
-    ),
-    asr: VolcanoAsrProvider(
-      appId: credentials.speechAppId,
-      accessToken: credentials.speechAccessToken,
-    ),
-    splitter: VolcanoSemanticSplitter(chat: chat),
-    builder: const SegmentationBuilder(snapper: BoundarySnapper()),
-    repository: FileTaskRepository(dataDir),
-    workDir: Directory(p.join(dataDir.path, 'analysis_work')),
-    thumbnails: ThumbnailService(),
-    batchFrames: BatchFrameExtractor(),
-    unitTagger: UnitTagger(chat: chat),
-    shotTagger: ShotTagger(chat: chat),
-    vocabulary: MiaoaTagVocabularySource(
-        MiaoaTagService(binary: resolveMiaoaBinary())),
-  );
-}
