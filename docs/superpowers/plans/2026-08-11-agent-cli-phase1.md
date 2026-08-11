@@ -6,7 +6,7 @@
 
 **Architecture:** 新增纯 Dart 可执行入口 `bin/ishkafel.dart`，复用现有 `lib/core/`。为此先把 CLI 依赖树上的 core 文件从 `package:flutter/foundation.dart` 解耦（换成 `package:meta` / `package:collection` / `dart:isolate`）。任务锁作为文件写在任务目录下，GUI 与 CLI 共享同一份判定逻辑。
 
-**Tech Stack:** Dart 3（`dart compile exe`）、`package:args`、`package:collection`、`package:meta`、`package:path`；测试用 `flutter test`（现有测试基建）。
+**Tech Stack:** Dart 3（`dart build cli`，见 Task 2 的坑）、`package:args`、`package:collection`、`package:meta`、`package:path`；测试用 `flutter test`（现有测试基建）。
 
 ## Global Constraints
 
@@ -351,7 +351,7 @@ Expected: PASS
 
 - [ ] **Step 5: 确认能编译成独立二进制**
 
-Run: `dart compile exe bin/ishkafel.dart -o build/ishkafel && build/ishkafel --help`
+Run: `./scripts/build_cli.sh && build/ishkafel --help`
 Expected: 编译成功；打印用法；退出码 0
 
 这一步是 Task 1 的真正验收——只要还有 flutter import，这里会直接失败。
@@ -599,7 +599,7 @@ Future<int> runTaskCommand({
 
 Run:
 ```bash
-dart compile exe bin/ishkafel.dart -o build/ishkafel
+./scripts/build_cli.sh
 build/ishkafel task hl30v3y45q | head -c 400
 build/ishkafel task 不存在的; echo "退出码 $?"
 ```
@@ -1443,7 +1443,7 @@ Future<int> runCandidatesCommand({
 
 - [ ] **Step 7: 真机验证**
 
-Run: `dart compile exe bin/ishkafel.dart -o build/ishkafel && build/ishkafel candidates hl30v3y45q --unit 1 --shot 5 | head -c 600`
+Run: `./scripts/build_cli.sh && build/ishkafel candidates hl30v3y45q --unit 1 --shot 5 | head -c 600`
 Expected: 打印 context（含 `unitTranscript`、`previous`、`next`）与 candidates 数组（含 `previewUrl`）
 
 - [ ] **Step 8: 提交**
@@ -1642,7 +1642,7 @@ String? initialTaskIdFrom(List<String> args) {
 
 Run:
 ```bash
-dart compile exe bin/ishkafel.dart -o build/ishkafel
+./scripts/build_cli.sh
 flutter build macos --debug
 ISHKAFEL_APP="$PWD/build/macos/Build/Products/Debug/ishkafel.app" build/ishkafel open hl30v3y45q
 ```
