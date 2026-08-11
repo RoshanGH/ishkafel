@@ -1,6 +1,6 @@
-import '../../core/ffmpeg/process_runner.dart' show FfmpegException;
-import '../../core/log/app_log.dart';
-import '../../core/miaoa/miaoa_tag_service.dart';
+import '../ffmpeg/process_runner.dart' show FfmpegException;
+import '../log/app_log.dart';
+import 'miaoa_tag_service.dart';
 
 /// 标签名 → miaoa 标签 id 的解析器。
 ///

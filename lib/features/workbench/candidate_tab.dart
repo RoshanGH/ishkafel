@@ -25,7 +25,7 @@ import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
 import '../picking/picking_scope.dart';
 import 'search_mode_policy.dart';
-import '../picking/tag_id_resolver.dart';
+import '../../core/miaoa/tag_id_resolver.dart';
 
 /// 工作台右栏的「替换素材」视图。
 ///

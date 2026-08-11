@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
+import 'package:ishkafel/cli/commands/candidates_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
 
@@ -20,6 +21,8 @@ Future<void> main(List<String> args) async {
   final parser = ArgParser()
     ..addFlag('json', help: '输出结构化 JSON', defaultsTo: true)
     ..addOption('data-dir', help: '数据目录（默认与 app 一致）')
+    ..addOption('unit', help: '单元下标（从 0 开始）')
+    ..addOption('shot', help: '镜头下标（从 0 开始）')
     ..addFlag('help', abbr: 'h', negatable: false, help: '显示这份用法');
 
   final ArgResults parsed;
@@ -49,6 +52,12 @@ Future<void> main(List<String> args) async {
 
   final code = switch (command) {
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
+    'candidates' => await runCandidatesCommand(
+        rest: rest,
+        dataDir: dataDir,
+        unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
+        shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
+      ),
     _ => failWith('未知命令：$command\n\n${usageText(parser)}', code: exitBadUsage),
   };
   exit(code);
@@ -63,6 +72,8 @@ ishkafel —— 成片翻新工具的命令行入口
 
 命令：
   task <id>        任务全貌（单元、镜头、标签、导出历史）
+  candidates <id> --unit <i> [--shot <j>]
+                   候选素材与上下文（本单元台词、相邻镜头及其已选素材）
 
 通用参数：
 ${parser.usage}

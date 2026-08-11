@@ -5,7 +5,7 @@ import '../../core/models/tag_trace.dart';
 import '../../core/replacement/replacement_plan.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
-import 'tag_id_resolver.dart';
+import '../../core/miaoa/tag_id_resolver.dart';
 
 /// 「当前正在为谁挑候选」——整体替换时是整个台词语义单元，镜头级时是选中的
 /// 那个视觉镜头。检索键（标签 / 关键词）与时长差的基准都取自这里。
