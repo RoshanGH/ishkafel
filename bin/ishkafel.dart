@@ -9,6 +9,7 @@ import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
+import 'package:ishkafel/cli/commands/todo_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
 
 /// ishkafel 的命令行入口。
@@ -31,6 +32,8 @@ Future<void> main(List<String> args) async {
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
+    ..addOption('external',
+        help: 'analyze 用：哪几步交给调用方做（segment,tag）')
     ..addFlag('help', abbr: 'h', negatable: false, help: '显示这份用法');
 
   final ArgResults parsed;
@@ -65,7 +68,12 @@ Future<void> main(List<String> args) async {
         tagGroups: parsed['tag-groups'] as String?,
       ),
     'tag-groups' => await runTagGroupsCommand(),
-    'analyze' => await runAnalyzeCommand(rest: rest, dataDir: dataDir),
+    'analyze' => await runAnalyzeCommand(
+        rest: rest,
+        dataDir: dataDir,
+        external: parsed['external'] as String?,
+      ),
+    'todo' => await runTodoCommand(rest: rest, dataDir: dataDir),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
@@ -95,7 +103,12 @@ ishkafel —— 成片翻新工具的命令行入口
   import <视频> [--tag-groups <id,id>]
                    建任务。**标签组要在这一步定**——它是打标的受控词表，
                    没有它后面挑替换素材时会没有标签可用
-  analyze <id>     跑完整分析（抽音频 → ASR → 切分 → 打标）
+  analyze <id> [--external=segment,tag]
+                   跑分析。--external 指定哪几步由你来做——那时会停下来
+                   输出待办，你做完用 apply 交回来。ASR 不可外包
+  apply segment|tags <id> --file <json>
+                   回填外部结果
+  todo <id>        把当前欠着的那件外包待办再吐一遍（丢了输出时用，不重跑分析）
   task <id>        任务全貌（单元、镜头、标签、导出历史）
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）

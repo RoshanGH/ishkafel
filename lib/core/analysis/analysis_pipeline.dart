@@ -42,6 +42,50 @@ String analysisPcmPath(Directory workDir, String taskId) =>
 const int understandingFrameHeight = 512;
 
 /// 分析管线编排：PCM 提取 → 静音谷 → 场景检测 → ASR → 语义切分 → 吸附构树 → 打标 → 落库
+/// 分析前半程的产物。**必须能落盘**：PCM 转完就删，静音谷算不回来；
+/// 镜头切点重算要几十秒。CLI 把它存起来，等调用方回填切分之后接着跑。
+class PreparedAnalysis {
+  final List<AsrSentence> sentences;
+  final List<int> valleys;
+  final List<int> shotBounds;
+  final String? vocalsPath;
+  final String? backgroundPath;
+
+  const PreparedAnalysis({
+    required this.sentences,
+    required this.valleys,
+    required this.shotBounds,
+    this.vocalsPath,
+    this.backgroundPath,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'sentences': [for (final s in sentences) s.toJson()],
+        'valleys': valleys,
+        'shotBounds': shotBounds,
+        'vocalsPath': vocalsPath,
+        'backgroundPath': backgroundPath,
+      };
+
+  static PreparedAnalysis? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final sentences = raw['sentences'];
+    if (sentences is! List) return null;
+    return PreparedAnalysis(
+      sentences: [
+        for (final s in sentences)
+          if (s is Map<String, dynamic>) AsrSentence.fromJson(s),
+      ],
+      valleys: [for (final v in (raw['valleys'] as List? ?? [])) v as int],
+      shotBounds: [
+        for (final b in (raw['shotBounds'] as List? ?? [])) b as int,
+      ],
+      vocalsPath: raw['vocalsPath'] as String?,
+      backgroundPath: raw['backgroundPath'] as String?,
+    );
+  }
+}
+
 class AnalysisPipeline {
   final AudioExtractor audio;
   final SilenceDetector silence;
@@ -213,6 +257,71 @@ class AnalysisPipeline {
     } catch (e) {
       AppLog.warn('任务 $id 分析失败后的用量结账没写成（不影响报错）：$e');
     }
+  }
+
+  /// 分析的**前半程**：抽音频 → 分离 / 镜头切点 / ASR（三条并行）。
+  ///
+  /// 抽出来是为了让 CLI 能在这里停一下，把语义切分交给调用方去做
+  /// （见 spec 第三节）。这几步都不可外包：ASR 的时间戳没法验证，
+  /// 其余是本地计算。
+  ///
+  /// 返回的东西必须**全部落盘**才能续跑——PCM 转完就删了，静音谷算不回来；
+  /// 镜头切点重算要几十秒。
+  Future<PreparedAnalysis> prepare(RenewTask task,
+      {AnalysisProgressSink? onProgress}) async {
+    final info = task.videoInfo;
+    if (info == null) {
+      throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
+    }
+    await workDir.create(recursive: true);
+    final pcmPath = analysisPcmPath(workDir, task.id);
+
+    _report(onProgress, AnalysisStage.extractingAudio);
+    final samples = await audio.extractSamples(
+        videoPath: task.sourcePath,
+        outPcmPath: pcmPath,
+        sampleRate: sampleRate);
+    final valleys = silence.detectValleyCenters(samples, sampleRate);
+
+    _report(onProgress, AnalysisStage.separatingVocals);
+    final stemsFuture = _separate(task);
+    final boundsFuture = _detectShotBoundaries(task, info.fps);
+    final sentencesFuture = asr.transcribe(pcmPath);
+
+    _report(onProgress, AnalysisStage.transcribing);
+    final sentences = await sentencesFuture;
+    unawaited(_discardPcm(pcmPath));
+
+    _report(onProgress, AnalysisStage.detectingScenes);
+    final shotBounds = await boundsFuture;
+    final stems = await stemsFuture;
+
+    return PreparedAnalysis(
+      sentences: sentences,
+      valleys: valleys,
+      shotBounds: shotBounds,
+      vocalsPath: stems?.vocalsPath,
+      backgroundPath: stems?.backgroundPath,
+    );
+  }
+
+  /// 用切分草稿组装成单元。**纯本地**，不碰云端。
+  ///
+  /// [drafts] 可以来自内置的语义切分，也可以来自调用方回填——两条路走到
+  /// 这里之后完全一样。
+  List<SemanticUnit> assemble({
+    required RenewTask task,
+    required List<UnitDraft> drafts,
+    required PreparedAnalysis prepared,
+  }) {
+    final info = task.videoInfo!;
+    return _withBoundaryTrace(builder.build(
+      drafts: drafts,
+      shotBoundaryMs: prepared.shotBounds,
+      silenceValleyMs: prepared.valleys,
+      videoDurationMs: info.duration.inMilliseconds,
+      fps: info.fps,
+    ));
   }
 
   Future<RenewTask> _analyze(RenewTask task,

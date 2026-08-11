@@ -5,8 +5,15 @@ import 'package:path/path.dart' as p;
 
 import '../../app/service_wiring.dart';
 import '../../core/ai/ai_credentials.dart';
+import '../../core/analysis/tag_vocabulary.dart';
+import '../../core/miaoa/miaoa_locator.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
+import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/models/renew_task.dart';
+import '../external_steps.dart';
+import '../todo_view.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 
@@ -20,6 +27,7 @@ import '../task_view.dart';
 Future<int> runAnalyzeCommand({
   required List<String> rest,
   required Directory dataDir,
+  String? external,
   String holder = 'agent',
   StringSink? out,
   StringSink? err,
@@ -37,6 +45,16 @@ Future<int> runAnalyzeCommand({
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
   }
+
+  final parsedExternal = parseExternal(external);
+  if (parsedExternal.unknown.isNotEmpty) {
+    // 不能静默忽略：调用方会以为外包生效了，其实还在烧内置 API
+    sink.writeln('认不出这些步骤：${parsedExternal.unknown.join('、')}。'
+        '可外包的只有 segment、tag——'
+        'ASR 不可外包，它的时间戳没法验证，偏 200ms 就毁掉整条链');
+    return exitBadUsage;
+  }
+  final external0 = parsedExternal.steps;
 
   final credentials = loadCliCredentials(dataDir);
   if (!credentials.isComplete) {
@@ -65,15 +83,59 @@ Future<int> runAnalyzeCommand({
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
 
   try {
-    final analyzed = await pipeline.analyze(
+    if (external0.isEmpty) {
+      final analyzed = await pipeline.analyze(
+        task,
+        onProgress: (progress) => sink.writeln('· ${progress.stage.name}'),
+      );
+      if (analyzed.analysisError case final failure?) {
+        sink.writeln('分析失败：$failure');
+        return 1;
+      }
+      emitJson(taskToJson(analyzed), out: out);
+      return 0;
+    }
+
+    // 有要外包的步骤：先把不可外包的前半程跑完（抽音频、分离、镜头切点、
+    // ASR），落盘，然后把第一件待办交出去
+    final prepared = await pipeline.prepare(
       task,
       onProgress: (progress) => sink.writeln('· ${progress.stage.name}'),
     );
-    if (analyzed.analysisError case final failure?) {
-      sink.writeln('分析失败：$failure');
-      return 1;
+    saveAnalysisState(dataDir, id,
+        AnalysisState(prepared: prepared, pending: external0));
+    await repository.save(task.copyWith(
+      asrSentences: prepared.sentences,
+      vocalsPath: prepared.vocalsPath,
+      backgroundPath: prepared.backgroundPath,
+    ));
+
+    if (external0.contains(ExternalStep.segment)) {
+      emitJson(segmentTodo(id, prepared.sentences), out: out);
+      return 0;
     }
-    emitJson(taskToJson(analyzed), out: out);
+
+    // 只外包打标：切分照常走内置，跑到「等你打标」那一步
+    final drafts = await pipeline.splitter.split(prepared.sentences);
+    final units =
+        pipeline.assemble(task: task, drafts: drafts, prepared: prepared);
+    final ready = task.copyWith(
+      units: units,
+      status: RenewTaskStatus.ready,
+      asrSentences: prepared.sentences,
+      vocalsPath: prepared.vocalsPath,
+      backgroundPath: prepared.backgroundPath,
+    );
+    await repository.save(ready);
+    emitJson(
+      tagTodo(
+        id,
+        ready,
+        unitVocabulary: await vocabularyFor(ready.unitTagGroups),
+        shotVocabulary: await vocabularyFor(ready.shotTagGroups),
+      ),
+      out: out,
+    );
     return 0;
   } catch (e) {
     sink.writeln('分析失败：$e');
@@ -82,6 +144,20 @@ Future<int> runAnalyzeCommand({
     heartbeat.cancel();
     lock.release(holder);
   }
+}
+
+/// 这些标签组下的**标签**（不是组名）。
+///
+/// 打标的受控词表就是它。给错了调用方会打出一批全被拒绝的标签，而它无从
+/// 知道自己错在哪。
+Future<List<String>> vocabularyFor(List<TagGroupRef> groups) async {
+  final source =
+      MiaoaTagVocabularySource(MiaoaTagService(binary: resolveMiaoaBinary()));
+  final all = <String>{};
+  for (final group in groups) {
+    all.addAll(await source.vocabularyOf(group.id));
+  }
+  return all.toList()..sort();
 }
 
 /// CLI 的凭据来源。

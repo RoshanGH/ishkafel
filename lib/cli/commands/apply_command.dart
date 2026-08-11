@@ -5,6 +5,12 @@ import 'package:path/path.dart' as p;
 
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../app/service_wiring.dart';
+import '../../core/models/renew_task.dart';
+import '../external_steps.dart';
+import '../task_view.dart';
+import '../todo_view.dart';
+import 'analyze_command.dart';
 import '../cli_output.dart';
 import '../plan_submission.dart';
 
@@ -25,13 +31,13 @@ Future<int> runApplyCommand({
 }) async {
   final sink = err ?? stderr;
   if (rest.length < 2) {
-    sink.writeln('用法：ishkafel apply plans <任务 id> --file <方案.json>');
+    sink.writeln('用法：ishkafel apply plans|segment|tags <任务 id> --file <x.json>');
     return exitBadUsage;
   }
   final what = rest.first;
-  if (what != 'plans') {
-    // segment / tags / shots 是第二期后半段的事，先明确说清楚而不是装作不认识
-    sink.writeln('现在只支持 apply plans，收到的是：$what');
+  const supported = {'plans', 'segment', 'tags'};
+  if (!supported.contains(what)) {
+    sink.writeln('认不出「$what」。可用：${supported.join(' / ')}');
     return exitBadUsage;
   }
   final id = rest[1];
@@ -52,6 +58,36 @@ Future<int> runApplyCommand({
     return exitLocked;
   }
 
+  try {
+    return await _applyWithLock(
+      what: what,
+      id: id,
+      task: task,
+      file: file,
+      readStdin: readStdin,
+      dataDir: dataDir,
+      repository: repository,
+      sink: sink,
+      out: out,
+    );
+  } finally {
+    // 命令跑完立刻还锁。不还的话要等心跳超时 60 秒，这期间人在 app 里
+    // 打开这个任务只能看不能改，还不知道为什么
+    lock.release(holder);
+  }
+}
+
+Future<int> _applyWithLock({
+  required String what,
+  required String id,
+  required RenewTask task,
+  required String? file,
+  required Future<String> Function()? readStdin,
+  required Directory dataDir,
+  required FileTaskRepository repository,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
   final String raw;
   try {
     raw = file == null
@@ -66,8 +102,16 @@ Future<int> runApplyCommand({
   try {
     decoded = jsonDecode(raw);
   } catch (e) {
-    sink.writeln('方案不是合法的 JSON：$e');
+    sink.writeln('提交的内容不是合法的 JSON：$e');
     return exitBadUsage;
+  }
+
+  if (what == 'segment') {
+    return _applySegment(
+        decoded, task, dataDir, repository, sink, out ?? stdout);
+  }
+  if (what == 'tags') {
+    return _applyTags(decoded, task, dataDir, repository, sink, out ?? stdout);
   }
 
   final validation = parsePlans(decoded, task);
@@ -86,6 +130,112 @@ Future<int> runApplyCommand({
         {'name': plan.name, 'units': plan.units.length},
     ],
   }, out: out);
+  return 0;
+}
+
+/// 收下切分，组装成单元、落库，并把下一件待办交出去（如果还有）。
+///
+/// 这里只做**组装**，不做判断——怎么分组是调用方决定的，我们负责把它变成
+/// 帧对齐的、和镜头切点吸附好的单元。
+Future<int> _applySegment(
+  Object? decoded,
+  RenewTask task,
+  Directory dataDir,
+  FileTaskRepository repository,
+  StringSink err,
+  StringSink out,
+) async {
+  final state = readAnalysisState(dataDir, task.id);
+  if (state == null) {
+    err.writeln('没有待处理的分析状态。先跑 ishkafel analyze ${task.id} --external=segment');
+    return exitNotFound;
+  }
+
+  final parsed = parseSegments(decoded, state.prepared.sentences);
+  if (parsed.errors.isNotEmpty) {
+    for (final problem in parsed.errors) {
+      err.writeln('· $problem');
+    }
+    return exitBadUsage;
+  }
+
+  final credentials = loadCliCredentials(dataDir);
+  final pipeline = buildAnalysisPipeline(credentials, dataDir);
+  if (pipeline == null) {
+    err.writeln('缺少 AI 凭据，无法组装单元');
+    return 1;
+  }
+
+  final units = pipeline.assemble(
+      task: task, drafts: parsed.drafts, prepared: state.prepared);
+  final ready = task.copyWith(
+    units: units,
+    status: RenewTaskStatus.ready,
+    asrSentences: state.prepared.sentences,
+    vocalsPath: state.prepared.vocalsPath,
+    backgroundPath: state.prepared.backgroundPath,
+  );
+  await repository.save(ready);
+
+  final stillPending = {...state.pending}..remove(ExternalStep.segment);
+  saveAnalysisState(dataDir, task.id,
+      AnalysisState(prepared: state.prepared, pending: stillPending));
+
+  // 还欠打标就把下一件待办交出去；否则走内置打标收尾
+  if (stillPending.contains(ExternalStep.tag)) {
+    emitJson(
+      tagTodo(
+        task.id,
+        ready,
+        unitVocabulary: await vocabularyFor(ready.unitTagGroups),
+        shotVocabulary: await vocabularyFor(ready.shotTagGroups),
+      ),
+      out: out,
+    );
+    return 0;
+  }
+
+  err.writeln('切分已应用（${units.length} 个单元），开始内置打标');
+  final tagged = await pipeline.tagging.tag(ready, units);
+  final done = ready.copyWith(units: tagged);
+  await repository.save(done);
+  clearAnalysisState(dataDir, task.id);
+  emitJson(taskToJson(done), out: out);
+  return 0;
+}
+
+/// 收下标签并落库。标签必须在受控词表内——词表外的一律拒绝，不做近似匹配
+Future<int> _applyTags(
+  Object? decoded,
+  RenewTask task,
+  Directory dataDir,
+  FileTaskRepository repository,
+  StringSink err,
+  StringSink out,
+) async {
+  final units = task.units;
+  if (units == null) {
+    err.writeln('这个任务还没有单元，先应用切分');
+    return exitNotFound;
+  }
+
+  final parsed = parseTags(
+    decoded,
+    units,
+    unitVocabulary: (await vocabularyFor(task.unitTagGroups)).toSet(),
+    shotVocabulary: (await vocabularyFor(task.shotTagGroups)).toSet(),
+  );
+  if (parsed.errors.isNotEmpty) {
+    for (final problem in parsed.errors) {
+      err.writeln('· $problem');
+    }
+    return exitBadUsage;
+  }
+
+  final done = task.copyWith(units: parsed.units);
+  await repository.save(done);
+  clearAnalysisState(dataDir, task.id);
+  emitJson(taskToJson(done), out: out);
   return 0;
 }
 
