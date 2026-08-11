@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'dart:isolate';
 import 'package:path/path.dart' as p;
 import '../log/app_log.dart';
 import '../models/renew_task.dart';
@@ -94,7 +94,10 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
   Future<List<RenewTask>> findAll() async {
     _skippedTaskFileCount = 0;
     if (!await _tasksDir.exists()) return const [];
-    final payload = await compute(decodeTasksDirectory, _tasksDir.path);
+    // 解码不占调用方的 isolate：GUI 里是不跟渲染抢主 isolate，CLI 里是不
+    // 阻塞命令的其余部分。Isolate.run 是 compute 的纯 Dart 等价物
+    final path = _tasksDir.path;
+    final payload = await Isolate.run(() => decodeTasksDirectory(path));
     for (final warning in payload.warnings) {
       AppLog.warn(warning);
     }

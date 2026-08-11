@@ -7,7 +7,7 @@ import 'package:ishkafel/core/models/tag_trace.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/features/picking/picking_controller.dart';
 import 'package:ishkafel/features/picking/picking_scope.dart';
-import 'package:ishkafel/features/picking/tag_id_resolver.dart';
+import 'package:ishkafel/core/miaoa/tag_id_resolver.dart';
 
 /// 两层各一套标签：画面层 11/12，台词语义层 21/22
 class _Tags implements MiaoaTagService {

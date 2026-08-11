@@ -61,6 +61,8 @@ import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
 import '../export/export_dialog.dart';
+import '../../core/storage/task_lock.dart';
+import 'task_lock_banner.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
 ///
@@ -148,6 +150,58 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 留着引用只为离开时 [SpeedFitter.prune] 一次
   SpeedFitter? _speedFitter;
+
+  /// 别人（多半是 Agent）持有的锁；为 null 表示没人占着
+  TaskLock? _lock;
+  Timer? _lockTimer;
+
+  /// 锁文件。**在 initState 里就存下来**：dispose 时要放锁，而那时候
+  /// 已经不能再碰 ref（Riverpod 会抛 "Cannot use ref after disposed"）
+  TaskLockFile? _lockFile;
+
+  /// 本进程的身份。横幅上要能说出是谁占着，所以带上 pid
+  String get _lockHolder => 'gui:$pid';
+
+  /// 占住锁并盯着它。
+  ///
+  /// **进工作台就占锁**：人正在编辑而 Agent 同时在写，后写的会把先写的覆盖
+  /// 掉。两个方向都要防，不能只防 Agent 那一边。
+  ///
+  /// 每 5 秒一轮：既给自己的锁续命，也看看是不是被别人抢了。这个间隔比 60 秒
+  /// 的失效阈值密得多——对方一结束或一崩掉，很快就能恢复可编辑，而不是让人
+  /// 干等一分钟；自己这把锁也不会因为一次卡顿就过期。
+  void _watchLock() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final file = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
+    _lockFile = file;
+
+    void poll() {
+      // 先试着占住/续命。占不到说明别人正持着，那就进只读
+      final mine = file.heartbeat(_lockHolder) || file.acquire(_lockHolder);
+      final current = mine ? null : file.read();
+      final held = current != null &&
+          current.holder != _lockHolder &&
+          !current.isStale(DateTime.now().toUtc());
+      final next = held ? current : null;
+      if (next?.holder == _lock?.holder) return;
+      if (mounted) setState(() => _lock = next);
+    }
+
+    poll();
+    _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
+  }
+
+  /// 离开工作台就放锁——不放的话，别人要等 60 秒超时才能接手
+  void _releaseLock() => _lockFile?.release(_lockHolder);
+
+  void _takeoverLock() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    TaskLockFile(dataDir: dataDir, taskId: widget.task.id)
+        .forceTakeover(_lockHolder);
+    setState(() => _lock = null);
+  }
 
   /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
   /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
@@ -276,6 +330,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       unawaited(_buildSourceProxy());
     }
     _syncPreviewAudio();
+    _watchLock();
   }
 
   /// 变速切片的渲染器。没有数据目录（测试环境）就不做变速——
@@ -381,6 +436,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
+    _lockTimer?.cancel();
+    _releaseLock();
     _consequenceTimer?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
@@ -1265,6 +1322,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               PreviewAudioBanner(text: notice, building: false),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
+            // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
+            if (_lock case final lock?)
+              TaskLockBanner(holder: lock.holder, onTakeover: _takeoverLock),
             Expanded(
               child: WorkbenchBody(
                 // 整体替换后这一段在成片里多长——时间线上标出来
@@ -1277,7 +1337,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 media: _media,
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,
-                readOnly: !_isEditable,
+                readOnly: !_isEditable || _lock != null,
                 clock: widget.clock,
                 voices: _task.voices,
                 replacements: _replacements ?? const [],
@@ -1294,7 +1354,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   unitTagGroups: _task.unitTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
-                  readOnly: !_isEditable,
+                  readOnly: !_isEditable || _lock != null,
                   project: _task.project,
                   pickedMaterials: _task.pickedMaterials,
                   onPickedMaterialsChanged: _onPickedMaterialsChanged,

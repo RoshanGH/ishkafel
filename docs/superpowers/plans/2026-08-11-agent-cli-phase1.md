@@ -6,7 +6,7 @@
 
 **Architecture:** 新增纯 Dart 可执行入口 `bin/ishkafel.dart`，复用现有 `lib/core/`。为此先把 CLI 依赖树上的 core 文件从 `package:flutter/foundation.dart` 解耦（换成 `package:meta` / `package:collection` / `dart:isolate`）。任务锁作为文件写在任务目录下，GUI 与 CLI 共享同一份判定逻辑。
 
-**Tech Stack:** Dart 3（`dart compile exe`）、`package:args`、`package:collection`、`package:meta`、`package:path`；测试用 `flutter test`（现有测试基建）。
+**Tech Stack:** Dart 3（`dart build cli`，见 Task 2 的坑）、`package:args`、`package:collection`、`package:meta`、`package:path`；测试用 `flutter test`（现有测试基建）。
 
 ## Global Constraints
 
@@ -44,7 +44,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 /// CLI 是纯 Dart 进程，没有 Flutter binding。这几个文件在 CLI 的依赖树上，
-/// 一旦 import 了 package:flutter，`dart compile exe` 直接失败。
+/// 一旦 import 了 package:flutter，编译 CLI 时直接失败（`dart build cli`）。
 ///
 /// 用测试钉住而不是靠人记得：这类 import 常常是顺手加的（要个 @immutable
 /// 就 import 了 foundation），而它坏掉的地方在另一个构建产物里。
@@ -73,7 +73,7 @@ void main() {
       }
     }
     expect(offenders, isEmpty,
-        reason: '这些文件在 CLI 依赖树上，import flutter 会让 dart compile exe 失败');
+        reason: '这些文件在 CLI 依赖树上，import flutter 会让 dart build cli 失败');
   });
 }
 ```
@@ -125,7 +125,7 @@ git add -A
 git commit -m "refactor: CLI 依赖树上的 core 文件脱离 Flutter
 
 CLI 是纯 Dart 进程，没有 Flutter binding——依赖树上任何一个 import
-package:flutter 都会让 dart compile exe 直接失败。
+package:flutter 都会让 dart build cli 直接失败。
 
 替换都是等价物：@immutable → package:meta，compute → Isolate.run，
 GUI 专属的 FlutterError 转发挪到 lib/app/。公开签名一个都没动。
@@ -351,7 +351,7 @@ Expected: PASS
 
 - [ ] **Step 5: 确认能编译成独立二进制**
 
-Run: `dart compile exe bin/ishkafel.dart -o build/ishkafel && build/ishkafel --help`
+Run: `./scripts/build_cli.sh && build/ishkafel --help`
 Expected: 编译成功；打印用法；退出码 0
 
 这一步是 Task 1 的真正验收——只要还有 flutter import，这里会直接失败。
@@ -599,7 +599,7 @@ Future<int> runTaskCommand({
 
 Run:
 ```bash
-dart compile exe bin/ishkafel.dart -o build/ishkafel
+./scripts/build_cli.sh
 build/ishkafel task hl30v3y45q | head -c 400
 build/ishkafel task 不存在的; echo "退出码 $?"
 ```
@@ -1443,7 +1443,7 @@ Future<int> runCandidatesCommand({
 
 - [ ] **Step 7: 真机验证**
 
-Run: `dart compile exe bin/ishkafel.dart -o build/ishkafel && build/ishkafel candidates hl30v3y45q --unit 1 --shot 5 | head -c 600`
+Run: `./scripts/build_cli.sh && build/ishkafel candidates hl30v3y45q --unit 1 --shot 5 | head -c 600`
 Expected: 打印 context（含 `unitTranscript`、`previous`、`next`）与 candidates 数组（含 `previewUrl`）
 
 - [ ] **Step 8: 提交**
@@ -1642,7 +1642,7 @@ String? initialTaskIdFrom(List<String> args) {
 
 Run:
 ```bash
-dart compile exe bin/ishkafel.dart -o build/ishkafel
+./scripts/build_cli.sh
 flutter build macos --debug
 ISHKAFEL_APP="$PWD/build/macos/Build/Products/Debug/ishkafel.app" build/ishkafel open hl30v3y45q
 ```

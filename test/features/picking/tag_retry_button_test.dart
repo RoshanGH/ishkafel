@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ishkafel/features/picking/tag_id_resolver.dart';
+import 'package:ishkafel/core/miaoa/tag_id_resolver.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 
 class _Tags implements MiaoaTagService {
