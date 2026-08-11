@@ -522,3 +522,10 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 final taskListProvider =
     AsyncNotifierProvider<TaskListController, List<RenewTask>>(
         TaskListController.new);
+
+
+/// 启动时要直接打开的任务（来自 `ishkafel open <task>` 传的 `--task=`）。
+///
+/// null 表示照常进列表页。用完即弃：打开过一次就不该再自动跳，否则用户
+/// 返回列表会被立刻弹回去
+final initialTaskIdProvider = Provider<String?>((ref) => null);

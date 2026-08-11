@@ -27,6 +27,7 @@ import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'app/flutter_error_bridge.dart';
+import 'cli/commands/open_command.dart';
 import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
 import 'core/diagnostics/tool_installer.dart';
@@ -51,7 +52,7 @@ import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
 import 'core/audio/vocal_separator.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // 尽早接管：框架异常默认经 debugPrint 输出，真机直接跑二进制时不可见
   installFlutterErrorForwarding();
@@ -86,8 +87,13 @@ Future<void> main() async {
   // 开发期换机器总会留下没主的东西，它们只会一直躺在盘上占地方
   await _sweepOrphans(repository, dataDir);
 
+  // `ishkafel open <task>` 会带 --task=<id> 把 app 拉起来。CLI 写、GUI 读，
+  // 两边对同一个约定（见 open_command.dart）
+  final initialTaskId = initialTaskIdFrom(args);
+
   runApp(ProviderScope(
     overrides: [
+      initialTaskIdProvider.overrideWithValue(initialTaskId),
       taskRepositoryProvider.overrideWithValue(repository),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider.overrideWithValue(analysisPipeline),

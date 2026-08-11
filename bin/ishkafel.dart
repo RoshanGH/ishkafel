@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/candidates_command.dart';
+import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
 
@@ -52,6 +53,7 @@ Future<void> main(List<String> args) async {
 
   final code = switch (command) {
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
+    'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'candidates' => await runCandidatesCommand(
         rest: rest,
         dataDir: dataDir,
@@ -74,6 +76,7 @@ ishkafel —— 成片翻新工具的命令行入口
   task <id>        任务全貌（单元、镜头、标签、导出历史）
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）
+  open <id>        把 app 弹出来并落到这个任务——转人工审核用
 
 通用参数：
 ${parser.usage}

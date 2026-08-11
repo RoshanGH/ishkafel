@@ -53,6 +53,28 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   void initState() {
     super.initState();
     _lifecycle; // 触发 late 初始化，开始监听
+    _openInitialTask();
+  }
+
+  /// `ishkafel open <task>` 拉起来时，直接落到那个任务的工作台。
+  ///
+  /// **只跳一次**：跳过之后把标记清掉，否则用户从工作台返回列表会被立刻
+  /// 弹回去，等于出不来。
+  bool _jumpedToInitialTask = false;
+
+  void _openInitialTask() {
+    final id = ref.read(initialTaskIdProvider);
+    if (id == null || _jumpedToInitialTask) return;
+    _jumpedToInitialTask = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final task = await ref.read(taskRepositoryProvider).findById(id);
+      if (!mounted) return;
+      if (task == null) {
+        _showSnackBar(context, '没有这个任务：$id');
+        return;
+      }
+      await _openTask(context, ref, task);
+    });
   }
 
   @override

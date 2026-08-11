@@ -52,6 +52,18 @@ void main() {
     expect(find.textContaining('已经写进去的改动不受影响'), findsOneWidget);
   });
 
+  testWidgets('是另一个 GUI 占着时换一种说法——多半是上次没正常退出', (tester) async {
+    // 进程被杀时 dispose 不会执行，锁要等心跳超时才失效。这时候说
+    // 「另一个程序正在操作」，用户会莫名其妙——明明只有他一个人
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: TaskLockBanner(holder: 'gui:72683', onTakeover: () {}),
+      ),
+    ));
+    expect(find.textContaining('没有正常退出'), findsOneWidget);
+    expect(find.textContaining('最多一分钟后会自动解锁'), findsOneWidget);
+  });
+
   testWidgets('取消就什么都不做', (tester) async {
     var taken = false;
     await tester.pumpWidget(MaterialApp(

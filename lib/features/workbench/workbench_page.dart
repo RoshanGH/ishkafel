@@ -155,18 +155,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   TaskLock? _lock;
   Timer? _lockTimer;
 
+  /// 锁文件。**在 initState 里就存下来**：dispose 时要放锁，而那时候
+  /// 已经不能再碰 ref（Riverpod 会抛 "Cannot use ref after disposed"）
+  TaskLockFile? _lockFile;
+
   /// 本进程的身份。横幅上要能说出是谁占着，所以带上 pid
   String get _lockHolder => 'gui:$pid';
 
-  /// 盯着锁。**每 5 秒查一次**，比 60 秒的失效阈值密得多——对方一结束或
-  /// 一崩掉，很快就能恢复可编辑，而不是让人干等一分钟
+  /// 占住锁并盯着它。
+  ///
+  /// **进工作台就占锁**：人正在编辑而 Agent 同时在写，后写的会把先写的覆盖
+  /// 掉。两个方向都要防，不能只防 Agent 那一边。
+  ///
+  /// 每 5 秒一轮：既给自己的锁续命，也看看是不是被别人抢了。这个间隔比 60 秒
+  /// 的失效阈值密得多——对方一结束或一崩掉，很快就能恢复可编辑，而不是让人
+  /// 干等一分钟；自己这把锁也不会因为一次卡顿就过期。
   void _watchLock() {
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
     final file = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
+    _lockFile = file;
+
     void poll() {
-      final current = file.read();
-      // 自己持有的、以及已经失效的，都不算被占
+      // 先试着占住/续命。占不到说明别人正持着，那就进只读
+      final mine = file.heartbeat(_lockHolder) || file.acquire(_lockHolder);
+      final current = mine ? null : file.read();
       final held = current != null &&
           current.holder != _lockHolder &&
           !current.isStale(DateTime.now().toUtc());
@@ -178,6 +191,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     poll();
     _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
   }
+
+  /// 离开工作台就放锁——不放的话，别人要等 60 秒超时才能接手
+  void _releaseLock() => _lockFile?.release(_lockHolder);
 
   void _takeoverLock() {
     final dataDir = ref.read(dataDirProvider);
@@ -421,6 +437,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   @override
   void dispose() {
     _lockTimer?.cancel();
+    _releaseLock();
     _consequenceTimer?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();

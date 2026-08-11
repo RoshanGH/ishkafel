@@ -36,8 +36,7 @@ class TaskLockBanner extends StatelessWidget {
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: Text(
-                '$holder 正在操作这个任务，当前为只读。'
-                '它结束后会自动解锁；也可以强制接管，但那会让它后续的写入被拒绝。',
+                _explain(),
                 style: const TextStyle(
                     fontSize: AppFontSize.body,
                     height: 1.5,
@@ -53,6 +52,20 @@ class TaskLockBanner extends StatelessWidget {
           ],
         ),
       );
+
+  /// 横幅上那句话。
+  ///
+  /// **要区分是谁占着**：`agent:` 是真有别人在跑；`gui:` 多半是上一次没正常
+  /// 退出留下的残留（进程被杀时 dispose 不会执行，锁要等心跳超时才失效）。
+  /// 后一种情况下说「另一个程序正在操作」，用户会莫名其妙——明明只有他一个。
+  String _explain() {
+    final leftover = holder.startsWith('gui:');
+    return leftover
+        ? '这个任务被另一个窗口占着，或者上一次没有正常退出（$holder），当前为只读。'
+            '最多一分钟后会自动解锁；等不及可以直接强制接管。'
+        : '$holder 正在操作这个任务，当前为只读。'
+            '它结束后会自动解锁；也可以强制接管，但那会让它后续的写入被拒绝。';
+  }
 
   Future<void> _confirm(BuildContext context) async {
     final yes = await showDialog<bool>(
