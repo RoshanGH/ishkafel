@@ -5,6 +5,49 @@
 
 ---
 
+## 0.1.4
+
+### 新增：命令行入口（给 Agent 用）
+
+装了这一版之后多出一个 `ishkafel` 命令，能让 Agent（Claude Code / Codex /
+任何能跑 bash 的）独立跑完整条流程：
+
+```bash
+ishkafel tag-groups                     # 当前企业有哪些标签组
+ishkafel import <视频> --tag-groups 396,365
+ishkafel analyze <task>                 # 抽音频 → ASR → 切分 → 打标
+ishkafel task <task>                    # 任务全貌
+ishkafel candidates <task> --unit 1 --shot 5
+ishkafel apply plans <task> --file plans.json
+ishkafel export <task> --out ~/Desktop
+ishkafel open <task>                    # 把 app 弹出来转人工审核
+```
+
+构建：`./scripts/build_cli.sh`，产物在 `build/ishkafel`。
+给 Agent 的操作手册在 `docs/AGENT_SKILL.md`——**没有它，CLI 只是一堆能调用
+的动作，产不出能用的片子**。
+
+几个刻意的取舍：
+
+- **不做笛卡尔积**。Agent 提交的是完整方案列表，每条都是整体设计过的。
+  笛卡尔积隐含「任意搭配都成立」，而挑素材本来就要看前后是否顺畅
+- **候选带上下文**：本单元台词、相邻镜头的画面描述与它们已选的素材。只给
+  「这个镜头 2.8 秒、标签是厨房清洁」，很容易挑出每一个都合规、连起来很怪的组合
+- **导出前如实说代价但不设闸门**——跑不跑是调用方的判断
+
+### 新增：任务锁
+
+Agent 在跑而人打开 GUI，两边都写同一份任务数据会互相覆盖，而且悄无声息。
+现在：谁在操作就占着锁，另一边进只读并显示是谁占着；可以强制接管；**锁在
+心跳停 60 秒后自动失效**，所以持有者崩了也不会把任务永久封死。
+
+### 修复
+
+- `import` 没指定标签组时明确警告。标签组是打标的受控词表，缺了它后面挑
+  替换素材时会没有标签可用——这条链上原本没有任何一步会报错
+
+---
+
 ## 0.1.3
 
 ### 修复
