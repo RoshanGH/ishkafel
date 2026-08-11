@@ -34,13 +34,27 @@ VERSION="$(grep '^const String appVersion' lib/features/settings/settings_provid
 mkdir -p "$DIST"
 ZIP="$DIST/ishkafel-$VERSION.zip"
 
+# 这一版的更新说明必须存在：包发出去而对方不知道改了什么，等于每次都要
+# 靠猜。抽第一节（也就是最新版本那一节）跟着包一起走
+CHANGES="$DIST/更新说明-$VERSION.md"
+if ! grep -q "^## $VERSION\b" CHANGELOG.md; then
+  echo "CHANGELOG.md 里没有 $VERSION 这一节——先补上再打包。" >&2
+  echo "（版本号已经自增，直接在文件顶上加一节 '## $VERSION' 就行）" >&2
+  exit 1
+fi
+awk -v ver="## $VERSION" '
+  $0 ~ "^" ver "$" { on = 1; print; next }
+  on && /^## / { exit }
+  on { print }
+' CHANGELOG.md > "$CHANGES"
+
 # 只留这一份。同一个目录里躺着好几个版本、界面又长得一样，迟早发错——
 # 今天就误判过一次：以为功能没打进包，其实是对方装的旧包
-for old in "$DIST"/ishkafel-*.zip; do
+for old in "$DIST"/ishkafel-*.zip "$DIST"/更新说明-*.md; do
   [[ -e "$old" ]] || continue
-  [[ "$old" == "$ZIP" ]] && continue
+  [[ "$old" == "$ZIP" || "$old" == "$CHANGES" ]] && continue
   rm -f "$old"
-  echo "清掉旧包：$(basename "$old")"
+  echo "清掉旧的：$(basename "$old")"
 done
 
 rm -f "$ZIP"
@@ -115,3 +129,4 @@ GUIDE
 echo
 echo "打好了：${ZIP}  $(du -h "$ZIP" | cut -f1)"
 echo "说明：  ${DIST}/新机器上怎么跑起来.md"
+echo "更新：  ${CHANGES}"
