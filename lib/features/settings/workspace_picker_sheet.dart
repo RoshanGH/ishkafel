@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -24,6 +26,12 @@ class WorkspacePickerSheet extends StatefulWidget {
   /// 一个都不选也能关掉吗。登录流程里**不允许**——那正是要堵的洞
   final bool dismissible;
 
+  /// 让服务端按关键词再搜一次（可选）。
+  ///
+  /// 界面上的过滤是本地即时做的；这一条是**补充**——服务端的匹配规则可能比
+  /// 本地的 contains 宽，而且万一多到拉不全，它是兜底。为 null 就只用本地
+  final Future<MiaoaWorkspaceList> Function(String keyword)? search;
+
   const WorkspacePickerSheet({
     super.key,
     required this.title,
@@ -31,6 +39,7 @@ class WorkspacePickerSheet extends StatefulWidget {
     required this.load,
     required this.select,
     this.dismissible = true,
+    this.search,
   });
 
   /// 选中并切换成功返回 true
@@ -41,6 +50,7 @@ class WorkspacePickerSheet extends StatefulWidget {
     required Future<MiaoaWorkspaceList> Function() load,
     required Future<MiaoaAuthResult> Function(int id) select,
     bool dismissible = true,
+    Future<MiaoaWorkspaceList> Function(String keyword)? search,
   }) =>
       showDialog<bool>(
         context: context,
@@ -57,6 +67,7 @@ class WorkspacePickerSheet extends StatefulWidget {
               load: load,
               select: select,
               dismissible: dismissible,
+              search: search,
             ),
           ),
         ),
@@ -73,10 +84,49 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
   int? _switching;
   final _keyword = TextEditingController();
 
+  /// 服务端按关键词补回来的那些（本地列表里没有的）
+  List<MiaoaWorkspace> _extra = const [];
+  Timer? _searchDebounce;
+  bool _searching = false;
+
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _keyword.dispose();
     super.dispose();
+  }
+
+  /// 敲完再搜。每敲一个字跑一次子进程，慢且没必要——本地过滤已经即时生效了
+  static const _debounce = Duration(milliseconds: 350);
+
+  void _onKeywordChanged() {
+    setState(() {});
+    final search = widget.search;
+    if (search == null) return;
+    _searchDebounce?.cancel();
+    final key = _keyword.text.trim();
+    if (key.isEmpty) {
+      setState(() {
+        _extra = const [];
+        _searching = false;
+      });
+      return;
+    }
+    _searchDebounce = Timer(_debounce, () async {
+      if (!mounted) return;
+      setState(() => _searching = true);
+      final result = await search(key);
+      if (!mounted || _keyword.text.trim() != key) return;
+      // 只留本地没有的：服务端多半会把本地那几条再返回一遍
+      final known = {for (final w in _list?.items ?? const []) w.id};
+      setState(() {
+        _searching = false;
+        _extra = [
+          for (final w in result.items)
+            if (!known.contains(w.id)) w,
+        ];
+      });
+    });
   }
 
   /// 关键词过滤后的可选项。**本地过滤**：列表已经整个拉到手了，
@@ -88,6 +138,8 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
     return [
       for (final w in all)
         if (w.name.contains(key) || '${w.id}'.contains(key)) w,
+      // 服务端补回来的接在后面，去过重了
+      ..._extra,
     ];
   }
 
@@ -196,6 +248,15 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
         decoration: InputDecoration(
           isDense: true,
           hintText: '搜索名称或 ID（共 ${_list?.items.length ?? 0} 个）',
+          suffixIcon: _searching
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              : null,
           hintStyle: const TextStyle(
               fontSize: AppFontSize.body, color: AppColors.textTertiary),
           prefixIcon:
@@ -211,7 +272,7 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
             borderSide: const BorderSide(color: AppColors.border),
           ),
         ),
-        onChanged: (_) => setState(() {}),
+        onChanged: (_) => _onKeywordChanged(),
       );
 
   Widget _body() {

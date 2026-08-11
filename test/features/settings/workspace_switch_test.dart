@@ -290,6 +290,59 @@ void main() {
     });
   });
 
+  group('登录了却没有企业——真机上同事卡在这里', () {
+    testWidgets('账号区顶上一条醒目的警告，并且当场能选', (tester) async {
+      final f = fake({'tenant list': (code: 0, out: tenantsJson)});
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          // 这就是同事截图里的状态：已登录、租户为空、项目 0 个
+          miaoaAccountProvider.overrideWith((ref) async =>
+              const MiaoaAccountStatus(
+                  loggedIn: true,
+                  maskedAccount: '173****8350',
+                  tenantName: null,
+                  projectCount: 0)),
+          miaoaAuthServiceProvider.overrideWithValue(f.service),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AccountSection())),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('还没有选择企业'), findsOneWidget);
+      expect(find.textContaining('什么都干不了'), findsOneWidget,
+          reason: '要说清后果，不能只说「未选择」');
+      expect(find.byKey(const Key('settings-choose-tenant')), findsOneWidget);
+    });
+
+    testWidgets('已经有企业时不出这条警告——别拿噪音占地方', (tester) async {
+      final f = fake({'tenant list': (code: 0, out: tenantsJson)});
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          miaoaAccountProvider.overrideWith((ref) async =>
+              const MiaoaAccountStatus(loggedIn: true, tenantName: '极创美奥')),
+          miaoaAuthServiceProvider.overrideWithValue(f.service),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AccountSection())),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('还没有选择企业'), findsNothing);
+    });
+
+    testWidgets('没接登录服务时给出终端命令，而不是一个点不了的按钮', (tester) async {
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          miaoaAccountProvider.overrideWith((ref) async =>
+              const MiaoaAccountStatus(loggedIn: true, tenantName: null)),
+          miaoaAuthServiceProvider.overrideWithValue(null),
+        ],
+        child: const MaterialApp(home: Scaffold(body: AccountSection())),
+      ));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('settings-choose-tenant')), findsNothing);
+      expect(find.textContaining('miaoa tenant select'), findsOneWidget);
+    });
+  });
+
   group('设置页', () {
     testWidgets('企业与项目各有一个「切换」入口', (tester) async {
       final f = fake({'tenant list': (code: 0, out: tenantsJson)});

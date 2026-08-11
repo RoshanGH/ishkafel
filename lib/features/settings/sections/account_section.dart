@@ -73,6 +73,10 @@ class _LoggedIn extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) => SettingsCard(children: [
+        // 登录了却没有企业：账号能用，但**什么都干不了**——没有企业就没有项目、
+        // 没有标签组、检索不了素材。这个状态必须一眼看见并且当场能解决，
+        // 不能只在下面给一个小小的「切换」。真机上同事就卡在这里
+        ?_noTenantBanner(context, ref),
         SettingsRow(
           label: '登录状态',
           content: StatusDot(
@@ -111,6 +115,8 @@ class _LoggedIn extends ConsumerWidget {
             description: '检索候选素材时会限定在当前项目下。',
             load: (auth) => auth.listProjects(),
             select: (auth, id) => auth.switchProject(id),
+            // 项目动辄几十上百，本地过滤之外再让服务端按关键词兜一次
+            search: (auth, key) => auth.searchProjects(key),
           ),
         ),
         const Divider(height: 1, color: AppColors.border),
@@ -137,6 +143,69 @@ class _LoggedIn extends ConsumerWidget {
             '或挑替换素材时没有标签可用，先确认上面的企业是否正确。'),
       ]);
 
+  /// 「还没选企业」的横幅。企业已选时返回 null
+  Widget? _noTenantBanner(BuildContext context, WidgetRef ref) {
+    if ((status.tenantName ?? '').trim().isNotEmpty) return null;
+    final auth = ref.watch(miaoaAuthServiceProvider);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.orange.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.orange.withValues(alpha: 0.4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.warning_amber_rounded,
+                    size: 16, color: AppColors.orange),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '还没有选择企业——现在什么都干不了。\n'
+                    '项目、标签组、素材检索全都按企业分；没有企业，新建任务时'
+                    '选不到标签组，画面也打不出标签。',
+                    style: TextStyle(
+                        fontSize: AppFontSize.body,
+                        height: 1.6,
+                        color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (auth == null)
+              const Text('请在终端执行：miaoa tenant list 然后 miaoa tenant select <ID>',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      fontFamily: 'Menlo',
+                      color: AppColors.textSecondary))
+            else
+              FilledButton(
+                key: const Key('settings-choose-tenant'),
+                onPressed: () async {
+                  final picked = await WorkspacePickerSheet.show(
+                    context,
+                    title: '选择企业',
+                    description: '项目、标签组、素材检索都按企业分。选定之后才能开始用。',
+                    load: () => auth.listTenants(),
+                    select: auth.selectTenant,
+                  );
+                  if (picked == true) ref.invalidate(miaoaAccountProvider);
+                },
+                child: const Text('选择企业'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   /// 企业/项目的「切换」按钮。没接登录服务时不显示——那时这两项只能去终端改
   Widget? _switchButton(
     BuildContext context,
@@ -146,6 +215,7 @@ class _LoggedIn extends ConsumerWidget {
     required String description,
     required Future<MiaoaWorkspaceList> Function(MiaoaAuthService) load,
     required Future<MiaoaAuthResult> Function(MiaoaAuthService, int) select,
+    Future<MiaoaWorkspaceList> Function(MiaoaAuthService, String)? search,
   }) {
     final auth = ref.watch(miaoaAuthServiceProvider);
     if (auth == null) return null;
@@ -158,6 +228,7 @@ class _LoggedIn extends ConsumerWidget {
           description: description,
           load: () => load(auth),
           select: (id) => select(auth, id),
+          search: search == null ? null : (key) => search(auth, key),
         );
         // 切完整个上下文都变了：企业、项目、能读到的标签组
         if (switched == true) ref.invalidate(miaoaAccountProvider);

@@ -221,6 +221,28 @@ class MiaoaAuthService {
     ];
   }
 
+  /// 让**服务端**按关键词搜项目（CLI 的 `--keyword`，匹配 ID 或名称）。
+  ///
+  /// 界面上的即时过滤是本地做的（列表已经整个在手，跑子进程只会让每敲一个字
+  /// 都卡一下）。这一条是**补充**：服务端的匹配规则可能比本地的 contains 宽，
+  /// 而且万一某个企业的项目多到拉不全，它是兜底。
+  Future<MiaoaWorkspaceList> searchProjects(String keyword,
+      {int? currentId}) async {
+    final key = keyword.trim();
+    if (key.isEmpty) return const MiaoaWorkspaceList([]);
+    return _list(
+      [
+        'project', 'list',
+        '--enabled-only',
+        '--keyword', key,
+        '--page-size', '$_pageSize',
+        '--json',
+      ],
+      '搜索项目',
+      (json) => _parseProjects(json, currentId),
+    );
+  }
+
   Future<MiaoaAuthResult> switchProject(int projectId) =>
       _act(['project', 'switch', '$projectId', '--json'], '切换项目', '已切换项目');
 

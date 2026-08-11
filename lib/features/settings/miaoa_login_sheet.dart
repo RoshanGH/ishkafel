@@ -248,15 +248,31 @@ class _MiaoaLoginSheetState extends State<MiaoaLoginSheet> {
   /// 只有一家时不打扰：那就没有可选的，弹出来只是多一次点击。
   Future<void> _chooseTenant() async {
     final tenants = await widget.service.listTenants();
-    if (!mounted || tenants.items.length < 2) return;
+    if (!mounted) return;
+
+    // 一家都没有：账号能登录但进不了任何企业，这得找管理员，不是用户能解决的
+    if (tenants.items.isEmpty) {
+      setState(() => _error = tenants.failure ??
+          '这个账号还没有加入任何企业，无法使用。请联系 miaoa 管理员。');
+      return;
+    }
+
+    // 只有一家就替他选掉，不拿一个没得选的选择去打扰人。
+    // **但一定要选**：CLI 登录完不保证会落在某家企业上——真机上见过登录成功
+    // 而「租户 —、项目 0 个可选」的状态，那时整个软件是不可用的
+    if (tenants.items.length == 1) {
+      await widget.service.selectTenant(tenants.items.single.id);
+      return;
+    }
+
     await WorkspacePickerSheet.show(
       context,
       title: '选择企业',
-      description: '这个账号能进多家企业。**标签组是按企业分的**——选错了，'
-          '新建任务时会选不到标签组，画面也就打不出标签。',
+      description: '项目、标签组、素材检索都按企业分。选错了，新建任务时会选不到'
+          '标签组，画面也就打不出标签。',
       load: () async => tenants,
       select: widget.service.selectTenant,
-      // 这一步不给跳过：跳过就是把人留在一个不确定的上下文里
+      // 这一步不给跳过：跳过就是把人留在一个什么都干不了的状态里
       dismissible: false,
     );
   }
