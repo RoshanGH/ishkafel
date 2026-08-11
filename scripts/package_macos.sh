@@ -34,6 +34,15 @@ VERSION="$(grep '^const String appVersion' lib/features/settings/settings_provid
 mkdir -p "$DIST"
 ZIP="$DIST/ishkafel-$VERSION.zip"
 
+# 只留这一份。同一个目录里躺着好几个版本、界面又长得一样，迟早发错——
+# 今天就误判过一次：以为功能没打进包，其实是对方装的旧包
+for old in "$DIST"/ishkafel-*.zip; do
+  [[ -e "$old" ]] || continue
+  [[ "$old" == "$ZIP" ]] && continue
+  rm -f "$old"
+  echo "清掉旧包：$(basename "$old")"
+done
+
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 
