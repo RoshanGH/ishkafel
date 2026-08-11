@@ -61,6 +61,8 @@ import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
 import '../export/export_dialog.dart';
+import '../../core/storage/task_lock.dart';
+import 'task_lock_banner.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
 ///
@@ -148,6 +150,42 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 留着引用只为离开时 [SpeedFitter.prune] 一次
   SpeedFitter? _speedFitter;
+
+  /// 别人（多半是 Agent）持有的锁；为 null 表示没人占着
+  TaskLock? _lock;
+  Timer? _lockTimer;
+
+  /// 本进程的身份。横幅上要能说出是谁占着，所以带上 pid
+  String get _lockHolder => 'gui:$pid';
+
+  /// 盯着锁。**每 5 秒查一次**，比 60 秒的失效阈值密得多——对方一结束或
+  /// 一崩掉，很快就能恢复可编辑，而不是让人干等一分钟
+  void _watchLock() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final file = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
+    void poll() {
+      final current = file.read();
+      // 自己持有的、以及已经失效的，都不算被占
+      final held = current != null &&
+          current.holder != _lockHolder &&
+          !current.isStale(DateTime.now().toUtc());
+      final next = held ? current : null;
+      if (next?.holder == _lock?.holder) return;
+      if (mounted) setState(() => _lock = next);
+    }
+
+    poll();
+    _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
+  }
+
+  void _takeoverLock() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    TaskLockFile(dataDir: dataDir, taskId: widget.task.id)
+        .forceTakeover(_lockHolder);
+    setState(() => _lock = null);
+  }
 
   /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
   /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
@@ -276,6 +314,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       unawaited(_buildSourceProxy());
     }
     _syncPreviewAudio();
+    _watchLock();
   }
 
   /// 变速切片的渲染器。没有数据目录（测试环境）就不做变速——
@@ -381,6 +420,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
+    _lockTimer?.cancel();
     _consequenceTimer?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
@@ -1265,6 +1305,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               PreviewAudioBanner(text: notice, building: false),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
+            // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
+            if (_lock case final lock?)
+              TaskLockBanner(holder: lock.holder, onTakeover: _takeoverLock),
             Expanded(
               child: WorkbenchBody(
                 // 整体替换后这一段在成片里多长——时间线上标出来
@@ -1277,7 +1320,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 media: _media,
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,
-                readOnly: !_isEditable,
+                readOnly: !_isEditable || _lock != null,
                 clock: widget.clock,
                 voices: _task.voices,
                 replacements: _replacements ?? const [],
@@ -1294,7 +1337,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   unitTagGroups: _task.unitTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
-                  readOnly: !_isEditable,
+                  readOnly: !_isEditable || _lock != null,
                   project: _task.project,
                   pickedMaterials: _task.pickedMaterials,
                   onPickedMaterialsChanged: _onPickedMaterialsChanged,
