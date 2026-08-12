@@ -60,6 +60,12 @@ class InspectorPanel extends StatefulWidget {
   /// 试听这个单元已生成的配音；返回 null 表示还没生成过
   final VoidCallback? Function(int unitIndex)? previewVoice;
 
+  /// 空白任务：分子标签是**手填**的，所以这里要能改。
+  ///
+  /// 翻新任务为 null——那边的标签是模型按台词打出来的，在这儿手改会和
+  /// 「重新打标」互相覆盖，而用户看不出是谁赢了。
+  final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
+
   const InspectorPanel({
     super.key,
     required this.controller,
@@ -68,6 +74,7 @@ class InspectorPanel extends StatefulWidget {
     this.voiceOf,
     this.onChangeVoice,
     this.previewVoice,
+    this.unitTagEditor,
     this.readOnly = false,
   });
 
@@ -277,12 +284,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
-          TagTraceSection(
-            title: '台词语义单元标签',
-            tags: unit.tags,
-            tagsStale: unit.tagsStale,
-            trace: unit.trace,
-          ),
+          // 空白任务给一个能选的编辑器；翻新任务照旧只展示模型打的结果
+          widget.unitTagEditor?.call(unitIndex, unit.tags) ??
+              TagTraceSection(
+                title: '台词语义单元标签',
+                tags: unit.tags,
+                tagsStale: unit.tagsStale,
+                trace: unit.trace,
+              ),
           const SizedBox(height: 10),
           VoiceCard(
             voice: widget.voiceOf?.call(unitIndex),

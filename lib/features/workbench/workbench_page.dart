@@ -11,6 +11,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
 import '../../core/editing/blank_unit_ops.dart';
+import '../blank_task/blank_unit_tag_editor.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
@@ -528,6 +529,25 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     editor.select(EditorSelection.unit(next.length - 1));
     _scheduleAutosave();
   }
+
+  /// 空白任务的分子标签编辑器。只能从任务标签组的词表里选——手打的标签
+  /// 检索时一个都命中不了，而用户打完字看不出任何异常
+  Widget _blankTagEditor(int unitIndex, List<String> tags) =>
+      BlankUnitTagEditor(
+        key: ValueKey('blank-tags-$unitIndex'),
+        unitIndex: unitIndex,
+        tags: tags,
+        tagGroups: _task.unitTagGroups,
+        project: _task.project,
+        onChanged: (next) {
+          final editor = _editor;
+          if (editor == null || !_isEditable || _lock != null) return;
+          final units = BlankUnitOps.setTags(editor.units, unitIndex, next);
+          editor.replaceUnitsForBlankTask(
+              units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
+          _scheduleAutosave();
+        },
+      );
 
   void _onEditorChanged() {
     // 边界动过，每一段的时长就变了，预览音轨要重合（它自己带防抖）
@@ -1373,6 +1393,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onAddUnit: _task.isBlank && _isEditable && _lock == null
                     ? _addBlankUnit
                     : null,
+                unitTagEditor: _task.isBlank ? _blankTagEditor : null,
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,

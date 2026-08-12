@@ -41,6 +41,9 @@ class WorkbenchBody extends StatefulWidget {
 
   /// 空白任务：分子手动加。翻新任务为 null（分子是分析切出来的）
   final VoidCallback? onAddUnit;
+
+  /// 空白任务：分子标签手填，检查器里给一个能选的编辑器
+  final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
   final PlaybackController playback;
   final Widget? videoWidget;
   final TimelineMedia? media;
@@ -91,6 +94,7 @@ class WorkbenchBody extends StatefulWidget {
     super.key,
     required this.editor,
     this.onAddUnit,
+    this.unitTagEditor,
     required this.playback,
     this.videoWidget,
     this.media,
@@ -340,6 +344,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 voiceOf: widget.voices.voiceOf,
                                 onChangeVoice: widget.onChangeVoice,
                                 previewVoice: widget.previewVoice,
+                                unitTagEditor: widget.unitTagEditor,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),
