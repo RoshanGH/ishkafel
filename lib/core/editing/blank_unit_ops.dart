@@ -31,11 +31,12 @@ class BlankFillStat {
 /// 按下标记（改了顺序不重排下标，挑给某个分子的素材会跑到别人身上）；后者
 /// 是因为时间线、命中测试、配乐区间全都以它为内部坐标。
 abstract final class BlankUnitOps {
-  /// 还没挑素材的分子在时间轴上占多长。
+  /// 还没挑素材的分子在时间轴上占多长——固定 10 秒。
   ///
   /// **这不是「编造时长」**：格子上明确写着「待填」，而全片时长只统计已填的
   /// （见 [filledStat]）。给 0 的话格子是零宽，看不见也点不到，那更糟。
-  static const int placeholderMs = 2000;
+  /// 10 秒是为了在时间线上有足够宽度放下标签文字。
+  static const int placeholderMs = 10000;
 
   static List<SemanticUnit> append(List<SemanticUnit> units,
       {List<String> tags = const []}) {

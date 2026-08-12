@@ -13,7 +13,6 @@ import '../home/readiness_provider.dart';
 import '../home/welcome_view.dart';
 import '../import_flow/import_exception.dart';
 import '../settings/settings_page.dart';
-import '../blank_task/blank_workbench_page.dart';
 import '../workbench/workbench_page.dart';
 import 'new_task_wizard/new_task_wizard.dart';
 import 'environment_banner.dart';
@@ -168,14 +167,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       _showAnalysisFailedSnackBar(context, ref, task);
       return;
     }
-    // 空白任务不走分析，也没有帧率可校验——直接进它自己的工作台
-    if (task.isBlank) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => BlankWorkbenchPage(task: task)),
-      );
-      return;
-    }
-    if (task.status == RenewTaskStatus.analyzing || task.units == null) {
+    // 空白任务不走分析，也没有原片帧率——它进的是同一个工作台，只是内容空着
+    if (!task.isBlank &&
+        (task.status == RenewTaskStatus.analyzing || task.units == null)) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('任务分析中，请稍候')));
       return;
@@ -183,7 +177,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     // 历史遗留数据兜底：帧率非法（旧版本把 ffprobe 的 0/0 解析成 0 后落了库）
     // 时审片台按帧计算会得到 Infinity/整除零而红屏，这里拦在入口
     final fps = task.videoInfo?.fps ?? 0;
-    if (fps <= 0 || !fps.isFinite) {
+    if (!task.isBlank && (fps <= 0 || !fps.isFinite)) {
       _showSnackBar(context, '这条素材缺少可用的帧率信息，无法按帧切分，请重新导入转码后的文件。');
       return;
     }

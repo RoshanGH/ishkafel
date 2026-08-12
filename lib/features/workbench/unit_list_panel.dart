@@ -13,10 +13,19 @@ class UnitListPanel extends StatelessWidget {
   final SegmentationEditorController controller;
   final ValueChanged<SemanticUnit>? onUnitTap;
 
+  /// 空白任务：分子是手动加出来的，所以列表头上要有「添加」。
+  /// 翻新任务的分子是分析切出来的，不给这个按钮
+  final VoidCallback? onAddUnit;
+
+  /// 删掉一个分子（同样只有空白任务给）
+  final ValueChanged<int>? onDeleteUnit;
+
   const UnitListPanel({
     super.key,
     required this.controller,
     this.onUnitTap,
+    this.onAddUnit,
+    this.onDeleteUnit,
   });
 
   @override
@@ -28,7 +37,7 @@ class UnitListPanel extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _ListHeader(count: units.length),
+            _ListHeader(count: units.length, onAdd: onAddUnit),
             Expanded(
               child: ListView.separated(
                 padding: const EdgeInsets.all(AppSpacing.sm),
@@ -62,8 +71,9 @@ class UnitListPanel extends StatelessWidget {
 /// 列表头：标明这一栏是两层结构里的哪一层，并给出总数
 class _ListHeader extends StatelessWidget {
   final int count;
+  final VoidCallback? onAdd;
 
-  const _ListHeader({required this.count});
+  const _ListHeader({required this.count, this.onAdd});
 
   @override
   Widget build(BuildContext context) {
@@ -84,10 +94,34 @@ class _ListHeader extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          Text(
-            '$count 个',
-            style: const TextStyle(
-                color: AppColors.textTertiary, fontSize: AppFontSize.caption),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$count 个',
+                style: const TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: AppFontSize.caption),
+              ),
+              if (onAdd case final add?) ...[
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(
+                  height: 24,
+                  child: FilledButton(
+                    key: const Key('workbench-add-unit'),
+                    onPressed: add,
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('添加',
+                        style: TextStyle(fontSize: AppFontSize.caption)),
+                  ),
+                ),
+              ],
+            ],
           ),
         ],
       ),

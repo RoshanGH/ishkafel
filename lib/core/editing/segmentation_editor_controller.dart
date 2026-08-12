@@ -38,7 +38,11 @@ class EditorSelection {
 ///   录，甚至让"文本会话仍在进行"这一状态被意外清除）。拆成两个独立字段
 ///   后，`endDragSession()`/`endTextSession()` 只消费各自的会话，互不影响。
 class SegmentationEditorController extends ChangeNotifier {
-  final int durationMs;
+  /// 时间轴总长。
+  ///
+  /// 翻新任务是原片时长，一经建立不变。**空白任务是分子加出来的**——加一个
+  /// 分子、挑到一条更长的素材，总长就变了，所以这里不能是 final
+  int durationMs;
   final double fps;
   final List<AsrSentence> sentences;
 
@@ -234,6 +238,22 @@ class SegmentationEditorController extends ChangeNotifier {
   /// 新 selection 的场景；仅在操作成功时才会被调用。不传时默认对现有 selection 做
   /// 越界兜底（结构不变的操作如移动边界、拆分前半部分天然保持有效，因此这里的兜底
   /// 只是防御，不会误伤合法 selection）。
+  /// 整批换掉分子列表（**只给空白任务用**）。
+  ///
+  /// 翻新任务的编辑一律走 [SegmentationEditOps] 那套带不变量校验的操作：
+  /// 那边有一条固定的原片时长要无缝覆盖。空白任务没有原片，分子是加出来的，
+  /// 总长跟着变——这条通路把两者分开，免得为了让「加一个分子」通过校验而把
+  /// 那套不变量放松掉。
+  void replaceUnitsForBlankTask(List<SemanticUnit> units, int totalMs) {
+    _undoStack.add(_units);
+    _redoStack.clear();
+    _units = units;
+    _unitsView = List.unmodifiable(units);
+    durationMs = totalMs;
+    _selection = _clampSelection(_selection);
+    notifyListeners();
+  }
+
   bool _apply(List<SemanticUnit>? result,
       {EditorSelection? Function()? remapSelection}) {
     if (result == null) return false;

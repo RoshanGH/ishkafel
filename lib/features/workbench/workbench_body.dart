@@ -38,6 +38,9 @@ import 'workbench_shortcuts.dart';
 /// 也一并搬入，`WorkbenchPage` 不再需要关心它。
 class WorkbenchBody extends StatefulWidget {
   final SegmentationEditorController editor;
+
+  /// 空白任务：分子手动加。翻新任务为 null（分子是分析切出来的）
+  final VoidCallback? onAddUnit;
   final PlaybackController playback;
   final Widget? videoWidget;
   final TimelineMedia? media;
@@ -87,6 +90,7 @@ class WorkbenchBody extends StatefulWidget {
   const WorkbenchBody({
     super.key,
     required this.editor,
+    this.onAddUnit,
     required this.playback,
     this.videoWidget,
     this.media,
@@ -296,6 +300,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     width: widths.left,
                     child: UnitListPanel(
                       controller: editor,
+                      onAddUnit: widget.onAddUnit,
                       onUnitTap: (unit) =>
                           playback.seekMs(_composed(unit.startMs)),
                     ),

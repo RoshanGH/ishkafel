@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
+import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
@@ -80,7 +81,8 @@ import 'task_lock_banner.dart';
 ///   工作目录复用与 `AnalysisPipeline` 一致的 `ishkafel_data/analysis_work`；
 ///   测试注入假 builder 时改用一次性临时目录（不复用生产缓存位置），避免测试
 ///   之间因缓存文件互相污染。
-/// - `task.units == null || task.videoInfo == null` 时不组装编辑器/播放器，
+/// - `task.units == null`（或非空白任务而 `videoInfo == null`）时不组装
+///   编辑器/播放器，
 ///   仅渲染错误占位（路由层已按状态拦截，这里是纵深防御，防止极端脏数据崩溃）。
 /// - 三栏 + 时间线的实际布局、页面级全局播放快捷键（空格/←/→）都下沉到
 ///   [WorkbenchBody]（独立 StatefulWidget，见该文件文档）；本类只负责装配
@@ -274,14 +276,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final task = widget.task;
     final units = task.units;
     final videoInfo = task.videoInfo;
-    if (units == null || videoInfo == null) {
+    // 空白任务没有原片，也就没有 videoInfo。它进的是同一个工作台——
+    // 时间线、配乐、矩阵导出这些能力跟有没有原片无关，另起一页会把它们全丢掉
+    if (units == null || (videoInfo == null && !task.isBlank)) {
       return; // 兜底：路由层已拦截，此处只防御极端脏数据
     }
 
     final editor = SegmentationEditorController(
       initialUnits: units,
-      durationMs: videoInfo.duration.inMilliseconds,
-      fps: videoInfo.fps,
+      // 空白任务的总长由分子加出来（没挑素材的按占位长度算）
+      durationMs: videoInfo?.duration.inMilliseconds ??
+          (units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs),
+      // 没有原片就没有原片帧率。30 只是内部坐标的刻度——成片规格跟素材走
+      fps: videoInfo?.fps ?? 30,
       sentences: task.asrSentences ?? const [],
     );
     editor.addListener(_onEditorChanged);
@@ -508,6 +515,20 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 弹「保存草稿」确认框）；三栏面板与底部栏各自监听同一个 controller，
   /// 不需要页面代劳。改造前这里无条件 `setState`，于是拖拽边界时每个
   /// DragUpdate（macOS 触控板约 90~125Hz）都重建整页。
+  /// 空白任务：在末尾加一个空分子。
+  ///
+  /// 走 [SegmentationEditorController.replaceUnitsForBlankTask] 而不是切分
+  /// 那套操作——那套要保证「无缝覆盖固定的原片时长」，而这里总长本来就是
+  /// 加出来的。
+  void _addBlankUnit() {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final next = BlankUnitOps.append(editor.units);
+    editor.replaceUnitsForBlankTask(next, next.last.endMs);
+    editor.select(EditorSelection.unit(next.length - 1));
+    _scheduleAutosave();
+  }
+
   void _onEditorChanged() {
     // 边界动过，每一段的时长就变了，预览音轨要重合（它自己带防抖）
     _syncPreviewAudio();
@@ -1347,6 +1368,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onBgmResize: _isEditable ? _resizeBgm : null,
                 onBgmDelete: _isEditable ? _deleteBgm : null,
                 editor: editor,
+                // 分子手动加只发生在空白任务上。翻新任务的分子是分析切出来的，
+                // 给它一个「添加」按钮只会让人误以为能凭空插一段
+                onAddUnit: _task.isBlank && _isEditable && _lock == null
+                    ? _addBlankUnit
+                    : null,
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,
