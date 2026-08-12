@@ -616,6 +616,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 比自动保存等得久得多：用户往往连着拖好几刀才算改完一处，改一下弹一次
   /// 会把人逼疯。3 秒是「手停下来了」的信号。
   void _scheduleConsequenceCheck() {
+    // 空白任务不问这个。它问的是「切分结构变了，原来的素材和标签多半对不上」
+    // ——那是翻新任务拆分/合并之后的真实后果。空白任务加一个分子什么都没影响，
+    // 删一个的连带处理（替换方案、配乐区间）已经在删除那一步做掉了。
+    //
+    // 更要命的是它提出的「重新打标」：空白任务的标签是**手填**的，
+    // 照做等于把用户刚选的标签清掉，送去一个没有台词可读的模型重打
+    if (_task.isBlank) return;
     _consequenceTimer?.cancel();
     _consequenceTimer = Timer(const Duration(seconds: 3), _askConsequence);
   }

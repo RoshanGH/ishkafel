@@ -5,10 +5,9 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/analysis/tag_vocabulary.dart';
-import '../../core/miaoa/miaoa_locator.dart';
-import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../tasks/new_task_wizard/wizard_providers.dart';
 
 /// 给一个分子打标签。
 ///
@@ -55,8 +54,10 @@ class _BlankUnitTagEditorState extends ConsumerState<BlankUnitTagEditor> {
       setState(() => _words = const []);
       return;
     }
+    // 走 provider 而不是 new 一个：绕过依赖注入的话，测试没法替换它，
+    // 而它会真的去起一个 10 分钟超时的子进程
     final source = widget.vocabulary ??
-        MiaoaTagVocabularySource(MiaoaTagService(binary: resolveMiaoaBinary()));
+        MiaoaTagVocabularySource(ref.read(miaoaTagServiceProvider));
     try {
       final all = <String>{};
       for (final group in widget.tagGroups) {

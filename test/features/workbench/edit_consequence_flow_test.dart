@@ -189,6 +189,7 @@ Future<void> _settleConsequence(WidgetTester tester) async {
 }
 
 void main() {
+  _blankTaskNeverAsks();
   testWidgets('改动很小时也会问，但两项都默认不勾', (tester) async {
     await _open(tester);
 
@@ -372,5 +373,63 @@ void main() {
 
     expect(find.byKey(const Key('consequence-confirm')), findsNothing,
         reason: '每改一次都被翻一遍旧账，用户会开始无脑点「都不用」');
+  });
+}
+
+/// 空白任务里这个确认框是**有害**的，不能弹。
+///
+/// 它问的是「切分结构变了，原来的素材和标签多半对不上」——那是翻新任务
+/// 拆分/合并之后的真实后果。而空白任务加一个分子什么都没影响，更要命的是
+/// 它提出的「重新打标」：那边的标签是手填的，照做等于把用户刚选的标签清掉，
+/// 送去一个没有台词可读的模型重打。
+void _blankTaskNeverAsks() {
+  RenewTask blankTask() => RenewTask(
+        id: 'blank-1',
+        name: '拼片',
+        sourcePath: null,
+        status: RenewTaskStatus.ready,
+        createdAt: DateTime.utc(2026, 8, 12),
+        updatedAt: DateTime.utc(2026, 8, 12),
+        unitTagGroups: const [TagGroupRef(id: 1, name: '台词标签组')],
+        units: [
+          for (var i = 0; i < 4; i++)
+            SemanticUnit(
+              index: i,
+              startMs: i * 10000,
+              endMs: (i + 1) * 10000,
+              transcript: '',
+              tags: const ['促销'],
+              shots: const [],
+            ),
+        ],
+      );
+
+  testWidgets('加一个分子之后不弹「改完之后要连带处理吗」', (tester) async {
+    final repo = _Repo();
+    final task = blankTask();
+    await repo.save(task);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        taskRepositoryProvider.overrideWithValue(repo),
+        miaoaTagServiceProvider.overrideWithValue(_FakeTagService()),
+        miaoaProjectServiceProvider.overrideWithValue(_FakeProjectService()),
+      ],
+      child: MaterialApp(
+        home: WorkbenchPage(
+          task: task,
+          playbackFactory: FakePlaybackController.new,
+          mediaBuilder: _fakeMediaBuilder(),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('workbench-add-unit')));
+    await tester.pumpAndSettle();
+    await _settleConsequence(tester);
+
+    expect(find.byKey(const Key('consequence-confirm')), findsNothing);
+    expect(find.textContaining('重新打标'), findsNothing,
+        reason: '这里的标签是手填的，「重新打标」会把它清掉');
   });
 }
