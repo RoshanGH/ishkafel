@@ -60,6 +60,9 @@ class NewTaskWizard extends ConsumerStatefulWidget {
 
 class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   String? _filePath;
+
+  /// 走「不用原片，从素材拼」这一路
+  bool _blank = false;
   List<TagGroup>? _groups;
   String? _groupsError;
   late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
@@ -103,7 +106,10 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     try {
       final path = await ref.read(videoFilePickerProvider)();
       if (path == null || !mounted) return;
-      setState(() => _filePath = path);
+      setState(() {
+        _filePath = path;
+        _blank = false; // 选了本地文件就不再是空白任务
+      });
     } catch (e) {
       AppLog.warn('选择成片文件失败：$e');
       if (mounted) _showSnackBar('打开文件选择框失败，请重试。');
@@ -158,18 +164,25 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     return TagPreviewReady(merged);
   }
 
-  /// 还差哪些必填项；为空表示可以开始分析
+  /// 还差哪些必填项；为空表示可以开始。
+  ///
+  /// 空白任务不需要原片，也**不需要镜头标签组**——它不分镜头。分子标签组
+  /// 仍然必填：那是打标的受控词表，没有它后面挑素材时没有标签可用
   List<String> get _missing => [
-        if (_filePath == null) '选择本地成片文件',
+        if (!_blank && _filePath == null) '选择本地成片文件或「不用原片」',
         if (_unitGroups.isEmpty) '选择台词语义单元标签组',
-        if (_shotGroups.isEmpty) '选择视觉镜头标签组',
+        if (!_blank && _shotGroups.isEmpty) '选择视觉镜头标签组',
       ];
 
+  void _pickBlank() => setState(() {
+        _blank = true;
+        _filePath = null;
+      });
+
   void _start() {
-    final path = _filePath;
-    if (path == null || _unitGroups.isEmpty || _shotGroups.isEmpty) return;
+    if (_missing.isNotEmpty) return;
     Navigator.of(context).pop(NewTaskWizardResult(
-        filePath: path,
+        filePath: _filePath,
         unitTagGroups: List.of(_unitGroups),
         shotTagGroups: List.of(_shotGroups),
         unitTagPrompt: _unitPrompt,
@@ -184,7 +197,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+        constraints: const BoxConstraints(maxWidth: 680, maxHeight: 640),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xl),
           child: Column(
@@ -198,6 +211,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                   child: WizardBody(
                     filePath: _filePath,
                     onPickFile: _pickFile,
+                    blank: _blank,
+                    onPickBlank: _pickBlank,
                     groups: _groups,
                     groupsError: _groupsError,
                     onRetryGroups: _loadGroups,
@@ -220,6 +235,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
               const SizedBox(height: AppSpacing.lg),
               WizardFooter(
                 missing: _missing,
+                // 空白任务建出来就能编，没有任何东西要分析
+                startLabel: _blank ? '创建拼片任务' : '开始分析',
                 onCancel: () => Navigator.of(context).pop(),
                 onStart: _start,
               ),

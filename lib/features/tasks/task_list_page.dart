@@ -104,9 +104,22 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       prefillProject: recent?.project,
     );
     if (result == null) return;
+    final filePath = result.filePath;
+    if (filePath == null) {
+      // 空白任务：没有原片可导，直接建出来就能编辑
+      await ref.read(taskListProvider.notifier).createBlankTask(
+            name: '拼片 ${DateTime.now().toString().substring(5, 16)}',
+            unitTagGroups: result.unitTagGroups,
+            shotTagGroups: result.shotTagGroups,
+            unitTagPrompt: result.unitTagPrompt,
+            shotTagPrompt: result.shotTagPrompt,
+            project: result.project,
+          );
+      return;
+    }
     try {
       await ref.read(taskListProvider.notifier).importFile(
-            result.filePath,
+            filePath,
             unitTagGroups: result.unitTagGroups,
             shotTagGroups: result.shotTagGroups,
             unitTagPrompt: result.unitTagPrompt,
@@ -115,10 +128,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
           );
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志
-      AppLog.warn('导入失败 ${result.filePath}：${e.cause ?? e.message}');
+      AppLog.warn('导入失败 $filePath：${e.cause ?? e.message}');
       if (context.mounted) _showSnackBar(context, e.message);
     } catch (e) {
-      AppLog.warn('导入失败 ${result.filePath}：$e');
+      AppLog.warn('导入失败 $filePath：$e');
       if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
     }
   }

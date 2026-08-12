@@ -33,6 +33,42 @@ class ImportService {
   static String _defaultId() =>
       DateTime.now().microsecondsSinceEpoch.toRadixString(36);
 
+  /// 建一条**空白任务**：没有原片，分子手动加、标签手动填，只靠标签检索
+  /// 素材拼片。
+  ///
+  /// 跟导入的差别只有「没有原片」这一件事：不探规格、不抽封面、不排分析，
+  /// 建出来直接是 ready。标签组照旧——那是「上哪儿找素材、按什么打标」，
+  /// 跟有没有原片无关。
+  Future<RenewTask> createBlank({
+    required String name,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
+    ProjectRef? project,
+  }) async {
+    final now = clock();
+    final task = RenewTask(
+      id: idGenerator(),
+      name: name.trim().isEmpty ? '未命名拼片' : name.trim(),
+      // 没有原片。用 null 而不是空串：空串是个谎，且不会有任何地方报错
+      sourcePath: null,
+      // 空列表而不是 null：null 的意思是「还没分析」，而空白任务不需要分析，
+      // 它只是还没有分子。两者在界面上要给出完全不同的提示
+      units: const [],
+      status: RenewTaskStatus.ready,
+      createdAt: now,
+      updatedAt: now,
+      unitTagGroups: unitTagGroups,
+      shotTagGroups: shotTagGroups,
+      unitTagPrompt: unitTagPrompt,
+      shotTagPrompt: shotTagPrompt,
+      project: project,
+    );
+    await repository.save(task);
+    return task;
+  }
+
   /// [unitTagGroups] / [shotTagGroups] 来自新建任务向导；为空表示该层
   /// 不打标（无受控词表可用）。[unitTagPrompt] / [shotTagPrompt] 是两层各自
   /// 的打标约束（一层一条）。

@@ -16,6 +16,10 @@ class WizardBody extends StatelessWidget {
   final String? filePath;
   final VoidCallback onPickFile;
 
+  /// 走「不用原片，从素材拼」这一路
+  final bool blank;
+  final VoidCallback onPickBlank;
+
   /// null 表示标签组仍在读取中
   final List<TagGroup>? groups;
 
@@ -44,6 +48,8 @@ class WizardBody extends StatelessWidget {
   const WizardBody({
     super.key,
     required this.filePath,
+    this.blank = false,
+    required this.onPickBlank,
     required this.onPickFile,
     required this.groups,
     required this.groupsError,
@@ -68,7 +74,11 @@ class WizardBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _StepLabel('第 1 步 · 成片来源'),
-        WizardSourceStep(filePath: filePath, onPickFile: onPickFile),
+        WizardSourceStep(
+            filePath: filePath,
+            onPickFile: onPickFile,
+            blank: blank,
+            onPickBlank: onPickBlank),
         const SizedBox(height: AppSpacing.lg),
         const _StepLabel('第 2 步 · 项目与标签组（素材从哪儿来、按什么打标）'),
         // 项目在最上面：先定「上哪儿找素材」，再定「按什么打标」
@@ -208,12 +218,16 @@ class _NoticeBox extends StatelessWidget {
 class WizardFooter extends StatelessWidget {
   /// 还差哪些必填项；为空表示可以开始
   final List<String> missing;
+
+  /// 主按钮文案。空白任务不分析——写「开始分析」是骗人的
+  final String startLabel;
   final VoidCallback onCancel;
   final VoidCallback onStart;
 
   const WizardFooter({
     super.key,
     required this.missing,
+    this.startLabel = '开始分析',
     required this.onCancel,
     required this.onStart,
   });
@@ -248,7 +262,7 @@ class WizardFooter extends StatelessWidget {
             FilledButton(
               key: const Key('wizard-start-btn'),
               onPressed: ready ? onStart : null,
-              child: const Text('开始分析'),
+              child: Text(startLabel),
             ),
           ],
         ),

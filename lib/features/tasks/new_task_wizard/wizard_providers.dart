@@ -11,7 +11,9 @@ import '../../../core/models/tag_group_ref.dart';
 /// 三项都是必填——缺任何一项都会让后续阶段②「按相同标签检索候选素材」拿不
 /// 到检索键，所以向导在选齐之前不放行（见 `new_task_wizard.dart` 的禁用理由）。
 class NewTaskWizardResult {
-  final String filePath;
+  /// 原片路径。**为 null 表示「不用原片，从素材拼」**——分子手动加、
+  /// 标签手动填，只靠标签检索素材
+  final String? filePath;
   /// 两层各自可以选多个标签组，标签合并成一份受控词表
   final List<TagGroupRef> unitTagGroups;
   final List<TagGroupRef> shotTagGroups;
@@ -24,7 +26,7 @@ class NewTaskWizardResult {
   final ProjectRef? project;
 
   NewTaskWizardResult({
-    required this.filePath,
+    this.filePath,
     required List<TagGroupRef> unitTagGroups,
     required List<TagGroupRef> shotTagGroups,
     this.unitTagPrompt = '',

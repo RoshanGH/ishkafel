@@ -94,6 +94,7 @@ Future<void> pickGroup(WidgetTester tester, Key fieldKey, String name) async {
 }
 
 void main() {
+  _blankSourceTests();
   testWidgets('向导按设计稿分两步：成片来源 + 两个标签组', (tester) async {
     await openWizard(tester, wrap());
 
@@ -298,5 +299,43 @@ void main() {
               '实测同样长度要几分钟；界面上写一个做不到的数字，'
               '比不给预期更伤信任');
     });
+  });
+}
+
+/// 「不用原片，从素材拼」这一路。
+///
+/// 空白任务不需要原片，也不需要镜头标签组（它不分镜头）；但分子标签组仍然
+/// 必填——那是打标的受控词表，没有它后面挑素材时没有标签可用。
+void _blankSourceTests() {
+  testWidgets('第 1 步有「不用原片」这张卡，并说清它是干什么的', (tester) async {
+    await openWizard(tester, wrap());
+    expect(find.text('不用原片，从素材拼'), findsOneWidget);
+    expect(find.textContaining('用标签搜素材拼片'), findsOneWidget);
+  });
+
+  testWidgets('选了它之后，缺的只剩分子标签组——不再要求选文件、也不要镜头标签组',
+      (tester) async {
+    await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-blank-source')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('选择本地成片文件'), findsNothing);
+    expect(find.textContaining('视觉镜头标签组'), findsWidgets,
+        reason: '标签组区域还在，只是不再是必填');
+    expect(find.textContaining('还需要：'), findsWidgets);
+  });
+
+  testWidgets('只选分子标签组就能开始，交回来的 filePath 是 null', (tester) async {
+    await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-blank-source')));
+    await tester.pumpAndSettle();
+    await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
+    await tester.ensureVisible(find.text('创建拼片任务'));
+    await tester.tap(find.text('创建拼片任务'));
+    await tester.pumpAndSettle();
+
+    expect(lastResult, isNotNull);
+    expect(lastResult!.filePath, isNull, reason: 'null 就是「没有原片」这件事本身');
+    expect(lastResult!.unitTagGroups, isNotEmpty);
   });
 }

@@ -299,6 +299,26 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
   /// 导入并自动分析。[unitTagGroups] / [shotTagGroups] 是新建向导选定的两层
   /// miaoa 标签组，随任务落库，分析时据此解析各自的受控词表。
+  /// 建一条空白任务。**不排分析**——没有原片可分析，建出来直接可编辑
+  Future<void> createBlankTask({
+    required String name,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
+    ProjectRef? project,
+  }) async {
+    await ref.read(importServiceProvider).createBlank(
+          name: name,
+          project: project,
+          unitTagGroups: unitTagGroups,
+          shotTagGroups: shotTagGroups,
+          unitTagPrompt: unitTagPrompt,
+          shotTagPrompt: shotTagPrompt,
+        );
+    await reload();
+  }
+
   Future<void> importFile(
     String path, {
     List<TagGroupRef> unitTagGroups = const [],
