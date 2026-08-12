@@ -98,7 +98,12 @@ void main() {
 
     final report = <String>[];
     for (final task in before) {
-      if (!File(task.sourcePath).existsSync()) {
+      final sourcePath = task.sourcePath;
+      if (sourcePath == null) {
+        report.add('${task.name}：空白任务，没有原片可分析，跳过');
+        continue;
+      }
+      if (!File(sourcePath).existsSync()) {
         report.add('${task.name}：源文件不存在，跳过');
         continue;
       }

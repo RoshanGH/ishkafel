@@ -154,7 +154,7 @@ class ExportRunner {
   /// 一条失败不拖累其余：失败的那条记下原因继续跑下一条——十条里坏一条，
   /// 重跑那一条就行，没道理整批作废。
   Future<List<ExportOutcome>> exportAll({
-    required String sourcePath,
+    required String? sourcePath,
     required List<SemanticUnit> units,
     required List<UnitReplacement> replacements,
     required Directory outputDir,
@@ -196,7 +196,7 @@ class ExportRunner {
   /// 被配乐盖住的段落有没有纯人声）是按它判的。
   Future<List<ExportOutcome>> exportCombinations({
     required List<ExportCombination> combos,
-    required String sourcePath,
+    required String? sourcePath,
     required List<SemanticUnit> units,
     required List<UnitReplacement> replacements,
     required Directory outputDir,
@@ -364,7 +364,7 @@ class ExportRunner {
   /// 拼一条成片：逐段渲染画面 → concat → 与共用的声音合成
   Future<String> _composeOne({
     required ExportCombination combo,
-    required String sourcePath,
+    required String? sourcePath,
     required String audio,
     required Directory outputDir,
     required Map<String, String> clips,
@@ -390,7 +390,7 @@ class ExportRunner {
   /// 渲染一段画面。同一段在多条组合里会重复出现，按指纹缓存，只做一遍。
   Future<String> _renderSegment(
     ExportSegment segment,
-    String sourcePath,
+    String? sourcePath,
     Map<String, String> clips,
     Future<String> Function(int id) material,
   ) async {
@@ -400,6 +400,13 @@ class ExportRunner {
 
     final out = p.join(workDir.path, 'clip_$key.mp4');
     if (segment.isOriginal) {
+      // 空白任务没有原片。走到这儿说明有一段没挑素材而前置检查漏了——
+      // 让它掉进 ffmpeg 只会得到一句「No such file」，指不出是哪一段
+      if (sourcePath == null) {
+        throw StateError(
+            'U${segment.unitIndex + 1} 这一段要用原片，但这条任务没有原片。'
+            '请给它挑一条素材，或者删掉这个分子');
+      }
       await _ffmpeg(
         ExportCommands.trimOriginalVideo(
           source: sourcePath,

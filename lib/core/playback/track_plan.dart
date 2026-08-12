@@ -134,11 +134,18 @@ class TrackPlan {
   /// 预览可以少一段垫乐——人还在编辑、听得出来——但必须说出来
   final List<String> bgmMissing;
 
+  /// 空白任务里还没挑素材、这一轮预览**跳过**了的分子（下标，从 0 起）。
+  ///
+  /// 没有原片可以垫底，跳过是唯一的选择——但跳过必须说出来，否则用户看到
+  /// 的片子比他排的短一段，还以为是自己记错了
+  final List<int> skippedEmptyUnits;
+
   const TrackPlan({
     this.video = const [],
     this.voice = const [],
     this.bgm = const [],
     this.bgmMissing = const [],
+    this.skippedEmptyUnits = const [],
   });
 
   static const empty = TrackPlan();

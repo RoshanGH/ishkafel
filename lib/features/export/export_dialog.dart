@@ -30,7 +30,7 @@ Future<void> showExportDialog(
   BuildContext context, {
   required String taskId,
   required String taskName,
-  required String sourcePath,
+  required String? sourcePath,
   required List<SemanticUnit> units,
   required List<UnitReplacement> replacements,
   BgmPlan bgm = BgmPlan.empty,
@@ -111,7 +111,8 @@ Future<void> revealInFinder(String path) async {
 class _ExportDialog extends ConsumerStatefulWidget {
   final String taskId;
   final String taskName;
-  final String sourcePath;
+  /// 为 null 表示空白任务：所有段落都来自素材，没有原片可切
+  final String? sourcePath;
   final List<SemanticUnit> units;
   final List<UnitReplacement> replacements;
   final BgmPlan bgm;

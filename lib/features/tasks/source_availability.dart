@@ -28,7 +28,8 @@ final missingSourceTaskIdsProvider = FutureProvider<Set<String>>((ref) async {
   if (tasks.isEmpty) return const <String>{};
   final probe = ref.read(fileExistsProbeProvider);
   // 同一路径只探一次：同一素材可能被导入成多条任务
-  final paths = {for (final task in tasks) task.sourcePath};
+  // 空白任务没有原片，也就无所谓「原片不见了」——它永远是可用的
+  final paths = {for (final task in tasks) ?task.sourcePath};
   final results = Map.fromEntries(await Future.wait([
     for (final path in paths)
       _probeQuietly(probe, path).then((exists) => MapEntry(path, exists)),
@@ -51,7 +52,9 @@ final missingSourceTaskIdsProvider = FutureProvider<Set<String>>((ref) async {
 /// 结果与缓存不一致时顺手让缓存重算，列表上的标记随即跟上。
 Future<bool> isSourceMissingNow(WidgetRef ref, RenewTask task) async {
   final probe = ref.read(fileExistsProbeProvider);
-  final exists = await _probeQuietly(probe, task.sourcePath);
+  final sourcePath = task.sourcePath;
+  if (sourcePath == null) return false; // 空白任务不存在原片丢失
+  final exists = await _probeQuietly(probe, sourcePath);
   final cachedMissing =
       ref.read(missingSourceTaskIdsProvider).valueOrNull ?? const <String>{};
   if (cachedMissing.contains(task.id) == exists) {

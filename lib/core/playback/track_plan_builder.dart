@@ -30,7 +30,9 @@ class TrackPlanBuilder {
     /// 画面轨读的原片。**预览走代理**（见 [ProxySpec]）：段与段规格一致，
     /// 播放器在接缝处才不用重建解码器。代理还没生成好时传原片路径，
     /// 那一轮先按原样播
-    required String sourcePath,
+    /// 画面轨读的原片。**为 null 表示空白任务**——那时没挑素材的分子
+    /// 没有任何东西可播，只能跳过（记进 [TrackPlan.skippedEmptyUnits]）
+    required String? sourcePath,
 
     /// 口播轨读的原片。**始终是原片本身，不走代理**：音频解码不吃硬件，
     /// 而代理是 `-c:a copy` 出来的、音质本就一样，没有理由多绕一层。
@@ -48,9 +50,10 @@ class TrackPlanBuilder {
     /// 并记进 [TrackPlan.bgmMissing]——预览可以少一段垫乐，但必须说出来
     Map<int, String> bgmPaths = const {},
   }) {
-    final audioSource = audioSourcePath ?? sourcePath;
+
     final video = <TrackSegment>[];
     final voice = <TrackSegment>[];
+    final skipped = <int>[];
     // 成片时间轴上的游标：整体替换会改变段落长度，后面的全跟着挪
     var at = 0;
     // 单元下标 → 它在成片上占的 [起, 止)，配乐要按它定位
@@ -78,6 +81,16 @@ class TrackPlanBuilder {
         unitRanges[unit.index] = (start, at);
         continue;
       }
+
+      // 空白任务里没挑素材的分子：没有原片垫底，只能跳过并如实记下来
+      if (sourcePath == null) {
+        skipped.add(unit.index);
+        unitRanges[unit.index] = (start, at);
+        continue;
+      }
+
+      // 走到这儿 sourcePath 一定非空——空白任务在上一个分支已经跳过了
+      final audioSource = audioSourcePath ?? sourcePath;
 
       // 没有整体替换：画面按镜头逐段取，声音按「这一段该用哪条音源」取
       final shots = unit.shots.isEmpty
@@ -145,6 +158,7 @@ class TrackPlanBuilder {
       bgm: List.unmodifiable(
           _bgmTrack(bgm, unitRanges, bgmPaths, missing)),
       bgmMissing: List.unmodifiable(missing),
+      skippedEmptyUnits: List.unmodifiable(skipped),
     );
   }
 

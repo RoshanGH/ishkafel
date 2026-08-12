@@ -269,6 +269,13 @@ class AnalysisPipeline {
   /// 镜头切点重算要几十秒。
   Future<PreparedAnalysis> prepare(RenewTask task,
       {AnalysisProgressSink? onProgress}) async {
+    // 空白任务没有原片，整条分析都无从谈起。挡在最外层并说清楚——
+    // 让它往下走，最后是 ffmpeg 报一句「No such file」，谁也看不懂
+    final sourcePath = task.sourcePath;
+    if (sourcePath == null) {
+      throw StateError('任务 ${task.id} 是一条空白任务，没有原片可分析。'
+          '分子和标签在 app 里手动填');
+    }
     final info = task.videoInfo;
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
@@ -278,14 +285,14 @@ class AnalysisPipeline {
 
     _report(onProgress, AnalysisStage.extractingAudio);
     final samples = await audio.extractSamples(
-        videoPath: task.sourcePath,
+        videoPath: sourcePath,
         outPcmPath: pcmPath,
         sampleRate: sampleRate);
     final valleys = silence.detectValleyCenters(samples, sampleRate);
 
     _report(onProgress, AnalysisStage.separatingVocals);
-    final stemsFuture = _separate(task);
-    final boundsFuture = _detectShotBoundaries(task, info.fps);
+    final stemsFuture = _separate(task, sourcePath);
+    final boundsFuture = _detectShotBoundaries(task, sourcePath, info.fps);
     final sentencesFuture = asr.transcribe(pcmPath);
 
     _report(onProgress, AnalysisStage.transcribing);
@@ -328,6 +335,12 @@ class AnalysisPipeline {
       {AnalysisProgressSink? onProgress,
       void Function(RenewTask ready)? onUnitsReady}) async {
     final startedAt = clock();
+    // 空白任务没有原片，整条分析都无从谈起（同 prepare 的守卫）
+    final sourcePath = task.sourcePath;
+    if (sourcePath == null) {
+      throw StateError('任务 ${task.id} 是一条空白任务，没有原片可分析。'
+          '分子和标签在 app 里手动填');
+    }
     final info = task.videoInfo;
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
@@ -339,7 +352,7 @@ class AnalysisPipeline {
 
     _report(onProgress, AnalysisStage.extractingAudio);
     final samples = await audio.extractSamples(
-        videoPath: task.sourcePath,
+        videoPath: sourcePath,
         outPcmPath: pcmPath,
         sampleRate: sampleRate);
     final valleys = silence.detectValleyCenters(samples, sampleRate);
@@ -349,8 +362,8 @@ class AnalysisPipeline {
     // 串行跑它们纯属浪费——实测串行 229 秒里，这三条加起来占 120 秒，
     // 而并起来只花最长那条的时间。进度按「最慢的那条」报，不然进度条会跳。
     _report(onProgress, AnalysisStage.separatingVocals);
-    final stemsFuture = _separate(task);
-    final boundsFuture = _detectShotBoundaries(task, info.fps);
+    final stemsFuture = _separate(task, sourcePath);
+    final boundsFuture = _detectShotBoundaries(task, sourcePath, info.fps);
     final sentencesFuture = asr.transcribe(pcmPath);
 
     _report(onProgress, AnalysisStage.transcribing);
@@ -411,12 +424,12 @@ class AnalysisPipeline {
   /// 分离口播与背景音。**失败不中断整条分析**：切分与打标本身仍然有价值，
   /// 为了一条音轨把几分钟的分析结果整个废掉不划算。缺了它只影响「替换配乐」，
   /// 那一步会自己说明原因。
-  Future<SeparatedAudio?> _separate(RenewTask task) async {
+  Future<SeparatedAudio?> _separate(RenewTask task, String sourcePath) async {
     final tool = separator;
     if (tool == null) return null;
     try {
       return await tool.separate(
-        audioPath: task.sourcePath,
+        audioPath: sourcePath,
         outputDir: Directory(p.join(workDir.path, 'stems', task.id)),
       );
     } catch (e) {
@@ -427,15 +440,16 @@ class AnalysisPipeline {
 
   /// 求视觉镜头切点。新链路（双判据 + 画面复核）失败时退回旧的单一阈值
   /// 检测——切分结果本身仍有价值，为了「切得更准」把整条分析废掉不划算。
-  Future<List<int>> _detectShotBoundaries(RenewTask task, double fps) async {
+  Future<List<int>> _detectShotBoundaries(
+      RenewTask task, String sourcePath, double fps) async {
     final finder = shotBoundaries;
-    if (finder == null) return scenes.detect(task.sourcePath);
+    if (finder == null) return scenes.detect(sourcePath);
     try {
       return await finder.find(
-          videoPath: task.sourcePath, taskId: task.id, fps: fps);
+          videoPath: sourcePath, taskId: task.id, fps: fps);
     } catch (e) {
       AppLog.warn('镜头切点检测失败，退回基础场景检测：$e');
-      return scenes.detect(task.sourcePath);
+      return scenes.detect(sourcePath);
     }
   }
 

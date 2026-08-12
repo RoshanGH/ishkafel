@@ -63,7 +63,9 @@ class AudioTrackBuilder {
   /// [vocalsPath] 是分离出来的纯人声轨；为 null（没装分离工具或分离失败）时，
   /// 被配乐覆盖的段落只能退回原混音——新旧背景会叠在一起，由上层如实告知用户。
   Future<AudioTrack> build({
-    required String sourcePath,
+    /// 原片路径。**为 null 表示空白任务**——那时每个单元都是整体替换，
+    /// 声音全部来自素材，不会走到「切原片音频」那一支
+    required String? sourcePath,
     required List<SemanticUnit> units,
     String? vocalsPath,
     BgmPlan bgm = BgmPlan.empty,
@@ -204,7 +206,7 @@ class AudioTrackBuilder {
   /// 段被配乐覆盖，按单元一刀切会让没覆盖的那半段也白白损一道音质。
   Future<List<String>> _unitParts({
     required SemanticUnit unit,
-    required String sourcePath,
+    required String? sourcePath,
     required String? vocalsPath,
     required List<(int, int)> covered,
     required Map<int, String> voiceAudio,
@@ -249,6 +251,12 @@ class AudioTrackBuilder {
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
       final needsClean = _overlaps(covered, start, end) && vocalsPath != null;
       final source = needsClean ? vocalsPath : sourcePath;
+      if (source == null) {
+        // 空白任务里每个单元都是整体替换，走不到这儿。走到了就是有一段
+        // 既没有素材也没有原片——不许拿静音顶上，那会让成片少一段声音
+        throw StateError('U${unit.index + 1} 这一段既没有素材也没有原片，'
+            '合不出声音。请给它挑一条素材，或者删掉这个分子');
+      }
       pieces.add(await _cache.render(
         key: 'trim|$source|$start|$end',
         prefix: 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}',

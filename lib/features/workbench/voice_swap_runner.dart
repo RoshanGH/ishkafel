@@ -35,7 +35,9 @@ class VoiceSwapJob {
 
 /// 按任务造一个配音作业。任务不同，原片与产物目录都不同，所以是工厂而不是
 /// 单例服务。
-typedef VoiceSwapFactory = VoiceSwapJob Function(RenewTask task);
+/// 返回 null 表示这条任务换不了音色（空白任务没有台词）——
+/// 界面据此禁用按钮并说明原因，而不是让用户点了之后撞一个空指针
+typedef VoiceSwapFactory = VoiceSwapJob? Function(RenewTask task);
 
 /// 换音色服务的装配点：把真实的 ffmpeg 切片、ffprobe 量时长、云端客户端接起来。
 ///
@@ -50,18 +52,23 @@ VoiceSwapFactory? defaultVoiceSwapFactory({
   required Directory dataDir,
 }) {
   if (!credentials.isComplete) return null;
-  return (task) => VoiceSwapJob(
-        service: buildVoiceSwapService(
-          arkApiKey: credentials.arkApiKey,
-          speechAppId: credentials.speechAppId,
-          speechAccessToken: credentials.speechAccessToken,
-          sourcePath: task.sourcePath,
-          // 切片是中间产物，跟分析的临时文件放一块，清理缓存时一并带走
-          workDir: Directory(p.join(dataDir.path, 'analysis_work')),
-        ),
-        // 产物按任务分目录：任务删掉时整个目录一并删，不会留下孤儿音频
-        outputDir: Directory(p.join(dataDir.path, 'voices', task.id)),
-      );
+  return (task) {
+    // 空白任务没有台词，也就没有音色可换
+    final sourcePath = task.sourcePath;
+    if (sourcePath == null) return null;
+    return VoiceSwapJob(
+      service: buildVoiceSwapService(
+        arkApiKey: credentials.arkApiKey,
+        speechAppId: credentials.speechAppId,
+        speechAccessToken: credentials.speechAccessToken,
+        sourcePath: sourcePath,
+        // 切片是中间产物，跟分析的临时文件放一块，清理缓存时一并带走
+        workDir: Directory(p.join(dataDir.path, 'analysis_work')),
+      ),
+      // 产物按任务分目录：任务删掉时整个目录一并删，不会留下孤儿音频
+      outputDir: Directory(p.join(dataDir.path, 'voices', task.id)),
+    );
+  };
 }
 
 /// 用真实工具链造一个可用的服务

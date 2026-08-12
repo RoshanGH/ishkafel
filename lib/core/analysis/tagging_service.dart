@@ -202,7 +202,10 @@ class TaggingService {
       List<SemanticUnit> units, List<({int unit, int shot})> flat) async {
     final extractor = batchFrames;
     final info = task.videoInfo;
-    if (extractor == null || info == null) return null;
+    final sourcePath = task.sourcePath;
+    // 空白任务没有原片可抽帧。走到这儿说明调用方没挡住——照旧返回 null，
+    // 调用方会退回逐帧那条路，而那条路也有同样的守卫
+    if (extractor == null || info == null || sourcePath == null) return null;
 
     final wanted = <int>[
       for (final at in flat)
@@ -217,7 +220,7 @@ class TaggingService {
     }
 
     return extractor.extract(
-      videoPath: task.sourcePath,
+      videoPath: sourcePath,
       requestedMs: wanted,
       fps: info.fps,
       outDir: Directory(p.join(workDir.path, '${task.id}_frames')),
@@ -289,6 +292,12 @@ class TaggingService {
   Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
       List<TagDimension> shotVocabulary,
       {Map<int, String>? prefetched}) async {
+    final sourcePath = task.sourcePath;
+    if (sourcePath == null) {
+      // 空白任务的镜头标签是手动填的，不该走到视觉打标
+      AppLog.warn('任务 ${task.id} 没有原片，跳过 S${shotIndex + 1} 的视觉打标');
+      return shot;
+    }
     try {
       final at = ShotFrameSampler.sampleAt(
           startMs: shot.startMs, endMs: shot.endMs);
@@ -300,7 +309,7 @@ class TaggingService {
         if (outPath == null) {
           outPath = p.join(workDir.path, '${task.id}_shot${shotIndex}_$i.jpg');
           await LocalWorkGate.shared.run(() => thumbnails!.extractCover(
-                videoPath: task.sourcePath,
+                videoPath: sourcePath,
                 outPath: outPath!,
                 atSeconds: at[i] / 1000.0,
                 height: understandingFrameHeight,

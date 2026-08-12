@@ -32,8 +32,17 @@ enum RenewTaskStatus { analyzing, ready }
 class RenewTask {
   final String id;
   final String name;
-  final String sourcePath;
+  /// 原片路径。**为 null 表示这是一条空白任务**——没有原片，分子和标签
+  /// 手动填，只靠标签检索素材拼片（见 docs/superpowers/specs/
+  /// 2026-08-12-blank-task-design.md）。
+  ///
+  /// 用可空而不是空串：空串是个谎，而且不会有任何地方报错。可空之后编译器
+  /// 会把每一处假设「原片一定在」的地方指出来，逐个决策。
+  final String? sourcePath;
   final String? miaoaVideoId;
+
+  /// 空白任务：没有原片。分子手动添加、标签手动填，每个分子都走整体替换
+  bool get isBlank => sourcePath == null;
   final VideoInfo? videoInfo;
   final String? coverPath;
   final RenewTaskStatus status;
@@ -128,7 +137,7 @@ class RenewTask {
   RenewTask({
     required this.id,
     required this.name,
-    required this.sourcePath,
+    this.sourcePath,
     this.miaoaVideoId,
     this.videoInfo,
     this.coverPath,
@@ -303,7 +312,7 @@ class RenewTask {
     return RenewTask(
         id: json['id'] as String,
         name: json['name'] as String,
-        sourcePath: json['sourcePath'] as String,
+        sourcePath: json['sourcePath'] as String?,
         miaoaVideoId: json['miaoaVideoId'] as String?,
         videoInfo: json['videoInfo'] == null
             ? null

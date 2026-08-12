@@ -313,7 +313,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (_playhead.value == ms) return;
       _playhead.value = ms;
     });
-    unawaited(_openSource(playback, task.sourcePath));
+    // 空白任务没有原片可开。画面全部来自素材，等轨道推上去自然就有内容了
+    if (task.sourcePath case final source?) {
+      unawaited(_openSource(playback, source));
+    }
     unawaited(_loadMedia());
     _restoreVoiceAudio();
 
@@ -396,7 +399,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (factory == null) return;
     try {
       _voiceAudio = factory(widget.task)
-          .existingAudio(widget.task.voices.assignedUnits);
+              ?.existingAudio(widget.task.voices.assignedUnits) ??
+          const {};
     } catch (e) {
       // 目录读不出来只影响试听按钮，不该拦住整个页面
       AppLog.warn('恢复已生成配音失败（taskId=${widget.task.id}）：$e');
@@ -594,6 +598,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
 
     final job = factory(_task);
+    if (job == null) {
+      // 空白任务没有台词可念。这个按钮本来就不该出现在这类任务上，
+      // 真出现了也要说人话
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('这条任务没有台词，换不了音色')));
+      return;
+    }
     setState(() => _voiceProgress = (0, _task.voices.assignedUnits.length));
     try {
       // 合成按字符计费，且用户会反复改台词重生成——记进这个任务的账
@@ -955,11 +966,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   Future<void> _loadMedia() async {
     final videoInfo = widget.task.videoInfo;
-    if (videoInfo == null) return;
+    final sourcePath = widget.task.sourcePath;
+    // 空白任务没有原片，也就没有原片缩略图这一条轨
+    if (videoInfo == null || sourcePath == null) return;
     try {
       final resolved = await _resolveMedia();
       final media = await resolved.builder.build(
-        videoPath: widget.task.sourcePath,
+        videoPath: sourcePath,
         taskId: widget.task.id,
         durationMs: videoInfo.duration.inMilliseconds,
         workDir: resolved.workDir,
@@ -1133,10 +1146,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   Future<void> _buildSourceProxy() async {
     final dataDir = ref.read(dataDirProvider);
     final tracks = _tracks;
-    if (dataDir == null || tracks == null) return;
+    final sourcePath = widget.task.sourcePath;
+    // 空白任务没有原片，也就没有原片代理要转
+    if (dataDir == null || tracks == null || sourcePath == null) return;
     final path = await _proxyBuilder(dataDir)
-        .build(path: widget.task.sourcePath, frameRate: _frameRateArg);
-    if (!mounted || path == widget.task.sourcePath) return;
+        .build(path: sourcePath, frameRate: _frameRateArg);
+    if (!mounted || path == sourcePath) return;
     tracks.proxyPath = path;
     _syncPreviewAudio();
   }
