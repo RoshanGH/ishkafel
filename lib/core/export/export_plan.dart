@@ -111,13 +111,20 @@ class ExportPlanner {
 
     final out = <ExportCombination>[];
     final cursor = List<int>.filled(units.length, 0);
-    while (out.length < limit) {
-      out.add(ExportCombination(
-        index: out.length + 1,
-        segments: [
-          for (var i = 0; i < units.length; i++) ...choicesPerUnit[i][cursor[i]],
-        ],
-      ));
+    // 里程表最多能走多少格。作废的组合不占 out 的名额，光靠 out.length
+    // 收不住循环
+    var steps = 0;
+    final maxSteps = _stepBudget(choicesPerUnit, limit);
+    while (out.length < limit && steps++ < maxSteps) {
+      final segments = <ExportSegment>[
+        for (var i = 0; i < units.length; i++) ...choicesPerUnit[i][cursor[i]],
+      ];
+      // 同一条素材在一条成片里出现两次，一眼就能看出来——那不是用户想要的。
+      // 笛卡尔积会自然产出这种组合（U1 选 [A,B]、U2 选 [A,C] 里就有 A+A），
+      // 在这儿滤掉，编号按**留下来的**顺延，不在编号上留洞
+      if (!_hasDuplicateMaterial(segments)) {
+        out.add(ExportCombination(index: out.length + 1, segments: segments));
+      }
       // 里程表进位：从最后一个单元开始加
       var i = units.length - 1;
       while (i >= 0) {
@@ -129,6 +136,28 @@ class ExportPlanner {
       if (i < 0) break; // 全部进位完毕 = 枚举结束
     }
     return List.unmodifiable(out);
+  }
+
+  /// 一条成片里同一条素材出现了两次
+  static bool _hasDuplicateMaterial(List<ExportSegment> segments) {
+    final seen = <int>{};
+    for (final segment in segments) {
+      final id = segment.candidateId;
+      if (id != null && !seen.add(id)) return true;
+    }
+    return false;
+  }
+
+  /// 里程表最多走多少格：所有排法的乘积，但不超过一个跟上限同量级的天花板。
+  /// 去重会让「有效组合」少于总排法数，不设步数预算的话循环收不住
+  static int _stepBudget(List<List<List<ExportSegment>>> choices, int limit) {
+    var total = 1;
+    final ceiling = limit * 10 + 100;
+    for (final unitChoices in choices) {
+      total *= unitChoices.isEmpty ? 1 : unitChoices.length;
+      if (total >= ceiling) return ceiling;
+    }
+    return total;
   }
 
   /// 这个单元有几种排法，每种排法由哪些段组成

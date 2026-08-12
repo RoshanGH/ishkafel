@@ -35,6 +35,7 @@ List<int?> _fingerprint(ExportCombination c) =>
     [for (final s in c.segments) s.candidateId];
 
 void main() {
+  _duplicateMaterialTests();
   group('一条都没换', () {
     test('也要产出一条：原片本身就是一种排法', () {
       final combos = _enumerate([
@@ -263,6 +264,67 @@ void main() {
       );
 
       expect(combos.single.durationMs, 4000);
+    });
+  });
+}
+
+/// 同一条素材不能在同一条成片里出现两次。
+///
+/// 笛卡尔积会自然产出这种组合：U1 选了 [A,B]、U2 选了 [A,C]，四条里就有一条
+/// 是 A+A。那不是用户想要的——同一个画面在片子里出现两次，一眼就能看出来。
+void _duplicateMaterialTests() {
+  group('同一条素材不能在一条成片里用两次', () {
+    test('含重复素材的组合直接不生成', () {
+      final combos = ExportPlanner.enumerate(
+        units: _units(),
+        replacements: [
+          UnitReplacement.whole(const [101, 102]),
+          UnitReplacement.whole(const [101, 103]),
+        ],
+      );
+
+      // 2×2 = 4 种排法，其中 101+101 那条作废
+      expect(combos, hasLength(3));
+      for (final c in combos) {
+        final used = [
+          for (final s in c.segments)
+            if (s.candidateId != null) s.candidateId!,
+        ];
+        expect(used.toSet(), hasLength(used.length), reason: '不许有重复');
+      }
+    });
+
+    test('编号连续——作废的那条不能在编号上留个洞', () {
+      final combos = ExportPlanner.enumerate(
+        units: _units(),
+        replacements: [
+          UnitReplacement.whole(const [101, 102]),
+          UnitReplacement.whole(const [101, 103]),
+        ],
+      );
+      expect(combos.map((c) => c.index), [1, 2, 3]);
+    });
+
+    test('全部组合都因重复作废时返回空——上层据此明说，不静默导 0 条', () {
+      final combos = ExportPlanner.enumerate(
+        units: _units(),
+        replacements: [
+          UnitReplacement.whole(const [101]),
+          UnitReplacement.whole(const [101]),
+        ],
+      );
+      expect(combos, isEmpty);
+    });
+
+    test('不同单元用不同素材时一条都不少', () {
+      final combos = ExportPlanner.enumerate(
+        units: _units(),
+        replacements: [
+          UnitReplacement.whole(const [101, 102]),
+          UnitReplacement.whole(const [201, 202]),
+        ],
+      );
+      expect(combos, hasLength(4));
     });
   });
 }

@@ -226,7 +226,8 @@ class ExportRunner {
     // 镜头替换的候选必须能在 0.8×~2.0× 内对齐坑位。一次把所有越界的点名，
     // 免得用户改一个导一次
     final tooFar = await _speedBlocker(combos, material);
-    final blocker = tooFar ??
+    final blocker = _blankBlocker(combos, sourcePath) ??
+        tooFar ??
         _deliveryBlocker(
             bgm: bgm,
             vocalsPath: vocalsPath,
@@ -385,6 +386,26 @@ class ExportRunner {
     await _ffmpeg(
         ExportCommands.mux(video: silent, audio: audio, out: out), '画面与声音合成');
     return out;
+  }
+
+  /// 空白任务里还没挑素材的分子。
+  ///
+  /// 没有原片垫底，这种段落**没有任何东西可以放**。不能拿黑场顶上，也不能
+  /// 悄悄跳过——那都属于「影响最终成片的东西出了错却不说」。一次把所有空着
+  /// 的点名，免得用户填一个导一次。
+  static String? _blankBlocker(
+      List<ExportCombination> combos, String? sourcePath) {
+    if (sourcePath != null) return null;
+    final empty = <int>{};
+    for (final combo in combos) {
+      for (final segment in combo.segments) {
+        if (segment.isOriginal) empty.add(segment.unitIndex);
+      }
+    }
+    if (empty.isEmpty) return null;
+    final names =
+        (empty.toList()..sort()).map((i) => 'U${i + 1}').join('、');
+    return '$names 还没有挑素材。删掉这些分子，或者把它们挑满，再导出';
   }
 
   /// 渲染一段画面。同一段在多条组合里会重复出现，按指纹缓存，只做一遍。

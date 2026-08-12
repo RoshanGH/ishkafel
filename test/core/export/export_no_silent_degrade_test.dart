@@ -40,6 +40,7 @@ ExportRunner _runner(
     );
 
 void main() {
+  _blankTaskTests();
   late Directory temp;
   setUp(() => temp = Directory.systemTemp.createTempSync('ishkafel_exp_'));
   tearDown(() => temp.deleteSync(recursive: true));
@@ -188,5 +189,40 @@ void main() {
     );
 
     expect(results.every((r) => r.failure == null), isTrue);
+  });
+}
+
+/// 空白任务：没有原片，每个分子都要有素材才导得出来。
+void _blankTaskTests() {
+  late Directory temp;
+  setUp(() => temp = Directory.systemTemp.createTempSync('ishkafel_blank_'));
+  tearDown(() => temp.deleteSync(recursive: true));
+
+  test('有分子没挑素材时直接失败，并把是哪几个点出来', () async {
+    final runner = _runner(temp);
+    final results = await runner.exportAll(
+      sourcePath: null, // 空白任务
+      units: _units(),
+      replacements: const [], // 一个都没挑
+      outputDir: Directory('${temp.path}/out'),
+    );
+
+    expect(results.every((r) => r.failure != null), isTrue);
+    // 「导出失败」三个字帮不了任何人——要说是哪个分子、下一步做什么
+    expect(results.first.failure, contains('U1'));
+    expect(results.first.failure, contains('删掉'));
+    expect(results.first.failure, contains('挑满'));
+  });
+
+  test('不能拿黑场或静音顶上——一个文件都不该产出', () async {
+    final out = Directory('${temp.path}/out');
+    final runner = _runner(temp);
+    await runner.exportAll(
+      sourcePath: null,
+      units: _units(),
+      replacements: const [],
+      outputDir: out,
+    );
+    expect(out.existsSync() && out.listSync().isNotEmpty, isFalse);
   });
 }
