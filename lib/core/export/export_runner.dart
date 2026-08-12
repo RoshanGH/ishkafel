@@ -54,6 +54,10 @@ class ExportRunner {
   /// 不注入时退回素材自带的签名地址——它随时可能已经失效。
   final Future<String> Function(BgmMaterial material)? resolveBgm;
 
+  /// 把一条替换素材分离成纯人声。整体替换的段落铺了配乐时要用它——
+  /// 素材自带的背景音留着的话，它和新配乐会两首曲子一起响
+  final Future<String?> Function(String materialPath)? separateMaterial;
+
   /// 读一条本地素材有多长（毫秒）。镜头替换要按它算变速倍率；读不出来
   /// 返回 null，那时退回裁/冻帧而不是瞎猜倍率。
   final Future<int?> Function(String path)? probeDurationMs;
@@ -63,6 +67,7 @@ class ExportRunner {
     required this.workDir,
     required this.fetchMaterial,
     this.resolveBgm,
+    this.separateMaterial,
     this.probeDurationMs,
   });
 
@@ -285,6 +290,7 @@ class ExportRunner {
               ? Directory(p.join(workDir.path, 'audio_v$i'))
               : workDir,
           resolveBgm: resolveBgm,
+          separateMaterial: separateMaterial,
         ).build(
           sourcePath: sourcePath,
           units: units,

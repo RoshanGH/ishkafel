@@ -47,7 +47,19 @@ class AudioTrackBuilder {
   /// 真实装配要注入 [BgmCache]：优先本地缓存、必要时按 id 现取新地址。
   final Future<String> Function(BgmMaterial material)? resolveBgm;
 
+  /// 把一条**替换素材**分离成纯人声，返回人声轨的路径；返回 null 表示分不了
+  /// （没装分离工具或分离失败）。
+  ///
+  /// 为什么需要它：整体替换的段落，声音来自那条素材，里面同样有背景音。
+  /// 在它上面铺配乐，素材自带的背景音和新配乐就是两首曲子一起响——跟原片
+  /// 那一路是同一个问题，只是音源换成了素材。
+  ///
+  /// 只在**真的铺了配乐**的段落才调用：分离是有损的（实测残差 -27dB），
+  /// 没铺配乐的地方没必要先损一道。
+  final Future<String?> Function(String materialPath)? separateMaterial;
+
   AudioTrackBuilder({
+    this.separateMaterial,
     required this.run,
     required this.workDir,
     this.resolveBgm,
@@ -216,13 +228,20 @@ class AudioTrackBuilder {
   }) async {
     // 整体替换优先于换音色——同一个单元两者都设时导出前置检查已经拦下了
     if (wholeAudio != null && File(wholeAudio).existsSync()) {
+      // 这一段被配乐盖住时，用素材的**纯人声**：素材自带的背景音留着的话，
+      // 它和新配乐就是两首曲子一起响
+      var source = wholeAudio;
+      if (_overlaps(covered, unit.startMs, unit.endMs)) {
+        final vocals = await separateMaterial?.call(wholeAudio);
+        if (vocals != null && File(vocals).existsSync()) source = vocals;
+      }
       return [
         await _cache.render(
-          key: 'whole|$wholeAudio',
+          key: 'whole|$source',
           prefix: 'mix_u${unit.index}_whole',
           extension: 'wav',
           args: (dest) =>
-              ExportCommands.wholeReplacementAudio(input: wholeAudio, out: dest),
+              ExportCommands.wholeReplacementAudio(input: source, out: dest),
           what: 'U${unit.index + 1} 的替换声音',
         )
       ];

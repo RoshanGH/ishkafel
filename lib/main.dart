@@ -1,5 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+
+import 'core/audio/material_vocal_cache.dart';
+import 'core/audio/vocal_separator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
@@ -34,6 +37,15 @@ import 'features/workbench/bgm_picker_sheet.dart';
 import 'core/miaoa/material_downloader.dart';
 import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
+
+/// 素材人声分离器。预览与导出共用一份缓存目录，同一条素材只分离一次
+MaterialVocalCache materialVocals(Directory dataDir) => MaterialVocalCache(
+      separator: VocalSeparator(
+        binary: resolveVocalSeparatorBinary(),
+        modelDir: Directory(p.join(dataDir.path, 'separator_models')),
+      ),
+      cacheDir: Directory(p.join(dataDir.path, 'material_vocals')),
+    );
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -105,10 +117,17 @@ Future<void> main(List<String> args) async {
         content: MiaoaContentService(binary: resolveMiaoaBinary()),
         cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
       ).fetch),
+      // 预览与导出共用同一份素材人声：听到的就是要交付的
+      // （工具没装时 vocalsOf 一律返回 null，界面据此如实说明）
+      materialSeparatorProvider
+          .overrideWithValue(materialVocals(dataDir).vocalsOf),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
             resolveBgm: bgmCache(dataDir).fetch,
+            // 整体替换的段落铺了配乐时，用素材的纯人声——否则素材自带的
+            // 背景音和新配乐两首曲子一起响
+            separateMaterial: materialVocals(dataDir).vocalsOf,
             // 镜头替换要按候选的真实时长算变速倍率
             probeDurationMs: (path) async => (await FfprobeService(
                     run: const ResolvingProcessRunner().call)

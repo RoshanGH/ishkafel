@@ -49,6 +49,13 @@ class TrackPlanBuilder {
     /// 配乐在本地的文件（曲子 id → 路径）。取不到的那一段直接不铺，
     /// 并记进 [TrackPlan.bgmMissing]——预览可以少一段垫乐，但必须说出来
     Map<int, String> bgmPaths = const {},
+
+    /// 替换素材已经分离好的纯人声（素材路径 → 人声轨路径）。
+    ///
+    /// 整体替换的段落铺了配乐时用它——素材自带的背景音留着的话，它和新配乐
+    /// 就是两首曲子一起响。**预览与导出走同一条规则**：听到的就是要交付的。
+    /// 取不到就用素材原声，那时配乐会叠，由界面如实提示
+    Map<String, String> materialVocals = const {},
   }) {
 
     final video = <TrackSegment>[];
@@ -75,8 +82,13 @@ class TrackPlanBuilder {
           sourceStartMs: unit.startMs,
           sourceSpanMs: unit.durationMs,
         ));
+        // 这一段被配乐盖住时用素材的纯人声（与导出同一条规则）
+        final wholeCovered =
+            _coveredByBgm(units, bgm, unit.startMs, unit.endMs);
+        final wholeVoice =
+            (wholeCovered ? materialVocals[whole.path] : null) ?? whole.path;
         voice.add(TrackSegment(
-            atMs: at, durationMs: durationMs, source: whole.path));
+            atMs: at, durationMs: durationMs, source: wholeVoice));
         at += durationMs;
         unitRanges[unit.index] = (start, at);
         continue;

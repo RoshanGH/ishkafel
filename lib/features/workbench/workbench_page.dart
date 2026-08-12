@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
+import '../../core/audio/material_vocal_cache.dart';
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
@@ -332,6 +333,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (playback is MultitrackPlayback) {
       _tracks = PreviewTracks(
         playback: playback,
+        separateMaterial: ref.read(materialSeparatorProvider),
         materials: _mediaCache,
         bgmMedia: _bgmMediaCache,
         speedFitter: _speedFitter = _buildSpeedFitter(),
@@ -1453,7 +1455,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onRetry: _retryPreviewAudio,
               ),
             if (missingVocalsNotice(_task.bgm, _task.voices, _task.vocalsPath,
-                    isBlank: _task.isBlank)
+                    isBlank: _task.isBlank,
+                    canSeparate: ref.read(materialSeparatorProvider) != null)
                 case final notice?)
               PreviewAudioBanner(text: notice, building: false),
             if (_voiceProgress case final p?)

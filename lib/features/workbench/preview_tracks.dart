@@ -28,6 +28,10 @@ class PreviewTracks extends ChangeNotifier {
   final PickedMediaCache? bgmMedia;
   final SpeedFitter? speedFitter;
 
+  /// 把一条素材分离成纯人声。为 null 表示这台机器上分不了——那时配乐会和
+  /// 素材原声叠在一起，由界面如实提示
+  final Future<String?> Function(String materialPath)? separateMaterial;
+
   TrackPlan _plan = TrackPlan.empty;
   String? _lastKey;
   bool _disposed = false;
@@ -37,6 +41,7 @@ class PreviewTracks extends ChangeNotifier {
     this.materials,
     this.bgmMedia,
     this.speedFitter,
+    this.separateMaterial,
   }) {
     speedFitter?.addListener(_onFitterChanged);
   }
@@ -81,6 +86,11 @@ class PreviewTracks extends ChangeNotifier {
       materialPathOf: (id) => materials?.localPathOf(id),
     ));
 
+    // 铺了配乐的整体替换段，后台把素材分离成纯人声；出结果了再重推一次。
+    // **不等它**——分离要十几秒，预览为此卡住是不可接受的
+    unawaited(_ensureMaterialVocals(
+        task: task, units: units, replacements: replacements));
+
     final plan = _build(
       task: task,
       units: units,
@@ -93,6 +103,41 @@ class PreviewTracks extends ChangeNotifier {
     _plan = plan;
     await playback.setPlan(plan);
     _notify();
+  }
+
+  /// 已经分离好的素材人声（素材路径 → 人声轨）。异步分离在后台跑，
+  /// 出结果了再重推一次轨道——预览不能为了等分离先卡住
+  final Map<String, String> materialVocals = {};
+
+  /// 给「铺了配乐的整体替换段」准备纯人声。已经分过的不再分
+  Future<void> _ensureMaterialVocals({
+    required RenewTask task,
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+  }) async {
+    final separate = separateMaterial;
+    if (separate == null || task.bgm.segments.isEmpty) return;
+    var changed = false;
+    for (var i = 0; i < units.length && i < replacements.length; i++) {
+      final replacement = replacements[i];
+      if (replacement.mode != ReplacementMode.whole) continue;
+      if (!task.bgm.segments.any((s) => s.covers(i))) continue;
+      final id = replacement.wholePreviewId ??
+          (replacement.wholeCandidateIds.isEmpty
+              ? null
+              : replacement.wholeCandidateIds.first);
+      if (id == null) continue;
+      final path = materials?.localPathOf(id);
+      if (path == null || materialVocals.containsKey(path)) continue;
+      final vocals = await separate(path);
+      if (_disposed) return;
+      if (vocals != null) {
+        materialVocals[path] = vocals;
+        changed = true;
+      }
+    }
+    // 分出来了就重推一次轨道，换成纯人声
+    if (changed && !_disposed) _lastKey = null;
   }
 
   TrackPlan _build({
@@ -130,6 +175,7 @@ class PreviewTracks extends ChangeNotifier {
       voiceAudio: voiceAudio,
       bgm: task.bgm,
       bgmPaths: bgmPaths,
+      materialVocals: materialVocals,
     );
   }
 
@@ -171,18 +217,19 @@ class PreviewTracks extends ChangeNotifier {
 /// 这种情况下新配乐只能叠在原声上，原片自带的背景音还在——两首曲子一起响。
 /// 用户听到的东西不对，必须说清是为什么。
 ///
-/// [isBlank] 是空白任务：它**没有原片可以重新分析**，那句「装好工具后重新
-/// 分析」在这儿是条死路——用户照做也解决不了，只会来回折腾。这类任务的
-/// 背景音来自每一条挑中的素材，要分离得逐条分离（还没做）。
+/// [isBlank] 是空白任务：它没有原片、也就没有原片人声轨，但**它的声音全部
+/// 来自替换素材**，而素材是逐条分离的（见 [MaterialVocalCache]）。所以这条
+/// 提示对它不成立——除非机器上压根没装分离工具，[canSeparate] 就是为此。
 String? missingVocalsNotice(BgmPlan bgm, VoicePlan voices, String? vocalsPath,
-    {bool isBlank = false}) {
+    {bool isBlank = false, bool canSeparate = true}) {
   if (bgm.segments.isEmpty) return null;
-  if (vocalsPath != null && File(vocalsPath).existsSync()) return null;
   if (isBlank) {
-    return '配乐会和素材自带的声音叠在一起。'
-        '这条任务没有原片，素材声音还不能单独分离——'
-        '介意的话先把配乐去掉，或者把配乐音量压低一些';
+    // 空白任务的每一段都是整体替换，声音来自素材，逐条分离即可
+    if (canSeparate) return null;
+    return '这台机器上没有装人声分离工具，配乐会和素材自带的声音叠在一起。'
+        '去「设置 → 运行环境」装一下就好';
   }
+  if (vocalsPath != null && File(vocalsPath).existsSync()) return null;
   return '没有分离出纯人声轨，新配乐会与原片自带的背景音叠在一起。'
       '装好人声分离工具后重新分析可解决';
 }
