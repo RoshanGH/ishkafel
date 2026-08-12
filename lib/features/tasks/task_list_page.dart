@@ -13,6 +13,7 @@ import '../home/readiness_provider.dart';
 import '../home/welcome_view.dart';
 import '../import_flow/import_exception.dart';
 import '../settings/settings_page.dart';
+import '../blank_task/blank_workbench_page.dart';
 import '../workbench/workbench_page.dart';
 import 'new_task_wizard/new_task_wizard.dart';
 import 'environment_banner.dart';
@@ -165,6 +166,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     }
     if (task.analysisError != null) {
       _showAnalysisFailedSnackBar(context, ref, task);
+      return;
+    }
+    // 空白任务不走分析，也没有帧率可校验——直接进它自己的工作台
+    if (task.isBlank) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => BlankWorkbenchPage(task: task)),
+      );
       return;
     }
     if (task.status == RenewTaskStatus.analyzing || task.units == null) {
