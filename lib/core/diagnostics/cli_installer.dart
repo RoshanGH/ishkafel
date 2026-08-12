@@ -55,14 +55,17 @@ class CliInstaller {
 
   const CliInstaller({required this.binDir, required this.bundledCli});
 
-  /// 跑在 app 里时的默认装法：CLI 在 `<app>/Contents/Resources/cli/bin/ishkafel`
+  /// 跑在 app 里时的默认装法：CLI 在 `<app>/Contents/Resources/cli/ishkafel`。
+  ///
+  /// 那是个**按机器架构分发**的入口脚本，两个架构的 bundle 都在它旁边——
+  /// Dart 不支持交叉编译，两份产物也没法 lipo 成一个（AOT 快照是附加在
+  /// Mach-O 后面的，lipo 只认前面那段，合完快照就丢了）
   factory CliInstaller.forRunningApp({Directory? binDir}) {
     final macos = File(Platform.resolvedExecutable).parent; // Contents/MacOS
     final contents = macos.parent;
     return CliInstaller(
       binDir: binDir ?? Directory('/usr/local/bin'),
-      bundledCli: File(
-          p.join(contents.path, 'Resources', 'cli', 'bin', commandName)),
+      bundledCli: File(p.join(contents.path, 'Resources', 'cli', commandName)),
     );
   }
 

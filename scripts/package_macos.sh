@@ -33,16 +33,19 @@ echo "架构自检通过：$ARCHS"
 # 不需要知道自己这台是 Intel 还是 M 系列，更不需要自己去编译什么
 echo "构建命令行工具（universal）…"
 ./scripts/build_cli.sh --require-universal
-CLI_SRC="build/cli/universal/bundle"
-CLI_ARCHS="$(lipo -info "$CLI_SRC/bin/ishkafel" | sed 's/.*are: //;s/.*is architecture: //')"
-if [[ "$CLI_ARCHS" != *"x86_64"* || "$CLI_ARCHS" != *"arm64"* ]]; then
-  echo "命令行工具不是 universal（当前：$CLI_ARCHS）——装到 Intel 机器上会 Bad CPU type。" >&2
-  exit 1
-fi
-echo "命令行工具架构自检通过：$CLI_ARCHS"
+CLI_SRC="build/cli/dist"
+# 两个架构的产物必须都在。少一个的话，那种机器的使用者点完「安装」敲命令
+# 会得到「Bad CPU type」——而这件事要等包发出去才暴露
+for want in macos_arm64 macos_x64; do
+  if [[ ! -x "$CLI_SRC/$want/bundle/bin/ishkafel" ]]; then
+    echo "命令行工具缺 $want 这个架构，别把这个包发出去。" >&2
+    exit 1
+  fi
+done
+echo "命令行工具自检通过：macos_arm64 + macos_x64"
 rm -rf "$APP/Contents/Resources/cli"
 mkdir -p "$APP/Contents/Resources/cli"
-cp -R "$CLI_SRC/bin" "$CLI_SRC/lib" "$APP/Contents/Resources/cli/"
+cp -R "$CLI_SRC/." "$APP/Contents/Resources/cli/"
 # 往签好名的 app 里塞东西有可能破坏封签，那样对方双击会报「已损坏」——
 # 而这件事要等包发出去才暴露，必须在这儿挡住
 if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
@@ -53,7 +56,7 @@ if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
   }
 fi
 # 真的能跑起来吗——签名过了不代表二进制是好的
-"$APP/Contents/Resources/cli/bin/ishkafel" --help > /dev/null || {
+"$APP/Contents/Resources/cli/ishkafel" --help > /dev/null || {
   echo "app 里的命令行工具跑不起来，别把这个包发出去。" >&2; exit 1
 }
 
