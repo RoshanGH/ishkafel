@@ -27,6 +27,9 @@ class NoopPlaybackController implements PlaybackController {
   Future<void> clearRange() async {}
 
   @override
+  Future<void> clearSource() async {}
+
+  @override
   Future<void> stepFrames(int frames, double fps) async {}
 
   @override

@@ -23,7 +23,15 @@ import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 /// 抽帧要跑十几次 ffmpeg 子进程、波形要提取整段 PCM，真机实测进页面后约
 /// 2 秒才有内容。此前两条轨在这段时间里是纯空白、失败时也是纯空白——
 /// 用户无从判断是在算还是坏了。
-enum TimelineMediaStatus { loading, ready, failed }
+enum TimelineMediaStatus {
+  loading,
+  ready,
+  failed,
+
+  /// 没有原片可取（空白任务）。**这一条永远不会变成 ready**，所以不能
+  /// 显示「生成中…」——那是个永远转下去的圈
+  noSource,
+}
 
 /// 时间线绘制器（无状态纯绘制）
 ///
@@ -586,17 +594,22 @@ class TimelinePainter extends CustomPainter {
     if (mediaStatus == TimelineMediaStatus.ready) return;
     final rect = Rect.fromLTRB(0, top, size.width, bottom);
     final failed = mediaStatus == TimelineMediaStatus.failed;
+    final noSource = mediaStatus == TimelineMediaStatus.noSource;
     canvas.drawRect(
       rect,
       Paint()
         ..color = (failed ? AppColors.red : AppColors.textTertiary)
-            .withValues(alpha: 0.10),
+            .withValues(alpha: noSource ? 0.06 : 0.10),
     );
     _drawText(
       canvas,
-      failed ? '$what生成失败' : '$what生成中…',
+      noSource
+          ? '这条任务没有原片，$what 这一轨用不上'
+          : (failed ? '$what生成失败' : '$what生成中…'),
       Offset(AppSpacing.sm, top + (bottom - top) / 2 - 7),
-      failed ? AppColors.red : AppColors.textSecondary,
+      failed
+          ? AppColors.red
+          : (noSource ? AppColors.textTertiary : AppColors.textSecondary),
       fontSize: AppFontSize.caption,
       maxWidth: size.width - AppSpacing.sm * 2,
     );

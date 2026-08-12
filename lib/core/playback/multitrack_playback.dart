@@ -72,6 +72,12 @@ class MultitrackPlayback implements PlaybackController {
   /// - **保持播放状态**。正在播的时候点一下 ★ 就停住，是不能接受的；
   /// - **按逻辑位置恢复**。记的是「我停在原片的哪一刻」，不是「第几毫秒」
   ///   ——取消整体替换之后成片总长会变，同一个毫秒对应的内容完全不是同一处。
+  @override
+  Future<void> clearSource() async {
+    _videoEdl = null;
+    await video.clearSource();
+  }
+
   Future<void> setPlan(TrackPlan plan) async {
     final wasPlaying = video.isPlaying;
     // 换之前先记下逻辑位置（用旧的那套轨换算）
@@ -81,6 +87,16 @@ class MultitrackPlayback implements PlaybackController {
 
     _plan = plan;
     final videoEdl = Edl.of(plan.video);
+    // 画面轨空了（空白任务一条素材都没挑）必须**明确清掉**。
+    //
+    // 原来只在 videoEdl != null 时才换源，于是空轨等于「什么都不做」——
+    // 播放器里还挂着上一次打开的东西，用户看到的是**别的任务的画面**。
+    // 真机上撞到过：新建的空白任务里播着上一条滴露成片的一帧。
+    if (videoEdl == null && _videoEdl != null) {
+      _videoEdl = null;
+      AppLog.info('画面轨清空（没有可播的段落）');
+      await video.clearSource();
+    }
     final videoChanged = videoEdl != null && videoEdl != _videoEdl;
     if (videoChanged) {
       _videoEdl = videoEdl;

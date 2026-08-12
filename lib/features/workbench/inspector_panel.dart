@@ -60,6 +60,11 @@ class InspectorPanel extends StatefulWidget {
   /// 试听这个单元已生成的配音；返回 null 表示还没生成过
   final VoidCallback? Function(int unitIndex)? previewVoice;
 
+  /// 空白任务：没有台词、没有原片，检查器里这几样都不成立——
+  /// 拆分/并入（没有台词可拆）、换音色（没有台词可念）、单元台词（本来就空）。
+  /// 摆着它们只会让人点了没反应，或者以为软件坏了
+  final bool blankTask;
+
   /// 空白任务：分子标签是**手填**的，所以这里要能改。
   ///
   /// 翻新任务为 null——那边的标签是模型按台词打出来的，在这儿手改会和
@@ -75,6 +80,7 @@ class InspectorPanel extends StatefulWidget {
     this.onChangeVoice,
     this.previewVoice,
     this.unitTagEditor,
+    this.blankTask = false,
     this.readOnly = false,
   });
 
@@ -292,31 +298,40 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 tagsStale: unit.tagsStale,
                 trace: unit.trace,
               ),
-          const SizedBox(height: 10),
-          VoiceCard(
-            voice: widget.voiceOf?.call(unitIndex),
-            onTap: widget.readOnly ? null : () => widget.onChangeVoice?.call(unitIndex),
-            onPreview: widget.previewVoice?.call(unitIndex),
-          ),
-          const SizedBox(height: 10),
-          inspectorCard([
-            // 回看模式下台词框是禁用的，标题必须如实反映，不能继续声称可编辑
-            inspectorLabel(
-                widget.readOnly ? '单元台词（只读）' : '单元台词（可编辑）'),
-            const SizedBox(height: 6),
-            _transcriptField(unitIndex),
-          ]),
-          const SizedBox(height: 10),
-          inspectorActionsRow(
-            splitLabel: '✂ 在游标处拆分单元',
-            mergeLabel: '⇧ 并入上一单元',
-            onSplit: widget.readOnly || structureLocked
-                ? null
-                : () => widget.onSplitAtPlayhead?.call(),
-            onMerge: widget.readOnly || structureLocked
-                ? null
-                : widget.controller.mergeSelectedWithPrevious,
-          ),
+          // 空白任务没有台词：换音色没得念、台词框永远是空的
+          if (!widget.blankTask) ...[
+            const SizedBox(height: 10),
+            VoiceCard(
+              voice: widget.voiceOf?.call(unitIndex),
+              onTap: widget.readOnly
+                  ? null
+                  : () => widget.onChangeVoice?.call(unitIndex),
+              onPreview: widget.previewVoice?.call(unitIndex),
+            ),
+            const SizedBox(height: 10),
+            inspectorCard([
+              // 回看模式下台词框是禁用的，标题必须如实反映，不能继续声称可编辑
+              inspectorLabel(
+                  widget.readOnly ? '单元台词（只读）' : '单元台词（可编辑）'),
+              const SizedBox(height: 6),
+              _transcriptField(unitIndex),
+            ]),
+          ],
+          // 拆分/并入是「在一条固定的原片时间轴上换个切法」。空白任务的分子
+          // 是加出来的，没有台词可拆、也没有原片区间可并
+          if (!widget.blankTask) ...[
+            const SizedBox(height: 10),
+            inspectorActionsRow(
+              splitLabel: '✂ 在游标处拆分单元',
+              mergeLabel: '⇧ 并入上一单元',
+              onSplit: widget.readOnly || structureLocked
+                  ? null
+                  : () => widget.onSplitAtPlayhead?.call(),
+              onMerge: widget.readOnly || structureLocked
+                  ? null
+                  : widget.controller.mergeSelectedWithPrevious,
+            ),
+          ],
         ],
       ),
     );

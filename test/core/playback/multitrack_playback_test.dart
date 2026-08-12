@@ -61,6 +61,7 @@ TrackPlan _planWithBgm() => const TrackPlan(
     );
 
 void main() {
+  _emptyVideoTrack();
   _switchBehaviour();
   group('跟随轨纠偏：只在真漂了的时候动手', () {
     test('抖动幅度内不纠——每次 seek 都是一次可闻的接缝', () {
@@ -310,6 +311,54 @@ void _switchBehaviour() {
       expect(master.positionMs, 2000,
           reason: '「停在 U1 的一半」= 原片 2000ms；'
               '照搬成片毫秒的话会落到 1000ms，画面完全是别处');
+    });
+  });
+}
+
+/// 画面轨空了要**明确清掉**。
+///
+/// 「没有东西可播」和「什么都不做」是两回事。后者会让播放器一直挂着上一次
+/// 打开的内容——真机上撞到过：新建的空白任务里播着上一条成片的一帧，
+/// 用户完全没法理解那画面是从哪儿来的。
+void _emptyVideoTrack() {
+  group('画面轨空了', () {
+    late FakePlaybackController master;
+    late _Fake voice;
+    late _Fake bgm;
+    late MultitrackPlayback playback;
+
+    setUp(() {
+      master = FakePlaybackController();
+      voice = _Fake();
+      bgm = _Fake();
+      playback = MultitrackPlayback(video: master, voice: voice, bgm: bgm);
+    });
+    tearDown(() => playback.dispose());
+
+    test('从有内容变成空时，把画面源卸掉', () async {
+      await playback.setPlan(TrackPlan(video: [
+        TrackSegment(atMs: 0, durationMs: 5000, source: '/a.mp4'),
+      ]));
+      master.calls.clear();
+
+      await playback.setPlan(const TrackPlan());
+
+      expect(master.calls, contains('clearSource'));
+    });
+
+    test('本来就空时不反复卸——那会在每次重推轨道时多做一次无用功', () async {
+      await playback.setPlan(const TrackPlan());
+      master.calls.clear();
+      await playback.setPlan(const TrackPlan());
+      expect(master.calls, isNot(contains('clearSource')));
+    });
+
+    test('卸掉之后再给内容，照常打开', () async {
+      await playback.setPlan(const TrackPlan());
+      await playback.setPlan(TrackPlan(video: [
+        TrackSegment(atMs: 0, durationMs: 5000, source: '/b.mp4'),
+      ]));
+      expect(master.calls.any((c) => c.startsWith('open')), isTrue);
     });
   });
 }

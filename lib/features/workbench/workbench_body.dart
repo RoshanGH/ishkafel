@@ -350,6 +350,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 onChangeVoice: widget.onChangeVoice,
                                 previewVoice: widget.previewVoice,
                                 unitTagEditor: widget.unitTagEditor,
+                                blankTask: widget.unitTagEditor != null,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),

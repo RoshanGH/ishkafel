@@ -505,6 +505,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 时间线辅助素材的就绪状态
   TimelineMediaStatus get _mediaStatus {
+    // 空白任务没有原片，缩略图和波形永远不会有——显示「生成中…」等于挂一个
+    // 永远转下去的圈
+    if (_task.isBlank) return TimelineMediaStatus.noSource;
     if (_media != null) return TimelineMediaStatus.ready;
     return _mediaFailed
         ? TimelineMediaStatus.failed
@@ -1376,7 +1379,28 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         hasTagGroups: widget.task.unitTagGroup != null ||
             widget.task.shotTagGroup != null,
         composedMs: _tracks?.plan.totalMs,
+        blankFill: _task.isBlank
+            ? BlankUnitOps.filledStat(editor.units,
+                durationOf: _pickedDurationOf)
+            : null,
       );
+
+  /// 这个分子挑中的素材有多长；null 表示还没挑。空白任务的时长统计靠它
+  int? _pickedDurationOf(int unitIndex) {
+    final replacements = _replacements ?? const [];
+    if (unitIndex >= replacements.length) return null;
+    final replacement = replacements[unitIndex];
+    if (replacement.mode != ReplacementMode.whole) return null;
+    final id = replacement.wholePreviewId ??
+        (replacement.wholeCandidateIds.isEmpty
+            ? null
+            : replacement.wholeCandidateIds.first);
+    if (id == null) return null;
+    for (final material in _task.pickedMaterials) {
+      if (material.id == id) return material.durationMs;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {

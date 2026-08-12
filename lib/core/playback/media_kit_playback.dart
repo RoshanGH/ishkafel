@@ -29,6 +29,12 @@ class MediaKitPlaybackController implements MasterTrack {
   final PlaybackGate _gate = PlaybackGate();
 
   @override
+  @override
+  Future<void> clearSource() => _gate.run(() async {
+        await player.stop();
+      });
+
+  @override
   Future<void> open(String path) => _gate.run(() async {
         await player.open(Media(path), play: false);
         // 播到文件结尾（或区间终点）时停在最后一帧，而不是卸载文件后黑屏。

@@ -28,6 +28,13 @@ abstract class PlaybackController {
   /// 解除区间限制，恢复成一直往下播
   Future<void> clearRange();
 
+  /// 卸掉当前播放源，画面回到空。
+  ///
+  /// 存在的理由：**「没有东西可播」和「什么都不做」是两回事**。后者会让
+  /// 播放器一直挂着上一次打开的内容——真机上撞到过：新建的空白任务里播着
+  /// 上一条成片的一帧，用户完全没法理解那画面从哪来的。
+  Future<void> clearSource();
+
   /// 按帧步进（暂停态逐帧）：`frames` 为正前进、为负后退，`fps` 为素材帧率。
   Future<void> stepFrames(int frames, double fps);
 
@@ -76,6 +83,9 @@ abstract class MasterTrack implements PlaybackController {
 /// 测试替身：内存位置模拟，记录调用，零 libmpv 依赖。
 class FakePlaybackController implements MasterTrack {
   final List<String> calls = [];
+
+  @override
+  Future<void> clearSource() async => calls.add('clearSource');
 
   final StreamController<int> _positionController =
       StreamController<int>.broadcast();

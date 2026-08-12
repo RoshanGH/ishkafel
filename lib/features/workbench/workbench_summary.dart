@@ -1,3 +1,4 @@
+import '../../core/editing/blank_unit_ops.dart';
 import '../../core/models/semantic_unit.dart';
 
 /// 审片台底部状态摘要（纯函数，便于穷举各种打标覆盖情况）。
@@ -14,7 +15,15 @@ String workbenchSummaryText({
   /// 替换之后成片有多长。与 [durationMs]（原片时长）不同时两个都写出来——
   /// 时间线画的已经是成片了，这一行还只报原片时长，用户会以为哪儿算错了
   int? composedMs,
+
+  /// 空白任务：没有原片，分子是手动排的。这时**时长只统计已挑到素材的
+  /// 分子**——没挑的那些在时间线上占的是个占位长度，把它算进总时长等于
+  /// 给用户一个假数字，他会照着它去规划片长
+  BlankFillStat? blankFill,
 }) {
+  if (blankFill != null) {
+    return _blankSummary(units, blankFill, dirty);
+  }
   final totalShots = units.fold<int>(0, (sum, u) => sum + u.shots.length);
   final durationSec = (durationMs / 1000).toStringAsFixed(1);
   final changed = composedMs != null &&
@@ -30,6 +39,23 @@ String workbenchSummaryText({
       // 工作台里每次改动都直接落库，没有「未保存」这回事。这里曾经写
       // 「有未保存的修改」，会让用户去找一个不存在的保存按钮。
       '${dirty ? ' · 已自动保存' : ''}';
+}
+
+/// 空白任务的摘要：说清「填了多少、还差多少」，不提原片也不提镜头
+String _blankSummary(
+    List<SemanticUnit> units, BlankFillStat fill, bool dirty) {
+  final seconds = (fill.filledMs / 1000).toStringAsFixed(1);
+  final untagged = units.where((u) => u.tags.isEmpty).length;
+  final parts = <String>[
+    '共 ${units.length} 个分子',
+    fill.filledCount == 0
+        ? '一条素材都还没挑'
+        : '已填 ${fill.filledCount} 个共 ${seconds}s',
+    if (fill.emptyCount > 0) '还有 ${fill.emptyCount} 个没填',
+    if (untagged > 0) '$untagged 个还没打标签',
+    if (dirty) '已自动保存',
+  ];
+  return parts.join(' · ');
 }
 
 String _taggingPart(
