@@ -9,6 +9,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# 更新说明要在**自增之前**检查。放在后面的话，一次打包失败就白烧掉一个版本号，
+# 下次重跑又 +1——真发生过，连跳两个版本，而这两个号谁也没拿到过
+CURRENT="$(grep '^const String appVersion' lib/features/settings/settings_providers.dart \
+  | sed "s/.*'\(.*\)'.*/\1/")"
+NEXT="$(echo "$CURRENT" | awk -F. '{printf "%s.%s.%d", $1, $2, $3 + 1}')"
+if ! grep -q "^## ${NEXT}\b" CHANGELOG.md; then
+  echo "CHANGELOG.md 里没有 ${NEXT} 这一节——先补上再打包。" >&2
+  echo "（这一版要发给别人，对方得知道改了什么。在文件顶上加一节 '## ${NEXT}'）" >&2
+  exit 1
+fi
+
 ./scripts/bump_build.sh
 ./scripts/build_macos.sh --release
 ./scripts/package_macos.sh
