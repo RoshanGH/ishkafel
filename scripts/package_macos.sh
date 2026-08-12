@@ -60,7 +60,7 @@ fi
   echo "app 里的命令行工具跑不起来，别把这个包发出去。" >&2; exit 1
 }
 
-VERSION="$(grep '^const String appVersion' lib/features/settings/settings_providers.dart \
+VERSION="$(grep '^const String appVersion' lib/core/app_version.dart \
   | sed "s/.*'\(.*\)'.*/\1/")"
 mkdir -p "$DIST"
 ZIP="$DIST/ishkafel-$VERSION.zip"

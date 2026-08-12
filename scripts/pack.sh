@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 # 更新说明要在**自增之前**检查。放在后面的话，一次打包失败就白烧掉一个版本号，
 # 下次重跑又 +1——真发生过，连跳两个版本，而这两个号谁也没拿到过
-CURRENT="$(grep '^const String appVersion' lib/features/settings/settings_providers.dart \
+CURRENT="$(grep '^const String appVersion' lib/core/app_version.dart \
   | sed "s/.*'\(.*\)'.*/\1/")"
 NEXT="$(echo "$CURRENT" | awk -F. '{printf "%s.%s.%d", $1, $2, $3 + 1}')"
 if ! grep -q "^## ${NEXT}\b" CHANGELOG.md; then

@@ -6,6 +6,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/diagnostics/environment_report.dart';
 import '../../../core/diagnostics/tool_installer.dart';
+import '../agent_skill_card.dart';
 import '../cli_install_card.dart';
 import '../tool_install_panel.dart';
 import '../settings_providers.dart';
@@ -42,6 +43,7 @@ class EnvironmentSection extends ConsumerWidget {
         // 摆在体检结果**外面**：命令行工具跟体检没有依赖关系，体检失败或
         // 没开启时，这张卡片不该跟着一起消失
         const CliInstallCard(),
+        const AgentSkillCard(),
       ],
     );
   }

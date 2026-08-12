@@ -13,7 +13,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SRC="lib/features/settings/settings_providers.dart"
+SRC="lib/core/app_version.dart"
 CURRENT="$(grep '^const String appVersion' "$SRC" | sed "s/.*'\(.*\)'.*/\1/")"
 MAJOR="${CURRENT%%.*}"
 REST="${CURRENT#*.}"

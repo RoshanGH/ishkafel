@@ -8,6 +8,7 @@ import 'package:ishkafel/cli/commands/candidates_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
+import 'package:ishkafel/cli/commands/skill_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
 import 'package:ishkafel/cli/commands/todo_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
@@ -32,6 +33,8 @@ Future<void> main(List<String> args) async {
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
+    ..addFlag('install',
+        negatable: false, help: 'skill 用：直接装进各家 Agent 的技能目录')
     ..addOption('external',
         help: 'analyze 用：哪几步交给调用方做（segment,tag）')
     ..addFlag('help', abbr: 'h', negatable: false, help: '显示这份用法');
@@ -73,6 +76,10 @@ Future<void> main(List<String> args) async {
         dataDir: dataDir,
         external: parsed['external'] as String?,
       ),
+    'skill' => await runSkillCommand(
+        rest: rest,
+        install: parsed['install'] as bool,
+      ),
     'todo' => await runTodoCommand(rest: rest, dataDir: dataDir),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
@@ -109,6 +116,9 @@ ishkafel —— 成片翻新工具的命令行入口
   apply segment|tags <id> --file <json>
                    回填外部结果
   todo <id>        把当前欠着的那件外包待办再吐一遍（丢了输出时用，不重跑分析）
+  skill [--install]
+                   给 Agent 的操作手册。--install 装进 ~/.claude/skills 与
+                   ~/.codex/skills，之后在任意文件夹都生效
   task <id>        任务全貌（单元、镜头、标签、导出历史）
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）
