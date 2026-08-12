@@ -241,6 +241,14 @@ void main() {
 
       expect(find.textContaining('无法进行语音识别'), findsOneWidget);
     });
+
+    testWidgets('命令行工具那张卡片一直在，体检挂了也不受影响', (tester) async {
+      // 它跟体检没有依赖关系。挂在体检结果里面的话，体检一失败整张卡片
+      // 连同安装按钮一起消失，用户只会以为「这版没有这个功能」
+      await _pump(tester);
+      await _openSection(tester, '运行环境');
+      expect(find.text('命令行工具'), findsOneWidget);
+    });
   });
 
   group('缓存管理', () {

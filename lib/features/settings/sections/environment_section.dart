@@ -39,6 +39,9 @@ class EnvironmentSection extends ConsumerWidget {
                 ])
               : _Report(report: data, onRefresh: () => ref.invalidate(environmentReportProvider)),
         ),
+        // 摆在体检结果**外面**：命令行工具跟体检没有依赖关系，体检失败或
+        // 没开启时，这张卡片不该跟着一起消失
+        const CliInstallCard(),
       ],
     );
   }
@@ -69,7 +72,6 @@ class _Report extends StatelessWidget {
               ),
             ],
           ),
-          const CliInstallCard(),
           SettingsCard(
             title: '云端 AI 服务',
             children: [
