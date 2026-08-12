@@ -59,6 +59,14 @@ if [[ -x "$DART_X64" && "$NATIVE" == "macos_arm64" ]]; then
       lipo -create "$dylib" "build/cli/$OTHER/bundle/lib/$name" \
            -output "$OUT/lib/$name"
     done
+    # lipo 出来的东西签名是废的。Apple Silicon 上签名无效的二进制**根本不让跑**
+    # （直接被 kill），所以合完必须重签一遍
+    codesign --force --sign - "$OUT/bin/ishkafel"
+    for dylib in "$OUT"/lib/*; do codesign --force --sign - "$dylib"; done
+    codesign --verify --strict "$OUT/bin/ishkafel" || {
+      echo "重签之后签名仍然不过，别往下走了" >&2; exit 1
+    }
+
     BUNDLE="$OUT"
     UNIVERSAL=1
     echo "已合成 universal：$(lipo -info "$OUT/bin/ishkafel" | sed 's/.*are: //')"

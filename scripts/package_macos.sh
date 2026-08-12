@@ -43,6 +43,19 @@ echo "命令行工具架构自检通过：$CLI_ARCHS"
 rm -rf "$APP/Contents/Resources/cli"
 mkdir -p "$APP/Contents/Resources/cli"
 cp -R "$CLI_SRC/bin" "$CLI_SRC/lib" "$APP/Contents/Resources/cli/"
+# 往签好名的 app 里塞东西有可能破坏封签，那样对方双击会报「已损坏」——
+# 而这件事要等包发出去才暴露，必须在这儿挡住
+if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
+  echo "塞进 CLI 之后 app 签名不过，重签一遍…"
+  codesign --force --deep --sign - "$APP"
+  codesign --verify --deep --strict "$APP" || {
+    echo "重签之后签名仍然不过，别把这个包发出去。" >&2; exit 1
+  }
+fi
+# 真的能跑起来吗——签名过了不代表二进制是好的
+"$APP/Contents/Resources/cli/bin/ishkafel" --help > /dev/null || {
+  echo "app 里的命令行工具跑不起来，别把这个包发出去。" >&2; exit 1
+}
 
 VERSION="$(grep '^const String appVersion' lib/features/settings/settings_providers.dart \
   | sed "s/.*'\(.*\)'.*/\1/")"
