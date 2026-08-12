@@ -6,6 +6,7 @@ import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 import '../../../core/diagnostics/environment_report.dart';
 import '../../../core/diagnostics/tool_installer.dart';
+import '../cli_install_card.dart';
 import '../tool_install_panel.dart';
 import '../settings_providers.dart';
 import '../settings_widgets.dart';
@@ -68,6 +69,7 @@ class _Report extends StatelessWidget {
               ),
             ],
           ),
+          const CliInstallCard(),
           SettingsCard(
             title: '云端 AI 服务',
             children: [

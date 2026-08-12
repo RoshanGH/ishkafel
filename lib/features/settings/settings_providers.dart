@@ -13,7 +13,7 @@ import '../tasks/task_list_controller.dart';
 /// 应用版本号。`pubspec.yaml` 的值不能在运行时读到（打包后没有这个文件），
 /// 又不值得为一行字引入 package_info_plus——因此在这里写一份，用测试盯住
 /// 它和 pubspec 不漂移。
-const String appVersion = '0.1.4';
+const String appVersion = '0.1.5';
 
 /// 终端登录命令：三处（未登录提示、复制按钮、失败引导）共用一份，
 /// 免得改了一处另两处还在教用户敲旧命令

@@ -29,6 +29,21 @@ if [[ "$ARCHS" != *"x86_64"* || "$ARCHS" != *"arm64"* ]]; then
 fi
 echo "架构自检通过：$ARCHS"
 
+# 把命令行工具塞进 app 里。这样使用者装完 app 在设置里点一下就能用，
+# 不需要知道自己这台是 Intel 还是 M 系列，更不需要自己去编译什么
+echo "构建命令行工具（universal）…"
+./scripts/build_cli.sh --require-universal
+CLI_SRC="build/cli/universal/bundle"
+CLI_ARCHS="$(lipo -info "$CLI_SRC/bin/ishkafel" | sed 's/.*are: //;s/.*is architecture: //')"
+if [[ "$CLI_ARCHS" != *"x86_64"* || "$CLI_ARCHS" != *"arm64"* ]]; then
+  echo "命令行工具不是 universal（当前：$CLI_ARCHS）——装到 Intel 机器上会 Bad CPU type。" >&2
+  exit 1
+fi
+echo "命令行工具架构自检通过：$CLI_ARCHS"
+rm -rf "$APP/Contents/Resources/cli"
+mkdir -p "$APP/Contents/Resources/cli"
+cp -R "$CLI_SRC/bin" "$CLI_SRC/lib" "$APP/Contents/Resources/cli/"
+
 VERSION="$(grep '^const String appVersion' lib/features/settings/settings_providers.dart \
   | sed "s/.*'\(.*\)'.*/\1/")"
 mkdir -p "$DIST"
@@ -113,7 +128,20 @@ AirDrop 传过来的 app 都会被打上隔离标记，双击会被系统拦下�
 ⚠️ Intel Mac 上 audio-separator 没有 Metal 加速，同样一条片子可能要几分钟
 （Apple Silicon 上约 15 秒）。首次使用还会自动下载约 700MB 的模型。
 
-## 4. 确认环境
+## 4. 想让 Agent 自己干活：装一下命令行工具（可选）
+
+设置 → 运行环境 → 命令行工具 → 「安装」。会弹一次系统授权框（要往
+`/usr/local/bin` 写文件），点完之后在任意终端敲：
+
+    ishkafel --help
+
+**它随包一起走，Apple Silicon 与 Intel 通用**，不需要另外下载或编译任何东西。
+有了它，Claude Code 这类 Agent 就能自己跑完导入、分析、挑素材、导出整条流程。
+
+app 换过位置（比如从「下载」拖进「应用程序」）之后这条命令会失效，设置页里
+会显示「需要重新安装」，点一下就好。
+
+## 5. 确认环境
 
 打开 app → 设置 → 运行环境。这一页会把每个工具**实际解析到的路径**摆出来，
 缺什么、装在哪，一眼就能看到。
