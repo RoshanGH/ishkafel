@@ -53,6 +53,9 @@ class UnitListPanel extends StatelessWidget {
                     index: i,
                     fps: controller.fps,
                     selected: selected,
+                    onDelete: onDeleteUnit == null
+                        ? null
+                        : () => onDeleteUnit!(i),
                     onTap: () {
                       controller.select(EditorSelection.unit(i));
                       onUnitTap?.call(unit);
@@ -136,7 +139,11 @@ class _UnitRow extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
+  /// 空白任务才给。翻新任务的分子是分析切出来的，删掉一个等于让台词断掉
+  final VoidCallback? onDelete;
+
   const _UnitRow({
+    this.onDelete,
     required this.unit,
     required this.index,
     required this.fps,
@@ -187,6 +194,18 @@ class _UnitRow extends StatelessWidget {
                   const Spacer(),
                   // 镜头数：判断这个单元要不要展开细调的关键信息
                   _ShotCountBadge(count: unit.shots.length),
+                  if (onDelete case final delete?)
+                    SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        tooltip: '删掉这个分子',
+                        onPressed: delete,
+                        icon: const Icon(Icons.close, size: 13),
+                        color: AppColors.textTertiary,
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: AppSpacing.xs),

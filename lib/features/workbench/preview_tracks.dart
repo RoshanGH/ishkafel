@@ -170,9 +170,19 @@ class PreviewTracks extends ChangeNotifier {
 ///
 /// 这种情况下新配乐只能叠在原声上，原片自带的背景音还在——两首曲子一起响。
 /// 用户听到的东西不对，必须说清是为什么。
-String? missingVocalsNotice(BgmPlan bgm, VoicePlan voices, String? vocalsPath) {
+///
+/// [isBlank] 是空白任务：它**没有原片可以重新分析**，那句「装好工具后重新
+/// 分析」在这儿是条死路——用户照做也解决不了，只会来回折腾。这类任务的
+/// 背景音来自每一条挑中的素材，要分离得逐条分离（还没做）。
+String? missingVocalsNotice(BgmPlan bgm, VoicePlan voices, String? vocalsPath,
+    {bool isBlank = false}) {
   if (bgm.segments.isEmpty) return null;
   if (vocalsPath != null && File(vocalsPath).existsSync()) return null;
+  if (isBlank) {
+    return '配乐会和素材自带的声音叠在一起。'
+        '这条任务没有原片，素材声音还不能单独分离——'
+        '介意的话先把配乐去掉，或者把配乐音量压低一些';
+  }
   return '没有分离出纯人声轨，新配乐会与原片自带的背景音叠在一起。'
       '装好人声分离工具后重新分析可解决';
 }

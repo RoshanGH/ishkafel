@@ -44,6 +44,9 @@ class WorkbenchBody extends StatefulWidget {
 
   /// 空白任务：分子标签手填，检查器里给一个能选的编辑器
   final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
+
+  /// 空白任务：删掉一个分子
+  final ValueChanged<int>? onDeleteUnit;
   final PlaybackController playback;
   final Widget? videoWidget;
   final TimelineMedia? media;
@@ -95,6 +98,7 @@ class WorkbenchBody extends StatefulWidget {
     required this.editor,
     this.onAddUnit,
     this.unitTagEditor,
+    this.onDeleteUnit,
     required this.playback,
     this.videoWidget,
     this.media,
@@ -305,6 +309,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     child: UnitListPanel(
                       controller: editor,
                       onAddUnit: widget.onAddUnit,
+                      onDeleteUnit: widget.onDeleteUnit,
                       onUnitTap: (unit) =>
                           playback.seekMs(_composed(unit.startMs)),
                     ),

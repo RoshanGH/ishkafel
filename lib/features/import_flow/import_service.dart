@@ -1,5 +1,8 @@
 import 'dart:io';
 import 'package:path/path.dart' as p;
+
+import '../../core/editing/blank_unit_ops.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
@@ -53,9 +56,9 @@ class ImportService {
       name: name.trim().isEmpty ? '未命名拼片' : name.trim(),
       // 没有原片。用 null 而不是空串：空串是个谎，且不会有任何地方报错
       sourcePath: null,
-      // 空列表而不是 null：null 的意思是「还没分析」，而空白任务不需要分析，
-      // 它只是还没有分子。两者在界面上要给出完全不同的提示
-      units: const [],
+      // 建出来就给 [blankInitialUnits] 个空分子：进去是一片空白的话，
+      // 用户第一件事是找「怎么开始」；有几个空位摆着，直接就能点着填
+      units: _initialBlankUnits(),
       status: RenewTaskStatus.ready,
       createdAt: now,
       updatedAt: now,
@@ -67,6 +70,17 @@ class ImportService {
     );
     await repository.save(task);
     return task;
+  }
+
+  /// 新建空白任务时先摆几个空分子
+  static const blankInitialUnits = 4;
+
+  static List<SemanticUnit> _initialBlankUnits() {
+    var units = <SemanticUnit>[];
+    for (var i = 0; i < blankInitialUnits; i++) {
+      units = BlankUnitOps.append(units);
+    }
+    return units;
   }
 
   /// [unitTagGroups] / [shotTagGroups] 来自新建任务向导；为空表示该层

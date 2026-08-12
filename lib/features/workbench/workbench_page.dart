@@ -11,6 +11,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
 import '../../core/editing/blank_unit_ops.dart';
+import '../../core/editing/blank_unit_removal.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
@@ -548,6 +549,54 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           _scheduleAutosave();
         },
       );
+
+  /// 空白任务：删掉一个分子。
+  ///
+  /// 分子本身好删，风险在旁边两份**也是按下标记**的数据：替换方案和配乐
+  /// 区间。它们不跟着挪不会报错，只会让成片悄悄变成另一个样子
+  /// （见 [shiftReplacementsAfterRemoval] / [shiftBgmAfterRemoval]）。
+  Future<void> _deleteBlankUnit(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor.units.length <= blankMinUnits) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('至少要留 $blankMinUnits 个分子')));
+      return;
+    }
+
+    final picked = (_replacements ?? const []).length > unitIndex &&
+        _replacements![unitIndex].wholeCandidateIds.isNotEmpty;
+    if (picked) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('删掉 U${unitIndex + 1}？'),
+          content: const Text('它已经挑好素材了。删掉之后这个选择也一并没了，撤不回来。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('删掉')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+
+    final units = BlankUnitOps.removeAt(editor.units, unitIndex);
+    setState(() {
+      _replacements = shiftReplacementsAfterRemoval(
+          _replacements ?? const [], removed: unitIndex);
+      _task = _task.copyWith(
+          bgm: shiftBgmAfterRemoval(_task.bgm, removed: unitIndex));
+    });
+    editor.replaceUnitsForBlankTask(
+        units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
+    unawaited(_saveBgm(_task.bgm));
+    _scheduleAutosave();
+  }
 
   void _onEditorChanged() {
     // 边界动过，每一段的时长就变了，预览音轨要重合（它自己带防抖）
@@ -1372,8 +1421,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 building: (_tracks?.speedFitter?.pending ?? 0) > 0,
                 onRetry: _retryPreviewAudio,
               ),
-            if (missingVocalsNotice(
-                    _task.bgm, _task.voices, _task.vocalsPath)
+            if (missingVocalsNotice(_task.bgm, _task.voices, _task.vocalsPath,
+                    isBlank: _task.isBlank)
                 case final notice?)
               PreviewAudioBanner(text: notice, building: false),
             if (_voiceProgress case final p?)
@@ -1394,6 +1443,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                     ? _addBlankUnit
                     : null,
                 unitTagEditor: _task.isBlank ? _blankTagEditor : null,
+                onDeleteUnit: _task.isBlank && _isEditable && _lock == null
+                    ? _deleteBlankUnit
+                    : null,
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,
