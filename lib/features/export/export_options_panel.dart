@@ -42,18 +42,18 @@ class ExportOptionsPanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           _label('画面规格'),
           const SizedBox(height: AppSpacing.xs),
-          Row(children: [
-            Expanded(child: _resolution()),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: _field('分辨率', _resolution())),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _frameRate()),
+            Expanded(child: _field('帧率', _frameRate())),
           ]),
           const SizedBox(height: AppSpacing.sm),
-          Row(children: [
-            Expanded(child: _bitrate()),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: _field('码率', _bitrate())),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _codec()),
+            Expanded(child: _field('编码', _codec())),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _format()),
+            Expanded(child: _field('格式', _format())),
           ]),
           if (spec.bitrate == BitrateMode.custom) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -65,6 +65,18 @@ class ExportOptionsPanel extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   height: 1.5,
                   color: AppColors.textTertiary)),
+        ],
+      );
+
+  /// 每个下拉头上的字段名。光秃秃一个「推荐」，没人知道是什么的推荐
+  Widget _field(String name, Widget child) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name,
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+          const SizedBox(height: 2),
+          child,
         ],
       );
 
@@ -80,9 +92,15 @@ class ExportOptionsPanel extends StatelessWidget {
     if (spec.format == ContainerFormat.mov) {
       notes.add('mov 主要给剪辑软件用；投放平台一般吃 mp4');
     }
-    return notes.isEmpty
-        ? '导出 ${spec.width}×${spec.height} · ${spec.fps}fps · ${spec.bitrateLabel}'
-        : notes.join('；');
+    if (notes.isNotEmpty) return notes.join('；');
+    // 码率档位的效果要说人话：文件多大、画质如何，不是一个词摆在那儿
+    return switch (spec.bitrate) {
+      BitrateMode.lower => '码率更低：同样内容压得更狠，文件小三四成，画质略降——快速过稿用',
+      BitrateMode.recommended =>
+        '导出 ${spec.width}×${spec.height} · ${spec.fps}fps · 码率按分辨率与帧率自动匹配',
+      BitrateMode.higher => '码率更高：细节保留更多，文件明显更大——对画质苛刻时用',
+      BitrateMode.custom => '按填入的数值定死码率，不随画面复杂度浮动',
+    };
   }
 
   Widget _label(String text) => Text(text,
