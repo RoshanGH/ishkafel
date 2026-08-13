@@ -2,9 +2,9 @@ import 'package:meta/meta.dart';
 
 /// 码率档位。剪映给的是「推荐 / 更高 / 更低 / 自定义」，这里一一对上。
 ///
-/// 前三档落到 x264 的 CRF（**恒定质量**）而不是固定码率：同样一档，
-/// 画面简单的段自动少给码率，复杂的段多给——比固定码率省一半体积而看不出
-/// 区别。自定义那一档才是真的定死码率，因为用户点它就是想要一个确定的值。
+/// 前三档不是玄学：**按分辨率 × 帧率算出具体的码率数字**（见
+/// [ExportSpec.kbps]），选项上直接写着多少 Mbps，编码就按这个数字来。
+/// 界面显示的和实际编出来的是同一个值。
 enum BitrateMode { lower, recommended, higher, custom }
 
 /// 编码。H.264 到处都能播；HEVC 同画质文件小三成，但**软编慢得多**，
@@ -70,20 +70,31 @@ class ExportSpec {
           orElse: () => (label: '${shortSide}P', shortSide: shortSide))
       .label;
 
-  String get bitrateLabel => switch (bitrate) {
-        BitrateMode.lower => '更低',
-        BitrateMode.recommended => '推荐',
-        BitrateMode.higher => '更高',
-        BitrateMode.custom => '自定义 $customKbps kbps',
-      };
+  /// 这一档在当前分辨率、帧率下的**具体码率**（kbps）。
+  ///
+  /// 按每像素每帧的比特数（bpp）算：推荐档 0.19 bpp——1080×1920@30 正好
+  /// 落在 12 Mbps（业内对 1080P 竖版的常见建议值），分辨率或帧率一变，
+  /// 数字跟着变。更低 0.12、更高 0.28。取整到千位，界面上是整数 Mbps
+  int get kbps {
+    if (bitrate == BitrateMode.custom) return customKbps;
+    final bpp = switch (bitrate) {
+      BitrateMode.lower => 0.12,
+      BitrateMode.recommended => 0.19,
+      BitrateMode.higher => 0.28,
+      BitrateMode.custom => 0.19, // 不可达
+    };
+    final raw = width * height * fps * bpp / 1000;
+    return (raw / 1000).round().clamp(1, maxCustomKbps ~/ 1000) * 1000;
+  }
 
-  /// 前三档用 CRF；数字越小越清楚
-  int get crf => switch (bitrate) {
-        BitrateMode.lower => 26,
-        BitrateMode.recommended => 20,
-        BitrateMode.higher => 17,
-        // 自定义走定码率，这个值用不到
-        BitrateMode.custom => 20,
+  /// 某一档在当前分辨率、帧率下的码率（给界面把数字写在选项上）
+  int kbpsOf(BitrateMode mode) => copyWith(bitrate: mode).kbps;
+
+  String get bitrateLabel => switch (bitrate) {
+        BitrateMode.lower => '更低（${kbps ~/ 1000} Mbps）',
+        BitrateMode.recommended => '推荐（${kbps ~/ 1000} Mbps）',
+        BitrateMode.higher => '更高（${kbps ~/ 1000} Mbps）',
+        BitrateMode.custom => '自定义（$customKbps kbps）',
       };
 
   String get encoderName =>
@@ -95,18 +106,14 @@ class ExportSpec {
   List<String> get tagArgs =>
       codec == VideoCodec.hevc ? const ['-tag:v', 'hvc1'] : const [];
 
-  /// 编码参数。自定义码率时走定码率（含 maxrate/bufsize，否则「自定义」
-  /// 只是个平均值，峰值段照样糊）
+  /// 编码参数。**界面上写多少就编多少**：一律按 [kbps] 定码率，
+  /// 带 maxrate/bufsize——只给 -b:v 的话那是个平均值，峰值段照样糊
   List<String> get encodeArgs => [
         '-c:v', encoderName,
         '-preset', codec == VideoCodec.hevc ? 'medium' : 'veryfast',
-        if (bitrate == BitrateMode.custom) ...[
-          '-b:v', '${customKbps}k',
-          '-maxrate', '${customKbps}k',
-          '-bufsize', '${customKbps * 2}k',
-        ] else ...[
-          '-crf', '$crf',
-        ],
+        '-b:v', '${kbps}k',
+        '-maxrate', '${kbps}k',
+        '-bufsize', '${kbps * 2}k',
         ...tagArgs,
       ];
 
@@ -129,8 +136,8 @@ class ExportSpec {
 
   /// 缓存指纹。**规格必须进指纹**：同一段在 1080 和 720 下是两份不同的产物，
   /// 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格
-  String get fingerprint => '${width}x$height-$fps-${bitrate.name}'
-      '${bitrate == BitrateMode.custom ? customKbps : crf}-${codec.name}';
+  String get fingerprint =>
+      '${width}x$height-$fps-$kbps-${codec.name}';
 
   Map<String, dynamic> toJson() => {
         'shortSide': shortSide,

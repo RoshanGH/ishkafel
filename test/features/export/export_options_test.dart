@@ -9,6 +9,7 @@ void main() {
     WidgetTester tester, {
     int totalCombos = 24,
     int? pickCount,
+    int durationMs = 0,
     ExportSpec spec = ExportSpec.standard,
     ValueChanged<int?>? onPick,
     ValueChanged<ExportSpec>? onSpec,
@@ -21,6 +22,7 @@ void main() {
               onSpecChanged: onSpec ?? (_) {},
               totalCombos: totalCombos,
               pickCount: pickCount,
+              durationMs: durationMs,
               onPickCountChanged: onPick ?? (_) {},
             ),
           ),
@@ -61,13 +63,37 @@ void main() {
     expect(find.textContaining('每条素材都露一次面'), findsOneWidget);
   });
 
-  testWidgets('五档分辨率、五档帧率、四档码率，跟剪映对齐', (tester) async {
+  testWidgets('剪映式版式：每个下拉带字段名，选项与剪映一致', (tester) async {
     await pump(tester);
-    expect(find.text('1080P（1080×1920）'), findsOneWidget);
-    expect(find.text('30 fps'), findsOneWidget);
+    for (final label in ['分辨率', '帧率', '码率', '编码', '格式']) {
+      expect(find.text(label), findsOneWidget, reason: '缺字段名的下拉没人看得懂');
+    }
+    expect(find.text('1080P'), findsOneWidget);
+    expect(find.text('30fps'), findsOneWidget);
     expect(find.text('推荐'), findsOneWidget);
     expect(find.text('H.264'), findsOneWidget);
     expect(find.text('mp4'), findsOneWidget);
+  });
+
+  testWidgets('预计大小跟着规格变——这是感知档位差别的方式', (tester) async {
+    // 60 秒 @ 推荐（12 Mbps）≈ 89MB
+    await pump(tester, durationMs: 60000);
+    final at12 = tester
+        .widget<Text>(find.byKey(const Key('export-estimated-size')))
+        .data!;
+
+    await pump(tester,
+        durationMs: 60000,
+        spec: const ExportSpec(bitrate: BitrateMode.higher));
+    final at18 = tester
+        .widget<Text>(find.byKey(const Key('export-estimated-size')))
+        .data!;
+    expect(at12, isNot(at18), reason: '换了码率档预计大小必须跟着变');
+  });
+
+  testWidgets('时长未知时不显示预计大小——不摆一个编出来的数字', (tester) async {
+    await pump(tester);
+    expect(find.byKey(const Key('export-estimated-size')), findsNothing);
   });
 
   testWidgets('选了自定义码率才出输入框，并给出建议值', (tester) async {
@@ -78,19 +104,5 @@ void main() {
         spec: const ExportSpec(bitrate: BitrateMode.custom));
     expect(find.byKey(const Key('export-custom-kbps')), findsOneWidget);
     expect(find.textContaining('1080P 建议 ≥12000'), findsOneWidget);
-  });
-
-  testWidgets('选到 1080 以上时说清放大不会更清楚', (tester) async {
-    // 素材本身是 1080 竖版，往上放大只让文件变大
-    await pump(tester, spec: const ExportSpec(shortSide: 2160));
-    expect(find.textContaining('往上放大不会更清楚'), findsOneWidget);
-  });
-
-  testWidgets('HEVC 与 mov 的代价要说出来，不能让人挑完才发现', (tester) async {
-    await pump(tester, spec: const ExportSpec(codec: VideoCodec.hevc));
-    expect(find.textContaining('编码慢得多'), findsOneWidget);
-
-    await pump(tester, spec: const ExportSpec(format: ContainerFormat.mov));
-    expect(find.textContaining('投放平台一般吃 mp4'), findsOneWidget);
   });
 }

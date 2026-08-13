@@ -369,6 +369,9 @@ void main() {
         exports: [rec(8, 6, 6, '/Users/me/Movies/滴露')],
       );
 
+      // 选项面板加进来之后确认页变长，历史条目会在视口外
+      await tester.ensureVisible(
+          find.byKey(Key('export-history-open-${at.toIso8601String()}')));
       await tester.tap(find
           .byKey(Key('export-history-open-${at.toIso8601String()}')));
       await tester.pumpAndSettle();

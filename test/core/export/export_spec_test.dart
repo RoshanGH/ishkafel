@@ -72,27 +72,31 @@ void main() {
   });
 
   group('码率', () {
-    test('前三档走 CRF：恒定质量，同一档下简单的画面自动少给码率', () {
-      expect(argAfter(whole(const ExportSpec(bitrate: BitrateMode.lower)), '-crf'),
-          '26');
-      expect(
-          argAfter(whole(const ExportSpec(bitrate: BitrateMode.recommended)),
-              '-crf'),
-          '20');
-      expect(
-          argAfter(whole(const ExportSpec(bitrate: BitrateMode.higher)), '-crf'),
-          '17');
+    test('档位是具体数字：1080P@30 推荐档 = 12 Mbps', () {
+      // 界面上写多少就编多少——档位不是玄学，是按分辨率 × 帧率算出的码率
+      expect(const ExportSpec().kbps, 12000);
+      expect(const ExportSpec(bitrate: BitrateMode.lower).kbps, 7000);
+      expect(const ExportSpec(bitrate: BitrateMode.higher).kbps, 17000);
     });
 
-    test('自定义走定码率，并带上 maxrate/bufsize', () {
-      // 只给 -b:v 的话那是个平均值，峰值段照样糊——用户点「自定义」
-      // 就是想要一个确定的码率
+    test('分辨率或帧率一变，同一档的码率跟着变', () {
+      const base = ExportSpec();
+      expect(base.copyWith(shortSide: 720).kbps, lessThan(base.kbps));
+      expect(base.copyWith(fps: 60).kbps, greaterThan(base.kbps));
+    });
+
+    test('编码参数按算出的码率定死，带 maxrate/bufsize', () {
+      // 只给 -b:v 的话那是个平均值，峰值段照样糊
+      final args = whole(const ExportSpec());
+      expect(argAfter(args, '-b:v'), '12000k');
+      expect(argAfter(args, '-maxrate'), '12000k');
+      expect(argAfter(args, '-bufsize'), '24000k');
+    });
+
+    test('自定义按填入的数字来', () {
       final args = whole(const ExportSpec(
           bitrate: BitrateMode.custom, customKbps: 30000));
       expect(argAfter(args, '-b:v'), '30000k');
-      expect(argAfter(args, '-maxrate'), '30000k');
-      expect(argAfter(args, '-bufsize'), '60000k');
-      expect(args.contains('-crf'), isFalse, reason: '定码率和 CRF 不能同时给');
     });
   });
 

@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/export/export_spec.dart';
 
-/// 导出前要定的两件事：**出多少条**、**出多大多清楚**。
-///
-/// 单独一个组件，因为导出确认页本来就长（进度、历史、失败原因都在那儿），
-/// 再塞两组选项进去就没法看了。
+/// 导出选项。版式对齐剪映专业版：**一列「标签 + 下拉」**，码率档位就叫
+/// 推荐/更高/更低/自定义，档位的效果由「预计大小」传达——它跟着任何一项
+/// 选择实时变，不靠一段说明文字。
 class ExportOptionsPanel extends StatelessWidget {
   final ExportSpec spec;
   final ValueChanged<ExportSpec> onSpecChanged;
@@ -20,6 +20,9 @@ class ExportOptionsPanel extends StatelessWidget {
   final int? pickCount;
   final ValueChanged<int?> onPickCountChanged;
 
+  /// 每条成片的时长（算预计大小用）。0 表示未知，那时不显示预计大小
+  final int durationMs;
+
   final bool enabled;
 
   const ExportOptionsPanel({
@@ -29,6 +32,7 @@ class ExportOptionsPanel extends StatelessWidget {
     required this.totalCombos,
     required this.pickCount,
     required this.onPickCountChanged,
+    this.durationMs = 0,
     this.enabled = true,
   });
 
@@ -42,66 +46,30 @@ class ExportOptionsPanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           _label('画面规格'),
           const SizedBox(height: AppSpacing.xs),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: _field('分辨率', _resolution())),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _field('帧率', _frameRate())),
-          ]),
-          const SizedBox(height: AppSpacing.sm),
-          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Expanded(child: _field('码率', _bitrate())),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _field('编码', _codec())),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _field('格式', _format())),
-          ]),
-          if (spec.bitrate == BitrateMode.custom) ...[
-            const SizedBox(height: AppSpacing.sm),
-            _customKbps(),
-          ],
-          const SizedBox(height: AppSpacing.xs),
-          Text(_specNote,
-              style: const TextStyle(
-                  fontSize: AppFontSize.micro,
-                  height: 1.5,
-                  color: AppColors.textTertiary)),
+          _row('分辨率', _resolution()),
+          _row('帧率', _frameRate()),
+          _row('码率', _bitrate()),
+          if (spec.bitrate == BitrateMode.custom) _row('', _customKbps()),
+          _row('编码', _codec()),
+          _row('格式', _format()),
+          if (durationMs > 0) _row('预计大小', _estimatedSize()),
         ],
       );
 
-  /// 每个下拉头上的字段名。光秃秃一个「推荐」，没人知道是什么的推荐
-  Widget _field(String name, Widget child) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(name,
-              style: const TextStyle(
-                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
-          const SizedBox(height: 2),
-          child,
-        ],
+  /// 剪映式的一行：左边标签定宽，右边控件
+  Widget _row(String name, Widget child) => Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        child: Row(children: [
+          SizedBox(
+            width: 64,
+            child: Text(name,
+                style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary)),
+          ),
+          Expanded(child: child),
+        ]),
       );
-
-  /// 只在**真的会咬人**的时候出声，不是每种组合都念一句
-  String get _specNote {
-    final notes = <String>[];
-    if (spec.shortSide > 1080) {
-      notes.add('素材本身是 1080 竖版，往上放大不会更清楚，只会让文件变大');
-    }
-    if (spec.codec == VideoCodec.hevc) {
-      notes.add('HEVC 文件小三成，但编码慢得多，且部分平台与老设备不认');
-    }
-    if (spec.format == ContainerFormat.mov) {
-      notes.add('mov 主要给剪辑软件用；投放平台一般吃 mp4');
-    }
-    if (notes.isNotEmpty) return notes.join('；');
-    // 码率档位的效果要说人话：文件多大、画质如何，不是一个词摆在那儿
-    return switch (spec.bitrate) {
-      BitrateMode.lower => '码率更低：同样内容压得更狠，文件小三四成，画质略降——快速过稿用',
-      BitrateMode.recommended =>
-        '导出 ${spec.width}×${spec.height} · ${spec.fps}fps · 码率按分辨率与帧率自动匹配',
-      BitrateMode.higher => '码率更高：细节保留更多，文件明显更大——对画质苛刻时用',
-      BitrateMode.custom => '按填入的数值定死码率，不随画面复杂度浮动',
-    };
-  }
 
   Widget _label(String text) => Text(text,
       style: const TextStyle(
@@ -177,30 +145,23 @@ class ExportOptionsPanel extends StatelessWidget {
   Widget _resolution() => _dropdown(
         value: '${spec.shortSide}',
         items: [
-          for (final r in ExportSpec.resolutions)
-            ('${r.shortSide}', '${r.label}（${r.shortSide}×${_tall(r.shortSide)}）'),
+          for (final r in ExportSpec.resolutions) ('${r.shortSide}', r.label),
         ],
-        onChanged: (v) =>
-            onSpecChanged(spec.copyWith(shortSide: int.parse(v))),
+        onChanged: (v) => onSpecChanged(spec.copyWith(shortSide: int.parse(v))),
       );
-
-  static int _tall(int shortSide) {
-    final raw = (shortSide * 16 / 9).round();
-    return raw.isEven ? raw : raw + 1;
-  }
 
   Widget _frameRate() => _dropdown(
         value: '${spec.fps}',
-        items: [for (final f in ExportSpec.frameRates) ('$f', '$f fps')],
+        items: [for (final f in ExportSpec.frameRates) ('$f', '${f}fps')],
         onChanged: (v) => onSpecChanged(spec.copyWith(fps: int.parse(v))),
       );
 
   Widget _bitrate() => _dropdown(
         value: spec.bitrate.name,
         items: const [
-          ('lower', '更低'),
           ('recommended', '推荐'),
           ('higher', '更高'),
+          ('lower', '更低'),
           ('custom', '自定义'),
         ],
         onChanged: (v) => onSpecChanged(spec.copyWith(
@@ -221,44 +182,46 @@ class ExportOptionsPanel extends StatelessWidget {
             format: ContainerFormat.values.firstWhere((f) => f.name == v))),
       );
 
-  Widget _customKbps() => Row(children: [
-        const Text('码率 ',
-            style: TextStyle(
-                fontSize: AppFontSize.caption,
-                color: AppColors.textSecondary)),
-        SizedBox(
-          width: 110,
-          child: TextFormField(
-            key: const Key('export-custom-kbps'),
-            initialValue: '${spec.customKbps}',
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            style: const TextStyle(
-                fontSize: AppFontSize.caption, color: AppColors.textPrimary),
-            decoration: const InputDecoration(
-              isDense: true,
-              suffixText: 'kbps',
-              contentPadding: EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (raw) {
-              final value = int.tryParse(raw);
-              if (value == null || value <= 0) return;
-              // 上限跟剪映一致。不夹的话填个 999999999 会让 ffmpeg
-              // 直接失败，而错误信息里根本看不出是这儿填的
-              onSpecChanged(spec.copyWith(
-                  customKbps: value.clamp(1, ExportSpec.maxCustomKbps)));
-            },
-          ),
+  Widget _customKbps() => TextFormField(
+        key: const Key('export-custom-kbps'),
+        initialValue: '${spec.customKbps}',
+        enabled: enabled,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        style: const TextStyle(
+            fontSize: AppFontSize.caption, color: AppColors.textPrimary),
+        decoration: const InputDecoration(
+          isDense: true,
+          suffixText: 'kbps',
+          helperText: '1080P 建议 ≥12000，4K 建议 ≥25000',
+          helperStyle: TextStyle(
+              fontSize: AppFontSize.micro, color: AppColors.textTertiary),
+          contentPadding: EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+          border: OutlineInputBorder(),
         ),
-        const SizedBox(width: AppSpacing.sm),
-        const Expanded(
-          child: Text('1080P 建议 ≥12000，4K 建议 ≥25000',
-              style: TextStyle(
-                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
-        ),
-      ]);
+        onChanged: (raw) {
+          final value = int.tryParse(raw);
+          if (value == null || value <= 0) return;
+          // 上限跟剪映一致。不夹的话填个天文数字会让 ffmpeg 直接失败，
+          // 而错误信息里根本看不出是这儿填的
+          onSpecChanged(spec.copyWith(
+              customKbps: value.clamp(1, ExportSpec.maxCustomKbps)));
+        },
+      );
+
+  /// 剪映靠这个数字让人感知每一档的差别：换任何一项它都跟着变。
+  /// 码率是定死的，大小可以直接算（码率 × 时长，加音频约 128kbps）
+  Widget _estimatedSize() {
+    final mb = ((spec.kbps + 128) / 8) * (durationMs / 1000) / 1024;
+    final text = mb >= 1000
+        ? '每条约 ${(mb / 1024).toStringAsFixed(2)} GB'
+        : '每条约 ${mb.ceil()} MB';
+    return Text(text,
+        key: const Key('export-estimated-size'),
+        style: const TextStyle(
+            fontSize: AppFontSize.caption, color: AppColors.textPrimary));
+  }
 
   Widget _dropdown({
     required String value,
@@ -268,7 +231,6 @@ class ExportOptionsPanel extends StatelessWidget {
       DropdownButtonFormField<String>(
         initialValue: value,
         isDense: true,
-        // 窄列里长文案（如「1080P（1080×1920）」）会把 Row 挤爆
         isExpanded: true,
         dropdownColor: AppColors.surfaceCard,
         decoration: const InputDecoration(

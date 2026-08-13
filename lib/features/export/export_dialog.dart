@@ -297,6 +297,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                   totalCombos: _combos.length,
                   pickCount: _pickCount,
                   onPickCountChanged: (n) => setState(() => _pickCount = n),
+                  durationMs: _combos.isEmpty ? 0 : _combos.first.durationMs,
                   enabled: !_running,
                 ),
                 if (_failure case final f?) ...[

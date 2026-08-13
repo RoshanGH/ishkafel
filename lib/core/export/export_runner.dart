@@ -440,7 +440,7 @@ class ExportRunner {
     // 规格进指纹：同一段在 1080 和 720 下是两份不同的产物，
     // 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格
     final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
-        '_${renderSpec.width}x${renderSpec.height}_${renderSpec.crf}';
+        '_${renderSpec.fingerprint}';
     final hit = clips[key];
     if (hit != null) return hit;
 
