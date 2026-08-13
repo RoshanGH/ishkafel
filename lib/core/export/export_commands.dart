@@ -1,4 +1,5 @@
 import '../ffmpeg/media_spec.dart';
+import 'export_spec.dart';
 import 'speed_fit.dart';
 
 /// 导出用的 ffmpeg 命令行拼装（纯函数，不起进程）。
@@ -41,6 +42,7 @@ class ExportCommands {
     required int startMs,
     required int endMs,
     required String out,
+    ExportSpec? spec,
   }) =>
       [
         '-y', '-v', 'error',
@@ -49,7 +51,7 @@ class ExportCommands {
         // 多给两帧余量，真正的长度由 -frames:v 定
         '-to', _seconds(endMs + (2000 / fps).round()),
         '-an',
-        ..._videoNormalize(),
+        ..._videoNormalize(spec),
         '-frames:v', '${frameCount(endMs - startMs)}',
         out,
       ];
@@ -61,14 +63,16 @@ class ExportCommands {
   static List<String> wholeReplacementVideo({
     required String input,
     required String out,
+    ExportSpec? spec,
   }) =>
       [
         '-y', '-v', 'error',
         '-i', input,
         '-an',
-        '-vf', _scalePad(),
+        '-vf', _scalePad(null, spec),
         '-r', '$fps',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-c:v', 'libx264', '-preset', 'veryfast',
+        '-crf', '${spec?.crf ?? 20}',
         '-pix_fmt', 'yuv420p',
         out,
       ];
@@ -257,17 +261,18 @@ class ExportCommands {
 
   /// 统一画面规格：缩放到目标画幅，比例不同的补黑边（不拉伸变形）。
   /// 给了 [target] 就按原片的分辨率，否则按成片标准的 1080×1920
-  static String _scalePad([MediaSpec? target]) {
-    final w = target?.width ?? width;
-    final h = target?.height ?? height;
+  static String _scalePad([MediaSpec? target, ExportSpec? spec]) {
+    final w = target?.width ?? spec?.width ?? width;
+    final h = target?.height ?? spec?.height ?? height;
     return 'scale=$w:$h:force_original_aspect_ratio=decrease,'
         'pad=$w:$h:(ow-iw)/2:(oh-ih)/2:black,setsar=1';
   }
 
-  static List<String> _videoNormalize() => [
-        '-vf', _scalePad(),
+  static List<String> _videoNormalize([ExportSpec? spec]) => [
+        '-vf', _scalePad(null, spec),
         '-r', '$fps',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+        '-c:v', 'libx264', '-preset', 'veryfast',
+        '-crf', '${spec?.crf ?? 20}',
         '-pix_fmt', 'yuv420p',
       ];
 

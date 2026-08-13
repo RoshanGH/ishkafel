@@ -12,6 +12,7 @@ import '../audio/audio_track_builder.dart';
 import 'export_commands.dart';
 import 'speed_fit.dart';
 import 'export_plan.dart';
+import 'export_spec.dart';
 
 /// 一条成片的导出结果
 class ExportOutcome {
@@ -58,6 +59,10 @@ class ExportRunner {
   /// 素材自带的背景音留着的话，它和新配乐会两首曲子一起响
   final Future<String?> Function(String materialPath)? separateMaterial;
 
+  /// 出多大、多清楚的缺省值。按次导出可以用 exportAll/exportCombinations
+  /// 的 [spec] 参数盖掉——同一个 runner 可能先导一版 1080 再导一版 720
+  final ExportSpec defaultSpec;
+
   /// 读一条本地素材有多长（毫秒）。镜头替换要按它算变速倍率；读不出来
   /// 返回 null，那时退回裁/冻帧而不是瞎猜倍率。
   final Future<int?> Function(String path)? probeDurationMs;
@@ -69,6 +74,7 @@ class ExportRunner {
     this.resolveBgm,
     this.separateMaterial,
     this.probeDurationMs,
+    this.defaultSpec = ExportSpec.standard,
   });
 
   /// 变速越界的镜头替换（见 [SpeedFit]）。整体替换不参与——那一层是画面和
@@ -173,6 +179,7 @@ class ExportRunner {
     /// 分离出来的纯人声轨；被配乐覆盖的段落要用它，否则新旧背景一起响
     String? vocalsPath,
     int limit = ReplacementPlan.maxCombinations,
+    ExportSpec? spec,
     ExportProgress? onProgress,
   }) async {
     final combos = ExportPlanner.enumerate(
@@ -209,6 +216,7 @@ class ExportRunner {
     Map<int, String> voiceAudio = const {},
     VoicePlan voices = VoicePlan.empty,
     String? vocalsPath,
+    ExportSpec? spec,
     ExportProgress? onProgress,
   }) async {
     if (combos.isEmpty) return const [];
@@ -219,6 +227,7 @@ class ExportRunner {
 
     // 同一个候选会在预取和渲染两处用到，也会在多条组合里重复出现——
     // 记一下，别让下载器为同一个 id 跑好几遍
+    final renderSpec = spec ?? defaultSpec;
     final fetched = <int, String>{};
     Future<String> material(int id) async =>
         fetched[id] ??= await fetchMaterial(id);
@@ -344,6 +353,7 @@ class ExportRunner {
           audio: sharedAudio ?? await buildAudio(out.length),
           outputDir: outputDir,
           clips: clips,
+          renderSpec: renderSpec,
         );
         out.add(ExportOutcome(index: combo.index, path: path));
       } catch (e) {
@@ -376,10 +386,11 @@ class ExportRunner {
     required Directory outputDir,
     required Map<String, String> clips,
     required Future<String> Function(int id) material,
+    required ExportSpec renderSpec,
   }) async {
     final parts = <String>[];
     for (final segment in combo.segments) {
-      parts.add(await _renderSegment(segment, sourcePath, clips, material));
+      parts.add(await _renderSegment(segment, sourcePath, clips, material, renderSpec));
     }
 
     final listFile = File(p.join(workDir.path, 'concat_${combo.index}.txt'))
@@ -420,8 +431,12 @@ class ExportRunner {
     String? sourcePath,
     Map<String, String> clips,
     Future<String> Function(int id) material,
+    ExportSpec renderSpec,
   ) async {
-    final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}';
+    // 规格进指纹：同一段在 1080 和 720 下是两份不同的产物，
+    // 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格
+    final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
+        '_${renderSpec.width}x${renderSpec.height}_${renderSpec.crf}';
     final hit = clips[key];
     if (hit != null) return hit;
 
@@ -440,6 +455,7 @@ class ExportRunner {
           startMs: segment.startMs,
           endMs: segment.endMs,
           out: out,
+          spec: renderSpec,
         ),
         'U${segment.unitIndex + 1} 的原片画面',
       );
@@ -448,7 +464,8 @@ class ExportRunner {
       if (segment.shotIndex == null) {
         // **整体替换：原样接上**，不加速不放慢不裁不补，时长随候选
         await _ffmpeg(
-          ExportCommands.wholeReplacementVideo(input: path, out: out),
+          ExportCommands.wholeReplacementVideo(
+              spec: renderSpec, input: path, out: out),
           'U${segment.unitIndex + 1} 的替换画面',
         );
       } else {

@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../../core/export/diverse_pick.dart';
+import '../../core/replacement/picked_material.dart';
+import '../../core/export/export_spec.dart';
+import 'export_options_panel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:path/path.dart' as p;
@@ -59,6 +64,7 @@ Future<void> showExportDialog(
 
   /// 候选素材各有多长（候选 id → 毫秒）。整体替换的成片时长靠它算
   Map<int, int> materialDurations = const {},
+  List<PickedMaterial> pickedMaterials = const [],
 }) =>
     showDialog<void>(
       context: context,
@@ -80,6 +86,7 @@ Future<void> showExportDialog(
         now: now ?? DateTime.now,
         exports: exports,
         materialDurations: materialDurations,
+        pickedMaterials: pickedMaterials,
       ),
     );
 
@@ -131,6 +138,10 @@ class _ExportDialog extends ConsumerStatefulWidget {
   /// 候选素材各有多长（候选 id → 毫秒）。整体替换的成片时长靠它算
   final Map<int, int> materialDurations;
 
+  /// 已挑素材的落地信息。**挑「差异最大的几条」靠它**——判断两条素材像不像，
+  /// 看的是名字（同一批拍摄的同前缀）和画面描述
+  final List<PickedMaterial> pickedMaterials;
+
   const _ExportDialog({
     required this.taskId,
     required this.taskName,
@@ -148,6 +159,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     this.now = DateTime.now,
     this.exports = const [],
     this.materialDurations = const {},
+    this.pickedMaterials = const [],
   });
 
   @override
@@ -166,6 +178,18 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
   List<ExportOutcome>? _results;
   String? _failure;
 
+  /// 出多大多清楚。记住上次的选择——同一个项目连着导好几次是常态
+  ExportSpec _spec = ExportSpec.standard;
+
+  /// null = 全部导出；否则只挑这么多条差异最大的
+  int? _pickCount;
+
+  /// 真正要导的那几条：全部，或者挑出来的
+  List<ExportCombination> get _selected => _pickCount == null
+      ? _combos
+      : pickDiverse(_combos,
+          count: _pickCount!, materials: widget.pickedMaterials);
+
   late final List<ExportCombination> _combos = ExportPlanner.enumerate(
       units: widget.units,
       replacements: widget.replacements,
@@ -180,10 +204,15 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     setState(() {
       _running = true;
       _failure = null;
-      _progress = (0, _combos.length, '准备中');
+      _progress = (0, _selected.length, '准备中');
     });
     try {
-      final results = await factory(widget.taskId).exportAll(
+      final chosen = _selected;
+      final runner = factory(widget.taskId);
+      // 挑了几条就只导那几条，不再重新做笛卡尔积
+      final results = _pickCount == null
+          ? await runner.exportAll(
+        spec: _spec,
         sourcePath: widget.sourcePath,
         units: widget.units,
         replacements: widget.replacements,
@@ -195,7 +224,22 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
         },
-      );
+      )
+          : await runner.exportCombinations(
+              combos: chosen,
+              spec: _spec,
+              sourcePath: widget.sourcePath,
+              units: widget.units,
+              replacements: widget.replacements,
+              outputDir: _outputDir,
+              bgm: widget.bgm,
+              voiceAudio: widget.voiceAudio,
+              voices: widget.voices,
+              vocalsPath: widget.vocalsPath,
+              onProgress: (d, t, w) {
+                if (mounted) setState(() => _progress = (d, t, w));
+              },
+            );
       if (!mounted) return;
       setState(() => _results = results);
       // 记进项目：项目没有终态，**导出才是那件有始有终的事**
@@ -246,6 +290,15 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _summary(),
+                const SizedBox(height: AppSpacing.md),
+                ExportOptionsPanel(
+                  spec: _spec,
+                  onSpecChanged: (next) => setState(() => _spec = next),
+                  totalCombos: _combos.length,
+                  pickCount: _pickCount,
+                  onPickCountChanged: (n) => setState(() => _pickCount = n),
+                  enabled: !_running,
+                ),
                 if (_failure case final f?) ...[
                   const SizedBox(height: AppSpacing.md),
                   Text(f,
@@ -304,7 +357,11 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('共 ${_combos.length} 条成片 · 每条约 ${seconds.toStringAsFixed(1)}s',
+        Text(
+            _pickCount == null
+                ? '共 ${_combos.length} 条成片 · 每条约 ${seconds.toStringAsFixed(1)}s'
+                : '${_combos.length} 条组合里挑 ${_selected.length} 条 · '
+                    '每条约 ${seconds.toStringAsFixed(1)}s',
             key: const Key('export-summary'),
             style: const TextStyle(
                 color: AppColors.textPrimary,

@@ -1120,6 +1120,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       exports: _task.exports,
       // 整体替换的成片时长跟候选走——不给这个，确认页会按原片长度报，
       // 和底部摘要写的成片时长对不上
+      pickedMaterials: _task.pickedMaterials,
       materialDurations: {
         for (final m in _task.pickedMaterials)
           if (m.durationMs != null) m.id: m.durationMs!,
