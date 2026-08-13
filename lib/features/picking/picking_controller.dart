@@ -144,7 +144,51 @@ class PickingController extends ChangeNotifier {
 
   /// 勾选/取消勾选一个候选素材，作用在当前作用域上。
   /// 保留原片模式下不生效——没有可放置的位置，静默忽略优于凭空改模式。
+  /// 这条素材已经挑给了**别的位置**的话，返回那个位置（如「U1」「U4 的 S5」）。
+  ///
+  /// 用来在挑选那一刻当场拦：同一条素材不能在一条成片里出现两次，等到导出
+  /// 对话框里才发现组合被去掉一半，就是马后炮
+  String? usedElsewhere(int candidateId) {
+    for (var i = 0; i < _replacements.length; i++) {
+      final r = _replacements[i];
+      if (r.wholeCandidateIds.contains(candidateId)) {
+        if (i == _selectedUnitIndex && currentMode == ReplacementMode.whole) {
+          continue; // 就是当前位置：那是取消勾选，不拦
+        }
+        return 'U${i + 1}';
+      }
+      for (final e in r.shotCandidateIds.entries) {
+        if (!e.value.contains(candidateId)) continue;
+        if (i == _selectedUnitIndex &&
+            currentMode == ReplacementMode.perShot &&
+            e.key == _selectedShotIndex) {
+          continue;
+        }
+        return 'U${i + 1} 的 S${e.key + 1}';
+      }
+    }
+    return null;
+  }
+
+  /// 上一次 toggle 被拦下的原因（人话）。取一次就清空——它是给 SnackBar
+  /// 用的一次性消息，不是状态
+  String? _blockedMessage;
+  String? takeBlockedMessage() {
+    final message = _blockedMessage;
+    _blockedMessage = null;
+    return message;
+  }
+
   void toggleCandidate(int candidateId) {
+    // 勾上（而不是取消）一条已经用在别处的素材：当场拦住并说清去哪儿解
+    if (!isCandidateSelected(candidateId)) {
+      if (usedElsewhere(candidateId) case final where?) {
+        _blockedMessage = '这条素材已经挑给 $where 了。'
+            '同一条素材不能在一条成片里用两次——先去那边取消，才能挑到这里';
+        notifyListeners();
+        return;
+      }
+    }
     switch (currentMode) {
       case ReplacementMode.keepOriginal:
         return;

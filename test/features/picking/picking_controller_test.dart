@@ -32,6 +32,7 @@ List<SemanticUnit> _units() => const [
     ];
 
 void main() {
+  _duplicatePickTests();
   group('初始化与向后兼容', () {
     test('没有历史方案时全部按保留原片起步', () {
       final c = PickingController(units: _units());
@@ -219,5 +220,61 @@ void main() {
     c.setMode(ReplacementMode.whole);
     c.toggleCandidate(1);
     expect(notified, 3);
+  });
+}
+
+/// 同一条素材不能挑给两个位置——**挑的那一刻当场拦**，不是等导出对话框里
+/// 发现组合被去掉一半。
+void _duplicatePickTests() {
+  group('跨位置重复挑选', () {
+    test('已经挑给 U1 的素材，在 U2 勾不上，并说清去哪儿解', () {
+      final c = PickingController(units: _units());
+      c.selectUnit(0);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+
+      c.selectUnit(1);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+
+      expect(c.replacements[1].wholeCandidateIds, isEmpty, reason: '不落选择');
+      final message = c.takeBlockedMessage();
+      expect(message, contains('U1'));
+      expect(message, contains('先去那边取消'));
+    });
+
+    test('拦下的原因取一次就清空——它是一次性提示，不是状态', () {
+      final c = PickingController(units: _units());
+      c.selectUnit(0);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+      c.selectUnit(1);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+      c.takeBlockedMessage();
+      expect(c.takeBlockedMessage(), isNull);
+    });
+
+    test('在原位置取消勾选不受拦——那正是解开的路', () {
+      final c = PickingController(units: _units());
+      c.selectUnit(0);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+      c.toggleCandidate(101); // 取消
+      expect(c.replacements[0].wholeCandidateIds, isEmpty);
+      expect(c.takeBlockedMessage(), isNull);
+    });
+
+    test('取消之后就能挑到别的位置了', () {
+      final c = PickingController(units: _units());
+      c.selectUnit(0);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+      c.toggleCandidate(101);
+      c.selectUnit(1);
+      c.setMode(ReplacementMode.whole);
+      c.toggleCandidate(101);
+      expect(c.replacements[1].wholeCandidateIds, [101]);
+    });
   });
 }

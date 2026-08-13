@@ -686,7 +686,7 @@ class CandidatePanel extends StatelessWidget {
             entry: entry,
             selected: picked,
             targetMs: scope.targetDurationMs,
-            onTap: () => picking.toggleCandidate(entry.material.id),
+            onTap: () => _toggleWithNotice(context, picking, entry.material.id),
             onPlay: () => onPreview(context, entry.material),
             queryTags: scope.tagNames,
             isPreview: picking.previewCandidateId == entry.material.id,
@@ -740,7 +740,7 @@ class CandidatePanel extends StatelessWidget {
           entry: entry,
           selected: picked,
           targetMs: scope.targetDurationMs,
-          onTap: () => picking.toggleCandidate(entry.material.id),
+          onTap: () => _toggleWithNotice(context, picking, entry.material.id),
           onPlay: () => onPreview(context, entry.material),
           queryTags: scope.tagNames,
           isPreview: picking.previewCandidateId == entry.material.id,
@@ -784,4 +784,17 @@ class CandidatePanel extends StatelessWidget {
       ),
     );
   }
+}
+
+
+/// 勾选并处理「被拦下」：素材已用在别的位置时，控制器不落选择、只留一条
+/// 原因——这里把它弹出来。不弹的话用户点了没反应，只会以为软件坏了
+void _toggleWithNotice(
+    BuildContext context, PickingController picking, int candidateId) {
+  picking.toggleCandidate(candidateId);
+  final message = picking.takeBlockedMessage();
+  if (message == null) return;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
 }
