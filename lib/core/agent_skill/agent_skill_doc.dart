@@ -53,9 +53,28 @@ ishkafel candidates <task> --unit 1 --shot 5
 # 5. 提交完整方案列表
 ishkafel apply plans <task> --file plans.json
 
-# 6. 导出
-ishkafel export <task> --out ~/Desktop/成片
+# 6. 导出（规格可选，缺省 1080P/30fps/推荐码率/H.264/mp4）
+ishkafel export <task> --out ~/Desktop/成片 \
+  [--resolution 480|720|1080|1440|2160] [--fps 24|25|30|50|60] \
+  [--bitrate recommended|higher|lower|<kbps>] [--codec h264|hevc] [--format mp4|mov]
 ```
+
+## 不用原片，从素材拼（空白任务）
+
+没有参考成片、只知道要什么画面时走这条。分子手动加、标签手动填，
+之后（候选、方案、导出）与上面完全同一条路：
+
+```bash
+ishkafel blank create --name 拼片A --tag-groups 1261   # 自带 4 个空分子
+ishkafel blank tags <task> --unit 0 --tags 促单,痛点    # 标签必须在词表内
+ishkafel blank add <task>                              # 加一个分子
+ishkafel blank remove <task> --unit 4                  # 删一个（保底 4 个）
+ishkafel candidates <task> --unit 0                    # 之后照旧
+```
+
+空白任务里每个分子都是整体替换：没有原始画面，`keepOriginal` 与 `perShot`
+都不成立，方案里每个单元都要给 `whole` + material。`analyze` 对它无意义，
+会直接拒绝。
 
 任何一步都可以停下来交给人：
 
@@ -159,6 +178,10 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
 ---
 
 ## 组方案：每一条都要能用
+
+**同一条素材不能在一条方案里出现两次**——同一个画面在片子里出现两次，
+一眼就能看出来。提交时会点名拒绝（如「素材 101 用了两次（U1 和 U2 的 S1）」）。
+不同方案之间可以复用同一条素材。
 
 **不做笛卡尔积。** 你提交的是一份完整方案列表，每条明确「U1 用什么、U2 用什么」。
 

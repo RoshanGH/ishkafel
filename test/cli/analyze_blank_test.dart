@@ -32,6 +32,6 @@ void main() {
     // 让它掉进管线的话，报出来的是「Bad state: ...」——那是给程序员看的
     expect(err.toString(), isNot(contains('Bad state')));
     expect(err.toString(), contains('空白任务'));
-    expect(err.toString(), contains('手动填'));
+    expect(err.toString(), contains('blank tags'));
   });
 }

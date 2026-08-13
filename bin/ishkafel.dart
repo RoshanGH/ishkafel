@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/analyze_command.dart';
+import 'package:ishkafel/cli/commands/blank_command.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
 import 'package:ishkafel/cli/commands/candidates_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
@@ -35,6 +36,14 @@ Future<void> main(List<String> args) async {
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
     ..addFlag('install',
         negatable: false, help: 'skill 用：直接装进各家 Agent 的技能目录')
+    ..addOption('name', help: 'blank create 用：任务名')
+    ..addOption('resolution', help: 'export 用：短边 480/720/1080/1440/2160')
+    ..addOption('fps', help: 'export 用：24/25/30/50/60')
+    ..addOption('bitrate',
+        help: 'export 用：recommended/higher/lower 或 kbps 数字')
+    ..addOption('codec', help: 'export 用：h264/hevc')
+    ..addOption('format', help: 'export 用：mp4/mov')
+    ..addOption('tags', help: 'blank tags 用：标签，逗号分隔')
     ..addOption('external',
         help: 'analyze 用：哪几步交给调用方做（segment,tag）')
     ..addFlag('help', abbr: 'h', negatable: false, help: '显示这份用法');
@@ -80,13 +89,29 @@ Future<void> main(List<String> args) async {
         rest: rest,
         install: parsed['install'] as bool,
       ),
+    'blank' => await runBlankCommand(
+        rest: rest,
+        dataDir: dataDir,
+        name: parsed['name'] as String?,
+        tagGroups: parsed['tag-groups'] as String?,
+        unit: int.tryParse(parsed['unit'] as String? ?? ''),
+        tags: parsed['tags'] as String?,
+      ),
     'todo' => await runTodoCommand(rest: rest, dataDir: dataDir),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
         rest: rest, dataDir: dataDir, file: parsed['file'] as String?),
     'export' => await runExportCommand(
-        rest: rest, dataDir: dataDir, outputDir: parsed['out'] as String?),
+        rest: rest,
+        dataDir: dataDir,
+        outputDir: parsed['out'] as String?,
+        resolution: parsed['resolution'] as String?,
+        fps: parsed['fps'] as String?,
+        bitrate: parsed['bitrate'] as String?,
+        codec: parsed['codec'] as String?,
+        format: parsed['format'] as String?,
+      ),
     'candidates' => await runCandidatesCommand(
         rest: rest,
         dataDir: dataDir,
@@ -125,8 +150,14 @@ ishkafel —— 成片翻新工具的命令行入口
   open <id>        把 app 弹出来并落到这个任务——转人工审核用
   apply plans <id> --file <json>
                    提交完整方案列表（每条都是整体设计过的，不做笛卡尔积）
-  export <id> [--out <目录>]
-                   按已提交的方案逐条导出
+  export <id> [--out <目录>] [--resolution N] [--fps N]
+              [--bitrate recommended|higher|lower|<kbps>]
+              [--codec h264|hevc] [--format mp4|mov]
+                   按已提交的方案逐条导出。规格缺省 1080/30fps/推荐码率
+  blank create --name <名> --tag-groups <id,id>
+                   建空白任务（不用原片，从素材拼），自带 4 个空分子
+  blank add|remove|tags <id> [--unit i] [--tags a,b]
+                   空白任务的分子增删与打标（标签必须在词表内）
 
 通用参数：
 ${parser.usage}

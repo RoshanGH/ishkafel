@@ -50,7 +50,7 @@ Future<int> runAnalyzeCommand({
   // 异常文本——那是给程序员看的
   if (task.isBlank) {
     sink.writeln('$id 是一条空白任务，没有原片可分析。'
-        '它的分子和标签在 app 里手动填，填完直接用 candidates / apply plans / export');
+        '用 blank tags 给分子打标签，然后直接 candidates / apply plans / export');
     return exitBadUsage;
   }
 

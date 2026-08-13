@@ -13,6 +13,7 @@ import 'package:ishkafel/core/models/shot.dart';
 /// 不能给一个模式却不给对应的取值。不合格整批拒绝并一次点全所有问题——
 /// 让它改一个提交一次是在浪费双方的时间。
 void main() {
+  _duplicateMaterialInPlanTests();
   final task = RenewTask(
     id: 't',
     name: 'n',
@@ -173,5 +174,75 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.errors.single, contains('还没分析完'));
     });
+  });
+}
+
+/// 同一条素材在一条方案里出现两次——提交那一刻就拒，不等导出去重才发现。
+void _duplicateMaterialInPlanTests() {
+  RenewTask taskOf() => RenewTask(
+        id: 't',
+        name: 'n',
+        sourcePath: '/tmp/a.mp4',
+        status: RenewTaskStatus.ready,
+        createdAt: DateTime.utc(2026),
+        updatedAt: DateTime.utc(2026),
+        units: [
+          SemanticUnit(
+            index: 0,
+            startMs: 0,
+            endMs: 4000,
+            transcript: 'A',
+            shots: const [Shot(startMs: 0, endMs: 4000)],
+          ),
+          SemanticUnit(
+            index: 1,
+            startMs: 4000,
+            endMs: 8000,
+            transcript: 'B',
+            shots: const [Shot(startMs: 4000, endMs: 8000)],
+          ),
+        ],
+      );
+
+  test('整体替换与镜头替换共用同一条素材时点名拒绝', () {
+    final validation = parsePlans({
+      'plans': [
+        {
+          'name': '方案A',
+          'units': [
+            {'unit': 0, 'mode': 'whole', 'material': 101},
+            {
+              'unit': 1,
+              'mode': 'perShot',
+              'shots': {'0': 101},
+            },
+          ],
+        },
+      ],
+    }, taskOf());
+    expect(validation.ok, isFalse);
+    expect(validation.errors.single, contains('素材 101 用了两次'));
+    expect(validation.errors.single, contains('U1'));
+    expect(validation.errors.single, contains('U2 的 S1'));
+  });
+
+  test('不同方案可以用同一条素材——限制只在一条成片内部', () {
+    final validation = parsePlans({
+      'plans': [
+        {
+          'name': '方案A',
+          'units': [
+            {'unit': 0, 'mode': 'whole', 'material': 101},
+          ],
+        },
+        {
+          'name': '方案B',
+          'units': [
+            {'unit': 1, 'mode': 'whole', 'material': 101},
+          ],
+        },
+      ],
+    }, taskOf());
+    expect(validation.ok, isTrue);
   });
 }

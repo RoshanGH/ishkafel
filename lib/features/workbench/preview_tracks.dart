@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:flutter/foundation.dart';
 
 import '../../core/audio/bgm_plan.dart';
@@ -211,6 +213,15 @@ class PreviewTracks extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// 把素材分离成纯人声的能力。**null 表示这台机器上分不了**（没装工具）——
+/// 界面据此如实说明「配乐会和素材原声叠在一起」，而不是让用户对着一条
+/// 听起来不对的预览发呆。缺省是 null，真实实现在 main.dart 里装配。
+///
+/// 放在 features 层而不是 core：riverpod 会把 Flutter 拖进依赖树，
+/// 而 core/audio 是 CLI 也要用的——`dart build cli` 会在 FFI 那层直接崩
+final materialSeparatorProvider =
+    Provider<Future<String?> Function(String materialPath)?>((ref) => null);
 
 /// 有配乐或配音、但没有分离出来的人声轨时的提醒。
 ///

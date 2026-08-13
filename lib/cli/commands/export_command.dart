@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../core/audio/bgm_cache_factory.dart';
+import '../../core/audio/material_vocal_cache.dart';
+import '../../core/audio/vocal_separator.dart';
 import '../../core/export/export_runner.dart';
+import '../../core/export/export_spec.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/miaoa/material_downloader.dart';
@@ -27,15 +30,34 @@ Future<int> runExportCommand({
   required List<String> rest,
   required Directory dataDir,
   String? outputDir,
+  String? resolution,
+  String? fps,
+  String? bitrate,
+  String? codec,
+  String? format,
   String holder = 'agent',
   StringSink? out,
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
-    sink.writeln('用法：ishkafel export <任务 id> [--out <目录>]');
+    sink.writeln('用法：ishkafel export <任务 id> [--out <目录>] '
+        '[--resolution 480|720|1080|1440|2160] [--fps 24|25|30|50|60] '
+        '[--bitrate recommended|higher|lower|<kbps>] '
+        '[--codec h264|hevc] [--format mp4|mov]');
     return exitBadUsage;
   }
+
+  // 规格参数逐个校验，认不出就报错——静默用默认值会让调用方以为生效了
+  final spec = _parseSpec(
+    resolution: resolution,
+    fps: fps,
+    bitrate: bitrate,
+    codec: codec,
+    format: format,
+    sink: sink,
+  );
+  if (spec == null) return exitBadUsage;
   final id = rest.first;
 
   final repository = FileTaskRepository(dataDir);
@@ -79,7 +101,9 @@ Future<int> runExportCommand({
   ];
 
   // 代价先说清楚——但不拦。要不要继续是调用方的判断
-  sink.writeln('将导出 ${combos.length} 条到 ${dest.path}');
+  sink.writeln('将导出 ${combos.length} 条到 ${dest.path}'
+      '（${spec.width}×${spec.height} · ${spec.fps}fps · '
+      '${spec.kbps ~/ 1000} Mbps · ${spec.encoderName} · ${spec.fileExtension}）');
 
   final runner = ExportRunner(
     run: const ResolvingProcessRunner().call,
@@ -94,10 +118,19 @@ Future<int> runExportCommand({
       content: MiaoaContentService(binary: resolveMiaoaBinary()),
       cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
     ).fetch,
+    // 整体替换的段落铺了配乐时用素材的纯人声——与 GUI 同一条规则
+    separateMaterial: MaterialVocalCache(
+      separator: VocalSeparator(
+        binary: resolveVocalSeparatorBinary(),
+        modelDir: Directory(p.join(dataDir.path, 'separator_models')),
+      ),
+      cacheDir: Directory(p.join(dataDir.path, 'material_vocals')),
+    ).vocalsOf,
   );
 
   final outcomes = await runner.exportCombinations(
     combos: combos,
+    spec: spec,
     sourcePath: task.sourcePath,
     units: units,
     replacements: task.replacements ?? const [],
@@ -136,4 +169,73 @@ Future<int> runExportCommand({
   }, out: out);
   // 有失败的就非零退出：调用方不该靠解析 JSON 才发现出了问题
   return succeeded == outcomes.length ? 0 : 1;
+}
+
+
+/// 把命令行给的规格参数拼成 [ExportSpec]。任何一个认不出都返回 null 并报错
+ExportSpec? _parseSpec({
+  required String? resolution,
+  required String? fps,
+  required String? bitrate,
+  required String? codec,
+  required String? format,
+  required StringSink sink,
+}) {
+  var spec = ExportSpec.standard;
+  if (resolution != null) {
+    final side = int.tryParse(resolution);
+    if (side == null ||
+        !ExportSpec.resolutions.any((r) => r.shortSide == side)) {
+      sink.writeln('认不出分辨率「$resolution」。可用：'
+          '${ExportSpec.resolutions.map((r) => r.shortSide).join(' / ')}（短边）');
+      return null;
+    }
+    spec = spec.copyWith(shortSide: side);
+  }
+  if (fps != null) {
+    final value = int.tryParse(fps);
+    if (value == null || !ExportSpec.frameRates.contains(value)) {
+      sink.writeln('认不出帧率「$fps」。可用：${ExportSpec.frameRates.join(' / ')}');
+      return null;
+    }
+    spec = spec.copyWith(fps: value);
+  }
+  if (bitrate != null) {
+    switch (bitrate) {
+      case 'recommended':
+        spec = spec.copyWith(bitrate: BitrateMode.recommended);
+      case 'higher':
+        spec = spec.copyWith(bitrate: BitrateMode.higher);
+      case 'lower':
+        spec = spec.copyWith(bitrate: BitrateMode.lower);
+      default:
+        final kbps = int.tryParse(bitrate);
+        if (kbps == null || kbps <= 0 || kbps > ExportSpec.maxCustomKbps) {
+          sink.writeln('认不出码率「$bitrate」。可用：recommended / higher / '
+              'lower，或直接给 kbps 数字（上限 ${ExportSpec.maxCustomKbps}）');
+          return null;
+        }
+        spec = spec.copyWith(
+            bitrate: BitrateMode.custom, customKbps: kbps);
+    }
+  }
+  if (codec != null) {
+    final value =
+        VideoCodec.values.where((c) => c.name == codec).firstOrNull;
+    if (value == null) {
+      sink.writeln('认不出编码「$codec」。可用：h264 / hevc');
+      return null;
+    }
+    spec = spec.copyWith(codec: value);
+  }
+  if (format != null) {
+    final value =
+        ContainerFormat.values.where((f) => f.name == format).firstOrNull;
+    if (value == null) {
+      sink.writeln('认不出格式「$format」。可用：mp4 / mov');
+      return null;
+    }
+    spec = spec.copyWith(format: value);
+  }
+  return spec;
 }

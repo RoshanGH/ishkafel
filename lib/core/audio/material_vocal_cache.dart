@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import 'package:path/path.dart' as p;
 
 import '../log/app_log.dart';
@@ -46,9 +44,3 @@ class MaterialVocalCache {
     }
   }
 }
-
-/// 把素材分离成纯人声的能力。**null 表示这台机器上分不了**（没装工具）——
-/// 界面据此如实说明「配乐会和素材原声叠在一起」，而不是让用户对着一条
-/// 听起来不对的预览发呆。缺省是 null，真实实现在 main.dart 里装配。
-final materialSeparatorProvider =
-    Provider<Future<String?> Function(String materialPath)?>((ref) => null);

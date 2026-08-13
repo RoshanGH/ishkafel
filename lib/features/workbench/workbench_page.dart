@@ -10,7 +10,6 @@ import 'package:path_provider/path_provider.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
-import '../../core/audio/material_vocal_cache.dart';
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../blank_task/blank_unit_tag_editor.dart';

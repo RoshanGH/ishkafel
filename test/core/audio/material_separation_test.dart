@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/audio_track_builder.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
-import 'package:ishkafel/core/ffmpeg/process_runner.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 

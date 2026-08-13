@@ -94,6 +94,26 @@ PlanValidation parsePlans(Object? raw, RenewTask task) {
       final problem = _parseUnit(u, units, parsed, where);
       if (problem != null) errors.add(problem);
     }
+    // 同一条素材不能在一条成片里出现两次——同一个画面重复出现，一眼就能
+    // 看出来。GUI 在挑的那一刻就拦；这里是 Agent 提交整条方案的对应关口
+    final seen = <int, String>{};
+    for (final e in parsed.entries) {
+      final positions = <(int?, String)>[
+        (e.value.material, 'U${e.key + 1}'),
+        for (final shot in e.value.shots.entries)
+          (shot.value, 'U${e.key + 1} 的 S${shot.key + 1}'),
+      ];
+      for (final (id, place) in positions) {
+        if (id == null) continue;
+        final before = seen[id];
+        if (before != null) {
+          errors.add('$where 里素材 $id 用了两次（$before 和 $place）'
+              '——同一条素材不能在一条成片里出现两次');
+        } else {
+          seen[id] = place;
+        }
+      }
+    }
     plans.add(SubmittedPlan(name: name, units: parsed));
   }
 
