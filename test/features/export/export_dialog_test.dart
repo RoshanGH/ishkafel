@@ -111,6 +111,7 @@ Future<void> _open(
 }
 
 void main() {
+  _dedupBreakdownTests();
   _breakdownTests();
   testWidgets('先说清要导出几条、每条多长、导到哪儿', (tester) async {
     await _open(tester, replacements: [
@@ -436,5 +437,22 @@ void _breakdownTests() {
       UnitReplacement.whole(const [11, 12]),
     ]);
     expect(find.byKey(const Key('export-combo-breakdown')), findsNothing);
+  });
+}
+
+/// 去重让实际条数少于乘积时，算式必须如实写两步——等号两边对不上是欺骗。
+void _dedupBreakdownTests() {
+  testWidgets('位置之间挑了相同素材时，写清乘积、去掉几条、剩几条', (tester) async {
+    // U1 与 U2 都挑了素材 11：2×2=4，去掉 11+11 那 1 条，剩 3
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+      UnitReplacement.whole(const [11, 13]),
+    ]);
+    final text = tester
+        .widget<Text>(find.byKey(const Key('export-combo-breakdown')))
+        .data!;
+    expect(text, contains('2 × 2 = 4'));
+    expect(text, contains('去掉同一条素材出现两次的 1 条'));
+    expect(text, contains('剩 3 条'));
   });
 }

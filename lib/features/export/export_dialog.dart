@@ -373,10 +373,16 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
       }
     }
     if (parts.length < 2) return null; // 单因子或没得乘，总数自明
+    final raw = parts.fold<int>(1, (acc, p) => acc * p.$1);
     final formula = parts.map((p) => '${p.$1}').join(' × ');
-    final who =
-        parts.map((p) => '${p.$2} 挑了 ${p.$1} 条').join('、');
-    return '$formula = ${_combos.length}（$who，每条成片各取一条组合）';
+    final who = parts.map((p) => '${p.$2} 挑了 ${p.$1} 条').join('、');
+    // 去重会让实际条数少于乘积：同一条素材在一条成片里出现两次的组合
+    // 被丢掉了。**等号两边必须对得上**——写 2×4×2×3 = 24 是在羞辱读者
+    if (raw == _combos.length) {
+      return '$formula = ${_combos.length}（$who，每条成片各取一条组合）';
+    }
+    return '$formula = $raw，去掉同一条素材出现两次的 ${raw - _combos.length} 条，'
+        '剩 ${_combos.length} 条（$who；有几个位置挑了相同的素材）';
   }
 
   Widget _summary() {
