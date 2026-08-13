@@ -45,14 +45,45 @@ class ExportOptionsPanel extends StatelessWidget {
           Row(children: [
             Expanded(child: _resolution()),
             const SizedBox(width: AppSpacing.sm),
-            Expanded(child: _quality()),
+            Expanded(child: _frameRate()),
           ]),
+          const SizedBox(height: AppSpacing.sm),
+          Row(children: [
+            Expanded(child: _bitrate()),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(child: _codec()),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(child: _format()),
+          ]),
+          if (spec.bitrate == BitrateMode.custom) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _customKbps(),
+          ],
           const SizedBox(height: AppSpacing.xs),
-          const Text('帧率固定 30fps（竖屏投放的既定标准）',
-              style: TextStyle(
-                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+          Text(_specNote,
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  height: 1.5,
+                  color: AppColors.textTertiary)),
         ],
       );
+
+  /// 只在**真的会咬人**的时候出声，不是每种组合都念一句
+  String get _specNote {
+    final notes = <String>[];
+    if (spec.shortSide > 1080) {
+      notes.add('素材本身是 1080 竖版，往上放大不会更清楚，只会让文件变大');
+    }
+    if (spec.codec == VideoCodec.hevc) {
+      notes.add('HEVC 文件小三成，但编码慢得多，且部分平台与老设备不认');
+    }
+    if (spec.format == ContainerFormat.mov) {
+      notes.add('mov 主要给剪辑软件用；投放平台一般吃 mp4');
+    }
+    return notes.isEmpty
+        ? '导出 ${spec.width}×${spec.height} · ${spec.fps}fps · ${spec.bitrateLabel}'
+        : notes.join('；');
+  }
 
   Widget _label(String text) => Text(text,
       style: const TextStyle(
@@ -125,29 +156,93 @@ class ExportOptionsPanel extends StatelessWidget {
   List<int> get _pickOptions =>
       [for (final n in const [3, 5, 10, 20]) if (n < totalCombos) n];
 
-  Widget _resolution() => _dropdown<String>(
-        value: spec.resolutionLabel,
+  Widget _resolution() => _dropdown(
+        value: '${spec.shortSide}',
         items: [
           for (final r in ExportSpec.resolutions)
-            ('${r.width}×${r.height}', r.label),
+            ('${r.shortSide}', '${r.label}（${r.shortSide}×${_tall(r.shortSide)}）'),
         ],
-        onChanged: (value) {
-          final r = ExportSpec.resolutions
-              .firstWhere((r) => '${r.width}×${r.height}' == value);
-          onSpecChanged(spec.copyWith(width: r.width, height: r.height));
-        },
+        onChanged: (v) =>
+            onSpecChanged(spec.copyWith(shortSide: int.parse(v))),
       );
 
-  Widget _quality() => _dropdown<String>(
-        value: spec.qualityLabel,
-        items: [for (final q in ExportSpec.qualities) (q.label, q.label)],
-        onChanged: (value) {
-          final q = ExportSpec.qualities.firstWhere((q) => q.label == value);
-          onSpecChanged(spec.copyWith(crf: q.crf));
-        },
+  static int _tall(int shortSide) {
+    final raw = (shortSide * 16 / 9).round();
+    return raw.isEven ? raw : raw + 1;
+  }
+
+  Widget _frameRate() => _dropdown(
+        value: '${spec.fps}',
+        items: [for (final f in ExportSpec.frameRates) ('$f', '$f fps')],
+        onChanged: (v) => onSpecChanged(spec.copyWith(fps: int.parse(v))),
       );
 
-  Widget _dropdown<T>({
+  Widget _bitrate() => _dropdown(
+        value: spec.bitrate.name,
+        items: const [
+          ('lower', '更低'),
+          ('recommended', '推荐'),
+          ('higher', '更高'),
+          ('custom', '自定义'),
+        ],
+        onChanged: (v) => onSpecChanged(spec.copyWith(
+            bitrate: BitrateMode.values.firstWhere((m) => m.name == v))),
+      );
+
+  Widget _codec() => _dropdown(
+        value: spec.codec.name,
+        items: const [('h264', 'H.264'), ('hevc', 'HEVC')],
+        onChanged: (v) => onSpecChanged(spec.copyWith(
+            codec: VideoCodec.values.firstWhere((c) => c.name == v))),
+      );
+
+  Widget _format() => _dropdown(
+        value: spec.format.name,
+        items: const [('mp4', 'mp4'), ('mov', 'mov')],
+        onChanged: (v) => onSpecChanged(spec.copyWith(
+            format: ContainerFormat.values.firstWhere((f) => f.name == v))),
+      );
+
+  Widget _customKbps() => Row(children: [
+        const Text('码率 ',
+            style: TextStyle(
+                fontSize: AppFontSize.caption,
+                color: AppColors.textSecondary)),
+        SizedBox(
+          width: 110,
+          child: TextFormField(
+            key: const Key('export-custom-kbps'),
+            initialValue: '${spec.customKbps}',
+            enabled: enabled,
+            keyboardType: TextInputType.number,
+            style: const TextStyle(
+                fontSize: AppFontSize.caption, color: AppColors.textPrimary),
+            decoration: const InputDecoration(
+              isDense: true,
+              suffixText: 'kbps',
+              contentPadding: EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+              border: OutlineInputBorder(),
+            ),
+            onChanged: (raw) {
+              final value = int.tryParse(raw);
+              if (value == null || value <= 0) return;
+              // 上限跟剪映一致。不夹的话填个 999999999 会让 ffmpeg
+              // 直接失败，而错误信息里根本看不出是这儿填的
+              onSpecChanged(spec.copyWith(
+                  customKbps: value.clamp(1, ExportSpec.maxCustomKbps)));
+            },
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        const Expanded(
+          child: Text('1080P 建议 ≥12000，4K 建议 ≥25000',
+              style: TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+        ),
+      ]);
+
+  Widget _dropdown({
     required String value,
     required List<(String, String)> items,
     required ValueChanged<String> onChanged,
@@ -155,6 +250,8 @@ class ExportOptionsPanel extends StatelessWidget {
       DropdownButtonFormField<String>(
         initialValue: value,
         isDense: true,
+        // 窄列里长文案（如「1080P（1080×1920）」）会把 Row 挤爆
+        isExpanded: true,
         dropdownColor: AppColors.surfaceCard,
         decoration: const InputDecoration(
           isDense: true,

@@ -58,8 +58,13 @@ class AudioTrackBuilder {
   /// 没铺配乐的地方没必要先损一道。
   final Future<String?> Function(String materialPath)? separateMaterial;
 
+  /// 导出用的帧率。**声音要和画面按同一个帧率取整**，否则每段差出小半帧、
+  /// 一路累积到片尾就是可听见的错位。为 null 表示按默认 30
+  final double? exportFps;
+
   AudioTrackBuilder({
     this.separateMaterial,
+    this.exportFps,
     required this.run,
     required this.workDir,
     this.resolveBgm,
@@ -255,7 +260,10 @@ class AudioTrackBuilder {
           prefix: 'mix_u${unit.index}_voice',
           extension: 'wav',
           args: (dest) => ExportCommands.fitVoiceAudio(
-              input: voice, durationMs: unit.durationMs, out: dest),
+              input: voice,
+              durationMs: unit.durationMs,
+              out: dest,
+              atFps: exportFps),
           what: 'U${unit.index + 1} 的配音',
         )
       ];
@@ -285,6 +293,7 @@ class AudioTrackBuilder {
           startMs: start,
           endMs: end,
           out: dest,
+          atFps: exportFps,
         ),
         what: 'U${unit.index + 1} 的声音',
       ));

@@ -61,14 +61,36 @@ void main() {
     expect(find.textContaining('每条素材都露一次面'), findsOneWidget);
   });
 
-  testWidgets('帧率固定这件事要写在面上，不能让人找', (tester) async {
+  testWidgets('五档分辨率、五档帧率、四档码率，跟剪映对齐', (tester) async {
     await pump(tester);
-    expect(find.textContaining('帧率固定 30fps'), findsOneWidget);
+    expect(find.text('1080P（1080×1920）'), findsOneWidget);
+    expect(find.text('30 fps'), findsOneWidget);
+    expect(find.text('推荐'), findsOneWidget);
+    expect(find.text('H.264'), findsOneWidget);
+    expect(find.text('mp4'), findsOneWidget);
   });
 
-  testWidgets('分辨率与画质各是一个下拉，默认 1080 高画质', (tester) async {
+  testWidgets('选了自定义码率才出输入框，并给出建议值', (tester) async {
     await pump(tester);
-    expect(find.text('1080×1920（推荐）'), findsOneWidget);
-    expect(find.text('高（推荐）'), findsOneWidget);
+    expect(find.byKey(const Key('export-custom-kbps')), findsNothing);
+
+    await pump(tester,
+        spec: const ExportSpec(bitrate: BitrateMode.custom));
+    expect(find.byKey(const Key('export-custom-kbps')), findsOneWidget);
+    expect(find.textContaining('1080P 建议 ≥12000'), findsOneWidget);
+  });
+
+  testWidgets('选到 1080 以上时说清放大不会更清楚', (tester) async {
+    // 素材本身是 1080 竖版，往上放大只让文件变大
+    await pump(tester, spec: const ExportSpec(shortSide: 2160));
+    expect(find.textContaining('往上放大不会更清楚'), findsOneWidget);
+  });
+
+  testWidgets('HEVC 与 mov 的代价要说出来，不能让人挑完才发现', (tester) async {
+    await pump(tester, spec: const ExportSpec(codec: VideoCodec.hevc));
+    expect(find.textContaining('编码慢得多'), findsOneWidget);
+
+    await pump(tester, spec: const ExportSpec(format: ContainerFormat.mov));
+    expect(find.textContaining('投放平台一般吃 mp4'), findsOneWidget);
   });
 }

@@ -283,7 +283,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         backgroundColor: AppColors.surfaceRaised,
         title: const Text('矩阵导出'),
         content: SizedBox(
-          width: 460,
+          width: 520,
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -522,7 +522,49 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                     fontSize: AppFontSize.micro,
                     height: 1.4)),
           ),
+        // 挑过的话，逐条写清它用了哪些素材。挑得对不对只有人能判断，
+        // 只报一个条数等于让用户自己去比对四个文件
+        if (_pickCount != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          const Text('每条用了什么',
+              style: TextStyle(
+                  fontSize: AppFontSize.caption,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary)),
+          for (final combo in _selected)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.xs),
+              child: Text('第 ${combo.index} 条 · ${_composition(combo)}',
+                  style: const TextStyle(
+                      color: AppColors.textTertiary,
+                      fontSize: AppFontSize.micro,
+                      height: 1.5)),
+            ),
+        ],
       ],
     );
   }
+
+  /// 一条成片用了哪些素材，按 U 顺序写出来。
+  ///
+  /// 用素材**名字**而不是 id：id 是给机器看的，用户看到 80791142539264
+  /// 只能再去别处查一遍
+  String _composition(ExportCombination combo) {
+    final names = <String>[];
+    for (final segment in combo.segments) {
+      final id = segment.candidateId;
+      if (id == null) continue;
+      final material = widget.pickedMaterials
+          .where((m) => m.id == id)
+          .firstOrNull;
+      final label = material?.name ?? '素材 $id';
+      // 名字往往很长（滴露_植源喷雾_姚瑶_20260702_80791142539264），
+      // 尾号才是区分同一批里那几条的关键，所以留尾不留头
+      names.add('U${segment.unitIndex + 1} ${_tail(label)}');
+    }
+    return names.isEmpty ? '全部用原片' : names.join(' · ');
+  }
+
+  static String _tail(String name) =>
+      name.length <= 14 ? name : '…${name.substring(name.length - 13)}';
 }

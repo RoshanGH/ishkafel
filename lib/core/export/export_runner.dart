@@ -300,6 +300,7 @@ class ExportRunner {
               : workDir,
           resolveBgm: resolveBgm,
           separateMaterial: separateMaterial,
+          exportFps: renderSpec.fps.toDouble(),
         ).build(
           sourcePath: sourcePath,
           units: units,
@@ -399,7 +400,10 @@ class ExportRunner {
     await _ffmpeg(
         ExportCommands.concat(listFile: listFile.path, out: silent), '拼接画面');
 
-    final out = p.join(outputDir.path, '变体${combo.index}.mp4');
+    // 扩展名跟着格式走。选了 mov 却导出 .mp4，双击能开但拖进剪辑软件
+    // 会被当成另一种东西
+    final out =
+        p.join(outputDir.path, '变体${combo.index}.${renderSpec.fileExtension}');
     await _ffmpeg(
         ExportCommands.mux(video: silent, audio: audio, out: out), '画面与声音合成');
     return out;

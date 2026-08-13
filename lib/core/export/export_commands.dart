@@ -27,7 +27,14 @@ class ExportCommands {
       (durationMs * ((atFps ?? 0) > 0 ? atFps! : fps) / 1000).round();
 
   /// 这一段实际会有多长（帧数决定的真实时长，毫秒）
-  static double exactSeconds(int durationMs) => frameCount(durationMs) / fps;
+  /// 这一段的**精确秒数**（按整帧对齐）。
+  ///
+  /// 声音与画面必须用**同一个帧率**算，否则两边各自取整，每段差出小半帧、
+  /// 一路累积到片尾就是可听见的错位。所以选了 60fps 导出时，这里也要按 60 算
+  static double exactSeconds(int durationMs, {double? atFps}) {
+    final rate = (atFps ?? 0) > 0 ? atFps! : fps.toDouble();
+    return frameCount(durationMs, atFps: rate) / rate;
+  }
 
   /// 把原片的一段切出来，规格归一到成片标准（**丢掉声音**，声音单独成轨）。
   ///
@@ -49,10 +56,13 @@ class ExportCommands {
         '-i', source,
         '-ss', _seconds(startMs),
         // 多给两帧余量，真正的长度由 -frames:v 定
-        '-to', _seconds(endMs + (2000 / fps).round()),
+        '-to', _seconds(endMs + (2000 / (spec?.fps ?? fps)).round()),
         '-an',
         ..._videoNormalize(spec),
-        '-frames:v', '${frameCount(endMs - startMs)}',
+        // **按导出帧率数帧**：选了 60fps 而这里还按 30 算，切出来的片段
+        // 只有一半长，后面所有段跟着错位
+        '-frames:v',
+        '${frameCount(endMs - startMs, atFps: (spec?.fps ?? fps).toDouble())}',
         out,
       ];
 
@@ -70,9 +80,8 @@ class ExportCommands {
         '-i', input,
         '-an',
         '-vf', _scalePad(null, spec),
-        '-r', '$fps',
-        '-c:v', 'libx264', '-preset', 'veryfast',
-        '-crf', '${spec?.crf ?? 20}',
+        '-r', '${spec?.fps ?? fps}',
+        ...(spec ?? const ExportSpec()).encodeArgs,
         '-pix_fmt', 'yuv420p',
         out,
       ];
@@ -152,6 +161,7 @@ class ExportCommands {
     required int startMs,
     required int endMs,
     required String out,
+    double? atFps,
   }) =>
       [
         '-y', '-v', 'error',
@@ -160,7 +170,7 @@ class ExportCommands {
         '-vn',
         // 声音按画面的帧数对齐（不足补静音）：两边各走各的，片尾必然错位
         '-af', 'apad',
-        '-t', (exactSeconds(endMs - startMs)).toStringAsFixed(6),
+        '-t', exactSeconds(endMs - startMs, atFps: atFps).toStringAsFixed(6),
         ..._audioNormalize(),
         out,
       ];
@@ -189,13 +199,14 @@ class ExportCommands {
     required String input,
     required int durationMs,
     required String out,
+    double? atFps,
   }) =>
       [
         '-y', '-v', 'error',
         '-i', input,
         '-vn',
         '-af', 'apad',
-        '-t', exactSeconds(durationMs).toStringAsFixed(6),
+        '-t', exactSeconds(durationMs, atFps: atFps).toStringAsFixed(6),
         ..._audioNormalize(),
         out,
       ];
@@ -262,17 +273,16 @@ class ExportCommands {
   /// 统一画面规格：缩放到目标画幅，比例不同的补黑边（不拉伸变形）。
   /// 给了 [target] 就按原片的分辨率，否则按成片标准的 1080×1920
   static String _scalePad([MediaSpec? target, ExportSpec? spec]) {
-    final w = target?.width ?? spec?.width ?? width;
-    final h = target?.height ?? spec?.height ?? height;
+    final w = spec?.width ?? target?.width ?? width;
+    final h = spec?.height ?? target?.height ?? height;
     return 'scale=$w:$h:force_original_aspect_ratio=decrease,'
         'pad=$w:$h:(ow-iw)/2:(oh-ih)/2:black,setsar=1';
   }
 
   static List<String> _videoNormalize([ExportSpec? spec]) => [
         '-vf', _scalePad(null, spec),
-        '-r', '$fps',
-        '-c:v', 'libx264', '-preset', 'veryfast',
-        '-crf', '${spec?.crf ?? 20}',
+        '-r', '${spec?.fps ?? fps}',
+        ...(spec ?? const ExportSpec()).encodeArgs,
         '-pix_fmt', 'yuv420p',
       ];
 
