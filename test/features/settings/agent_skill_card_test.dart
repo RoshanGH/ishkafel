@@ -37,7 +37,7 @@ void main() {
     expect(find.text('未安装'), findsNWidgets(2));
     expect(find.text('安装'), findsOneWidget);
     expect(find.textContaining('任意文件夹都生效'), findsOneWidget);
-    expect(find.textContaining('不用把这个项目的源码给谁'), findsOneWidget);
+    expect(find.textContaining('在任意文件夹都生效'), findsOneWidget);
   });
 
   testWidgets('点安装 → 两家都装上，并告诉他下一句该怎么说', (tester) async {
@@ -71,6 +71,23 @@ void main() {
     expect(find.text('有更新'), findsNWidgets(2));
     expect(find.text('更新'), findsOneWidget);
     expect(find.textContaining('照着旧文档去调新命令'), findsOneWidget);
+  });
+
+  testWidgets('用别的 Agent 的人有出路：复制全文 / 存成文件', (tester) async {
+    // 技能目录每家都不一样（Cursor、Warp、各家桌面版…）穷举不完，
+    // 但说明书本身就是一份 Markdown——文本谁都认
+    await pump(tester, make());
+    expect(find.text('复制全文'), findsOneWidget);
+    expect(find.text('存成文件'), findsOneWidget);
+    expect(find.textContaining('粘给它就行'), findsOneWidget);
+  });
+
+  testWidgets('复制出去的是带 frontmatter 的完整说明书', (tester) async {
+    final installer = make();
+    final text = installer.markdownForSharing;
+    expect(text, startsWith('---\n'));
+    expect(text, contains('name: ishkafel'));
+    expect(text, contains('# 手册'), reason: '正文要在里面');
   });
 
   testWidgets('只装了一家时分开显示，不含糊成一个总状态', (tester) async {

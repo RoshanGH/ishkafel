@@ -147,6 +147,13 @@ class SkillInstaller {
 
   String get _versionLine => '<!-- ishkafel-skill $version -->';
 
+  /// 说明书的完整文本（带 frontmatter）。
+  ///
+  /// **这是最通用的分发方式**：装进技能目录只对认那个目录的 Agent 有用
+  /// （Claude Code、Codex 各有各的位置），而 Warp、Cursor、各家桌面版、
+  /// 明天冒出来的新工具都不一样，穷举不完。底下那层是通的——把文本给它。
+  String get markdownForSharing => _skillFile();
+
   /// frontmatter 里的 `description` 决定 Agent **什么时候会想起用它**。
   /// 只写「ishkafel 的使用说明」的话，用户说「把这条片子换个画面」时它不会
   /// 联想到这里——所以要把触发场景写进去。
