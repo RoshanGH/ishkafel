@@ -1,102 +1,59 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/agent_skill/skill_installer.dart';
 import 'package:ishkafel/features/settings/agent_skill_card.dart';
-import 'package:path/path.dart' as p;
 
 /// 「Agent 说明书」卡片。
 ///
-/// 盯的是每种状态下用户看到什么、能点什么——尤其「有更新」不能跟「未安装」
-/// 混成一句话：前者手上那份会把 Agent 带偏，后者只是还没有。
+/// 只有一种分发方式：把全文给 Agent，让它自己装。不替任何一家写技能目录
+/// ——技能目录每家都不一样，替两家装、别家不管，反而让人以为只支持那两家。
 void main() {
   late Directory home;
 
   setUp(() => home = Directory.systemTemp.createTempSync('skill_card'));
   tearDown(() => home.deleteSync(recursive: true));
 
-  SkillInstaller make({String version = '1.0.0'}) =>
-      SkillInstaller.forCurrentUser(
-          markdown: '# 手册\n', version: version, home: home.path);
+  SkillInstaller make() => SkillInstaller.forCurrentUser(
+      markdown: '# 手册\n', version: '1.0.0', home: home.path);
 
-  Future<void> pump(WidgetTester tester, SkillInstaller installer) =>
-      tester.pumpWidget(ProviderScope(
+  Future<void> pump(WidgetTester tester) => tester.pumpWidget(ProviderScope(
         child: MaterialApp(
             home: Scaffold(
                 body: SingleChildScrollView(
-                    child: AgentSkillCard(installer: installer)))),
+                    child: AgentSkillCard(installer: make())))),
       ));
 
-  testWidgets('没装：两家都显示未安装，按钮是「安装」，并说清装完在哪儿生效',
-      (tester) async {
-    await pump(tester, make());
-    expect(find.text('Claude Code'), findsOneWidget);
-    expect(find.text('Codex'), findsOneWidget);
-    expect(find.text('未安装'), findsNWidgets(2));
-    expect(find.text('安装'), findsOneWidget);
-    expect(find.textContaining('任意文件夹都生效'), findsOneWidget);
-    expect(find.textContaining('在任意文件夹都生效'), findsOneWidget);
-  });
-
-  testWidgets('点安装 → 两家都装上，并告诉他下一句该怎么说', (tester) async {
-    final installer = make();
-    await pump(tester, installer);
-    await tester.runAsync(() async {
-      await tester.tap(find.text('安装'));
-      while (!installer.inspect().allCurrent) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-    });
-    await tester.pump();
-
-    expect(find.text('已安装'), findsNWidgets(2));
-    expect(find.textContaining('用 ishkafel 翻新这条片子'), findsWidgets);
-    expect(find.text('移除'), findsOneWidget);
-    for (final dir in ['.claude', '.codex']) {
-      expect(
-          File(p.join(home.path, dir, 'skills', 'ishkafel', 'SKILL.md'))
-              .existsSync(),
-          isTrue);
-    }
-  });
-
-  testWidgets('app 升级过：说清旧说明书会把 Agent 带偏，按钮变成「更新」',
-      (tester) async {
-    await tester.runAsync(() => make(version: '1.0.0').install());
-    await pump(tester, make(version: '2.0.0'));
-
-    expect(find.text('有更新'), findsNWidgets(2));
-    expect(find.text('更新'), findsOneWidget);
-    expect(find.textContaining('照着旧文档去调新命令'), findsOneWidget);
-  });
-
-  testWidgets('用别的 Agent 的人有出路：复制全文 / 存成文件', (tester) async {
-    // 技能目录每家都不一样（Cursor、Warp、各家桌面版…）穷举不完，
-    // 但说明书本身就是一份 Markdown——文本谁都认
-    await pump(tester, make());
+  testWidgets('只有复制全文与存成文件，没有「安装」按钮', (tester) async {
+    await pump(tester);
     expect(find.text('复制全文'), findsOneWidget);
     expect(find.text('存成文件'), findsOneWidget);
-    expect(find.textContaining('粘给它就行'), findsOneWidget);
+    expect(find.text('安装'), findsNothing,
+        reason: '替两家写技能目录、别家不管，会让人以为只支持那两家');
+  });
+
+  testWidgets('说清用法：粘给任何 Agent 让它自己装', (tester) async {
+    await pump(tester);
+    expect(find.textContaining('让它自己装成技能'), findsOneWidget);
   });
 
   testWidgets('复制出去的是带 frontmatter 的完整说明书', (tester) async {
-    final installer = make();
-    final text = installer.markdownForSharing;
+    final text = make().markdownForSharing;
     expect(text, startsWith('---\n'));
     expect(text, contains('name: ishkafel'));
     expect(text, contains('# 手册'), reason: '正文要在里面');
   });
 
-  testWidgets('只装了一家时分开显示，不含糊成一个总状态', (tester) async {
-    await tester.runAsync(() => make().install());
-    File(p.join(home.path, '.codex', 'skills', 'ishkafel', 'SKILL.md'))
-        .deleteSync();
-
-    await pump(tester, make());
-    expect(find.text('已安装'), findsOneWidget);
-    expect(find.text('未安装'), findsOneWidget);
+  testWidgets('复制后告诉用户下一句怎么跟 Agent 说', (tester) async {
+    // Clipboard 走平台通道，要给测试装一个假的收信端，否则 await 永远不回来
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform, (call) async => null);
+    await pump(tester);
+    await tester.tap(find.text('复制全文'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('把这份技能装给你自己'), findsOneWidget);
   });
 }
