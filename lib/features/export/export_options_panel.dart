@@ -6,9 +6,10 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/export/export_spec.dart';
 
-/// 导出选项。版式对齐剪映专业版：**一列「标签 + 下拉」**，码率档位就叫
-/// 推荐/更高/更低/自定义，档位的效果由「预计大小」传达——它跟着任何一项
-/// 选择实时变，不靠一段说明文字。
+/// 导出选项。版式对齐剪映专业版：**一列「标签 + 下拉」**。
+///
+/// 码率选项是**具体数字**（按当前分辨率 × 帧率算出），档位名只是后缀注明
+/// ——「推荐」到底是多少不该让人猜。「预计大小」跟着任何一项选择实时变。
 class ExportOptionsPanel extends StatelessWidget {
   final ExportSpec spec;
   final ValueChanged<ExportSpec> onSpecChanged;
@@ -156,12 +157,17 @@ class ExportOptionsPanel extends StatelessWidget {
         onChanged: (v) => onSpecChanged(spec.copyWith(fps: int.parse(v))),
       );
 
+  /// 选项是**具体数字**，档位名只是后缀注明。数字按当前分辨率 × 帧率算，
+  /// 改了分辨率或帧率，这里的数字跟着变
   Widget _bitrate() => _dropdown(
         value: spec.bitrate.name,
-        items: const [
-          ('recommended', '推荐'),
-          ('higher', '更高'),
-          ('lower', '更低'),
+        items: [
+          (
+            'recommended',
+            '${spec.kbpsOf(BitrateMode.recommended) ~/ 1000} Mbps（推荐）'
+          ),
+          ('higher', '${spec.kbpsOf(BitrateMode.higher) ~/ 1000} Mbps（更高）'),
+          ('lower', '${spec.kbpsOf(BitrateMode.lower) ~/ 1000} Mbps（更低）'),
           ('custom', '自定义'),
         ],
         onChanged: (v) => onSpecChanged(spec.copyWith(

@@ -70,7 +70,8 @@ void main() {
     }
     expect(find.text('1080P'), findsOneWidget);
     expect(find.text('30fps'), findsOneWidget);
-    expect(find.text('推荐'), findsOneWidget);
+    expect(find.text('12 Mbps（推荐）'), findsOneWidget,
+        reason: '码率必须是具体数字，档位名只是注明');
     expect(find.text('H.264'), findsOneWidget);
     expect(find.text('mp4'), findsOneWidget);
   });

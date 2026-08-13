@@ -351,6 +351,34 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         ],
       );
 
+  /// 24 条是怎么来的：每个挑了多条候选的位置各自的候选数相乘。
+  /// 算式直接写出来，不让用户对着一个总数自己猜
+  String? get _comboBreakdown {
+    final parts = <(int factor, String where)>[];
+    for (var i = 0; i < widget.replacements.length; i++) {
+      final r = widget.replacements[i];
+      switch (r.mode) {
+        case ReplacementMode.whole:
+          if (r.wholeCandidateIds.length > 1) {
+            parts.add((r.wholeCandidateIds.length, 'U${i + 1}'));
+          }
+        case ReplacementMode.perShot:
+          for (final e in r.shotCandidateIds.entries) {
+            if (e.value.length > 1) {
+              parts.add((e.value.length, 'U${i + 1} 的 S${e.key + 1}'));
+            }
+          }
+        case ReplacementMode.keepOriginal:
+          break;
+      }
+    }
+    if (parts.length < 2) return null; // 单因子或没得乘，总数自明
+    final formula = parts.map((p) => '${p.$1}').join(' × ');
+    final who =
+        parts.map((p) => '${p.$2} 挑了 ${p.$1} 条').join('、');
+    return '$formula = ${_combos.length}（$who，每条成片各取一条组合）';
+  }
+
   Widget _summary() {
     final replaced = _combos.where((c) => c.replacedCount > 0).length;
     final seconds =
@@ -368,6 +396,15 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                 color: AppColors.textPrimary,
                 fontSize: AppFontSize.emphasis,
                 fontWeight: FontWeight.w600)),
+        if (_comboBreakdown case final breakdown?) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(breakdown,
+              key: const Key('export-combo-breakdown'),
+              style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: AppFontSize.caption,
+                  height: 1.5)),
+        ],
         const SizedBox(height: AppSpacing.xs),
         // 「有几条其实跟原片一样」要说在前面：用户按条数付出的是等待时间
         Text(

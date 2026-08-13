@@ -111,6 +111,7 @@ Future<void> _open(
 }
 
 void main() {
+  _breakdownTests();
   testWidgets('先说清要导出几条、每条多长、导到哪儿', (tester) async {
     await _open(tester, replacements: [
       UnitReplacement.whole(const [11, 12]),
@@ -412,5 +413,28 @@ void main() {
       expect(shortenPath('/Volumes/外置盘/片子'), '/Volumes/外置盘/片子',
           reason: '不在家目录下的原样显示');
     });
+  });
+}
+
+/// 24 条不是一个让人猜的数：算式和「谁挑了几条」写在总数底下。
+void _breakdownTests() {
+  testWidgets('多因子时把乘法算式写出来', (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+      UnitReplacement.whole(const [21, 22, 23]),
+    ]);
+    final text = tester
+        .widget<Text>(find.byKey(const Key('export-combo-breakdown')))
+        .data!;
+    expect(text, contains('2 × 3 = 6'));
+    expect(text, contains('U1 挑了 2 条'));
+    expect(text, contains('U2 挑了 3 条'));
+  });
+
+  testWidgets('单因子不写算式——2 = 2 是废话', (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+    ]);
+    expect(find.byKey(const Key('export-combo-breakdown')), findsNothing);
   });
 }
