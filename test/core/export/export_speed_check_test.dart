@@ -75,34 +75,25 @@ void main() {
         reason: '4.5 秒素材填 3 秒坑位 = 加速 1.5 倍');
   });
 
-  test('加速超过 2 倍时导出中止，并说清该找多长的素材', () async {
+  test('倍率不设上限：3 秒坑位塞 10 秒素材照常按 3.3 倍导出', () async {
+    // 预览渲染的就是真实倍率的切片——用户在预览里看过并接受了，
+    // 软件不该再替他做审美判断。原来这里有一道 0.8×~2.0× 的闸，已拆掉
     final env = _runner(temp, durations: {77: 10000});
 
     final results = await run(env, picks: {0: 77});
 
-    expect(results.every((r) => r.failure != null), isTrue,
-        reason: '3 秒坑位塞 10 秒素材要 3.3 倍速，出来是快进，'
-            '按「设置了的东西出错就报错」不该导');
-    expect(results.first.failure, contains('2.4'));
-    expect(results.first.failure, contains('6.0'));
-    expect(results.first.failure, contains('S1'), reason: '要点名是哪个镜头');
+    expect(results.single.failure, isNull);
+    expect(env.ran.where((c) => c.contains('setpts=PTS/3.33')), hasLength(1),
+        reason: '10 秒素材填 3 秒坑位 = 加速 3.33 倍，如实变速');
   });
 
-  test('放慢低于 0.8 倍时同样中止', () async {
+  test('放慢也不设下限：1 秒素材填 3 秒坑位按 0.33 倍放慢', () async {
     final env = _runner(temp, durations: {77: 1000});
 
     final results = await run(env, picks: {0: 77});
 
-    expect(results.every((r) => r.failure != null), isTrue);
-  });
-
-  test('多个镜头越界时一次点名，不用改一个导一次', () async {
-    final env = _runner(temp, durations: {77: 10000, 88: 500});
-
-    final results = await run(env, picks: {0: 77, 1: 88});
-
-    expect(results.first.failure, contains('S1'));
-    expect(results.first.failure, contains('S2'));
+    expect(results.single.failure, isNull);
+    expect(env.ran.where((c) => c.contains('setpts=PTS/0.33')), hasLength(1));
   });
 
   test('探测不出候选时长时不猜倍率，退回裁/冻帧照常导出', () async {

@@ -10,7 +10,6 @@ import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 import '../audio/audio_track_builder.dart';
 import 'export_commands.dart';
-import 'speed_fit.dart';
 import 'export_plan.dart';
 import 'export_spec.dart';
 
@@ -76,40 +75,6 @@ class ExportRunner {
     this.probeDurationMs,
     this.defaultSpec = ExportSpec.standard,
   });
-
-  /// 变速越界的镜头替换（见 [SpeedFit]）。整体替换不参与——那一层是画面和
-  /// 声音一起换、时长随候选，本来就不变速。
-  Future<String?> _speedBlocker(List<ExportCombination> combos,
-      Future<String> Function(int id) material) async {
-    final probe = probeDurationMs;
-    if (probe == null) return null;
-
-    final seen = <String>{};
-    final bad = <String>[];
-    for (final combo in combos) {
-      for (final segment in combo.segments) {
-        final id = segment.candidateId;
-        if (id == null || segment.shotIndex == null) continue;
-        final key = '${segment.startMs}_${segment.endMs}_$id';
-        if (!seen.add(key)) continue;
-
-        final int? candidateMs;
-        try {
-          candidateMs = await probe(await material(id));
-        } catch (e) {
-          AppLog.warn('读不出候选 $id 的时长，这一段退回裁/冻帧：$e');
-          continue;
-        }
-        // 读不出来就不猜倍率
-        if (candidateMs == null || candidateMs <= 0) continue;
-        final why = SpeedFit.rejectReason(
-            candidateMs: candidateMs, slotMs: segment.durationMs);
-        if (why == null) continue;
-        bad.add('U${segment.unitIndex + 1} 的 S${segment.shotIndex! + 1}：$why');
-      }
-    }
-    return bad.isEmpty ? null : bad.join('\n');
-  }
 
   /// 出片前的拦截：有任何一条会让成片**静默出错**就返回原因，否则 null。
   ///
@@ -237,11 +202,10 @@ class ExportRunner {
     // **预览可以降级，成片不行**：预览时人还在编辑、听得出来；成片少一段
     // 垫乐、少一句换过的配音、或者新旧背景叠在一起，交付出去没人会发现。
     // 宁可这一次导不出来，也不能给一条看起来正常、其实是错的片子。
-    // 镜头替换的候选必须能在 0.8×~2.0× 内对齐坑位。一次把所有越界的点名，
-    // 免得用户改一个导一次
-    final tooFar = await _speedBlocker(combos, material);
+    // 变速倍率**不设上限**：预览渲染的就是真实倍率的切片，用户在预览里
+    // 看到 2.9× 什么样、导出来就是什么样——他看过并接受了，就不该拦。
+    // 原来这里有一道 0.8×~2.0× 的闸，是在替用户做审美判断，已拆掉
     final blocker = _blankBlocker(combos, sourcePath) ??
-        tooFar ??
         _deliveryBlocker(
             bgm: bgm,
             vocalsPath: vocalsPath,
