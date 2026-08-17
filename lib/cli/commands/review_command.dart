@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'dart:io';
 
 import '../../core/review/review_receipt.dart';
+import '../../core/storage/ui_wake.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../cli_output.dart';
 import 'open_command.dart';
@@ -47,11 +47,13 @@ Future<int> runReviewCommand({
   final stale = reviewReceiptFile(dataDir, id);
   if (stale.existsSync()) stale.deleteSync();
 
+  // 意图走唤醒文件（见 ui_wake.dart）：--args 只在冷启动生效，
+  // app 已经在跑时会被静默丢弃
+  writeUiWake(dataDir, id, review: true);
   final appPath =
       (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
   final exec = run ?? Process.run;
-  final result = await exec(
-      'open', ['-a', appPath, '--args', '--task=$id', '--review']);
+  final result = await exec('open', ['-a', appPath]);
   if (result.exitCode != 0) {
     sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
     return 1;
@@ -90,9 +92,3 @@ Future<int> runReviewResultCommand({
   }, out: out);
   return 0;
 }
-
-/// 启动参数里有没有 `--review`（review 命令的另一半，GUI 读）
-bool reviewModeFrom(List<String> args) => args.contains('--review');
-
-/// 便于测试：把回执序列化成一行 JSON（与 review-result 输出一致）
-String receiptJson(ReviewReceipt receipt) => jsonEncode(receipt.toJson());

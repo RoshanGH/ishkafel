@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'cli/commands/review_command.dart';
 import 'package:flutter/material.dart';
 
 import 'core/audio/material_vocal_cache.dart';
@@ -88,12 +87,10 @@ Future<void> main(List<String> args) async {
   // `ishkafel open <task>` 会带 --task=<id> 把 app 拉起来。CLI 写、GUI 读，
   // 两边对同一个约定（见 open_command.dart）
   final initialTaskId = initialTaskIdFrom(args);
-  final initialReview = reviewModeFrom(args);
 
   runApp(ProviderScope(
     overrides: [
       initialTaskIdProvider.overrideWithValue(initialTaskId),
-      initialReviewModeProvider.overrideWithValue(initialReview),
       taskRepositoryProvider.overrideWithValue(repository),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider.overrideWithValue(analysisPipeline),

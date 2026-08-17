@@ -8,6 +8,7 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/review/review_receipt.dart';
+import 'package:ishkafel/core/storage/ui_wake.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 /// `ishkafel review` / `review-result` —— 人把关那一环的 CLI 半边。
@@ -35,7 +36,7 @@ void main() {
   tearDown(() => dir.deleteSync(recursive: true));
 
   group('review', () {
-    test('带 --review 参数把 app 拉起来，并说清下一步取回执', () async {
+    test('写唤醒文件并激活 app——不走 --args，那只在冷启动时生效', () async {
       await repo.save(taskWith(replacements: [
         UnitReplacement.whole(const [101]),
       ]));
@@ -52,7 +53,11 @@ void main() {
         },
       );
       expect(code, 0);
-      expect(calls.single, containsAllInOrder(['open', '--task=r1', '--review']));
+      // 意图在唤醒文件里，open 只负责把 app 带到前台
+      expect(calls.single.any((a) => a.contains('--task')), isFalse);
+      final wake = consumeUiWake(dir)!;
+      expect(wake.taskId, 'r1');
+      expect(wake.review, isTrue);
       expect(err.toString(), contains('review-result r1'));
     });
 
@@ -115,8 +120,9 @@ void main() {
     });
   });
 
-  test('--review 启动参数的识别（GUI 读的那一半）', () {
-    expect(reviewModeFrom(['--task=r1', '--review']), isTrue);
-    expect(reviewModeFrom(['--task=r1']), isFalse);
+  test('唤醒文件读到即删——同一条请求只处理一次', () {
+    writeUiWake(dir, 'r1', review: true);
+    expect(consumeUiWake(dir), isNotNull);
+    expect(consumeUiWake(dir), isNull);
   });
 }

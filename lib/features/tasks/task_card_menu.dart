@@ -5,11 +5,12 @@ import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
 
 /// 任务卡上下文菜单动作
-enum TaskCardAction { rename, reanalyze, delete }
+enum TaskCardAction { review, rename, reanalyze, delete }
 
 /// 在指定屏幕坐标弹出任务卡菜单（右键或「更多」按钮触发）
 Future<TaskCardAction?> showTaskCardMenu(
-    BuildContext context, Offset globalPosition) {
+    BuildContext context, Offset globalPosition,
+    {bool canReview = false}) {
   final overlay =
       Overlay.of(context).context.findRenderObject() as RenderBox?;
   final overlaySize = overlay?.size ?? MediaQuery.of(context).size;
@@ -22,19 +23,28 @@ Future<TaskCardAction?> showTaskCardMenu(
       overlaySize.width - globalPosition.dx,
       overlaySize.height - globalPosition.dy,
     ),
-    items: const [
-      PopupMenuItem(
+    items: [
+      // 挑过候选才给：没有候选就没有可审的
+      if (canReview) ...const [
+        PopupMenuItem(
+          value: TaskCardAction.review,
+          height: 34,
+          child: Text('审核候选', style: _itemStyle),
+        ),
+        PopupMenuDivider(height: 8),
+      ],
+      const PopupMenuItem(
         value: TaskCardAction.rename,
         height: 34,
         child: Text('重命名', style: _itemStyle),
       ),
-      PopupMenuItem(
+      const PopupMenuItem(
         value: TaskCardAction.reanalyze,
         height: 34,
         child: Text('重新分析', style: _itemStyle),
       ),
-      PopupMenuDivider(height: 8),
-      PopupMenuItem(
+      const PopupMenuDivider(height: 8),
+      const PopupMenuItem(
         value: TaskCardAction.delete,
         height: 34,
         child: Text('删除', style: _destructiveItemStyle),

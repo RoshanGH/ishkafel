@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../core/storage/ui_wake.dart';
 import '../cli_output.dart';
 
 /// app 的默认安装位置。装在别处时用 `ISHKAFEL_APP` 指定
@@ -30,10 +31,14 @@ Future<int> runOpenCommand({
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
   }
+  // 意图走唤醒文件，不走 --args：启动参数只在冷启动时生效，app 已经在跑
+  // 时会被静默丢弃（真机撞到过：再次 open/review 只是把窗口调到前台，
+  // 什么都不发生）。文件冷热启动一条路，GUI 轮询读到即删
+  writeUiWake(dataDir, id, review: false);
   final appPath =
       (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
   final exec = run ?? Process.run;
-  final result = await exec('open', ['-a', appPath, '--args', '--task=$id']);
+  final result = await exec('open', ['-a', appPath]);
   if (result.exitCode != 0) {
     sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
     return 1;

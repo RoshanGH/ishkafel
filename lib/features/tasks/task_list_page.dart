@@ -4,7 +4,10 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../core/review/review_receipt.dart';
+import '../../core/storage/ui_wake.dart';
 import '../review/review_page.dart';
+import '../settings/settings_providers.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
@@ -64,6 +67,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   bool _jumpedToInitialTask = false;
 
   void _openInitialTask() {
+    _startWakeWatcher();
     final id = ref.read(initialTaskIdProvider);
     if (id == null || _jumpedToInitialTask) return;
     _jumpedToInitialTask = true;
@@ -74,20 +78,63 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         _showSnackBar(context, '没有这个任务：$id');
         return;
       }
-      // `ishkafel review <task>` 进审核页，不进工作台——审核是把关，
-      // 不该把人扔进一个能改一切的编辑器
-      if (ref.read(initialReviewModeProvider)) {
-        await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
-        );
-        return;
-      }
       await _openTask(context, ref, task);
     });
   }
 
+  /// 轮询 CLI 写的唤醒文件（见 ui_wake.dart）。`open --args` 只在冷启动时
+  /// 生效，app 已经在跑时参数被静默丢弃——真机上人从审核页退出后再跑
+  /// `ishkafel review`，app 只是亮了一下，什么都没发生。文件冷热启动一条路
+  Timer? _wakeTimer;
+  bool _handlingWake = false;
+  String? _reviewOpenFor;
+
+  void _startWakeWatcher() {
+    _wakeTimer ??=
+        Timer.periodic(const Duration(milliseconds: 700), (_) => _pollWake());
+    // 冷启动的第一条请求不等第一个周期
+    WidgetsBinding.instance.addPostFrameCallback((_) => _pollWake());
+  }
+
+  Future<void> _pollWake() async {
+    if (_handlingWake || !mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final wake = consumeUiWake(dataDir);
+    if (wake == null) return;
+    _handlingWake = true;
+    try {
+      final task =
+          await ref.read(taskRepositoryProvider).findById(wake.taskId);
+      if (!mounted) return;
+      if (task == null) {
+        _showSnackBar(context, '没有这个任务：${wake.taskId}');
+        return;
+      }
+      if (wake.review) {
+        // 同一条任务的审核页已经开着时不再叠一层——Agent 重复跑 review
+        // 只该把窗口带到前台
+        if (_reviewOpenFor == task.id) return;
+        _reviewOpenFor = task.id;
+        try {
+          // 审核是把关，不进能改一切的工作台
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
+          );
+        } finally {
+          _reviewOpenFor = null;
+        }
+      } else {
+        await _openTask(context, ref, task);
+      }
+    } finally {
+      _handlingWake = false;
+    }
+  }
+
   @override
   void dispose() {
+    _wakeTimer?.cancel();
     _lifecycle.dispose();
     super.dispose();
   }
@@ -198,10 +245,18 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 任务卡菜单：重命名 / 重新分析 / 删除（删除为破坏性操作，需二次确认）
   Future<void> _openCardMenu(BuildContext context, WidgetRef ref,
       RenewTask task, Offset position) async {
-    final action = await showTaskCardMenu(context, position);
+    final action = await showTaskCardMenu(context, position,
+        canReview: collectReviewItems(task.replacements ?? const []).isNotEmpty);
     if (action == null || !context.mounted) return;
     final controller = ref.read(taskListProvider.notifier);
     switch (action) {
+      case TaskCardAction.review:
+        // 人不靠 CLI 也能进审核页——Agent 挑完但人当时没看，之后随时补审
+        if (context.mounted) {
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
+          );
+        }
       case TaskCardAction.rename:
         final name = await promptRenameTask(context, task);
         if (name == null) return;

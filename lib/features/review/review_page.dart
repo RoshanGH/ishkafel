@@ -1,37 +1,40 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/export/speed_fit.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/task_lock.dart';
+import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/task_list_controller.dart';
-import 'review_preview.dart';
+import 'review_hover_player.dart';
 
-/// 审核页：人过一遍 Agent 挑的候选，勾选去留，一次确认。
+/// 审核页：人过一遍 Agent 挑的候选，点掉不要的，一次确认。
 ///
-/// 「Agent 干活 → 人把关 → 导出」闭环里人把关那一环。为什么由软件提供而
-/// 不是让 Agent 现造页面：回执格式与剔除逻辑必须是固定契约（见
-/// [ReviewReceipt]）；播放的必须是本地落好的素材，Agent 手里的签名地址
-/// 隔天就 403——**看到的就是要交付的**，这只有软件自己能保证。
+/// 「Agent 干活 → 人把关 → 导出」闭环里人把关那一环。交互按「快速扫片」
+/// 设计：**悬停即播**（有声、循环）、**点卡片即剔除/恢复**——审核是把
+/// 不要的挑出来，不是重新挑一遍，所以不摆一排勾选框。
 ///
-/// 确认那一刻做三件事：剔除落进任务（[applyReviewDecisions]）、写回执、
-/// 通知列表刷新。Agent 之后用 `ishkafel review-result` 取回执，不需要
-/// 也不应该再改一遍方案。
+/// 版式：左侧位置栏（结构 + 进度，点击跳到对应段），右侧按位置分组的卡片
+/// 网格。确认那一刻剔除落进任务、写回执（见 [ReviewReceipt]），Agent 用
+/// `review-result` 取结果。
 class ReviewPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
-  /// 播放一条素材。测试注入假实现，免得碰 libmpv
-  final ReviewPreviewOpener? onPlay;
+  /// 测试注入：假播放器（真实现碰 libmpv）与假素材解析
+  final ReviewHoverPlayer? hoverPlayer;
+  final Future<String> Function(int materialId)? resolveMedia;
 
-  const ReviewPage({super.key, required this.task, this.onPlay});
+  const ReviewPage(
+      {super.key, required this.task, this.hoverPlayer, this.resolveMedia});
 
   @override
   ConsumerState<ReviewPage> createState() => _ReviewPageState();
@@ -41,16 +44,35 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   late final List<ReviewItem> _items =
       collectReviewItems(widget.task.replacements ?? const []);
 
-  /// 每条候选的去留，默认保留——审核是「把不要的挑出来」，不是重挑一遍
-  late final Map<String, bool> _keep = {
-    for (final item in _items) _keyOf(item): true,
-  };
+  /// 被剔除的候选。默认空 = 全保留：审核是把不要的挑出来
+  final Set<String> _dropped = {};
+
+  late final ReviewHoverPlayer _hover =
+      widget.hoverPlayer ?? MediaKitHoverPlayer();
+
+  /// 当前悬停在哪张卡上（null = 没有）。整页共用一个播放器，
+  /// 只有这张卡把缩略图换成视频
+  String? _hoveringKey;
+  Timer? _hoverDebounce;
+
+  final ScrollController _scroll = ScrollController();
+  final Map<String, GlobalKey> _sectionKeys = {};
 
   bool _confirmed = false;
   String? _error;
 
-  static String _keyOf(ReviewItem item) =>
+  static String keyOf(ReviewItem item) =>
       '${item.unit}/${item.shot}/${item.material}';
+
+  @override
+  void dispose() {
+    _hoverDebounce?.cancel();
+    _hover.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  // ---- 数据视图 ----
 
   PickedMaterial? _materialOf(int id) {
     for (final m in widget.task.pickedMaterials) {
@@ -59,7 +81,104 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     return null;
   }
 
-  int get _droppedCount => _keep.values.where((keep) => !keep).length;
+  /// 标了 ★ 的那些（预览版）：审核的人该知道哪条是 Agent 的首选
+  late final Set<String> _previewKeys = () {
+    final keys = <String>{};
+    final replacements = widget.task.replacements ?? const [];
+    for (var u = 0; u < replacements.length; u++) {
+      final r = replacements[u];
+      if (r.wholeCandidateIds.isNotEmpty) {
+        keys.add('$u/null/${r.wholePreviewId ?? r.wholeCandidateIds.first}');
+      }
+      for (final e in r.shotCandidateIds.entries) {
+        if (e.value.isEmpty) continue;
+        keys.add('$u/${e.key}/${r.shotPreviewIds[e.key] ?? e.value.first}');
+      }
+    }
+    return keys;
+  }();
+
+  /// 位置分组（保持出现顺序）
+  late final List<_Section> _sections = () {
+    final map = <String, _Section>{};
+    final units = widget.task.units ?? const [];
+    for (final item in _items) {
+      final id = '${item.unit}/${item.shot}';
+      map.putIfAbsent(id, () {
+        final unit = item.unit < units.length ? units[item.unit] : null;
+        final slotMs = item.shot == null
+            ? null // 整段替换：时长跟素材走，没有固定坑位
+            : (unit != null && item.shot! < unit.shots.length
+                ? unit.shots[item.shot!].durationMs
+                : null);
+        return _Section(
+          id: id,
+          title: item.shot == null
+              ? 'U${item.unit + 1} · 整段替换'
+              : 'U${item.unit + 1} · S${item.shot! + 1}',
+          transcript: unit?.transcript ?? '',
+          slotMs: slotMs,
+          items: [],
+        );
+      });
+      map[id]!.items.add(item);
+    }
+    return map.values.toList();
+  }();
+
+  int get _droppedCount => _dropped.length;
+
+  // ---- 交互 ----
+
+  void _toggle(ReviewItem item) {
+    final key = keyOf(item);
+    setState(() {
+      _dropped.contains(key) ? _dropped.remove(key) : _dropped.add(key);
+    });
+  }
+
+  void _onHover(ReviewItem item, bool entered) {
+    final key = keyOf(item);
+    _hoverDebounce?.cancel();
+    if (!entered) {
+      if (_hoveringKey == key) {
+        setState(() => _hoveringKey = null);
+        _hover.stop();
+      }
+      return;
+    }
+    // 250ms 防抖：鼠标扫过一排卡时别把每张都拉起来播一下
+    _hoverDebounce = Timer(const Duration(milliseconds: 250), () async {
+      if (!mounted) return;
+      setState(() => _hoveringKey = key);
+      final resolve = widget.resolveMedia ??
+          (int id) async {
+            final fetch = ref.read(materialFetcherProvider);
+            if (fetch == null) throw StateError('素材下载器未就绪');
+            return fetch(id);
+          };
+      try {
+        final path = await resolve(item.material);
+        if (!mounted || _hoveringKey != key) return;
+        await _hover.play(path);
+      } catch (_) {
+        if (mounted && _hoveringKey == key) {
+          setState(() => _hoveringKey = null);
+        }
+      }
+    });
+  }
+
+  void _jumpTo(String sectionId) {
+    final key = _sectionKeys[sectionId];
+    final ctx = key?.currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(ctx,
+          duration: const Duration(milliseconds: 250),
+          alignment: 0,
+          curve: Curves.easeOut);
+    }
+  }
 
   Future<void> _confirm() async {
     final dataDir = ref.read(dataDirProvider);
@@ -67,7 +186,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       setState(() => _error = '数据目录未就绪，确认不了');
       return;
     }
-    // 写任务前要拿锁：Agent 可能还在操作这条任务，两边同时写会互相覆盖
+    // 写任务前要拿锁：Agent 可能还在操作这条任务
     final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
     if (!lock.acquire('review')) {
       setState(() => _error =
@@ -81,7 +200,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             unit: item.unit,
             shot: item.shot,
             material: item.material,
-            keep: _keep[_keyOf(item)] ?? true,
+            keep: !_dropped.contains(keyOf(item)),
           ),
       ];
       final repo = ref.read(taskRepositoryProvider);
@@ -91,11 +210,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           applyReviewDecisions(current.replacements ?? const [], decisions);
       await repo.save(
           current.copyWith(replacements: pruned, updatedAt: DateTime.now()));
-      saveReviewReceipt(
-        dataDir,
-        widget.task.id,
-        ReviewReceipt(reviewedAt: DateTime.now(), decisions: decisions),
-      );
+      saveReviewReceipt(dataDir, widget.task.id,
+          ReviewReceipt(reviewedAt: DateTime.now(), decisions: decisions));
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
       setState(() {
@@ -109,13 +225,30 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     }
   }
 
+  // ---- 视图 ----
+
   @override
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: AppColors.background,
         appBar: AppBar(
           backgroundColor: AppColors.surface,
-          title: Text('审核候选 · ${widget.task.name}',
-              style: const TextStyle(fontSize: AppFontSize.emphasis)),
+          titleSpacing: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text('审核候选',
+                  style: TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      fontWeight: FontWeight.w600)),
+              Text(widget.task.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+            ],
+          ),
         ),
         body: _items.isEmpty
             ? const _EmptyState()
@@ -124,108 +257,198 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             _items.isEmpty || _confirmed ? null : _confirmBar(),
       );
 
-  Widget _reviewBody() {
-    // 按位置分组展示：一个坑位的几条候选摆在一起才好比
-    final groups = <String, List<ReviewItem>>{};
-    for (final item in _items) {
-      final key = item.shot == null
-          ? 'U${item.unit + 1} · 整段替换'
-          : 'U${item.unit + 1} 的 S${item.shot! + 1}';
-      (groups[key] ??= []).add(item);
-    }
-    return ListView(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      children: [
-        const Text(
-          '这些是 Agent 挑的候选。不要的取消勾选，然后点底下的「确认」——'
-          '被剔除的会从方案里拿掉，其余照旧。',
-          style: TextStyle(
-              fontSize: AppFontSize.caption,
-              height: 1.6,
-              color: AppColors.textSecondary),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        for (final entry in groups.entries) ...[
-          _groupHeader(entry.key, entry.value.first),
-          const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [for (final item in entry.value) _card(item)],
-          ),
-          const SizedBox(height: AppSpacing.lg),
+  Widget _reviewBody() => Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _railView(),
+          const VerticalDivider(width: 1, color: AppColors.border),
+          Expanded(child: _sectionsView()),
         ],
-      ],
-    );
-  }
+      );
 
-  Widget _groupHeader(String title, ReviewItem first) {
-    final units = widget.task.units ?? const [];
-    final transcript = first.unit < units.length
-        ? units[first.unit].transcript
-        : '';
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title,
-            style: const TextStyle(
-                fontSize: AppFontSize.body,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary)),
-        if (transcript.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(transcript,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: AppFontSize.caption,
-                    color: AppColors.textTertiary)),
-          ),
-      ],
-    );
-  }
-
-  Widget _card(ReviewItem item) {
-    final material = _materialOf(item.material);
-    final key = _keyOf(item);
-    final keep = _keep[key] ?? true;
-    final thumb = material?.thumbPath;
-    return Container(
-      width: 148,
-      decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(
-          // 被剔除的一眼能认出来：红边 + 半透明
-          color: keep ? AppColors.border : AppColors.red,
-        ),
-      ),
-      child: Opacity(
-        opacity: keep ? 1 : 0.45,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+  /// 左栏：位置导航 + 进度。审核是逐位置过一遍的活，要能看到全貌
+  Widget _railView() => SizedBox(
+        width: 220,
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
           children: [
-            // 首帧图：本地文件，不依赖会过期的签名地址
-            AspectRatio(
-              aspectRatio: 9 / 16,
-              child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(8)),
-                child: thumb != null && File(thumb).existsSync()
-                    ? Image.file(File(thumb), fit: BoxFit.cover)
-                    : Container(
-                        color: AppColors.surfaceCard,
-                        child: const Icon(Icons.movie_outlined,
-                            color: AppColors.textTertiary)),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(
+                  AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
+              child: Text('位置',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textSecondary)),
+            ),
+            for (final section in _sections)
+              _RailRow(
+                title: section.title,
+                kept: section.items
+                    .where((i) => !_dropped.contains(keyOf(i)))
+                    .length,
+                total: section.items.length,
+                onTap: () => _jumpTo(section.id),
+              ),
+          ],
+        ),
+      );
+
+  Widget _sectionsView() => ListView(
+        controller: _scroll,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        children: [
+          const Text('悬停播放，点击剔除/恢复。确认后被剔除的从方案里拿掉，其余照旧。',
+              style: TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textTertiary)),
+          const SizedBox(height: AppSpacing.lg),
+          for (final section in _sections) ...[
+            KeyedSubtree(
+              key: _sectionKeys.putIfAbsent(section.id, GlobalKey.new),
+              child: _sectionHeader(section),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              spacing: AppSpacing.md,
+              runSpacing: AppSpacing.md,
+              children: [
+                for (final item in section.items)
+                  _card(item, slotMs: section.slotMs),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xl),
+          ],
+        ],
+      );
+
+  Widget _sectionHeader(_Section section) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            Text(section.title,
+                style: const TextStyle(
+                    fontSize: AppFontSize.emphasis,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            if (section.slotMs case final ms?) ...[
+              const SizedBox(width: AppSpacing.sm),
+              Text('坑位 ${(ms / 1000).toStringAsFixed(1)}s',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textTertiary)),
+            ],
+          ]),
+          if (section.transcript.isNotEmpty)
+            Container(
+              constraints: const BoxConstraints(maxWidth: 720),
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(section.transcript,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      height: 1.5,
+                      color: AppColors.textSecondary)),
+            ),
+        ],
+      );
+
+  Widget _card(ReviewItem item, {int? slotMs}) {
+    final key = keyOf(item);
+    final material = _materialOf(item.material);
+    final dropped = _dropped.contains(key);
+    final hovering = _hoveringKey == key;
+    final thumb = material?.thumbPath;
+
+    // 镜头替换要变速对齐坑位：倍率如实标出来，人看一眼就知道会不会像快进
+    String? rate;
+    if (slotMs != null && slotMs > 0 && material?.durationMs != null) {
+      rate = SpeedFit.describe(
+          SpeedFit.factorFor(candidateMs: material!.durationMs!, slotMs: slotMs));
+    }
+
+    return MouseRegion(
+      onEnter: (_) => _onHover(item, true),
+      onExit: (_) => _onHover(item, false),
+      child: GestureDetector(
+        key: Key('review-card-$key'),
+        onTap: () => _toggle(item),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 120),
+          opacity: dropped ? 0.38 : 1,
+          child: Container(
+            width: 150,
+            decoration: BoxDecoration(
+              color: AppColors.surfaceRaised,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(
+                color: dropped
+                    ? AppColors.red
+                    : (hovering ? AppColors.accentBlue : AppColors.border),
+                width: dropped || hovering ? 1.5 : 1,
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.xs),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AspectRatio(
+                  aspectRatio: 9 / 16,
+                  child: ClipRRect(
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(8)),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (thumb != null && File(thumb).existsSync())
+                          Image.file(File(thumb), fit: BoxFit.cover)
+                        else
+                          Container(
+                              color: AppColors.surfaceCard,
+                              child: const Icon(Icons.movie_outlined,
+                                  color: AppColors.textTertiary)),
+                        // 悬停时缩略图上盖真视频（有声、循环）
+                        if (hovering && !dropped) _hover.buildVideo(),
+                        // 角标们
+                        Positioned(
+                          left: 6,
+                          bottom: 6,
+                          child: Row(children: [
+                            if (material?.durationMs case final ms?)
+                              _chip('${(ms / 1000).toStringAsFixed(1)}s'),
+                            if (rate != null) ...[
+                              const SizedBox(width: 4),
+                              _chip(rate, color: AppColors.orange),
+                            ],
+                          ]),
+                        ),
+                        if (_previewKeys.contains(key))
+                          Positioned(
+                              right: 6, top: 6, child: _chip('★ 预览版')),
+                        if (dropped)
+                          Center(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: AppSpacing.sm,
+                                  vertical: AppSpacing.xs),
+                              decoration: BoxDecoration(
+                                color: AppColors.red.withValues(alpha: 0.85),
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.sm),
+                              ),
+                              child: const Text('已剔除',
+                                  style: TextStyle(
+                                      fontSize: AppFontSize.caption,
+                                      color: Colors.white)),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.xs),
+                  child: Text(
                     material == null
                         ? '素材 ${item.material}'
                         : _tail(material.name),
@@ -233,48 +456,34 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                         fontSize: AppFontSize.micro,
-                        color: AppColors.textSecondary),
+                        color: AppColors.textTertiary),
                   ),
-                  Row(
-                    children: [
-                      if (material?.durationMs case final ms?)
-                        Text('${(ms / 1000).toStringAsFixed(1)}s',
-                            style: const TextStyle(
-                                fontSize: AppFontSize.micro,
-                                color: AppColors.textTertiary)),
-                      const Spacer(),
-                      IconButton(
-                        key: Key('review-play-$key'),
-                        visualDensity: VisualDensity.compact,
-                        tooltip: '播放',
-                        icon: const Icon(Icons.play_circle_outline, size: 18),
-                        color: AppColors.accentBlue,
-                        onPressed: () => (widget.onPlay ?? showReviewPreview)(
-                            context, ref, item.material,
-                            name: material?.name ?? '素材 ${item.material}'),
-                      ),
-                      Checkbox(
-                        key: Key('review-keep-$key'),
-                        value: keep,
-                        onChanged: (v) =>
-                            setState(() => _keep[key] = v ?? true),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
 
+  Widget _chip(String text, {Color? color}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(AppRadius.xs),
+        ),
+        child: Text(text,
+            style: TextStyle(
+                fontSize: AppFontSize.micro, color: color ?? Colors.white)),
+      );
+
   static String _tail(String name) =>
-      name.length <= 16 ? name : '…${name.substring(name.length - 15)}';
+      name.length <= 18 ? name : '…${name.substring(name.length - 17)}';
 
   Widget _confirmBar() => Container(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.md),
         decoration: const BoxDecoration(
           color: AppColors.surface,
           border: Border(top: BorderSide(color: AppColors.border)),
@@ -285,10 +494,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               Expanded(
                 child: Text(
                   _error ??
-                      '保留 ${_items.length - _droppedCount} 条 · '
-                          '剔除 $_droppedCount 条',
+                      '共 ${_items.length} 条 · 保留 '
+                          '${_items.length - _droppedCount} · '
+                          '剔除 $_droppedCount',
                   style: TextStyle(
-                      fontSize: AppFontSize.caption,
+                      fontSize: AppFontSize.body,
                       color: _error == null
                           ? AppColors.textSecondary
                           : AppColors.orange),
@@ -297,7 +507,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               FilledButton(
                 key: const Key('review-confirm'),
                 onPressed: _confirm,
-                child: const Text('确认'),
+                child: Text(_droppedCount == 0
+                    ? '确认 · 全部保留'
+                    : '确认 · 剔除 $_droppedCount 条'),
               ),
             ],
           ),
@@ -326,6 +538,65 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       );
 }
 
+class _Section {
+  final String id;
+  final String title;
+  final String transcript;
+
+  /// 镜头替换的固定坑位时长；整段替换为 null（时长跟素材走）
+  final int? slotMs;
+  final List<ReviewItem> items;
+
+  _Section({
+    required this.id,
+    required this.title,
+    required this.transcript,
+    required this.slotMs,
+    required this.items,
+  });
+}
+
+class _RailRow extends StatelessWidget {
+  final String title;
+  final int kept;
+  final int total;
+  final VoidCallback onTap;
+
+  const _RailRow(
+      {required this.title,
+      required this.kept,
+      required this.total,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(title,
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textPrimary)),
+              ),
+              Text(
+                kept == total ? '$total 条' : '$kept/$total',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    // 有剔除的位置标橙——一眼看出哪儿动过刀
+                    color: kept == total
+                        ? AppColors.textTertiary
+                        : AppColors.orange),
+              ),
+            ],
+          ),
+        ),
+      );
+}
+
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
@@ -335,7 +606,3 @@ class _EmptyState extends StatelessWidget {
             style: TextStyle(color: AppColors.textTertiary)),
       );
 }
-
-/// 首帧图找不到时兜底用（保留引用，避免误删 path 依赖）
-String reviewThumbFallback(Directory dataDir) =>
-    p.join(dataDir.path, 'picked_thumbs');

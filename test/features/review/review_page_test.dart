@@ -10,6 +10,7 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/review/review_receipt.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/review/review_hover_player.dart';
 import 'package:ishkafel/features/review/review_page.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
@@ -80,7 +81,8 @@ void main() {
       child: MaterialApp(
         home: ReviewPage(
           task: task,
-          onPlay: (_, _, _, {required name}) async {},
+          hoverPlayer: _FakeHoverPlayer(),
+          resolveMedia: (_) async => '/tmp/fake.mp4',
         ),
       ),
     ));
@@ -97,18 +99,21 @@ void main() {
           }),
         ]));
 
-    expect(find.text('U1 · 整段替换'), findsOneWidget);
-    expect(find.text('U2 的 S1'), findsOneWidget);
-    expect(find.textContaining('保留 3 条 · 剔除 0 条'), findsOneWidget);
+    // 左栏与正文各出现一次
+    expect(find.text('U1 · 整段替换'), findsNWidgets(2));
+    expect(find.text('U2 · S1'), findsNWidgets(2));
+    expect(find.textContaining('保留 3 · 剔除 0'), findsOneWidget);
     expect(find.text('第一句'), findsOneWidget, reason: '台词给上下文');
   });
 
   testWidgets('取消勾选 → 确认：剔除落进任务、回执落盘', (tester) async {
     await pump(tester, taskWith([UnitReplacement.whole(const [101, 102])]));
 
-    await tester.tap(find.byKey(const Key('review-keep-0/null/101')));
+    // 点卡片即剔除——审核是把不要的挑出来，不摆一排勾选框
+    await tester.tap(find.byKey(const Key('review-card-0/null/101')));
     await tester.pump();
-    expect(find.textContaining('保留 1 条 · 剔除 1 条'), findsOneWidget);
+    expect(find.text('已剔除'), findsOneWidget);
+    expect(find.textContaining('保留 1 · 剔除 1'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('review-confirm')));
     await tester.pumpAndSettle();
@@ -143,4 +148,18 @@ void main() {
     expect(find.textContaining('agent 正在操作这个任务'), findsOneWidget);
     expect(readReviewReceipt(dataDir, 'rv1'), isNull, reason: '没确认成就不能有回执');
   });
+}
+
+class _FakeHoverPlayer implements ReviewHoverPlayer {
+  @override
+  Future<void> play(String path) async {}
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Widget buildVideo() => const SizedBox.shrink();
+
+  @override
+  void dispose() {}
 }

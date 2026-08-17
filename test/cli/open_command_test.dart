@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
+import 'package:ishkafel/core/storage/ui_wake.dart';
 
 /// `ishkafel open <task>` —— 把 GUI 弹出来并落到这个任务。
 ///
@@ -30,7 +31,9 @@ void main() {
     );
     expect(code, 0);
     expect(calls.single.first, 'open');
-    expect(calls.single, containsAllInOrder(['-a', '--args', '--task=t1']));
+    // 意图走唤醒文件：--args 只在冷启动生效，app 在跑时会被静默丢弃
+    expect(calls.single.any((a) => a.contains('--task')), isFalse);
+    expect(consumeUiWake(dir)!.taskId, 't1');
   });
 
   test('app 装在别处时认 ISHKAFEL_APP', () async {
