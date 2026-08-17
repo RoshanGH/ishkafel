@@ -35,9 +35,9 @@ void main() {
         reason: '替两家写技能目录、别家不管，会让人以为只支持那两家');
   });
 
-  testWidgets('说清用法：粘给任何 Agent 让它自己装', (tester) async {
+  testWidgets('说清用法：粘过去就行，自装指令在文档里', (tester) async {
     await pump(tester);
-    expect(find.textContaining('让它自己装成技能'), findsOneWidget);
+    expect(find.textContaining('自己装成技能并回报'), findsOneWidget);
   });
 
   testWidgets('复制出去的是带 frontmatter 的完整说明书', (tester) async {
@@ -54,6 +54,6 @@ void main() {
     await pump(tester);
     await tester.tap(find.text('复制全文'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('把这份技能装给你自己'), findsOneWidget);
+    expect(find.textContaining('技能已装到哪儿'), findsOneWidget);
   });
 }
