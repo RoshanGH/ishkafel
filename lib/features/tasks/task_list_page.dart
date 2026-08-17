@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../review/review_page.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
@@ -71,6 +72,14 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       if (!mounted) return;
       if (task == null) {
         _showSnackBar(context, '没有这个任务：$id');
+        return;
+      }
+      // `ishkafel review <task>` 进审核页，不进工作台——审核是把关，
+      // 不该把人扔进一个能改一切的编辑器
+      if (ref.read(initialReviewModeProvider)) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
+        );
         return;
       }
       await _openTask(context, ref, task);

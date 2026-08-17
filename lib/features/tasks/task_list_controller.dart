@@ -549,3 +549,7 @@ final taskListProvider =
 /// null 表示照常进列表页。用完即弃：打开过一次就不该再自动跳，否则用户
 /// 返回列表会被立刻弹回去
 final initialTaskIdProvider = Provider<String?>((ref) => null);
+
+/// 启动时是否进**审核模式**（来自 `ishkafel review <task>` 传的 `--review`）。
+/// 只有配合 [initialTaskIdProvider] 一起才有意义
+final initialReviewModeProvider = Provider<bool>((ref) => false);
