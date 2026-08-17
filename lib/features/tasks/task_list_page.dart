@@ -118,9 +118,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         _reviewOpenFor = task.id;
         try {
           // 审核是把关，不进能改一切的工作台
-          await Navigator.of(context).push(
+          final outcome = await Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
           );
+          _showReviewOutcome(outcome);
         } finally {
           _reviewOpenFor = null;
         }
@@ -130,6 +131,12 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     } finally {
       _handlingWake = false;
     }
+  }
+
+  /// 审核回来弹条结果——回到来处继续干活，审核页不是终点站
+  void _showReviewOutcome(Object? outcome) {
+    if (outcome is! ReviewOutcome || !mounted) return;
+    _showSnackBar(context, '审核完成：保留 ${outcome.kept} 条 · 剔除 ${outcome.dropped} 条');
   }
 
   @override
@@ -253,9 +260,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       case TaskCardAction.review:
         // 人不靠 CLI 也能进审核页——Agent 挑完但人当时没看，之后随时补审
         if (context.mounted) {
-          await Navigator.of(context).push(
+          final outcome = await Navigator.of(context).push(
             MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
           );
+          _showReviewOutcome(outcome);
         }
       case TaskCardAction.rename:
         final name = await promptRenameTask(context, task);

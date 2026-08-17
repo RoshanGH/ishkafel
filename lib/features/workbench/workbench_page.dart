@@ -11,6 +11,8 @@ import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/editing/edit_locks.dart';
 import '../../core/editing/blank_unit_ops.dart';
+import '../../core/review/review_receipt.dart';
+import '../review/review_page.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
@@ -1100,6 +1102,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 审核候选：人挑完（或 Agent 挑完）在这里过一遍再导。
+  ///
+  /// 内嵌模式：审核页把决定交回来，在**本会话**里应用并走既有的落库通路
+  /// ——同一个人的同一次编辑，没有第二把锁
+  Future<void> _openReview() async {
+    final outcome = await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReviewPage(
+          task: _task.copyWith(
+              replacements: _replacements, units: _editor?.units),
+          onApply: (decisions) {
+            final pruned = applyReviewDecisions(
+                _replacements ?? const [], decisions);
+            unawaited(_onReplacementsChanged(pruned));
+          },
+        ),
+      ),
+    );
+    if (outcome is ReviewOutcome && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('审核完成：保留 ${outcome.kept} 条 · '
+              '剔除 ${outcome.dropped} 条')));
+    }
+  }
+
   /// 进入矩阵导出。
   ///
   /// 这里曾经是「确认切分，进入替换选材」——切分和选材已经合并在本工作台里
@@ -1553,6 +1580,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               combinationText: _plan.isEmpty ? null : combinationSummaryText(_plan),
               blockedReason: blocked,
               onExport: blocked == null ? _openExport : null,
+              onReview: _isEditable &&
+                      _lock == null &&
+                      collectReviewItems(_replacements ?? const []).isNotEmpty
+                  ? _openReview
+                  : null,
             );
           },
         ),

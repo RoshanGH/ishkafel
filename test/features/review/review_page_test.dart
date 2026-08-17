@@ -8,7 +8,6 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
-import 'package:ishkafel/core/review/review_receipt.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/review/review_hover_player.dart';
@@ -93,23 +92,44 @@ void main() {
     return file.path;
   }
 
+  Object? popped;
+
   Future<void> pump(WidgetTester tester, RenewTask task) async {
     repo.tasks[task.id] = task;
+    popped = null;
     await tester.pumpWidget(ProviderScope(
       overrides: [
         dataDirProvider.overrideWithValue(dataDir),
         taskRepositoryProvider.overrideWithValue(repo),
       ],
       child: MaterialApp(
-        home: ReviewPage(
-          task: task,
-          hoverPlayer: _FakeHoverPlayer(),
-          resolveMedia: (_) async => '/tmp/fake.mp4',
-          extractOriginalThumb: extractThumb,
+        // 审核页确认后 pop 回来处——用一个真实的 push 才能接到返回值
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () async {
+                  popped = await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReviewPage(
+                        task: task,
+                        hoverPlayer: _FakeHoverPlayer(),
+                        resolveMedia: (_) async => '/tmp/fake.mp4',
+                        extractOriginalThumb: extractThumb,
+                      ),
+                    ),
+                  );
+                },
+                child: const Text('进入审核'),
+              ),
+            ),
+          ),
         ),
       ),
     ));
-    await tester.pump();
+    await tester.tap(find.text('进入审核'));
+    // 把路由动画走完：动画中页面整体右偏，右下角的确认按钮会在视口外
+    await tester.pumpAndSettle();
   }
 
   testWidgets('候选按位置分组列出，默认全部保留', (tester) async {
@@ -148,15 +168,12 @@ void main() {
     await tester.tap(find.byKey(const Key('review-confirm')));
     await tester.pumpAndSettle();
 
-    // 任务：101 被剔掉
+    // 任务：101 被剔掉——主流程即结果，没有回执这层中间产物
     expect(repo.tasks['rv1']!.replacements![0].wholeCandidateIds, [102]);
-    // 回执：两条决定都在，Agent 能取到
-    final receipt = readReviewReceipt(dataDir, 'rv1')!;
-    expect(receipt.droppedCount, 1);
-    expect(receipt.keptCount, 1);
-    // 界面进完成态，并告诉人 Agent 那边怎么拿结果
-    expect(find.textContaining('审核完成'), findsOneWidget);
-    expect(find.textContaining('review-result'), findsOneWidget);
+    // 确认后回到来处，带上结果给来处弹条用——审核页不是终点站
+    expect(find.byKey(const Key('review-confirm')), findsNothing);
+    expect((popped as ReviewOutcome).dropped, 1);
+    expect((popped as ReviewOutcome).kept, 1);
   });
 
   testWidgets('原片卡点了不剔除——它是参照物，不是候选', (tester) async {
@@ -191,18 +208,28 @@ void main() {
     expect(find.byKey(const Key('review-confirm')), findsNothing);
   });
 
-  testWidgets('Agent 占着锁时确认被拦，说清等谁', (tester) async {
-    final task = taskWith([UnitReplacement.whole(const [101])]);
-    await pump(tester, task);
-    // 模拟 Agent 正持锁
+  testWidgets('Agent 占着锁时**进门就拦**，给强制接管——互斥是会话级的', (tester) async {
+    // 只在确认那一刻抢锁是补丁：审核期间任务不设防，Agent 中途改方案
+    // 会让确认剪的是过期状态
     final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
     lock.acquire('agent');
 
-    await tester.tap(find.byKey(const Key('review-confirm')));
-    await tester.pumpAndSettle();
+    await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
 
     expect(find.textContaining('agent 正在操作这个任务'), findsOneWidget);
-    expect(readReviewReceipt(dataDir, 'rv1'), isNull, reason: '没确认成就不能有回执');
+    expect(find.byKey(const Key('review-confirm')), findsNothing,
+        reason: '被拦时不该出现确认按钮');
+
+    // 强制接管后照常进入
+    await tester.tap(find.byKey(const Key('review-takeover')));
+    await tester.pump();
+    expect(find.byKey(const Key('review-confirm')), findsOneWidget);
+  });
+
+  testWidgets('独立模式进门持锁——审核期间 Agent 的写入会被拒', (tester) async {
+    await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
+    final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
+    expect(lock.acquire('agent'), isFalse, reason: '人在审核，Agent 拿不到锁');
   });
 }
 

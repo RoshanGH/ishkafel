@@ -33,6 +33,11 @@ import 'review_hover_player.dart';
 class ReviewPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
+  /// 工作台内嵌模式：确认时把决定交回工作台，由它在自己的会话里应用
+  /// ——同一个人的同一次编辑会话，没有第二把锁。为 null 时是**独立模式**
+  /// （CLI 唤醒 / 任务列表进入）：进门持锁、确认自己写盘
+  final void Function(List<ReviewDecision> decisions)? onApply;
+
   /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
   final ReviewHoverPlayer? hoverPlayer;
   final Future<String> Function(int materialId)? resolveMedia;
@@ -41,6 +46,7 @@ class ReviewPage extends ConsumerStatefulWidget {
   const ReviewPage({
     super.key,
     required this.task,
+    this.onApply,
     this.hoverPlayer,
     this.resolveMedia,
     this.extractOriginalThumb,
@@ -68,11 +74,20 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   final ScrollController _scroll = ScrollController();
   final Map<String, GlobalKey> _sectionKeys = {};
 
-  bool _confirmed = false;
   String? _error;
 
   /// 原片段落的首帧图（分组 id → 本地 jpg）。抽出来一张补一张
   final Map<String, String> _originThumbs = {};
+
+  /// 独立模式的会话锁。**进门就持**：审核期间任务就是「人在处理」，
+  /// Agent 这时的写入要被拒（互斥是双向的——反过来 Agent 在处理时，
+  /// 这里进不来，见 [_blockedBy]）。工作台内嵌模式不碰锁：那是同一次会话
+  TaskLockFile? _lock;
+  Timer? _lockHeartbeat;
+  static String get _holder => '人（审核中）';
+
+  /// 进门时锁在别人手里：显示是谁、给强制接管
+  String? _blockedBy;
 
   static String keyOf(ReviewItem item) =>
       '${item.unit}/${item.shot}/${item.material}';
@@ -80,7 +95,33 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.onApply == null) _acquireSessionLock();
     _loadOriginThumbs();
+  }
+
+  void _acquireSessionLock() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
+    if (!lock.acquire(_holder)) {
+      _blockedBy = lock.read()?.holder ?? '别人';
+      return;
+    }
+    _lock = lock;
+    // 心跳让锁活着：审核可能一看十分钟，超时失效等于没锁
+    _lockHeartbeat = Timer.periodic(
+        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
+  }
+
+  void _forceTakeover() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
+    lock.forceTakeover(_holder);
+    setState(() => _blockedBy = null);
+    _lock = lock;
+    _lockHeartbeat = Timer.periodic(
+        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
   }
 
   /// 给每个位置组的原片段落抽一张首帧图（取中点：两端常踩在转场上，
@@ -125,6 +166,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
 
   @override
   void dispose() {
+    _lockHeartbeat?.cancel();
+    _lock?.release(_holder);
     _hoverDebounce?.cancel();
     _hover.dispose();
     _scroll.dispose();
@@ -254,49 +297,42 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   }
 
   Future<void> _confirm() async {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) {
-      setState(() => _error = '数据目录未就绪，确认不了');
+    final decisions = [
+      for (final item in _items)
+        ReviewDecision(
+          unit: item.unit,
+          shot: item.shot,
+          material: item.material,
+          keep: !_dropped.contains(keyOf(item)),
+        ),
+    ];
+
+    // 工作台内嵌：决定交回工作台，它在自己的会话里应用并走既有的自动保存
+    if (widget.onApply case final apply?) {
+      apply(decisions);
+      if (mounted) Navigator.of(context).pop(_outcome());
       return;
     }
-    // 写任务前要拿锁：Agent 可能还在操作这条任务
-    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    if (!lock.acquire('review')) {
-      setState(() => _error =
-          '${lock.read()?.holder ?? '别人'} 正在操作这个任务，等它结束再确认');
-      return;
-    }
+
+    // 独立模式：锁在进门时已持有，这里直接写盘
     try {
-      final decisions = [
-        for (final item in _items)
-          ReviewDecision(
-            unit: item.unit,
-            shot: item.shot,
-            material: item.material,
-            keep: !_dropped.contains(keyOf(item)),
-          ),
-      ];
       final repo = ref.read(taskRepositoryProvider);
-      // 以盘上最新的为准：审核期间 Agent 可能改过任务
       final current = await repo.findById(widget.task.id) ?? widget.task;
       final pruned =
           applyReviewDecisions(current.replacements ?? const [], decisions);
       await repo.save(
           current.copyWith(replacements: pruned, updatedAt: DateTime.now()));
-      saveReviewReceipt(dataDir, widget.task.id,
-          ReviewReceipt(reviewedAt: DateTime.now(), decisions: decisions));
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
-      setState(() {
-        _confirmed = true;
-        _error = null;
-      });
+      // 审核完回到来处——它不是终点站，主流程才是
+      Navigator.of(context).pop(_outcome());
     } catch (e) {
       if (mounted) setState(() => _error = '确认失败：$e');
-    } finally {
-      lock.release('review');
     }
   }
+
+  ReviewOutcome _outcome() => ReviewOutcome(
+      kept: _items.length - _droppedCount, dropped: _droppedCount);
 
   // ---- 视图 ----
 
@@ -323,11 +359,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             ],
           ),
         ),
-        body: _items.isEmpty
-            ? const _EmptyState()
-            : (_confirmed ? _doneState() : _reviewBody()),
+        body: _blockedBy != null
+            ? _blockedState()
+            : (_items.isEmpty ? const _EmptyState() : _reviewBody()),
         bottomNavigationBar:
-            _items.isEmpty || _confirmed ? null : _confirmBar(),
+            _items.isEmpty || _blockedBy != null ? null : _confirmBar(),
       );
 
   Widget _reviewBody() => Row(
@@ -686,26 +722,43 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ),
       );
 
-  Widget _doneState() => Center(
+  /// 进门时锁在别人手里。互斥与工作台同一套长相：说清是谁、给强制接管
+  Widget _blockedState() => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.check_circle_outline,
-                size: 48, color: AppColors.green),
+            const Icon(Icons.lock_outline,
+                size: 40, color: AppColors.orange),
             const SizedBox(height: AppSpacing.md),
-            Text(
-              '审核完成：保留 ${_items.length - _droppedCount} 条，'
-              '剔除 $_droppedCount 条。\n'
-              '剔除已落进任务，Agent 用 review-result 就能取到结果。',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                  fontSize: AppFontSize.body,
-                  height: 1.8,
-                  color: AppColors.textPrimary),
-            ),
+            Text('$_blockedBy 正在操作这个任务',
+                style: const TextStyle(
+                    fontSize: AppFontSize.body, color: AppColors.textPrimary)),
+            const SizedBox(height: AppSpacing.xs),
+            const Text('等它结束再进，或者强制接管（它那边的写入会被拒绝）',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textTertiary)),
+            const SizedBox(height: AppSpacing.md),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('返回')),
+              const SizedBox(width: AppSpacing.sm),
+              FilledButton(
+                  key: const Key('review-takeover'),
+                  onPressed: _forceTakeover,
+                  child: const Text('强制接管')),
+            ]),
           ],
         ),
       );
+}
+
+/// 审核结果（pop 回来处时带上，来处弹条提示用）
+class ReviewOutcome {
+  final int kept;
+  final int dropped;
+  const ReviewOutcome({required this.kept, required this.dropped});
 }
 
 class _Section {

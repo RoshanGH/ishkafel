@@ -49,6 +49,9 @@ class TaskArtifacts {
   /// 已经废弃、但可能还躺在老用户盘上的目录。开机扫一遍清掉——
   /// 磁盘上躺着的每一份数据都要有人读、有人删，没人读的就该走
   static const retiredDirNames = [
+    // 审核回执（短命的中间设计）：审核完一切回到主流程，任务里的方案就是
+    // 最终结果，回执没有第二个读者
+    'reviews',
     // 「把素材转成原片规格」那套（MaterialNormalizer）已随代理方案退休，
     // 产物改放 preview_proxy。真机上这里躺着 77MB
     'material_normalized',
@@ -67,15 +70,11 @@ class TaskArtifacts {
 
   Directory get coversDir => Directory(p.join(dataDir.path, 'covers'));
 
-  /// 审核回执：`reviews/<taskId>.json`（一个任务一个文件，不是子目录）
-  Directory get reviewsDir => Directory(p.join(dataDir.path, 'reviews'));
-
   Directory get stemsDir => Directory(p.join(workDir.path, 'stems'));
 
   /// 属于 [taskId] 的全部产物（文件与目录都算）
   List<FileSystemEntity> of(String taskId) => [
         File(p.join(coversDir.path, '$taskId.jpg')),
-        File(p.join(reviewsDir.path, '$taskId.json')),
         ..._workEntities().where(
             (e) => artifactBelongsTo(p.basename(e.path), taskId)),
         Directory(p.join(stemsDir.path, taskId)),
@@ -118,7 +117,6 @@ class TaskArtifacts {
 
     return [
       ..._children(coversDir).where((e) => orphan(_stem(e))),
-      ..._children(reviewsDir).where((e) => orphan(_stem(e))),
       ..._workEntities().where((e) => orphan(p.basename(e.path))),
       ..._children(stemsDir).where((e) => orphan(p.basename(e.path))),
       for (final name in perTaskDirNames)

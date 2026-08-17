@@ -315,6 +315,9 @@ class WorkbenchBottomBar extends StatelessWidget {
 
   final VoidCallback? onExport;
 
+  /// 有已挑候选时出现：人的审核主入口。为 null 不显示
+  final VoidCallback? onReview;
+
   /// 有几句指定了新音色。为 0 时不显示「生成配音」——没选音色的片子
   /// 生成个什么
   final int voiceCount;
@@ -328,6 +331,7 @@ class WorkbenchBottomBar extends StatelessWidget {
     this.combinationText,
     this.blockedReason,
     this.onExport,
+    this.onReview,
     this.voiceCount = 0,
     this.onGenerateVoices,
   });
@@ -374,6 +378,14 @@ class WorkbenchBottomBar extends StatelessWidget {
               onPressed: onGenerateVoices,
               icon: const Icon(Icons.graphic_eq, size: 16),
               label: Text('生成配音（$voiceCount 句）'),
+            ),
+            const SizedBox(width: 8),
+          ],
+          if (onReview != null) ...[
+            OutlinedButton(
+              key: const Key('workbench-review-btn'),
+              onPressed: onReview,
+              child: const Text('审核候选'),
             ),
             const SizedBox(width: 8),
           ],

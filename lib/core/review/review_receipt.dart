@@ -1,20 +1,12 @@
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:path/path.dart' as p;
-
 import '../replacement/replacement_plan.dart';
 
-/// 人审核 Agent 挑的候选：这一层是**固定的回执格式**与**确定的应用规则**。
+/// 人审核挑好的候选：这一层是**确定的剔除规则**。
 ///
-/// Agent 现造审核页的问题就在这两处：回执格式每次现编、剔除逻辑每次现写，
-/// 换个 Agent 换个会话就变。把它们钉进软件，任何 Agent 走到审核这一步，
-/// 拿到的都是同一份契约：
-///
-/// - GUI 审核完把 [ReviewReceipt] 写到 `<dataDir>/reviews/<task>.json`
-/// - Agent 用 `ishkafel review-result <task>` 取回执
-/// - 剔除已经由 GUI 在确认那一刻落进任务（[applyReviewDecisions]），
-///   Agent 不需要也不应该再改一遍方案
+/// 审核完一切回到主流程：剔除在确认那一刻落进任务，之后
+/// `ishkafel task <id>` 里的方案**就是**最终结果——没有回执、没有第二个
+/// 真相来源。Agent 想知道剔了哪几条，拿自己提交过的方案和现状一比就有；
+/// 人确认没确认，由人开口告诉它（等不等、等多久是人和 Agent 之间的策略，
+/// 软件只提供审核功能，不当流程裁判）
 
 /// 一条候选的去留。[shot] 为 null 表示整体替换的候选，否则是镜头替换
 class ReviewDecision {
@@ -43,34 +35,6 @@ class ReviewDecision {
       shot: raw['shot'] is int ? raw['shot'] as int : null,
       material: material,
       keep: raw['keep'] != false,
-    );
-  }
-}
-
-class ReviewReceipt {
-  final DateTime reviewedAt;
-  final List<ReviewDecision> decisions;
-
-  const ReviewReceipt({required this.reviewedAt, required this.decisions});
-
-  int get keptCount => decisions.where((d) => d.keep).length;
-  int get droppedCount => decisions.length - keptCount;
-
-  Map<String, dynamic> toJson() => {
-        'reviewedAt': reviewedAt.toIso8601String(),
-        'decisions': [for (final d in decisions) d.toJson()],
-      };
-
-  static ReviewReceipt? tryFromJson(Object? raw) {
-    if (raw is! Map) return null;
-    final at = DateTime.tryParse('${raw['reviewedAt']}');
-    if (at == null) return null;
-    return ReviewReceipt(
-      reviewedAt: at,
-      decisions: [
-        for (final item in (raw['decisions'] as List? ?? []))
-          ?ReviewDecision.tryFromJson(item),
-      ],
     );
   }
 }
@@ -160,25 +124,5 @@ UnitReplacement _pruned(
         },
         previewIds: r.shotPreviewIds,
       );
-  }
-}
-
-File reviewReceiptFile(Directory dataDir, String taskId) =>
-    File(p.join(dataDir.path, 'reviews', '$taskId.json'));
-
-void saveReviewReceipt(
-    Directory dataDir, String taskId, ReviewReceipt receipt) {
-  final file = reviewReceiptFile(dataDir, taskId);
-  file.parent.createSync(recursive: true);
-  file.writeAsStringSync(jsonEncode(receipt.toJson()));
-}
-
-ReviewReceipt? readReviewReceipt(Directory dataDir, String taskId) {
-  final file = reviewReceiptFile(dataDir, taskId);
-  if (!file.existsSync()) return null;
-  try {
-    return ReviewReceipt.tryFromJson(jsonDecode(file.readAsStringSync()));
-  } catch (_) {
-    return null; // 文件坏了当没审核过，别炸
   }
 }

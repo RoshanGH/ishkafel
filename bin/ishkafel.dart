@@ -91,8 +91,6 @@ Future<void> main(List<String> args) async {
         install: parsed['install'] as bool,
       ),
     'review' => await runReviewCommand(rest: rest, dataDir: dataDir),
-    'review-result' =>
-      await runReviewResultCommand(rest: rest, dataDir: dataDir),
     'blank' => await runBlankCommand(
         rest: rest,
         dataDir: dataDir,
@@ -152,10 +150,8 @@ ishkafel —— 成片翻新工具的命令行入口
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）
   open <id>        把 app 弹出来并落到这个任务的工作台
-  review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留
-  review-result <id>
-                   取人审核的回执（保留/剔除各几条、逐条决定）。剔除已在
-                   确认那一刻落进任务，之后直接 export 即可
+  review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
+                   确认后 task <id> 里的方案就是最终结果，等用户发话再继续
   apply plans <id> --file <json>
                    提交完整方案列表（每条都是整体设计过的，不做笛卡尔积）
   export <id> [--out <目录>] [--resolution N] [--fps N]
