@@ -41,7 +41,7 @@ void main() {
     test('命令参数正确', () async {
       late String usedExe;
       late List<String> usedArgs;
-      final service = MiaoaTagService(run: (exe, args) async {
+      final service = MiaoaTagService(binary: 'miaoa', run: (exe, args) async {
         usedExe = exe;
         usedArgs = args;
         return ProcessResult(1, 0, groupListJson, '');

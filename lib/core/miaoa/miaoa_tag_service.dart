@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import '../ffmpeg/process_runner.dart';
+import 'miaoa_locator.dart';
 import '../log/app_log.dart';
 
 /// miaoa CLI 调用失败（非零退出码或返回内容非法）
@@ -85,7 +86,9 @@ class MiaoaTagService {
   final ProcessRunner run;
   final String binary;
 
-  MiaoaTagService({this.run = systemProcessRunner, this.binary = 'miaoa'});
+  /// [binary] 缺省即解析真实安装路径，理由见 MiaoaContentService
+  MiaoaTagService({this.run = systemProcessRunner, String? binary})
+      : binary = binary ?? resolveMiaoaBinary();
 
   static const _groupAction = 'tag group list';
   static const _tagAction = 'tag list';

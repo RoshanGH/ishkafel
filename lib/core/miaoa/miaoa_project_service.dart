@@ -33,7 +33,9 @@ class MiaoaProjectService {
   final ProcessRunner run;
   final String binary;
 
-  MiaoaProjectService({this.run = systemProcessRunner, this.binary = 'miaoa'});
+  /// [binary] 缺省即解析真实安装路径，理由见 MiaoaContentService
+  MiaoaProjectService({this.run = systemProcessRunner, String? binary})
+      : binary = binary ?? resolveMiaoaBinary();
 
   /// 一次取回全部项目。
   ///

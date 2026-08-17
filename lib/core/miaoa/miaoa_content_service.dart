@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../ffmpeg/process_runner.dart';
+import 'miaoa_locator.dart';
 import '../log/app_log.dart';
 import 'miaoa_errors.dart';
 import 'miaoa_tag_service.dart' show MiaoaException;
@@ -129,7 +130,10 @@ class MiaoaContentService {
   final ProcessRunner run;
   final String binary;
 
-  MiaoaContentService({this.run = systemProcessRunner, this.binary = 'miaoa'});
+  /// [binary] 缺省即解析真实安装路径——GUI 进程的 PATH 不含 ~/.local/bin，
+  /// 裸名会误报「未安装」（settings 能读、素材面板不能读的那个 bug）
+  MiaoaContentService({this.run = systemProcessRunner, String? binary})
+      : binary = binary ?? resolveMiaoaBinary();
 
   /// 按标签检索。[mode] 为 `and`（全部满足）或 `or`（任一满足）；
   /// [projectIds] 为空表示不限项目（我的全部项目聚合）
