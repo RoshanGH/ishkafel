@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +10,8 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/export/speed_fit.dart';
+import '../../core/ffmpeg/process_runner.dart';
+import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
@@ -29,12 +33,18 @@ import 'review_hover_player.dart';
 class ReviewPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
-  /// 测试注入：假播放器（真实现碰 libmpv）与假素材解析
+  /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
   final ReviewHoverPlayer? hoverPlayer;
   final Future<String> Function(int materialId)? resolveMedia;
+  final Future<String?> Function(int startMs, int endMs)? extractOriginalThumb;
 
-  const ReviewPage(
-      {super.key, required this.task, this.hoverPlayer, this.resolveMedia});
+  const ReviewPage({
+    super.key,
+    required this.task,
+    this.hoverPlayer,
+    this.resolveMedia,
+    this.extractOriginalThumb,
+  });
 
   @override
   ConsumerState<ReviewPage> createState() => _ReviewPageState();
@@ -61,8 +71,57 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   bool _confirmed = false;
   String? _error;
 
+  /// 原片段落的首帧图（分组 id → 本地 jpg）。抽出来一张补一张
+  final Map<String, String> _originThumbs = {};
+
   static String keyOf(ReviewItem item) =>
       '${item.unit}/${item.shot}/${item.material}';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOriginThumbs();
+  }
+
+  /// 给每个位置组的原片段落抽一张首帧图（取中点：两端常踩在转场上，
+  /// 抽出来是糊的）。按任务缓存，抽过的直接用
+  Future<void> _loadOriginThumbs() async {
+    if (widget.task.sourcePath == null) return;
+    for (final section in _sections) {
+      final start = section.originStartMs;
+      final end = section.originEndMs;
+      if (start == null || end == null) continue;
+      try {
+        final path = await (widget.extractOriginalThumb ?? _extractThumb)(
+            start, end);
+        if (!mounted) return;
+        if (path != null && File(path).existsSync()) {
+          setState(() => _originThumbs[section.id] = path);
+        }
+      } catch (_) {
+        // 抽不出来就保持占位图，悬停仍能播真画面——不值得为一张缩略图报错
+      }
+    }
+  }
+
+  Future<String?> _extractThumb(int startMs, int endMs) async {
+    final dataDir = ref.read(dataDirProvider);
+    final source = widget.task.sourcePath;
+    if (dataDir == null || source == null) return null;
+    final dir = Directory(
+        p.join(dataDir.path, 'review_thumbs', widget.task.id))
+      ..createSync(recursive: true);
+    final out = p.join(dir.path, 'orig_${startMs}_$endMs.jpg');
+    if (File(out).existsSync()) return out;
+    await ThumbnailService(run: const ResolvingProcessRunner().call)
+        .extractCover(
+      videoPath: source,
+      outPath: out,
+      atSeconds: ((startMs + endMs) / 2) / 1000.0,
+      height: 480,
+    );
+    return out;
+  }
 
   @override
   void dispose() {
@@ -412,10 +471,15 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Container(
-                        color: AppColors.surfaceCard,
-                        child: const Icon(Icons.theaters_outlined,
-                            size: 32, color: AppColors.textTertiary)),
+                    if (_originThumbs[section.id] case final thumb?)
+                      Image.file(File(thumb),
+                          key: Key('review-original-thumb-${section.id}'),
+                          fit: BoxFit.cover)
+                    else
+                      Container(
+                          color: AppColors.surfaceCard,
+                          child: const Icon(Icons.theaters_outlined,
+                              size: 32, color: AppColors.textTertiary)),
                     if (hovering) _hover.buildVideo(),
                     Positioned(
                       left: 6,

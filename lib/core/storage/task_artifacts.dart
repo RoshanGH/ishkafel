@@ -34,6 +34,7 @@ class TaskArtifacts {
     'export_work', // 导出的中间产物
     'voices', // 生成的配音
     'picked_thumbs', // 已选素材的首帧图
+    'review_thumbs', // 审核页原片段落的首帧图
   ];
 
   /// **跨任务共享**的缓存目录：里面按内容指纹命名，同一份内容只存一次，
@@ -66,11 +67,15 @@ class TaskArtifacts {
 
   Directory get coversDir => Directory(p.join(dataDir.path, 'covers'));
 
+  /// 审核回执：`reviews/<taskId>.json`（一个任务一个文件，不是子目录）
+  Directory get reviewsDir => Directory(p.join(dataDir.path, 'reviews'));
+
   Directory get stemsDir => Directory(p.join(workDir.path, 'stems'));
 
   /// 属于 [taskId] 的全部产物（文件与目录都算）
   List<FileSystemEntity> of(String taskId) => [
         File(p.join(coversDir.path, '$taskId.jpg')),
+        File(p.join(reviewsDir.path, '$taskId.json')),
         ..._workEntities().where(
             (e) => artifactBelongsTo(p.basename(e.path), taskId)),
         Directory(p.join(stemsDir.path, taskId)),
@@ -113,6 +118,7 @@ class TaskArtifacts {
 
     return [
       ..._children(coversDir).where((e) => orphan(_stem(e))),
+      ..._children(reviewsDir).where((e) => orphan(_stem(e))),
       ..._workEntities().where((e) => orphan(p.basename(e.path))),
       ..._children(stemsDir).where((e) => orphan(p.basename(e.path))),
       for (final name in perTaskDirNames)
