@@ -106,18 +106,23 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       final id = '${item.unit}/${item.shot}';
       map.putIfAbsent(id, () {
         final unit = item.unit < units.length ? units[item.unit] : null;
-        final slotMs = item.shot == null
-            ? null // 整段替换：时长跟素材走，没有固定坑位
-            : (unit != null && item.shot! < unit.shots.length
-                ? unit.shots[item.shot!].durationMs
-                : null);
+        final shot = unit != null &&
+                item.shot != null &&
+                item.shot! < unit.shots.length
+            ? unit.shots[item.shot!]
+            : null;
+        // 原片这一段的区间：整段替换是整个单元，镜头替换是那个镜头
+        final originStart = item.shot == null ? unit?.startMs : shot?.startMs;
+        final originEnd = item.shot == null ? unit?.endMs : shot?.endMs;
         return _Section(
           id: id,
           title: item.shot == null
               ? 'U${item.unit + 1} · 整段替换'
               : 'U${item.unit + 1} · S${item.shot! + 1}',
           transcript: unit?.transcript ?? '',
-          slotMs: slotMs,
+          slotMs: item.shot == null ? null : shot?.durationMs,
+          originStartMs: originStart,
+          originEndMs: originEnd,
           items: [],
         );
       });
@@ -137,8 +142,13 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     });
   }
 
-  void _onHover(ReviewItem item, bool entered) {
-    final key = keyOf(item);
+  void _onHover(
+    String key,
+    bool entered, {
+    required Future<String> Function() resolve,
+    int? startMs,
+    int? endMs,
+  }) {
     _hoverDebounce?.cancel();
     if (!entered) {
       if (_hoveringKey == key) {
@@ -151,22 +161,26 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     _hoverDebounce = Timer(const Duration(milliseconds: 250), () async {
       if (!mounted) return;
       setState(() => _hoveringKey = key);
-      final resolve = widget.resolveMedia ??
-          (int id) async {
-            final fetch = ref.read(materialFetcherProvider);
-            if (fetch == null) throw StateError('素材下载器未就绪');
-            return fetch(id);
-          };
       try {
-        final path = await resolve(item.material);
+        final path = await resolve();
         if (!mounted || _hoveringKey != key) return;
-        await _hover.play(path);
+        await _hover.play(path, startMs: startMs, endMs: endMs);
       } catch (_) {
         if (mounted && _hoveringKey == key) {
           setState(() => _hoveringKey = null);
         }
       }
     });
+  }
+
+  Future<String> _resolveMaterial(int id) {
+    final resolve = widget.resolveMedia ??
+        (int id) async {
+          final fetch = ref.read(materialFetcherProvider);
+          if (fetch == null) throw StateError('素材下载器未就绪');
+          return fetch(id);
+        };
+    return resolve(id);
   }
 
   void _jumpTo(String sectionId) {
@@ -312,7 +326,16 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             Wrap(
               spacing: AppSpacing.md,
               runSpacing: AppSpacing.md,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                // 原片这一段打头：审核就是「原来是什么 → 换成什么」的对比
+                if (widget.task.sourcePath != null &&
+                    section.originStartMs != null &&
+                    section.originEndMs != null) ...[
+                  _originalCard(section),
+                  const Icon(Icons.arrow_forward,
+                      size: 18, color: AppColors.textTertiary),
+                ],
                 for (final item in section.items)
                   _card(item, slotMs: section.slotMs),
               ],
@@ -354,6 +377,87 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ],
       );
 
+  /// 原片卡：这一段本来的样子。不可剔除（它不是候选，是参照物），
+  /// 悬停播的是原片的这个区间
+  Widget _originalCard(_Section section) {
+    final key = 'orig/${section.id}';
+    final hovering = _hoveringKey == key;
+    final source = widget.task.sourcePath!;
+    final start = section.originStartMs!;
+    final end = section.originEndMs!;
+    return MouseRegion(
+      onEnter: (_) => _onHover(key, true,
+          resolve: () async => source, startMs: start, endMs: end),
+      onExit: (_) => _onHover(key, false,
+          resolve: () async => source, startMs: start, endMs: end),
+      child: Container(
+        key: Key('review-original-${section.id}'),
+        width: 150,
+        decoration: BoxDecoration(
+          color: AppColors.surfaceCard,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+            color: hovering ? AppColors.accentBlue : AppColors.accentBlueLight,
+            width: hovering ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AspectRatio(
+              aspectRatio: 9 / 16,
+              child: ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(8)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(
+                        color: AppColors.surfaceCard,
+                        child: const Icon(Icons.theaters_outlined,
+                            size: 32, color: AppColors.textTertiary)),
+                    if (hovering) _hover.buildVideo(),
+                    Positioned(
+                      left: 6,
+                      top: 6,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.accentBlue,
+                          borderRadius: BorderRadius.circular(AppRadius.xs),
+                        ),
+                        child: const Text('原片',
+                            style: TextStyle(
+                                fontSize: AppFontSize.micro,
+                                color: Colors.white)),
+                      ),
+                    ),
+                    Positioned(
+                      left: 6,
+                      bottom: 6,
+                      child:
+                          _chip('${((end - start) / 1000).toStringAsFixed(1)}s'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.xs),
+              child: Text('这一段本来的样子',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _card(ReviewItem item, {int? slotMs}) {
     final key = keyOf(item);
     final material = _materialOf(item.material);
@@ -369,8 +473,10 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     }
 
     return MouseRegion(
-      onEnter: (_) => _onHover(item, true),
-      onExit: (_) => _onHover(item, false),
+      onEnter: (_) => _onHover(key, true,
+          resolve: () => _resolveMaterial(item.material)),
+      onExit: (_) => _onHover(key, false,
+          resolve: () => _resolveMaterial(item.material)),
       child: GestureDetector(
         key: Key('review-card-$key'),
         onTap: () => _toggle(item),
@@ -545,6 +651,10 @@ class _Section {
 
   /// 镜头替换的固定坑位时长；整段替换为 null（时长跟素材走）
   final int? slotMs;
+
+  /// 原片这一段的区间（悬停原片卡播的就是它）。空白任务没有原片时为 null
+  final int? originStartMs;
+  final int? originEndMs;
   final List<ReviewItem> items;
 
   _Section({
@@ -552,6 +662,8 @@ class _Section {
     required this.title,
     required this.transcript,
     required this.slotMs,
+    this.originStartMs,
+    this.originEndMs,
     required this.items,
   });
 }

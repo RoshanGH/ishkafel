@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/review/review_receipt.dart';
@@ -47,7 +48,12 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 17),
         units: const [
           SemanticUnit(index: 0, startMs: 0, endMs: 5000, transcript: '第一句'),
-          SemanticUnit(index: 1, startMs: 5000, endMs: 9000, transcript: '第二句'),
+          SemanticUnit(
+              index: 1,
+              startMs: 5000,
+              endMs: 9000,
+              transcript: '第二句',
+              shots: [Shot(startMs: 5000, endMs: 9000)]),
         ],
         replacements: replacements,
         pickedMaterials: const [
@@ -104,6 +110,9 @@ void main() {
     expect(find.text('U2 · S1'), findsNWidgets(2));
     expect(find.textContaining('保留 3 · 剔除 0'), findsOneWidget);
     expect(find.text('第一句'), findsOneWidget, reason: '台词给上下文');
+    // 每个位置组开头是原片卡：审核是「原来是什么 → 换成什么」的对比
+    expect(find.text('原片'), findsNWidgets(2));
+    expect(find.byIcon(Icons.arrow_forward), findsNWidgets(2));
   });
 
   testWidgets('取消勾选 → 确认：剔除落进任务、回执落盘', (tester) async {
@@ -129,6 +138,32 @@ void main() {
     expect(find.textContaining('review-result'), findsOneWidget);
   });
 
+  testWidgets('原片卡点了不剔除——它是参照物，不是候选', (tester) async {
+    await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
+    await tester.tap(find.byKey(const Key('review-original-0/null')));
+    await tester.pump();
+    expect(find.text('已剔除'), findsNothing);
+    expect(find.textContaining('剔除 0'), findsOneWidget);
+  });
+
+  testWidgets('空白任务没有原片，不显示原片卡', (tester) async {
+    final task = taskWith([UnitReplacement.whole(const [101])]);
+    await pump(
+        tester,
+        RenewTask(
+          id: task.id,
+          name: task.name,
+          sourcePath: null,
+          status: task.status,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          units: task.units,
+          replacements: task.replacements,
+          pickedMaterials: task.pickedMaterials,
+        ));
+    expect(find.text('原片'), findsNothing);
+  });
+
   testWidgets('一条候选都没有时说清，不摆确认按钮', (tester) async {
     await pump(tester, taskWith([UnitReplacement.keepOriginal()]));
     expect(find.textContaining('没有可审核的'), findsOneWidget);
@@ -152,7 +187,7 @@ void main() {
 
 class _FakeHoverPlayer implements ReviewHoverPlayer {
   @override
-  Future<void> play(String path) async {}
+  Future<void> play(String path, {int? startMs, int? endMs}) async {}
 
   @override
   Future<void> stop() async {}
