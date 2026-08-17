@@ -36,7 +36,9 @@ Future<void> main(List<String> args) async {
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
     ..addFlag('install',
-        negatable: false, help: 'skill 用：直接装进各家 Agent 的技能目录')
+        negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
+    ..addOption('dir',
+        help: 'skill --install 用：装到指定技能目录（不认默认目录的 Agent 自报）')
     ..addOption('name', help: 'blank create 用：任务名')
     ..addOption('resolution', help: 'export 用：短边 480/720/1080/1440/2160')
     ..addOption('fps', help: 'export 用：24/25/30/50/60')
@@ -89,6 +91,7 @@ Future<void> main(List<String> args) async {
     'skill' => await runSkillCommand(
         rest: rest,
         install: parsed['install'] as bool,
+        dir: parsed['dir'] as String?,
       ),
     'review' => await runReviewCommand(rest: rest, dataDir: dataDir),
     'blank' => await runBlankCommand(
@@ -143,9 +146,10 @@ ishkafel —— 成片翻新工具的命令行入口
   apply segment|tags <id> --file <json>
                    回填外部结果
   todo <id>        把当前欠着的那件外包待办再吐一遍（丢了输出时用，不重跑分析）
-  skill [--install]
-                   给 Agent 的操作手册。--install 装进 ~/.claude/skills 与
-                   ~/.codex/skills，之后在任意文件夹都生效
+  skill [--install] [--dir <目录>]
+                   给 Agent 的操作手册。--install 装成技能（缺省认
+                   Claude Code / Codex 的目录；别家用 --dir 自报），
+                   之后在任意文件夹、任意会话都生效
   task <id>        任务全貌（单元、镜头、标签、导出历史）
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）

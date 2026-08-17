@@ -34,6 +34,23 @@ void main() {
     }
   });
 
+  test('--install --dir 装到 Agent 自报的技能目录——不认默认目录的工具也有确定性落盘', () async {
+    final home = Directory.systemTemp.createTempSync('skill_dir');
+    addTearDown(() => home.deleteSync(recursive: true));
+
+    final custom = p.join(home.path, 'my-agent', 'skills');
+    final out = StringBuffer();
+    final code = await runSkillCommand(
+        rest: const [], install: true, dir: custom, out: out);
+    expect(code, 0);
+
+    final file = File(p.join(custom, 'ishkafel', 'SKILL.md'));
+    expect(file.existsSync(), isTrue);
+    expect(file.readAsStringSync(), startsWith('---\n'));
+    // 装到哪要说出来——Agent 拿这个路径回报给用户，这是验收信号
+    expect(out.toString(), contains(file.path));
+  });
+
   test('多给了参数就报用法，不当没看见', () async {
     final err = StringBuffer();
     final code = await runSkillCommand(rest: const ['乱写'], err: err);

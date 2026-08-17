@@ -114,7 +114,8 @@ class SkillInstaller {
       try {
         target.file.parent.createSync(recursive: true);
         target.file.writeAsStringSync(_skillFile());
-        done.add(target.agent);
+        // 带上具体路径：Agent 装完要把路径回报给用户，这是验收信号
+        done.add('${target.agent} → ${target.file.path}');
       } catch (e) {
         failed.add('${target.agent}（$e）');
       }
@@ -125,8 +126,7 @@ class SkillInstaller {
     final note = failed.isEmpty ? '' : '；没装上：${failed.join('、')}';
     return SkillInstallResult(
       ok: failed.isEmpty,
-      message: '已装给 ${done.join('、')}$note。'
-          '之后在任意文件夹跟 Agent 说「用 ishkafel 翻新这条片子」即可',
+      message: '技能已装到：\n${done.join('\n')}$note',
     );
   }
 

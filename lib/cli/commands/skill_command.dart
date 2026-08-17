@@ -17,6 +17,7 @@ import '../cli_output.dart';
 Future<int> runSkillCommand({
   required List<String> rest,
   bool install = false,
+  String? dir,
   String? home,
   StringSink? out,
   StringSink? err,
@@ -25,7 +26,7 @@ Future<int> runSkillCommand({
   final stdoutSink = out ?? stdout;
 
   if (rest.isNotEmpty) {
-    sink.writeln('用法：ishkafel skill [--install]');
+    sink.writeln('用法：ishkafel skill [--install] [--dir <技能目录>]');
     return exitBadUsage;
   }
 
@@ -34,8 +35,16 @@ Future<int> runSkillCommand({
     return 0;
   }
 
-  final installer = SkillInstaller.forCurrentUser(
-      markdown: agentSkillMarkdown, version: appVersion, home: home);
+  // --dir：不认默认目录的 Agent（Cursor、Warp、各家新工具）自报家门。
+  // 装到哪它自己最清楚，我们只负责确定性落盘
+  final installer = dir != null
+      ? SkillInstaller(
+          markdown: agentSkillMarkdown,
+          version: appVersion,
+          targets: [SkillTarget(agent: '自定义', dir: Directory(dir))],
+        )
+      : SkillInstaller.forCurrentUser(
+          markdown: agentSkillMarkdown, version: appVersion, home: home);
   final result = await installer.install();
   (result.ok ? stdoutSink : sink).writeln(result.message);
   return result.ok ? 0 : 1;

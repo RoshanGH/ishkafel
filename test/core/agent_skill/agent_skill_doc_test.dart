@@ -18,6 +18,13 @@ void main() {
     );
   });
 
+  test('自举段必须是「跑命令装」——落盘由软件保证，不靠 Agent 自觉存文件', () {
+    final head = agentSkillMarkdown.substring(0, 900);
+    expect(head, contains('ishkafel skill --install'));
+    expect(head, contains('--dir'), reason: '不认默认目录的 Agent 要有自报出口');
+    expect(head, contains('回复给用户'), reason: '装到哪要回报，人才能验收');
+  });
+
   test('手册里必须有全流程那几条命令——少了 Agent 就得靠猜', () {
     for (final command in ['ishkafel import', 'ishkafel analyze',
         'ishkafel candidates', 'ishkafel apply plans', 'ishkafel export']) {
