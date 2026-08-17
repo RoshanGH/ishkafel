@@ -12,6 +12,7 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 /// 镜头上去了。改边界更隐蔽——镜头从 2.9 秒改成 4 秒，那条 5.5 秒的素材
 /// 得按新倍率重新变速，已渲染的切片全作废，而用户毫不知情。
 void main() {
+  _unitBoundaryLockTests();
   List<SemanticUnit> unitsOf() => [
         SemanticUnit(
           index: 0,
@@ -204,5 +205,62 @@ void main() {
       expect(reason, contains('S1'));
       expect(reason, contains('S3'));
     });
+  });
+}
+
+/// 单元边界移动的锁：两侧单元里**任何**挑过素材的镜头都要拦，
+/// 不只是贴着边界的那一颗。
+///
+/// 边界一动，镜头会在两个单元之间转移，两侧的镜头下标都可能变——而替换
+/// 方案是按下标记的，下标一移素材就串位。原来只查贴边那颗：U2 的 S3 挑过
+/// 素材、拖边界吞掉 S1 之后 S3 变 S2，素材静默跑到别的镜头上。
+void _unitBoundaryLockTests() {
+  SegmentationEditorController controllerWith(EditLocks locks) =>
+      SegmentationEditorController(
+        initialUnits: [
+          SemanticUnit(index: 0, startMs: 0, endMs: 9000, transcript: 'A', shots: const [
+            Shot(startMs: 0, endMs: 3000),
+            Shot(startMs: 3000, endMs: 6000),
+            Shot(startMs: 6000, endMs: 9000),
+          ]),
+          SemanticUnit(index: 1, startMs: 9000, endMs: 18000, transcript: 'B', shots: const [
+            Shot(startMs: 9000, endMs: 12000),
+            Shot(startMs: 12000, endMs: 15000),
+            Shot(startMs: 15000, endMs: 18000),
+          ]),
+        ],
+        durationMs: 18000,
+        fps: 30,
+        sentences: const [],
+      )..locks = locks;
+
+  test('右单元深处的镜头挑过素材，边界也不许动——下标会移，素材会串位', () {
+    // U2 的 S2 挑过素材，不贴边界。原来这种情况能拖
+    final c = controllerWith(EditLocks.of([
+      UnitReplacement.keepOriginal(),
+      UnitReplacement.perShot(const {
+        1: [201]
+      }),
+    ]));
+    expect(c.moveUnitBoundary(0, 10000), isFalse);
+    expect(c.takeBlockedReason(), contains('S2'));
+  });
+
+  test('左单元深处同理', () {
+    final c = controllerWith(EditLocks.of([
+      UnitReplacement.perShot(const {
+        0: [301]
+      }),
+      UnitReplacement.keepOriginal(),
+    ]));
+    expect(c.moveUnitBoundary(0, 8000), isFalse);
+    expect(c.takeBlockedReason(), contains('S1'));
+  });
+
+  test('两侧都没挑过素材时照常能动，切点跟着走', () {
+    final c = controllerWith(EditLocks.none);
+    expect(c.moveUnitBoundary(0, 10000), isTrue);
+    expect(c.units[0].shots.map((s) => s.endMs), contains(6000),
+        reason: '左单元的内部切点保留；旧单元边界 9000 不保留（拖它就是在挪它）');
   });
 }

@@ -112,19 +112,43 @@ abstract final class SegmentationEditOps {
     if (minB > maxB) return null;
     final b = _snap(rawMs, fps).clamp(minB, maxB);
 
-    var leftShots = left.shots.where((s) => s.startMs < b).toList();
-    if (leftShots.isEmpty) {
-      leftShots = [Shot(startMs: left.startMs, endMs: b)];
-    } else {
-      leftShots[leftShots.length - 1] = leftShots.last.copyWith(endMs: b);
+    // 被越过的**内部切点跟着走**，不吞并：那些是检测（或人切）出来的真实
+    // 画面切换，拖一下单元边界就把它们丢掉，等于让邻居的首镜头横跨好几个
+    // 真实切换——用户还得手动切回来。
+    //
+    // 但**旧的单元边界本身不保留**：拖这条边界的最常见动机就是「机器把切点
+    // 定错了，挪到对的位置」——旧位置在用户眼里是错的。保留它的话，往回挪
+    // 一帧就会在邻居里凭空多出一个一帧宽的碎镜头，越修越碎。代价是大幅度
+    // 拖动时旧边界处如果真有画面切换会丢一刀，那时再手动切回来即可——
+    // 常见动作（微调）必须顺，罕见动作（大挪）可以补。
+    final cuts = <int>{
+      for (final shot in left.shots.skip(1)) shot.startMs,
+      for (final shot in right.shots.skip(1)) shot.startMs,
+    };
+    // 新区间的每一段都要**继承原镜头的标签与画面描述**（按中点找到它原来
+    // 属于哪个镜头）——不然拖一下边界，两个单元里所有镜头的标签全被清空
+    final originals = [...left.shots, ...right.shots];
+    Shot inherit(int start, int end) {
+      final mid = (start + end) ~/ 2;
+      for (final shot in originals) {
+        if (mid >= shot.startMs && mid < shot.endMs) {
+          return shot.copyWith(startMs: start, endMs: end);
+        }
+      }
+      return Shot(startMs: start, endMs: end);
     }
 
-    var rightShots = right.shots.where((s) => s.endMs > b).toList();
-    if (rightShots.isEmpty) {
-      rightShots = [Shot(startMs: b, endMs: right.endMs)];
-    } else {
-      rightShots[0] = rightShots.first.copyWith(startMs: b);
+    List<Shot> partition(int start, int end) {
+      final inside = cuts.where((c) => c > start && c < end).toList()..sort();
+      final points = [start, ...inside, end];
+      return [
+        for (var k = 0; k + 1 < points.length; k++)
+          inherit(points[k], points[k + 1]),
+      ];
     }
+
+    final leftShots = partition(left.startMs, b);
+    final rightShots = partition(b, right.endMs);
 
     final newLeft = left.copyWith(endMs: b, shots: leftShots);
     final newRight = right.copyWith(startMs: b, shots: rightShots);

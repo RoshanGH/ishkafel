@@ -602,11 +602,23 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _scheduleAutosave();
   }
 
+  /// 上一次通知时是否正处在拖拽会话里——用来识别「刚松手」那一刻
+  bool _wasDragging = false;
+
   void _onEditorChanged() {
     // 边界动过，每一段的时长就变了，预览音轨要重合（它自己带防抖）
     _syncPreviewAudio();
     _scheduleAutosave();
-    _scheduleConsequenceCheck();
+    // 松手就是「这一刀拖完了」的明确信号，0.8 秒就问；步进按钮、改台词
+    // 这类没有明确收尾动作的编辑才等 3 秒的「手停下来了」
+    final dragging = _editor?.inDragSession ?? false;
+    final justReleased = _wasDragging && !dragging;
+    _wasDragging = dragging;
+    if (!dragging) {
+      _scheduleConsequenceCheck(justReleased
+          ? const Duration(milliseconds: 800)
+          : const Duration(seconds: 3));
+    }
     final dirty = _editor?.dirty ?? false;
     if (dirty == _lastDirty) return;
     setState(() => _lastDirty = dirty);
@@ -616,7 +628,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   ///
   /// 比自动保存等得久得多：用户往往连着拖好几刀才算改完一处，改一下弹一次
   /// 会把人逼疯。3 秒是「手停下来了」的信号。
-  void _scheduleConsequenceCheck() {
+  void _scheduleConsequenceCheck(
+      [Duration delay = const Duration(seconds: 3)]) {
     // 空白任务不问这个。它问的是「切分结构变了，原来的素材和标签多半对不上」
     // ——那是翻新任务拆分/合并之后的真实后果。空白任务加一个分子什么都没影响，
     // 删一个的连带处理（替换方案、配乐区间）已经在删除那一步做掉了。
@@ -625,7 +638,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // 照做等于把用户刚选的标签清掉，送去一个没有台词可读的模型重打
     if (_task.isBlank) return;
     _consequenceTimer?.cancel();
-    _consequenceTimer = Timer(const Duration(seconds: 3), _askConsequence);
+    _consequenceTimer = Timer(delay, _askConsequence);
   }
 
   Future<void> _askConsequence() async {

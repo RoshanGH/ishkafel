@@ -35,6 +35,12 @@ void main() {
       expect(out[1].startMs, 7000);
       expect(out[0].shots.last.endMs, 7000);
       expect(out[1].shots.first.startMs, 7000);
+      // 旧单元边界 6000 不保留（拖它就是在说「切点不在 6000」），
+      // 右单元的内部切点 9000 保留
+      expect(out[0].shots.map((s) => (s.startMs, s.endMs)),
+          [(0, 3000), (3000, 7000)]);
+      expect(out[1].shots.map((s) => (s.startMs, s.endMs)),
+          [(7000, 9000), (9000, 12000)]);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
       expect(units[0].endMs, 6000); // 不可变
     });
@@ -44,13 +50,49 @@ void main() {
       expect(out[0].endMs, 7000); // 7010→帧 210→7000
     });
 
-    test('越过右单元内部镜头边界时吞并该镜头', () {
-      // 边界推到 10000：右单元原镜头 [6000,9000] 被吞，剩 [10000,12000]
+    test('越过右单元内部切点时，被越过的切点跟着走、不丢', () {
+      // 内部切点是检测（或人切）出来的真实画面切换，拖一下单元边界就丢掉，
+      // 等于让邻居的首镜头横跨真实切换。边界推到 10000：右单元的内部切点
+      // 9000 被越过，保留为左单元的镜头边界
       final out = SegmentationEditOps.moveUnitBoundary(fixture(), 0, 10000, fps: fps)!;
-      expect(out[1].shots.length, 1);
-      expect(out[1].shots.single.startMs, 10000);
-      expect(out[0].shots.last.endMs, 10000);
+      expect(out[0].shots.map((s) => (s.startMs, s.endMs)),
+          [(0, 3000), (3000, 9000), (9000, 10000)],
+          reason: '9000 那个真实切点必须保留；旧单元边界 6000 不保留');
+      expect(out[1].shots.map((s) => (s.startMs, s.endMs)), [(10000, 12000)]);
       expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    test('往回拖同理：左单元被越过的内部切点转移进右单元', () {
+      // 边界拉回 2000：左单元的内部切点 3000 被越过，保留为右单元的镜头边界
+      final out = SegmentationEditOps.moveUnitBoundary(fixture(), 0, 2000, fps: fps)!;
+      expect(out[0].shots.map((s) => (s.startMs, s.endMs)), [(0, 2000)]);
+      expect(out[1].shots.map((s) => (s.startMs, s.endMs)),
+          [(2000, 3000), (3000, 9000), (9000, 12000)],
+          reason: '3000 必须保留；旧单元边界 6000 不保留');
+      expect(SegmentationEditOps.holdsInvariants(out, 12000, fps), true);
+    });
+
+    test('微调一帧不产生碎镜头——这是拖边界最常见的动作', () {
+      // 保留旧边界的话，往回挪一帧就会在邻居里凭空多出一个一帧宽的碎镜头
+      final before = fixture();
+      final out = SegmentationEditOps.moveUnitBoundary(before, 0, 5967, fps: fps)!;
+      expect(out[0].shots.length, before[0].shots.length);
+      expect(out[1].shots.length, before[1].shots.length);
+    });
+
+    test('转移过去的镜头继承原镜头的标签', () {
+      final tagged = [
+        fixture()[0],
+        fixture()[1].copyWith(shots: const [
+          Shot(startMs: 6000, endMs: 9000, tags: ['厨房']),
+          Shot(startMs: 9000, endMs: 12000, tags: ['冰箱']),
+        ]),
+      ];
+      final out = SegmentationEditOps.moveUnitBoundary(tagged, 0, 10000, fps: fps)!;
+      // [3000,9000] 的中点落在原「厨房」镜头里；[9000,10000] 落在「冰箱」里
+      expect(out[0].shots[1].tags, ['厨房']);
+      expect(out[0].shots[2].tags, ['冰箱']);
+      expect(out[1].shots.single.tags, ['冰箱']);
     });
 
     test('clamp：不能把单元压到小于一帧', () {

@@ -297,10 +297,13 @@ class SegmentationEditorController extends ChangeNotifier {
     for (final u in [i, i + 1]) {
       if (u < 0 || u >= _units.length) continue;
       if (_locks.isUnitLocked(u)) return LockWording.unit(u);
-      // i 的尾镜头、i+1 的首镜头会被这次移动改到
-      final shot = u == i ? _units[u].shots.length - 1 : 0;
-      if (shot >= 0 && _locks.isShotLocked(u, shot)) {
-        return LockWording.shot(u, shot);
+      // 两侧单元里**任何**挑过素材的镜头都要锁，不只是贴着边界的那颗：
+      // 边界一动，镜头会在两个单元之间转移，两侧的镜头下标都可能变——
+      // 而替换方案是按下标记的，下标一移素材就串位。原来只查贴边那颗，
+      // U3 的 S3 挑过素材、拖边界吞掉 S1 之后 S3 变 S2，素材就跑错了镜头
+      final locked = _locks.lockedShotsIn(u);
+      if (locked.isNotEmpty) {
+        return LockWording.shotsInUnit(u, locked);
       }
     }
     return null;
