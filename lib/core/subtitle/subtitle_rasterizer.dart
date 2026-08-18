@@ -54,8 +54,9 @@ class SubtitleRasterizer {
         'height': height,
         'fontSize': (height * style.fontRatio).round(),
         'marginV': (height * style.bottomRatio).round(),
-        // 描边占字号的百分比；底条预设描边收细
-        'strokePercent': style.preset == SubtitlePreset.whiteBox ? 3 : 6,
+        // 描边占字号的百分比。对标原片字幕的重描边（粗黑边 + 实心白字，
+        // 见 2026-08-18 用户给的样张）；底条预设描边收细
+        'strokePercent': style.preset == SubtitlePreset.whiteBox ? 3 : 9,
         'r': r,
         'g': g,
         'b': b,
@@ -104,11 +105,19 @@ function run(argv) {
     if (font.isNil()) font = $.NSFont.boldSystemFontOfSize(spec.fontSize);
     const para = $.NSMutableParagraphStyle.alloc.init;
     para.setAlignment(2);
+    // 两遍绘制：先用「仅描边」（正值）画粗黑边打底，再画实心字芯——
+    // 描边和填充一遍画（负值）时，描边一粗就会吃进字的内部
+    const strokeAttrs = $.NSMutableDictionary.alloc.init;
+    strokeAttrs.setObjectForKey(font, $.NSFontAttributeName);
+    strokeAttrs.setObjectForKey($.NSColor.blackColor, $.NSStrokeColorAttributeName);
+    strokeAttrs.setObjectForKey($.NSNumber.numberWithDouble(spec.strokePercent * 2), $.NSStrokeWidthAttributeName);
+    strokeAttrs.setObjectForKey(para, $.NSParagraphStyleAttributeName);
     const attrs = $.NSMutableDictionary.alloc.init;
     attrs.setObjectForKey(font, $.NSFontAttributeName);
     attrs.setObjectForKey($.NSColor.colorWithSRGBRedGreenBlueAlpha(spec.r, spec.g, spec.b, 1), $.NSForegroundColorAttributeName);
-    attrs.setObjectForKey($.NSColor.blackColor, $.NSStrokeColorAttributeName);
-    attrs.setObjectForKey($.NSNumber.numberWithDouble(-spec.strokePercent), $.NSStrokeWidthAttributeName);
+    // 字芯自身再带一圈同色细描边，撑出样张里那种饱满的字重
+    attrs.setObjectForKey($.NSColor.colorWithSRGBRedGreenBlueAlpha(spec.r, spec.g, spec.b, 1), $.NSStrokeColorAttributeName);
+    attrs.setObjectForKey($.NSNumber.numberWithDouble(-2.5), $.NSStrokeWidthAttributeName);
     attrs.setObjectForKey(para, $.NSParagraphStyleAttributeName);
     const ns = $(it.text);
     const margin = Math.round(w * 0.055);
@@ -123,6 +132,7 @@ function run(argv) {
         $.NSMakeRect((w - bw) / 2, rect.origin.y - pad, bw, Math.ceil(bounds.size.height) + pad * 2),
         pad * 0.6, pad * 0.6).fill;
     }
+    ns.drawWithRectOptionsAttributesContext(rect, 1, strokeAttrs, $());
     ns.drawWithRectOptionsAttributesContext(rect, 1, attrs, $());
     $.NSGraphicsContext.restoreGraphicsState;
     rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $())
