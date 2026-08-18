@@ -840,8 +840,34 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           .resize(startUnit: startUnit, newStart: newStart, newEnd: newEnd));
 
   /// 点段落上的 × 删掉它。此前删一段要点开素材库浮层再点移除，太重
-  Future<void> _deleteBgm(int startUnit) =>
-      _saveBgm(_task.bgm.removeSegment(startUnit));
+  /// 删一段配乐要确认：一点即删且不进撤销栈，误触的代价是重新找曲子、
+  /// 重新铺区间——破坏性操作必须有确认（对照删除任务/清缓存的既有规则）
+  Future<void> _deleteBgm(int startUnit) async {
+    final segment = _task.bgm.segments
+        .where((s) => s.startUnit == startUnit)
+        .firstOrNull;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('删除这段配乐？'),
+        content: Text(segment == null
+            ? '删除后需要重新选曲铺设。'
+            : '「${segment.materials.first.name}」将从 U${segment.startUnit + 1}'
+                '–U${segment.endUnit + 1} 移除，需要时要重新选曲铺设。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.red),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _saveBgm(_task.bgm.removeSegment(startUnit));
+  }
 
   /// 被整体替换的单元在成片里的时长（时间线上要标出「15.3s → 11.3s」）。
   /// 直接从画面轨读——每个整体替换单元就是轨上的一段
@@ -1158,10 +1184,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       vocalsPath: _task.vocalsPath,
       // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
       subtitleSentences: _task.asrSentences ?? const [],
-      // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片
-      outputDir: _task.exports.isEmpty
-          ? outputDir
-          : Directory(_task.exports.last.outputDir),
+      // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片。
+      // 但临时目录不算数：CLI 测试之类导进 /tmp 的一次性位置被记成默认，
+      // 下次成片就会落进重启即清的地方（真机踩过）
+      outputDir: _lastUsableExportDir() ?? outputDir,
       onExported: _recordExport,
       exports: _task.exports,
       // 整体替换的成片时长跟候选走——不给这个，确认页会按原片长度报，
@@ -1192,16 +1218,33 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   }
 
   /// 任务名会进文件路径，斜杠与冒号在 macOS 上都是雷
+  /// 上一次导出的目录，仅当它还值得再用：临时目录（/tmp、/private/tmp）
+  /// 重启就清，不能当默认；已经不存在的也不指过去
+  Directory? _lastUsableExportDir() {
+    if (_task.exports.isEmpty) return null;
+    final last = _task.exports.last.outputDir;
+    if (last.startsWith('/tmp/') || last.startsWith('/private/tmp/')) {
+      return null;
+    }
+    final dir = Directory(last);
+    return dir.existsSync() ? dir : null;
+  }
+
   static String _safeName(String name) =>
       name.replaceAll(RegExp(r'[/:\\]'), '_');
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
   /// 不把原始异常文本摊给用户（详情已进日志）。
-  void _showSaveFailure(String what) {
+  /// [retry] 非空时给「重试」按钮——文案叫人重试就必须给重试的入口，
+  /// 否则用户只能把刚才的操作从头做一遍
+  void _showSaveFailure(String what, {VoidCallback? retry}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$what保存失败，请检查磁盘空间后重试'),
         backgroundColor: AppColors.red,
+        action: retry == null
+            ? null
+            : SnackBarAction(label: '重试', textColor: Colors.white, onPressed: retry),
       ),
     );
   }
@@ -1238,7 +1281,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   }
 
   /// 右栏落地了新的已选素材：跟着存盘。存失败不打断选材——盘上少一条记录
-  /// 只影响「下次进来还看不看得见」，不影响这次的方案
+  /// 只影响「下次进来还看不看得见」，不影响这次的方案。
+  /// 但**要说出来**：静默吞掉的话，用户明天进来发现挑好的素材"丢了"，
+  /// 只会以为软件坏了
   Future<void> _onPickedMaterialsChanged(List<PickedMaterial> next) async {
     if (!_isEditable) return;
     if (const DeepCollectionEquality().equals(_task.pickedMaterials, next)) {
@@ -1249,6 +1294,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       _task = _task.copyWith(pickedMaterials: next);
     } catch (e) {
       AppLog.warn('已选素材落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) {
+        _showSaveFailure('已选素材', retry: () => _onPickedMaterialsChanged(next));
+      }
     }
   }
 

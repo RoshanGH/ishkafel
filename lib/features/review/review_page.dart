@@ -113,9 +113,33 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
   }
 
-  void _forceTakeover() {
+  Future<void> _forceTakeover() async {
     final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
+    if (dataDir == null) {
+      // 测试环境才会走到：按钮点了必须有反应，不能静默吞掉
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前环境没有数据目录，无法接管')));
+      return;
+    }
+    // 抢锁是破坏性的：对方之后的写入会被拒绝。工作台的同名按钮有确认框，
+    // 这里必须同一套规矩
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('强制接管这个任务？'),
+        content: Text('「${_blockedBy ?? '对方'}」之后的保存会被拒绝，'
+            '它未落盘的改动可能丢失。确定要接管吗？'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('接管')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
     lock.forceTakeover(_holder);
     setState(() => _blockedBy = null);

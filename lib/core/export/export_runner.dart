@@ -328,6 +328,7 @@ class ExportRunner {
     String? sharedAudio;
     if (!perVariant) {
       try {
+        onProgress?.call(0, total, '合成声音（含人声分离，可能要几分钟）');
         sharedAudio = await buildAudio(0);
       } catch (e) {
         AppLog.warn('导出：$e');
@@ -341,7 +342,14 @@ class ExportRunner {
     final clips = <String, Future<String>>{}; // 段落指纹 → 渲染中/已渲染的切片
     final out = <ExportOutcome>[];
     for (final combo in combos) {
-      onProgress?.call(out.length, total, '第 ${combo.index} 条');
+      // 逐条合声音（有整体替换/多首配乐）时，第一步是人声分离——CPU 上
+      // 一条素材要一两分钟。不说清的话进度会挂着不动五六分钟像卡死
+      onProgress?.call(
+          out.length,
+          total,
+          perVariant && sharedAudio == null
+              ? '第 ${combo.index} 条：合成声音（含人声分离，可能要几分钟）'
+              : '第 ${combo.index} 条');
       try {
         final path = await _composeOne(
           combo: combo,

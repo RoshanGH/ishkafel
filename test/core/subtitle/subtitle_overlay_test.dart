@@ -72,14 +72,15 @@ void main() {
       // 边界切在「…的人，|我就想…」之后：第 17 个字「我」从 1700ms 开始
       final lines = subtitleLinesInSlot(
           sentences: [longSentence()], slotStartMs: 1700, slotEndMs: 9000);
-      expect(lines.map((l) => l.text).join('|'), '我就想问问这玩意是犯了天条吗？');
+      expect(lines.map((l) => l.text).join('|'), '我就想问问这玩意是犯了天条吗',
+          reason: '标点不进画面——原片字幕就是无标点的堆字风格');
       expect(lines.first.startMs, 0, reason: '段首时间贴着坑位起点');
     });
 
     test('坑位在前半句：只显示前半句，且标点跟着词恢复出来', () {
       final lines = subtitleLinesInSlot(
           sentences: [longSentence()], slotStartMs: 0, slotEndMs: 1700);
-      expect(lines.map((l) => l.text).join('|'), '还有一种是没用过滴露冰箱清洁剂的人，');
+      expect(lines.map((l) => l.text).join('|'), '还有一种是没用过滴露冰箱清洁剂的人');
     });
 
     test('整句都在坑内但太长：拆成多段先后出现，不堆成一大块', () {
@@ -90,8 +91,8 @@ void main() {
       for (final l in lines) {
         expect(l.text.length, lessThanOrEqualTo(18));
       }
-      // 优先在标点处切开——语义断点比硬切好读
-      expect(lines.first.text, endsWith('，'));
+      // 优先在标点处切开——语义断点比硬切好读（标点用于定切点，不进画面）
+      expect(lines.first.text, '还有一种是没用过滴露冰箱清洁剂的人');
       // 段与段时间衔接：前一段显示到后一段开始，中间不闪没
       for (var i = 1; i < lines.length; i++) {
         expect(lines[i - 1].endMs, lines[i].startMs);
@@ -105,7 +106,7 @@ void main() {
       ]);
       final lines = subtitleLinesInSlot(
           sentences: const [s], slotStartMs: 0, slotEndMs: 5000);
-      expect(lines.single.text, '哇塞！');
+      expect(lines.single.text, '哇塞');
       expect(lines.single.startMs, 500);
       expect(lines.single.endMs, 1100);
     });

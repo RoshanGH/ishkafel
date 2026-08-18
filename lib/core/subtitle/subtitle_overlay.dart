@@ -61,7 +61,9 @@ List<SubtitleLine> subtitleLinesInSlot({
     if (s.words.isEmpty) {
       // 兜底：没有词级时间戳，按整句显示
       lines.add(SubtitleLine(
-          startMs: start - slotStartMs, endMs: end - slotStartMs, text: text));
+          startMs: start - slotStartMs,
+          endMs: end - slotStartMs,
+          text: stripPunctuation(text)));
       continue;
     }
 
@@ -86,10 +88,12 @@ List<SubtitleLine> subtitleLinesInSlot({
           ? segments[i + 1].first.startMs
           : (seg.last.endMs < slotEndMs ? seg.last.endMs : slotEndMs);
       if (rawEnd <= segStart) continue;
+      final text = stripPunctuation(seg.map((w) => w.text).join());
+      if (text.isEmpty) continue;
       lines.add(SubtitleLine(
         startMs: segStart - slotStartMs,
         endMs: rawEnd - slotStartMs,
-        text: seg.map((w) => w.text).join(),
+        text: text,
       ));
     }
   }
@@ -128,6 +132,13 @@ List<_TimedWord> _restorePunctuation(AsrSentence s) {
 }
 
 const _clauseEnders = '，。？！；：、…,.?!;:';
+
+/// 渲染文本里的标点全部剥掉（不留空格）——原片字幕就是无标点的堆字
+/// 风格，句读靠「逐段出现」的节奏表达。标点只在**拆段**阶段用
+/// （[_splitByLength] 优先在标点处切开），不进画面。
+String stripPunctuation(String text) => text.replaceAll(
+    RegExp('[，。？！；：、…,.?!;:~～·\'"\u201c\u201d\u2018\u2019()（）《》<>\\[\\]【】—-]'),
+    '');
 
 /// 超长的词串按上限拆段。切点优先级：窗口内**最后一个带句读标点的词**
 /// （语义断点最好读）> 窗口内词间停顿最大处 > 硬切在窗口末尾

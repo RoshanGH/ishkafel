@@ -222,7 +222,11 @@ void main() {
 
     // 强制接管后照常进入
     await tester.tap(find.byKey(const Key('review-takeover')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    // 抢锁是破坏性的（对方之后的写入被拒），必须先过确认框
+    expect(find.text('强制接管这个任务？'), findsOneWidget);
+    await tester.tap(find.text('接管'));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('review-confirm')), findsOneWidget);
   });
 
