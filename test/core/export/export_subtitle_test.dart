@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/export/export_runner.dart';
+import 'package:ishkafel/core/export/export_spec.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
@@ -14,6 +15,7 @@ import 'package:path/path.dart' as p;
 /// 假渲染器：不起 osascript，记录渲了什么并写个假 PNG
 class _FakeRasterizer implements SubtitleRasterizer {
   final rendered = <String>[];
+  final sizes = <(int, int)>[];
 
   @override
   noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -27,6 +29,7 @@ class _FakeRasterizer implements SubtitleRasterizer {
     required Directory outDir,
   }) async {
     outDir.createSync(recursive: true);
+    sizes.add((width, height));
     return [
       for (final (i, line) in lines.indexed)
         () {
@@ -61,7 +64,8 @@ void main() {
         ),
       ];
 
-  Future<_FakeRasterizer> export({required List<AsrSentence> sentences}) async {
+  Future<_FakeRasterizer> export(
+      {required List<AsrSentence> sentences, ExportSpec? spec}) async {
     calls.clear();
     final rasterizer = _FakeRasterizer();
     final work = Directory.systemTemp.createTempSync('ishkafel_sub_work_');
@@ -87,6 +91,7 @@ void main() {
         UnitReplacement.perShot(const {1: [9]}),
       ],
       outputDir: out,
+      spec: spec,
       subtitleSentences: sentences,
     );
     expect(results.single.ok, isTrue, reason: results.single.failure ?? '');
@@ -113,6 +118,24 @@ void main() {
     // 原片切片那一条不叠字幕——它自带的字幕还在画面里
     final trim = calls.where((a) => joined(a).contains('/v/src.mp4')).first;
     expect(joined(trim), isNot(contains('overlay')));
+  });
+
+  test('导出规格贯穿替换段与字幕图——720P/60fps 不吃 1080/30 死值', () async {
+    final rasterizer = await export(
+      sentences: const [AsrSentence(startMs: 2000, endMs: 5000, text: '第二句')],
+      spec: const ExportSpec(shortSide: 720, fps: 60),
+    );
+    // 字幕图按导出分辨率渲（720 短边 → 720×1280）
+    expect(rasterizer.sizes.single, (720, 1280));
+    // 替换切片命令按导出规格编码
+    final fit = calls.where((a) => joined(a).contains('m9.mp4')).single;
+    expect(joined(fit), contains('scale=720:1280'));
+    expect(fit[fit.indexOf('-r') + 1], '60');
+    // 原片段与替换段同规格同帧率——进同一条 concat 清单才不花屏
+    final trim = calls
+        .where((a) => joined(a).contains('/v/src.mp4') && a.contains('-vf'))
+        .first;
+    expect(trim[trim.indexOf('-r') + 1], '60');
   });
 
   test('没有转写（老任务/空白任务）：照常导出，替换切片不带字幕', () async {

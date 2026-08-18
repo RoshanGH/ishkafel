@@ -96,6 +96,7 @@ class ExportRunner {
     required String? vocalsPath,
     required VoicePlan voices,
     required Map<int, String> voiceAudio,
+    String? sourcePath,
     List<UnitReplacement> replacements = const [],
   }) {
     // 整体替换用的是候选素材自己的口播，换音色用的是 TTS 合成的口播——
@@ -114,8 +115,12 @@ class ExportRunner {
     }
 
     // 有配乐却没有分离出来的人声轨：新配乐只能叠在原混音上，原片自带的
-    // 背景音还在，成片里两首曲子一起响
-    if (bgm.segments.isNotEmpty &&
+    // 背景音还在，成片里两首曲子一起响。
+    // **空白任务豁免**：它没有原片，声音全部来自素材、由 separateMaterial
+    // 逐条分离——按「必须有原片人声轨」拦它等于配了乐就永远导不出
+    // （预览侧一直是豁免的，两边规则要一致）
+    if (sourcePath != null &&
+        bgm.segments.isNotEmpty &&
         (vocalsPath == null || !File(vocalsPath).existsSync())) {
       return '这条片子有配乐，但没有分离出来的纯人声轨——直接导出会让新配乐'
           '叠在原片背景音上（两首曲子一起响）。请先装好分离工具并重新分析';
@@ -230,6 +235,7 @@ class ExportRunner {
             vocalsPath: vocalsPath,
             voices: voices,
             voiceAudio: voiceAudio,
+            sourcePath: sourcePath,
             replacements: replacements);
     if (blocker != null) {
       AppLog.warn('导出前置检查未通过：$blocker');
@@ -473,15 +479,14 @@ class ExportRunner {
         );
       } else {
         // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝），
-        // 并把这段台词的字幕重渲上去——原片的字幕烧在被换掉的画面里。
-        // 字幕图与切片同一个输出分辨率（fitCandidateVideo 不传 target
-        // 时按成片标准 1080×1920）
+        // 并把这段台词的字幕重渲上去——原片的字幕烧在被换掉的画面里
         final overlays = subtitleLines.isEmpty
             ? const <SubtitleOverlayImage>[]
             : await rasterizer.rasterize(
                 lines: subtitleLines,
-                width: ExportCommands.width,
-                height: ExportCommands.height,
+                // 与切片同一个输出分辨率——跟导出规格，不吃成片标准死值
+                width: renderSpec.width,
+                height: renderSpec.height,
                 style: subtitleStyle,
                 outDir: workDir,
               );
@@ -492,6 +497,8 @@ class ExportRunner {
             candidateDurationMs: await _probeQuietly(path),
             out: out,
             subtitleOverlays: overlays,
+            // 规格必须贯穿：这段与原片段进同一条 concat 清单
+            spec: renderSpec,
           ),
           'U${segment.unitIndex + 1} 的替换画面',
         );

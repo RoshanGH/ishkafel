@@ -115,9 +115,13 @@ class ExportCommands {
     /// 编成什么规格。**预览必须传原片的规格**：预览是把原片与这段切片拼成
     /// 一条 EDL 播，中间换一次编码，播放器就要重建一次解码器——用户看到的
     /// 是「突然加速、突然变慢」（真机实测，与素材规格不一致时同一个毛病）。
-    ///
-    /// 导出不用传：那一批所有段落统一编成 libx264，本来就是一致的。
     MediaSpec? target,
+
+    /// 导出时传：分辨率/帧率/码率/编码器全跟用户选的规格走。
+    /// 曾经不传吃死值（1080×1920/30fps/H.264），同一条 concat 清单里
+    /// 原片段是新规格、这段是死值——`-c copy` 拼接轻则花屏重则失败。
+    /// 与 [target] 互斥：预览传 target、导出传 spec；都传时以 target 为准
+    ExportSpec? spec,
   }) {
     final factor = candidateDurationMs == null
         ? 1.0
@@ -127,8 +131,10 @@ class ExportCommands {
     final speed = (factor - 1).abs() < 1e-6
         ? ''
         : ',setpts=PTS/${_trim(factor)}';
-    final baseChain = '${_scalePad(target)}$speed'
+    final effectiveSpec = target == null ? spec : null;
+    final baseChain = '${_scalePad(target, effectiveSpec)}$speed'
         ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}';
+    final outFps = target?.fps ?? effectiveSpec?.fps.toDouble();
     return [
       '-y', '-v', 'error',
       '-i', input,
@@ -141,9 +147,13 @@ class ExportCommands {
         subtitleFilterComplex(baseChain: baseChain, overlays: subtitleOverlays),
         '-map', subtitleFilterOutLabel(subtitleOverlays.length),
       ],
-      '-r', target == null ? '$fps' : target.frameRate,
-      ..._encoder(),
-      '-frames:v', '${frameCount(durationMs, atFps: target?.fps)}',
+      '-r', target?.frameRate ?? '${effectiveSpec?.fps ?? fps}',
+      // 导出段与 trimOriginalVideo 同一套编码参数（码率/编码器跟设置），
+      // 预览段维持统一代理编码
+      ...(effectiveSpec == null
+          ? _encoder()
+          : [...effectiveSpec.encodeArgs, '-pix_fmt', 'yuv420p']),
+      '-frames:v', '${frameCount(durationMs, atFps: outFps)}',
       out,
     ];
   }

@@ -706,6 +706,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 与「选音色」分开是刻意的：选音色是即时的，生成要走云端、每句几秒，
   /// 用户往往先把几句都配好再统一生成。
   Future<void> _generateVoices() async {
+    // 重入闸：一轮生成是真金白银的云端计费任务，按钮虽随进度禁用，
+    // 但任何别的入口（快捷键/将来新增的调用点）都不该能并发触发第二轮
+    if (_voiceProgress != null) return;
     final editor = _editor;
     final factory = widget.voiceSwapFactory ?? ref.read(voiceSwapFactoryProvider);
     if (editor == null || _task.voices.isEmpty) return;

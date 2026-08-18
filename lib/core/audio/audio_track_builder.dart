@@ -256,7 +256,8 @@ class AudioTrackBuilder {
     if (voice != null && File(voice).existsSync()) {
       return [
         await _cache.render(
-          key: 'voice|$voice|${unit.durationMs}',
+          // fps 进键：-t 是按帧取整算的，30fps 与 60fps 的产物不同
+          key: 'voice|$voice|${unit.durationMs}|$exportFps',
           prefix: 'mix_u${unit.index}_voice',
           extension: 'wav',
           args: (dest) => ExportCommands.fitVoiceAudio(
@@ -285,7 +286,7 @@ class AudioTrackBuilder {
             '合不出声音。请给它挑一条素材，或者删掉这个分子');
       }
       pieces.add(await _cache.render(
-        key: 'trim|$source|$start|$end',
+        key: 'trim|$source|$start|$end|$exportFps',
         prefix: 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}',
         extension: 'wav',
         args: (dest) => ExportCommands.trimOriginalAudio(

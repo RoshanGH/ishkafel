@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/export/export_commands.dart';
+import 'package:ishkafel/core/export/export_spec.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 
 /// 取参数后面紧跟的那个值（ffmpeg 的参数就是这么成对出现的）
@@ -79,6 +80,31 @@ void main() {
           reason: '字幕时间轴是切片输出时间轴，必须在变速与补帧之后叠');
       expect(valueAfter(withSub, '-map'), '[b1]');
       expect(withSub, isNot(contains('-vf')));
+    });
+
+    test('导出规格贯穿：720P/60fps/HEVC 不再吃 1080/30/H.264 的死值', () {
+      const spec = ExportSpec(
+          shortSide: 720, fps: 60, codec: VideoCodec.hevc);
+      final args = ExportCommands.fitCandidateVideo(
+          input: '/m/1.mp4', durationMs: 3000, out: '/tmp/y.mp4', spec: spec);
+      final vf = valueAfter(args, '-vf')!;
+      expect(vf, contains('scale=720:1280'),
+          reason: '同一条 concat 清单里原片段是 720，替换段还是 1080 会花屏');
+      expect(valueAfter(args, '-r'), '60');
+      expect(valueAfter(args, '-frames:v'), '180',
+          reason: '3000ms @60fps；按 30 数帧的话这段只有一半长');
+      expect(valueAfter(args, '-c:v'), 'libx265',
+          reason: 'HEVC 导出时替换段编成 H.264，-c copy 拼接直接失败');
+      expect(valueAfter(args, '-b:v'), isNotNull,
+          reason: '码率档位也要跟导出设置，不能吃 CRF 死值');
+    });
+
+    test('预览规格（target）优先于导出规格——两者不该同时传，传了以预览为准', () {
+      final args = ExportCommands.fitCandidateVideo(
+          input: '/m/1.mp4', durationMs: 3000, out: '/tmp/y.mp4');
+      // 都不传时维持成片标准缺省
+      expect(valueAfter(args, '-vf'), contains('scale=1080:1920'));
+      expect(valueAfter(args, '-r'), '30');
     });
 
     test('不给字幕图就完全不碰滤镜链——和原行为一字不差', () {
