@@ -20,15 +20,15 @@ class SubtitleStyle {
   /// 字幕基线距**画面底部**的比例（0~1）。0.22 ≈ 竖屏底部安全区上沿
   final double bottomRatio;
 
-  /// 字号占画面**高度**的比例。0.042 在 1920 高下约 80px——
-  /// 投放类竖屏成片的常见档位
+  /// 字号占画面**高度**的比例。0.034 在 1920 高下约 65px——与示范原片
+  /// （滴露样张）的字幕实测大小对齐；0.042 那档真机对比后偏大
   final double fontRatio;
 
   final SubtitlePreset preset;
 
   const SubtitleStyle({
     this.bottomRatio = 0.22,
-    this.fontRatio = 0.042,
+    this.fontRatio = 0.034,
     this.preset = SubtitlePreset.whiteOutline,
   });
 
@@ -66,5 +66,5 @@ class SubtitleStyle {
   /// 两遍画）参数却没变时，靠它把旧图旧切片一并作废
   String get fingerprint =>
       'sub:${bottomRatio.toStringAsFixed(3)}:${fontRatio.toStringAsFixed(3)}'
-      ':${preset.name}:v2';
+      ':${preset.name}:v3';
 }

@@ -104,7 +104,9 @@ function run(argv) {
     let font = $.NSFont.fontWithNameSize('PingFangSC-Semibold', spec.fontSize);
     if (font.isNil()) font = $.NSFont.boldSystemFontOfSize(spec.fontSize);
     const para = $.NSMutableParagraphStyle.alloc.init;
-    para.setAlignment(2);
+    // NSTextAlignmentCenter：新 SDK 里是 1（老 AppKit 的 2 现在是右对齐，
+    // 真机上就是被它坑出了「从右往左排」）
+    para.setAlignment(1);
     // 两遍绘制：先用「仅描边」（正值）画粗黑边打底，再画实心字芯——
     // 描边和填充一遍画（负值）时，描边一粗就会吃进字的内部
     const strokeAttrs = $.NSMutableDictionary.alloc.init;
