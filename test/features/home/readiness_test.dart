@@ -15,9 +15,13 @@ Readiness _readiness({
   MediaToolsStatus? tools = _toolsOk,
   MiaoaAccountStatus? account = _loggedIn,
   bool credentials = true,
+  bool debugBuild = false, // 默认按正式版测；调试版文案单独一条用例
 }) =>
     Readiness.from(
-        mediaTools: tools, account: account, credentialsReady: credentials);
+        mediaTools: tools,
+        account: account,
+        credentialsReady: credentials,
+        debugBuild: debugBuild);
 
 void main() {
   group('准备工作清单（同事双击打开就用，没人给他做培训）', () {
@@ -74,6 +78,17 @@ void main() {
       expect(item.ready, isFalse);
       expect(item.hint, contains('同事'),
           reason: '凭据由打包注入，使用者自己配不了；让他去改配置只会白折腾');
+    });
+
+    test('调试构建缺凭据：如实说「调试版本就不含」，别把人引去找同事重新打包', () {
+      final item = _readiness(credentials: false, debugBuild: true)
+          .items
+          .firstWhere((i) => i.title == '云端 AI 服务');
+
+      expect(item.statusText, '调试版不含');
+      expect(item.hint, contains('开发调试版'));
+      expect(item.hint, isNot(contains('同事')),
+          reason: '调试版天生没有凭据，找同事重新打包解决不了任何问题');
     });
   });
 

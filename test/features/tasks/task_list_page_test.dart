@@ -313,7 +313,16 @@ void main() {
       await tester.pumpWidget(wrap(InMemoryTaskRepository()));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('尚未配置'), findsOneWidget);
+      // 测试 VM 是 debug 模式，横幅如实自报「开发调试版」
+      expect(find.textContaining('开发调试版'), findsWidgets);
+    });
+
+    test('横幅文案按构建区分：正式包指向补凭据，调试版自报家门', () {
+      expect(analysisMissingBannerText(debugBuild: false), contains('尚未配置'));
+      expect(analysisMissingBannerText(debugBuild: true), contains('开发调试版'));
+      expect(analysisMissingBannerText(debugBuild: true),
+          isNot(contains('补齐凭据')),
+          reason: '调试版没有凭据可补，这句话只会把人引错方向');
     });
 
     testWidgets('点「重试」时给出「AI 服务未配置」的即时反馈', (tester) async {

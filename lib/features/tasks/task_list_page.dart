@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
+import '../../core/build_mode.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/ui_wake.dart';
 import '../review/review_page.dart';
@@ -328,9 +329,29 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: AppColors.surface,
-        title: const Text('ishkafel',
-            style: TextStyle(
-                fontSize: AppFontSize.title, fontWeight: FontWeight.w700)),
+        title: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Text('ishkafel',
+              style: TextStyle(
+                  fontSize: AppFontSize.title, fontWeight: FontWeight.w700)),
+          // 调试构建必须自报家门：它不带凭据和 CLI，被误当正式版用过两次，
+          // 用户以为软件坏了
+          if (isDebugBuild)
+            Container(
+              key: const Key('debug-build-badge'),
+              margin: const EdgeInsets.only(left: AppSpacing.sm),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.sm, vertical: 2),
+              decoration: BoxDecoration(
+                color: AppColors.orange.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: const Text('开发调试版',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.orange,
+                      fontWeight: FontWeight.w600)),
+            ),
+        ]),
         actions: [
           // 常驻入口：忘掉流程的时刻，恰恰是列表里已经堆了一屏任务的时候，
           // 只在空状态露一次脸的说明等于没有

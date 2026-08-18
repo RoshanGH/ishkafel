@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/build_mode.dart';
 import '../../core/ffmpeg/media_tools_locator.dart';
 import 'task_list_controller.dart';
 
@@ -103,11 +104,10 @@ class EnvironmentBanners extends ConsumerWidget {
               '导入与分析都无法进行。请在终端执行 brew install ffmpeg 安装后重启本应用。',
         ),
       if (ref.watch(analysisPipelineProvider) == null)
-        const NoticeBanner(
+        NoticeBanner(
           icon: Icons.info_outline,
           color: AppColors.orange,
-          message: '尚未配置 AI 服务（语音识别与语义切分），导入的素材无法自动分析。'
-              '请补齐凭据后重启应用，再对任务点「重新分析」。',
+          message: analysisMissingBannerText(),
         ),
       if (skipped > 0)
         NoticeBanner(
@@ -121,3 +121,14 @@ class EnvironmentBanners extends ConsumerWidget {
     return Column(mainAxisSize: MainAxisSize.min, children: banners);
   }
 }
+
+/// AI 分析不可用时的横幅文案。
+/// 调试构建天生不带凭据——如实说，别把用户引去「补齐凭据」；
+/// 正式包缺凭据才是真的打包问题（测试注入 [debugBuild]：
+/// flutter test 的 VM 永远是 debug 模式）
+String analysisMissingBannerText({bool debugBuild = isDebugBuild}) =>
+    debugBuild
+        ? '当前是开发调试版（不含云端 AI 凭据与内置命令行工具），'
+            '仅供开发验证。日常使用请打开正式打包的版本。'
+        : '尚未配置 AI 服务（语音识别与语义切分），导入的素材无法自动分析。'
+            '请补齐凭据后重启应用，再对任务点「重新分析」。';

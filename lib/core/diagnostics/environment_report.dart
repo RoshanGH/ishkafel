@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../ai/ai_credentials.dart';
 import '../miaoa/miaoa_gateway.dart';
+import '../build_mode.dart';
 import '../ffmpeg/media_tools_locator.dart';
 import '../ffmpeg/process_runner.dart';
 import '../audio/vocal_separator.dart';
@@ -64,12 +65,17 @@ class EnvironmentProbe {
   final AiCredentials credentials;
   final ProcessRunnerLike run;
 
+  /// 测试注入用：flutter test 的 VM 永远是 debug 模式，不注入的话
+  /// 正式版文案那条分支在测试里永远走不到
+  final bool debugBuild;
+
   const EnvironmentProbe({
     required this.mediaTools,
     required this.resolveMiaoa,
     required this.resolveSeparator,
     required this.credentials,
     required this.run,
+    this.debugBuild = isDebugBuild,
   });
 
   Future<EnvironmentReport> collect() async {
@@ -97,8 +103,11 @@ class EnvironmentProbe {
       credentialsReady: credentials.isComplete,
       credentialsHint: credentials.isComplete
           ? null
-          : '云端 AI 凭据不完整，无法进行语音识别与画面打标。'
-              '请联系分发这个版本的同事重新打包。',
+          : debugBuild
+              // 调试版本就不含凭据，让用户去找同事重新打包是把他引错方向
+              ? '当前是开发调试版，本就不含云端 AI 凭据。日常使用请打开正式打包的版本。'
+              : '云端 AI 凭据不完整，无法进行语音识别与画面打标。'
+                  '请联系分发这个版本的同事重新打包。',
     );
   }
 

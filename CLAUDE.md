@@ -46,7 +46,8 @@
 
 ## 工作流要求（强制）
 
-- **每次代码改动落地后（任务波/里程碑收尾时），必须重新构建并启动 app**（`flutter run -d macos` 或构建产物 `open`），让用户能立即看到效果；不允许只报告"测试通过"就结束
+- **每次代码改动落地后（任务波/里程碑收尾时），必须重新构建并启动 app**，让用户能立即看到效果；不允许只报告"测试通过"就结束
+- **留给用户的必须是正式构建**：调试构建（`flutter build macos --debug` / `flutter run`）不带云端 AI 凭据和内置 CLI，用户接手会看到"未配置/未包含"的降级提示并以为软件坏了（真机发生过两次）。验证结束后必须退出调试版并启动 Release 产物（通常直接 `./scripts/pack.sh` 打新版号正式包），绝不把调试版留在前台
 - macOS 调试运行若出现 `Failed to foreground app`，需主动用 `open build/macos/Build/Products/Debug/ishkafel.app` 或 AppleScript activate 把窗口带到前台并核实可见
 
 ## 语言

@@ -1,4 +1,5 @@
 import '../../core/ffmpeg/media_tools_locator.dart';
+import '../../core/build_mode.dart';
 import '../../core/miaoa/miaoa_account_service.dart';
 
 /// 一项前置条件的检查结果（不可变）
@@ -48,10 +49,18 @@ class Readiness {
     required MediaToolsStatus? mediaTools,
     required MiaoaAccountStatus? account,
     required bool credentialsReady,
+
+    /// 测试注入用：flutter test 的 VM 永远是 debug 模式，不注入的话
+    /// 正式版文案那条分支在测试里永远走不到
+    bool debugBuild = isDebugBuild,
   }) {
     final tools = _toolsItem(mediaTools);
     return Readiness(
-      items: [tools, _accountItem(account), _credentialsItem(credentialsReady)],
+      items: [
+        tools,
+        _accountItem(account),
+        _credentialsItem(credentialsReady, debugBuild),
+      ],
       // 只拦真正做不下去的：没有 ffmpeg 连读取视频信息、抽封面都做不到。
       // miaoa / 凭据的问题都还有补救路径（向导内重试、先导入后重新分析），
       // 把入口锁死反而让用户连重试的机会都没有。
@@ -117,15 +126,18 @@ class Readiness {
     );
   }
 
-  static ReadinessItem _credentialsItem(bool ready) => ready
+  static ReadinessItem _credentialsItem(bool ready, bool debugBuild) => ready
       ? const ReadinessItem(
           title: '云端 AI 服务', statusText: '已配置', ready: true)
-      : const ReadinessItem(
+      : ReadinessItem(
           title: '云端 AI 服务',
-          statusText: '未配置',
+          statusText: debugBuild ? '调试版不含' : '未配置',
           ready: false,
-          // 凭据由打包注入，使用者自己配不了；让他去改配置只会白折腾
-          hint: '缺少语音识别与画面打标所需的凭据，导入的素材无法自动分析。'
-              '请联系分发这个版本的同事重新打包。',
+          // 凭据由打包注入，使用者自己配不了；让他去改配置只会白折腾。
+          // 调试版本就不含凭据——如实说，别把人引去找同事重新打包
+          hint: debugBuild
+              ? '当前是开发调试版，本就不含云端 AI 凭据。日常使用请打开正式打包的版本。'
+              : '缺少语音识别与画面打标所需的凭据，导入的素材无法自动分析。'
+                  '请联系分发这个版本的同事重新打包。',
         );
 }
