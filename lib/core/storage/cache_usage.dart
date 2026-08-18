@@ -65,14 +65,28 @@ class CacheScanner {
     );
   }
 
-  /// 删除孤儿产物，返回**实际**释放的字节数（删失败的不计入，不虚报）
-  Future<int> purgeOrphans({required Set<String> knownTaskIds}) async {
+  /// 删除孤儿产物，返回**实际**释放的字节数（删失败的不计入，不虚报）。
+  ///
+  /// [referencedStems] 是现存任务还引用着的素材文件名（不带扩展名）——
+  /// 给了才清 material_vocals 的无引用条目；拿不到（调用方没收集）就不清，
+  /// 不确定时不做减法
+  Future<int> purgeOrphans({
+    required Set<String> knownTaskIds,
+    Set<String>? referencedStems,
+  }) async {
     final artifacts = _artifacts;
-    return artifacts.delete([
+    var freed = artifacts.delete([
       ...artifacts.orphans(knownTaskIds),
       // 废弃目录一并带走：没人读的数据不该继续占着盘
       ...artifacts.retired(),
+      if (referencedStems != null)
+        ...artifacts.vocalOrphans(referencedStems),
     ]);
+    // 预览代理按内容指纹命名、判不了归属，只能按量控（10GB，与素材缓存同档）
+    freed += TaskArtifacts.sweepByQuota(
+        Directory(p.join(dataDir.path, 'preview_proxy')),
+        maxBytes: 10 * 1024 * 1024 * 1024);
+    return freed;
   }
 
   int _bytesOf(Directory dir) =>

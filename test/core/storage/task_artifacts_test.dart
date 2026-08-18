@@ -26,8 +26,7 @@ void main() {
       _file('analysis_work/ab_thumbs.raw');
       _file('analysis_work/ab_frames/batch_000.jpg');
       _file('analysis_work/stems/ab/人声.wav');
-      _file('preview_video/ab/pv_src_0_1000.mp4');
-      _file('preview_audio/ab/mix.wav');
+      _file('speed_fit/ab/fit_x.mp4');
       _file('export_work/ab/out.mp4');
       _file('voices/ab/u0.wav');
       _file('picked_thumbs/ab/100.jpg');
@@ -42,8 +41,7 @@ void main() {
             'covers/ab.jpg',
             'export_work/ab',
             'picked_thumbs/ab',
-            'preview_audio/ab',
-            'preview_video/ab',
+            'speed_fit/ab',
             'voices/ab',
           ]);
     });
@@ -51,7 +49,7 @@ void main() {
     test('不认 id 只是前缀相同的别人家产物', () {
       _file('analysis_work/abc.pcm');
       _file('covers/abc.jpg');
-      _file('preview_video/abc/x.mp4');
+      _file('speed_fit/abc/x.mp4');
 
       expect(TaskArtifacts(_root).of('ab'), isEmpty);
     });
@@ -64,13 +62,13 @@ void main() {
       _file('analysis_work/alive.pcm');
       _file('analysis_work/ghost_thumbs.raw');
       _file('analysis_work/stems/ghost/人声.wav');
-      _file('preview_video/ghost/x.mp4');
+      _file('speed_fit/ghost/x.mp4');
 
       expect(_names(TaskArtifacts(_root).orphans({'alive'})), [
         'analysis_work/ghost_thumbs.raw',
         'analysis_work/stems/ghost',
         'covers/ghost.jpg',
-        'preview_video/ghost',
+        'speed_fit/ghost',
       ]);
     });
 
@@ -83,7 +81,7 @@ void main() {
 
     test('删掉之后返回实际释放的字节数', () {
       _file('covers/ghost.jpg', 100);
-      _file('preview_video/ghost/x.mp4', 400);
+      _file('speed_fit/ghost/x.mp4', 400);
       final artifacts = TaskArtifacts(_root);
 
       final freed = artifacts.delete(artifacts.orphans({'alive'}));

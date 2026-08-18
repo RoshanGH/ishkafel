@@ -47,7 +47,23 @@ final cachePurgeProvider = Provider<CachePurge>((ref) {
   final repository = ref.watch(taskRepositoryProvider);
   return () async {
     if (scanner == null) return 0;
-    return scanner.purgeOrphans(knownTaskIds: await _knownTaskIds(repository));
+    final tasks = await repository.findAll();
+    return scanner.purgeOrphans(
+      knownTaskIds: {for (final t in tasks) t.id},
+      // 现存任务还引用着的素材：人声分离产物按素材归档，靠这份引用集
+      // 反推孤儿。宁可多保护（并集取宽），不误删在用的
+      referencedStems: {
+        for (final t in tasks) ...[
+          for (final m in t.pickedMaterials) '${m.id}',
+          for (final r in t.replacements ?? const []) ...[
+            for (final id in r.wholeCandidateIds) '$id',
+            for (final ids in r.shotCandidateIds.values) ...[
+              for (final id in ids) '$id',
+            ],
+          ],
+        ],
+      },
+    );
   };
 });
 

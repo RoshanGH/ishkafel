@@ -29,12 +29,11 @@ class TaskArtifacts {
 
   /// 一个任务一个子目录的那些：`<这个目录>/<taskId>/…`
   static const perTaskDirNames = [
-    'preview_audio', // 预览音轨的中间产物
-    'preview_video', // 预览画面的段落切片
-    'export_work', // 导出的中间产物
+    'export_work', // 导出的中间产物（增量重导要复用，按任务归属清理）
     'voices', // 生成的配音
     'picked_thumbs', // 已选素材的首帧图
     'review_thumbs', // 审核页原片段落的首帧图
+    'speed_fit', // 预览的变速切片（曾经不在清单里：任务删了目录还躺着）
   ];
 
   /// **跨任务共享**的缓存目录：里面按内容指纹命名，同一份内容只存一次，
@@ -44,11 +43,16 @@ class TaskArtifacts {
     'preview_proxy', // 预览代理（原片与候选素材共用，见 ProxySpec）
     'material_cache', // 候选素材的原始下载。**导出读这里**，不能当缓存清掉
     'bgm_cache', // 配乐
+    'material_vocals', // 素材人声分离产物（曾经不在清单：32MB/条只增不减）
+    'separator_models', // 人声分离模型下载
   ];
 
   /// 已经废弃、但可能还躺在老用户盘上的目录。开机扫一遍清掉——
   /// 磁盘上躺着的每一份数据都要有人读、有人删，没人读的就该走
   static const retiredDirNames = [
+    // 预合成的预览音视频：多轨预览取代后已无写入方，老用户盘上清掉
+    'preview_audio',
+    'preview_video',
     // 审核回执（短命的中间设计）：审核完一切回到主流程，任务里的方案就是
     // 最终结果，回执没有第二个读者
     'reviews',
@@ -123,6 +127,42 @@ class TaskArtifacts {
         ..._children(Directory(p.join(dataDir.path, name)))
             .where((e) => orphan(p.basename(e.path))),
     ];
+  }
+
+  /// material_vocals 里没有任何现存任务引用的条目。
+  ///
+  /// 人声分离产物按**素材**归档（不按任务），删任务带不走它——必须拿
+  /// 「全部现存任务还引用哪些素材」来反推孤儿。[referencedStems] 是这些
+  /// 素材落地文件的 basename（不带扩展名，与子目录名一致）
+  List<FileSystemEntity> vocalOrphans(Set<String> referencedStems) => [
+        for (final e
+            in _children(Directory(p.join(dataDir.path, 'material_vocals'))))
+          if (!referencedStems.contains(p.basename(e.path))) e,
+      ];
+
+  /// 按配额清扫一个共享缓存目录：超过 [maxBytes] 时从最久没碰过的开始删。
+  /// preview_proxy 这类按内容指纹命名的缓存没有「归属」可判，只能按量控
+  static int sweepByQuota(Directory dir, {required int maxBytes}) {
+    if (!dir.existsSync()) return 0;
+    final files = dir
+        .listSync()
+        .whereType<File>()
+        .map((f) => (file: f, stat: f.statSync()))
+        .toList()
+      ..sort((a, b) => a.stat.modified.compareTo(b.stat.modified));
+    var total = files.fold(0, (n, f) => n + f.stat.size);
+    var freed = 0;
+    for (final f in files) {
+      if (total <= maxBytes) break;
+      try {
+        f.file.deleteSync();
+        total -= f.stat.size;
+        freed += f.stat.size;
+      } catch (_) {
+        // 删不掉就跳过：清扫失败不该打断任何主流程
+      }
+    }
+    return freed;
   }
 
   /// 删掉给定的这些，返回**实际**释放的字节数（删失败的不计入，不虚报）

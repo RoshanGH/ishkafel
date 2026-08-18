@@ -165,7 +165,10 @@ class ExportRunner {
     ExportProgress? onProgress,
   }) async {
     final combos = ExportPlanner.enumerate(
-        units: units, replacements: replacements, limit: limit);
+      units: units,
+      replacements: replacements,
+      limit: limit,
+    );
     return exportCombinations(
       combos: combos,
       sourcePath: sourcePath,
@@ -215,11 +218,13 @@ class ExportRunner {
     final total = combos.length;
 
     // 同一个候选会在预取和渲染两处用到，也会在多条组合里重复出现——
-    // 记一下，别让下载器为同一个 id 跑好几遍
+    // 记的是 **Future**：并行渲染时两个段同时要同一条素材，也只下载一次
     final renderSpec = spec ?? defaultSpec;
-    final fetched = <int, String>{};
-    Future<String> material(int id) async =>
-        fetched[id] ??= await fetchMaterial(id);
+    final fetched = <int, Future<String>>{};
+    Future<String> material(int id) => fetched[id] ??= fetchMaterial(id);
+    // 同一条素材的时长探测同理：一次 ffprobe，处处复用
+    final probed = <String, Future<int?>>{};
+    Future<int?> probeOnce(String path) => probed[path] ??= _probeQuietly(path);
 
     // 出片前先把「会静默做错」的几件事拦掉。
     //
@@ -229,19 +234,20 @@ class ExportRunner {
     // 变速倍率**不设上限**：预览渲染的就是真实倍率的切片，用户在预览里
     // 看到 2.9× 什么样、导出来就是什么样——他看过并接受了，就不该拦。
     // 原来这里有一道 0.8×~2.0× 的闸，是在替用户做审美判断，已拆掉
-    final blocker = _blankBlocker(combos, sourcePath) ??
+    final blocker =
+        _blankBlocker(combos, sourcePath) ??
         _deliveryBlocker(
-            bgm: bgm,
-            vocalsPath: vocalsPath,
-            voices: voices,
-            voiceAudio: voiceAudio,
-            sourcePath: sourcePath,
-            replacements: replacements);
+          bgm: bgm,
+          vocalsPath: vocalsPath,
+          voices: voices,
+          voiceAudio: voiceAudio,
+          sourcePath: sourcePath,
+          replacements: replacements,
+        );
     if (blocker != null) {
       AppLog.warn('导出前置检查未通过：$blocker');
       return [
-        for (final c in combos)
-          ExportOutcome(index: c.index, failure: blocker),
+        for (final c in combos) ExportOutcome(index: c.index, failure: blocker),
       ];
     }
 
@@ -272,7 +278,8 @@ class ExportRunner {
 
     // 配乐每段只有一首时所有变体的声音一模一样，合一次就够；有备选（轮流用）
     // 或整体替换（各条变体的候选不同、时长也不同）就得逐条合
-    final perVariant = bgm.segments.any((s) => s.materials.length > 1) ||
+    final perVariant =
+        bgm.segments.any((s) => s.materials.length > 1) ||
         wholeByCombo.values.any((m) => m.isNotEmpty);
 
     /// 合第 [i] 条变体的声音。配乐没铺上就抛——成片少一段垫乐是静默的错。
@@ -281,37 +288,37 @@ class ExportRunner {
     Future<String> buildAudio(int i) async {
       final AudioTrack track;
       try {
-        track = await AudioTrackBuilder(
-          run: run,
-          // 逐条合时各用各的目录，否则中间产物互相覆盖
-          workDir: perVariant
-              ? Directory(p.join(workDir.path, 'audio_v$i'))
-              : workDir,
-          resolveBgm: resolveBgm,
-          separateMaterial: separateMaterial,
-          exportFps: renderSpec.fps.toDouble(),
-        ).build(
-          sourcePath: sourcePath,
-          units: units,
-          vocalsPath: vocalsPath,
-          bgm: bgm,
-          voiceAudio: voiceAudio,
-          variantIndex: i,
-          wholeAudio: {
-            for (final e in (wholeByCombo[i] ?? const {}).entries)
-              e.key: e.value.path,
-          },
-          wholeDurations: {
-            for (final e in (wholeByCombo[i] ?? const {}).entries)
-              e.key: e.value.ms,
-          },
-        );
+        track =
+            await AudioTrackBuilder(
+              run: run,
+              // 逐条合时各用各的目录，否则中间产物互相覆盖
+              workDir: perVariant
+                  ? Directory(p.join(workDir.path, 'audio_v$i'))
+                  : workDir,
+              resolveBgm: resolveBgm,
+              separateMaterial: separateMaterial,
+              exportFps: renderSpec.fps.toDouble(),
+            ).build(
+              sourcePath: sourcePath,
+              units: units,
+              vocalsPath: vocalsPath,
+              bgm: bgm,
+              voiceAudio: voiceAudio,
+              variantIndex: i,
+              wholeAudio: {
+                for (final e in (wholeByCombo[i] ?? const {}).entries)
+                  e.key: e.value.path,
+              },
+              wholeDurations: {
+                for (final e in (wholeByCombo[i] ?? const {}).entries)
+                  e.key: e.value.ms,
+              },
+            );
       } catch (e) {
         throw Exception('声音合成失败：$e');
       }
       if (track.bgmWarnings.isNotEmpty) {
-        throw Exception(
-            '声音合成失败：配乐没能铺上——${track.bgmWarnings.join('；')}');
+        throw Exception('声音合成失败：配乐没能铺上——${track.bgmWarnings.join('；')}');
       }
       return track.path;
     }
@@ -331,7 +338,7 @@ class ExportRunner {
       }
     }
 
-    final clips = <String, String>{}; // 段落指纹 → 已渲染的画面切片
+    final clips = <String, Future<String>>{}; // 段落指纹 → 渲染中/已渲染的切片
     final out = <ExportOutcome>[];
     for (final combo in combos) {
       onProgress?.call(out.length, total, '第 ${combo.index} 条');
@@ -340,6 +347,7 @@ class ExportRunner {
           combo: combo,
           sourcePath: sourcePath,
           material: material,
+          probe: probeOnce,
           audio: sharedAudio ?? await buildAudio(out.length),
           outputDir: outputDir,
           clips: clips,
@@ -353,20 +361,11 @@ class ExportRunner {
       }
     }
     onProgress?.call(total, total, '完成');
-    // 成片已经写到用户指定的目录，工作目录里那堆切片/中间音轨就没用了。
-    // 一批导出的中间产物动辄几百兆，留着只会让磁盘只增不减；下次导出要用
-    // 什么会重新渲染，这里没有什么值得留的
-    _discardWorkDir();
+    // 工作目录**留着**：切片和音轨都按内容指纹命名——改一个候选重导，
+    // 没变的段落直接命中磁盘、一次 ffmpeg 都不跑（「算过一次的东西要落地
+    // 复用，改动了才重算」）。它按任务归属在产物清单里：删任务时一并清、
+    // 设置页可统计可清理，不会变成孤儿
     return List.unmodifiable(out);
-  }
-
-  /// 删不掉不算错误：导出本身已经成了，为清理报错是本末倒置
-  void _discardWorkDir() {
-    try {
-      if (workDir.existsSync()) workDir.deleteSync(recursive: true);
-    } catch (e) {
-      AppLog.warn('清理导出中间产物失败 ${workDir.path}：$e');
-    }
   }
 
   /// 拼一条成片：逐段渲染画面 → concat → 与共用的声音合成
@@ -375,29 +374,49 @@ class ExportRunner {
     required String? sourcePath,
     required String audio,
     required Directory outputDir,
-    required Map<String, String> clips,
+    required Map<String, Future<String>> clips,
     required Future<String> Function(int id) material,
+    required Future<int?> Function(String path) probe,
     required ExportSpec renderSpec,
     required List<AsrSentence> subtitleSentences,
   }) async {
-    final parts = <String>[];
-    for (final segment in combo.segments) {
-      parts.add(await _renderSegment(
-          segment, sourcePath, clips, material, renderSpec, subtitleSentences));
+    // 段落渲染并行（窗口 3）：一条成片几十段逐段串行是导出慢的主因之一。
+    // 窗口不开大——每个 ffmpeg 自己就吃多核，开太多只会互相抢
+    final parts = List<String?>.filled(combo.segments.length, null);
+    for (var i = 0; i < combo.segments.length; i += 3) {
+      final batch = [
+        for (var j = i; j < combo.segments.length && j < i + 3; j++)
+          _renderSegment(
+            combo.segments[j],
+            sourcePath,
+            clips,
+            material,
+            probe,
+            renderSpec,
+            subtitleSentences,
+          ).then((path) => parts[j] = path),
+      ];
+      await Future.wait(batch);
     }
 
     final listFile = File(p.join(workDir.path, 'concat_${combo.index}.txt'))
-      ..writeAsStringSync(ExportCommands.concatList(parts));
+      ..writeAsStringSync(ExportCommands.concatList(parts.cast<String>()));
     final silent = p.join(workDir.path, 'video_${combo.index}.mp4');
     await _ffmpeg(
-        ExportCommands.concat(listFile: listFile.path, out: silent), '拼接画面');
+      ExportCommands.concat(listFile: listFile.path, out: silent),
+      '拼接画面',
+    );
 
     // 扩展名跟着格式走。选了 mov 却导出 .mp4，双击能开但拖进剪辑软件
     // 会被当成另一种东西
-    final out =
-        p.join(outputDir.path, '变体${combo.index}.${renderSpec.fileExtension}');
+    final out = p.join(
+      outputDir.path,
+      '变体${combo.index}.${renderSpec.fileExtension}',
+    );
     await _ffmpeg(
-        ExportCommands.mux(video: silent, audio: audio, out: out), '画面与声音合成');
+      ExportCommands.mux(video: silent, audio: audio, out: out),
+      '画面与声音合成',
+    );
     return out;
   }
 
@@ -407,7 +426,9 @@ class ExportRunner {
   /// 悄悄跳过——那都属于「影响最终成片的东西出了错却不说」。一次把所有空着
   /// 的点名，免得用户填一个导一次。
   static String? _blankBlocker(
-      List<ExportCombination> combos, String? sourcePath) {
+    List<ExportCombination> combos,
+    String? sourcePath,
+  ) {
     if (sourcePath != null) return null;
     final empty = <int>{};
     for (final combo in combos) {
@@ -416,8 +437,7 @@ class ExportRunner {
       }
     }
     if (empty.isEmpty) return null;
-    final names =
-        (empty.toList()..sort()).map((i) => 'U${i + 1}').join('、');
+    final names = (empty.toList()..sort()).map((i) => 'U${i + 1}').join('、');
     return '$names 还没有挑素材。删掉这些分子，或者把它们挑满，再导出';
   }
 
@@ -425,8 +445,9 @@ class ExportRunner {
   Future<String> _renderSegment(
     ExportSegment segment,
     String? sourcePath,
-    Map<String, String> clips,
+    Map<String, Future<String>> clips,
     Future<String> Function(int id) material,
+    Future<int?> Function(String path) probe,
     ExportSpec renderSpec,
     List<AsrSentence> subtitleSentences,
   ) async {
@@ -443,74 +464,78 @@ class ExportRunner {
     final subKey = subtitleLines.isEmpty
         ? ''
         : '_sub${[for (final l in subtitleLines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
-            '_${subtitleStyle.fingerprint.hashCode}';
-    final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
+              '_${subtitleStyle.fingerprint.hashCode}';
+    final key =
+        '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
         '_${renderSpec.fingerprint}$subKey';
-    final hit = clips[key];
-    if (hit != null) return hit;
-
-    final out = p.join(workDir.path, 'clip_$key.mp4');
-    if (segment.isOriginal) {
-      // 空白任务没有原片。走到这儿说明有一段没挑素材而前置检查漏了——
-      // 让它掉进 ffmpeg 只会得到一句「No such file」，指不出是哪一段
-      if (sourcePath == null) {
-        throw StateError(
+    // Future 记忆化：并行渲染时同一段只渲一次，后来的等同一个结果
+    return clips[key] ??= () async {
+      final out = p.join(workDir.path, 'clip_$key.mp4');
+      // 增量重导：上次导出留下的切片按指纹直接复用——改一个候选重导，
+      // 没变的段落一次 ffmpeg 都不跑
+      if (File(out).existsSync() && File(out).lengthSync() > 0) return out;
+      if (segment.isOriginal) {
+        // 空白任务没有原片。走到这儿说明有一段没挑素材而前置检查漏了——
+        // 让它掉进 ffmpeg 只会得到一句「No such file」，指不出是哪一段
+        if (sourcePath == null) {
+          throw StateError(
             'U${segment.unitIndex + 1} 这一段要用原片，但这条任务没有原片。'
-            '请给它挑一条素材，或者删掉这个分子');
-      }
-      await _ffmpeg(
-        ExportCommands.trimOriginalVideo(
-          source: sourcePath,
-          startMs: segment.startMs,
-          endMs: segment.endMs,
-          out: out,
-          spec: renderSpec,
-        ),
-        'U${segment.unitIndex + 1} 的原片画面',
-      );
-    } else {
-      final path = await material(segment.candidateId!);
-      if (segment.shotIndex == null) {
-        // **整体替换：原样接上**，不加速不放慢不裁不补，时长随候选
+            '请给它挑一条素材，或者删掉这个分子',
+          );
+        }
         await _ffmpeg(
-          ExportCommands.wholeReplacementVideo(
-              spec: renderSpec, input: path, out: out),
-          'U${segment.unitIndex + 1} 的替换画面',
-        );
-      } else {
-        // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝），
-        // 并把这段台词的字幕重渲上去——原片的字幕烧在被换掉的画面里
-        final overlays = subtitleLines.isEmpty
-            ? const <SubtitleOverlayImage>[]
-            : await rasterizer.rasterize(
-                lines: subtitleLines,
-                // 与切片同一个输出分辨率——跟导出规格，不吃成片标准死值
-                width: renderSpec.width,
-                height: renderSpec.height,
-                style: subtitleStyle,
-                outDir: workDir,
-              );
-        await _ffmpeg(
-          ExportCommands.fitCandidateVideo(
-            input: path,
-            durationMs: segment.durationMs,
-            candidateDurationMs: await _probeQuietly(path),
+          ExportCommands.trimOriginalVideo(
+            source: sourcePath,
+            startMs: segment.startMs,
+            endMs: segment.endMs,
             out: out,
-            subtitleOverlays: overlays,
-            // 规格必须贯穿：这段与原片段进同一条 concat 清单
             spec: renderSpec,
           ),
-          'U${segment.unitIndex + 1} 的替换画面',
+          'U${segment.unitIndex + 1} 的原片画面',
         );
+      } else {
+        final path = await material(segment.candidateId!);
+        if (segment.shotIndex == null) {
+          // **整体替换：原样接上**，不加速不放慢不裁不补，时长随候选
+          await _ffmpeg(
+            ExportCommands.wholeReplacementVideo(
+              spec: renderSpec,
+              input: path,
+              out: out,
+            ),
+            'U${segment.unitIndex + 1} 的替换画面',
+          );
+        } else {
+          // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝），
+          // 并把这段台词的字幕重渲上去——原片的字幕烧在被换掉的画面里
+          final overlays = subtitleLines.isEmpty
+              ? const <SubtitleOverlayImage>[]
+              : await rasterizer.rasterize(
+                  lines: subtitleLines,
+                  // 与切片同一个输出分辨率——跟导出规格，不吃成片标准死值
+                  width: renderSpec.width,
+                  height: renderSpec.height,
+                  style: subtitleStyle,
+                  outDir: workDir,
+                );
+          await _ffmpeg(
+            ExportCommands.fitCandidateVideo(
+              input: path,
+              durationMs: segment.durationMs,
+              candidateDurationMs: await probe(path),
+              out: out,
+              subtitleOverlays: overlays,
+              // 规格必须贯穿：这段与原片段进同一条 concat 清单
+              spec: renderSpec,
+            ),
+            'U${segment.unitIndex + 1} 的替换画面',
+          );
+        }
       }
-    }
-    clips[key] = out;
-    return out;
+      return out;
+    }();
   }
 
-  /// 这一段镜头替换要烧的 ASS 字幕文档；没有转写或坑位里没台词时为 null。
-  /// [ExportSegment] 的起止就是坑位在**原片时间轴**上的位置，与 asrSentences
-  /// 同一个轴，直接相交即可
   Future<int?> _probeQuietly(String path) async {
     final probe = probeDurationMs;
     if (probe == null) return null;
@@ -528,7 +553,9 @@ class ExportRunner {
     if (result.exitCode != 0) {
       // ffmpeg 的 stderr 动辄几百行，只留最后几行——真正的原因总在末尾
       final stderr = '${result.stderr}'.trim().split('\n');
-      final tail = stderr.length > 3 ? stderr.sublist(stderr.length - 3) : stderr;
+      final tail = stderr.length > 3
+          ? stderr.sublist(stderr.length - 3)
+          : stderr;
       throw Exception('$what 失败：${tail.join(' / ')}');
     }
   }

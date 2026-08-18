@@ -37,10 +37,24 @@ class MaterialVocalCache {
         outputDir: Directory(
             p.join(cacheDir.path, p.basenameWithoutExtension(materialPath))),
       );
+      // 背景轨从生成那一刻起就没有任何读者（这条链路只要纯人声），
+      // 一条 30MB 的未压缩 WAV 躺着纯属占盘——磁盘上的每一份数据都要
+      // 有人读、有人删
+      _discardQuietly(stems.backgroundPath);
       return stems.vocalsPath;
     } catch (e) {
       AppLog.warn('素材人声分离失败（$materialPath）：$e');
       return null;
+    }
+  }
+
+  /// 删失败只记日志：清理是顺手的事，不该让分离本身报错
+  static void _discardQuietly(String path) {
+    try {
+      final f = File(path);
+      if (f.existsSync()) f.deleteSync();
+    } catch (e) {
+      AppLog.warn('清理背景轨失败（$path）：$e');
     }
   }
 }

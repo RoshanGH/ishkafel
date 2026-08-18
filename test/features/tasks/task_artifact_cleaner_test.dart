@@ -73,12 +73,10 @@ void main() {
     await touch(stems, '人声.wav');
     final frames = Directory('${workDir.path}/ab_frames')..createSync();
     await touch(frames, 'batch_000.jpg');
-    final preview = Directory('${tempDir.path}/preview_video/ab')
+    // speed_fit 曾经不在清单里：任务删了、变速切片目录还躺着
+    final fit = Directory('${tempDir.path}/speed_fit/ab')
       ..createSync(recursive: true);
-    await touch(preview, 'pv_src_0_1000.mp4');
-    final audio = Directory('${tempDir.path}/preview_audio/ab')
-      ..createSync(recursive: true);
-    await touch(audio, 'mix_voice.wav');
+    await touch(fit, 'fit_abc.mp4');
     final voices = Directory('${tempDir.path}/voices/ab')..createSync(recursive: true);
     await touch(voices, 'u0.wav');
     final thumbs = Directory('${tempDir.path}/picked_thumbs/ab')
@@ -92,7 +90,7 @@ void main() {
 
     await cleaner.cleanup('ab');
 
-    for (final dir in [stems, frames, preview, audio, voices, thumbs]) {
+    for (final dir in [stems, frames, fit, voices, thumbs]) {
       expect(await dir.exists(), isFalse, reason: '${dir.path} 该被删掉');
     }
     expect(await otherStems.exists(), isTrue);

@@ -224,10 +224,10 @@ void main() {
     expect(results.single.ok, isTrue);
   });
 
-  group('导出完把中间产物清掉', () {
-    /// 成片已经写到用户指定的目录，工作目录里那堆切片和中间音轨就没用了。
-    /// 一批导出动辄几百兆，留着只会让磁盘只增不减。
-    test('跑完之后工作目录不留东西', () async {
+  group('导出的中间产物留作增量重导', () {
+    /// 切片按内容指纹命名：改一个候选重导，没变的段落直接命中磁盘。
+    /// 工作目录按任务归属在产物清单里（删任务清、设置页可清理），不是孤儿。
+    test('跑完之后工作目录保留切片——重导可复用', () async {
       final work = Directory.systemTemp.createTempSync('ishkafel_exp_clean_');
       final out = Directory.systemTemp.createTempSync('ishkafel_exp_kept_');
       addTearDown(() {
@@ -251,7 +251,10 @@ void main() {
       );
 
       expect(results, hasLength(1));
-      expect(work.existsSync(), isFalse);
+      expect(work.existsSync(), isTrue);
+      expect(work.listSync().whereType<File>().map((f) => f.path),
+          anyElement(contains('clip_')),
+          reason: '切片留着，下次重导按指纹直接复用');
       expect(out.listSync(), isNotEmpty, reason: '成片本身当然要留着');
     });
   });
