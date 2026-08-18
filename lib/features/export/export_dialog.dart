@@ -17,6 +17,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/audio/voice_plan.dart';
+import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/audio/bgm_plan.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
@@ -44,6 +45,9 @@ Future<void> showExportDialog(
 
   /// 分离出来的纯人声轨：被配乐覆盖的段落要用它
   String? vocalsPath,
+
+  /// 句级转写：镜头替换的切片上重渲台词字幕用（空 = 不渲）
+  List<AsrSentence> subtitleSentences = const [],
   required Directory outputDir,
 
   /// 让用户挑一个目录；返回 null 表示他取消了。注入而不是内建：单测不弹系统框
@@ -73,6 +77,7 @@ Future<void> showExportDialog(
         taskId: taskId,
         taskName: taskName,
         sourcePath: sourcePath,
+        subtitleSentences: subtitleSentences,
         units: units,
         replacements: replacements,
         bgm: bgm,
@@ -126,6 +131,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final Map<int, String> voiceAudio;
   final VoicePlan voices;
   final String? vocalsPath;
+  final List<AsrSentence> subtitleSentences;
   final Directory outputDir;
   final Future<String?> Function() pickDirectory;
   final Future<void> Function(String path) revealDirectory;
@@ -152,6 +158,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.voiceAudio,
     required this.voices,
     required this.vocalsPath,
+    this.subtitleSentences = const [],
     required this.outputDir,
     required this.pickDirectory,
     required this.revealDirectory,
@@ -221,6 +228,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         voiceAudio: widget.voiceAudio,
         voices: widget.voices,
         vocalsPath: widget.vocalsPath,
+        subtitleSentences: widget.subtitleSentences,
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
         },
@@ -236,6 +244,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               voiceAudio: widget.voiceAudio,
               voices: widget.voices,
               vocalsPath: widget.vocalsPath,
+              subtitleSentences: widget.subtitleSentences,
               onProgress: (d, t, w) {
                 if (mounted) setState(() => _progress = (d, t, w));
               },

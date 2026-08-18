@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/export/export_commands.dart';
 import '../../core/ffmpeg/media_spec.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
@@ -10,6 +11,9 @@ import '../../core/log/app_log.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/subtitle/subtitle_overlay.dart';
+import '../../core/subtitle/subtitle_rasterizer.dart';
+import '../../core/subtitle/subtitle_style.dart';
 
 /// 把镜头替换的候选变速成「正好填满原坑位」的切片。
 ///
@@ -32,6 +36,17 @@ class SpeedFitter extends ChangeNotifier {
   /// 「突然加速、突然变慢」。为 null 表示读不出来，那就不强求
   final Future<MediaSpec?> Function()? targetSpec;
 
+  /// 句级转写（任务的 asrSentences）。镜头替换换掉画面后，原片烧在像素里的
+  /// 台词字幕跟着没了——用它在切片上重渲同一句台词。空表示没有转写
+  /// （老任务/空白任务），切片照渲、不带字幕
+  final List<AsrSentence> sentences;
+
+  final SubtitleStyle subtitleStyle;
+
+  /// 把字幕行渲成透明 PNG 的渲染器（系统渲字，见 SubtitleRasterizer）。
+  /// 只有 [sentences] 非空才会用到
+  final SubtitleRasterizer rasterizer;
+
   /// 已经渲染好的：镜头 key（见 [TrackPlanBuilder.shotKey]）→ 本地切片
   final Map<String, String> _fitted = {};
 
@@ -49,7 +64,10 @@ class SpeedFitter extends ChangeNotifier {
     required this.cache,
     required this.probeDurationMs,
     this.targetSpec,
-  });
+    this.sentences = const [],
+    this.subtitleStyle = SubtitleStyle.standard,
+    SubtitleRasterizer? rasterizer,
+  }) : rasterizer = rasterizer ?? SubtitleRasterizer();
 
   MediaSpec? _target;
   bool _targetResolved = false;
@@ -82,7 +100,8 @@ class SpeedFitter extends ChangeNotifier {
     required List<UnitReplacement> replacements,
     required String? Function(int candidateId) materialPathOf,
   }) async {
-    final wanted = <String, ({int candidateId, int slotMs})>{};
+    final wanted =
+        <String, ({int candidateId, int slotStartMs, int slotEndMs})>{};
     for (var u = 0; u < units.length && u < replacements.length; u++) {
       final replacement = replacements[u];
       if (replacement.mode != ReplacementMode.perShot) continue;
@@ -92,7 +111,8 @@ class SpeedFitter extends ChangeNotifier {
         if (pick == null) continue;
         wanted[TrackPlanBuilder.shotKey(u, s)] = (
           candidateId: pick,
-          slotMs: shots[s].endMs - shots[s].startMs,
+          slotStartMs: shots[s].startMs,
+          slotEndMs: shots[s].endMs,
         );
       }
     }
@@ -114,7 +134,8 @@ class SpeedFitter extends ChangeNotifier {
       unawaited(_fit(
         key: entry.key,
         candidatePath: path,
-        slotMs: entry.value.slotMs,
+        slotStartMs: entry.value.slotStartMs,
+        slotEndMs: entry.value.slotEndMs,
       ));
     }
   }
@@ -122,10 +143,11 @@ class SpeedFitter extends ChangeNotifier {
   Future<void> _fit({
     required String key,
     required String candidatePath,
-    required int slotMs,
+    required int slotStartMs,
+    required int slotEndMs,
   }) async {
     // 已经就绪且入参没变：什么都不做。**这一条是死循环的闸**，见 [_fittedFrom]
-    final from = '$candidatePath|$slotMs';
+    final from = '$candidatePath|$slotStartMs-$slotEndMs';
     final ready = _fitted[key];
     if (_fittedFrom[key] == from &&
         ready != null &&
@@ -140,7 +162,11 @@ class SpeedFitter extends ChangeNotifier {
     if (_running.contains(key)) return;
     _running.add(key);
     try {
-      await _fitLocked(key: key, candidatePath: candidatePath, slotMs: slotMs);
+      await _fitLocked(
+          key: key,
+          candidatePath: candidatePath,
+          slotStartMs: slotStartMs,
+          slotEndMs: slotEndMs);
     } finally {
       _running.remove(key);
       _notify();
@@ -150,11 +176,23 @@ class SpeedFitter extends ChangeNotifier {
   Future<void> _fitLocked({
     required String key,
     required String candidatePath,
-    required int slotMs,
+    required int slotStartMs,
+    required int slotEndMs,
   }) async {
+    final slotMs = slotEndMs - slotStartMs;
     final candidateMs = await probeDurationMs(candidatePath);
     final target = await _resolveTarget();
-    final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs|$target';
+    // 这一段坑位里要显示的台词。**内容进指纹**：改了切分或重新转写之后，
+    // 旧切片上烧的字幕就是错的，不能再命中
+    final lines = subtitleLinesInSlot(
+        sentences: sentences, slotStartMs: slotStartMs, slotEndMs: slotEndMs);
+    final width = target?.width ?? ExportCommands.width;
+    final height = target?.height ?? ExportCommands.height;
+    final subKey = lines.isEmpty
+        ? ''
+        : '|sub${[for (final l in lines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
+            '|${subtitleStyle.fingerprint}';
+    final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs|$target$subKey';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -163,12 +201,22 @@ class SpeedFitter extends ChangeNotifier {
         _fitted[key] = expected;
         _notify();
       }
-      _fittedFrom[key] = '$candidatePath|$slotMs';
+      _fittedFrom[key] = '$candidatePath|$slotStartMs-$slotEndMs';
       return;
     }
 
     _notify();
     try {
+      // 字幕图放在缓存目录里、按内容指纹命名——已渲过的句子直接复用
+      final overlays = lines.isEmpty
+          ? const <SubtitleOverlayImage>[]
+          : await rasterizer.rasterize(
+              lines: lines,
+              width: width,
+              height: height,
+              style: subtitleStyle,
+              outDir: cache.dir,
+            );
       final out = await cache.render(
         key: cacheKey,
         prefix: 'fit',
@@ -180,11 +228,12 @@ class SpeedFitter extends ChangeNotifier {
           out: dest,
           // 和原片一个规格，播放器换段时才不用重建解码器
           target: target,
+          subtitleOverlays: overlays,
         ),
         what: '把替换镜头变速对齐坑位',
       );
       _fitted[key] = out;
-      _fittedFrom[key] = '$candidatePath|$slotMs';
+      _fittedFrom[key] = '$candidatePath|$slotStartMs-$slotEndMs';
     } catch (e) {
       // 变速失败只影响这一段：它退回播原片，其余照旧
       AppLog.warn('镜头替换变速失败（$key）：$e');

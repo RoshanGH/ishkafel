@@ -365,6 +365,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               .inMilliseconds,
       // 切片也编成代理规格：预览链路上每一段规格一致，接缝处才不用重建解码器
       targetSpec: () async => ProxySpec.at(_frameRateArg),
+      // 镜头替换保留台词字幕：用任务里的句级转写在切片上重渲
+      sentences: widget.task.asrSentences ?? const [],
     );
   }
 
@@ -1151,6 +1153,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 导出前要核对「选了音色的单元是不是都生成了配音」——少了会静默出原声
       voices: _task.voices,
       vocalsPath: _task.vocalsPath,
+      // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
+      subtitleSentences: _task.asrSentences ?? const [],
       // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片
       outputDir: _task.exports.isEmpty
           ? outputDir

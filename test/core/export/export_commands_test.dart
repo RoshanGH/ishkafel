@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/export/export_commands.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 
 /// 取参数后面紧跟的那个值（ffmpeg 的参数就是这么成对出现的）
 String? valueAfter(List<String> args, String flag) {
@@ -60,6 +61,29 @@ void main() {
     test('短了冻结最后一帧补齐，而不是循环播放', () {
       expect(valueAfter(args, '-vf'), contains('tpad=stop_mode=clone'),
           reason: '循环会看到画面突然跳回开头，观众一眼看出是拼的');
+    });
+
+    test('给了字幕图就走 filter_complex：主链之后按时间叠加，不再用 -vf', () {
+      final withSub = ExportCommands.fitCandidateVideo(
+          input: '/m/1.mp4',
+          durationMs: 3000,
+          out: '/tmp/y.mp4',
+          subtitleOverlays: const [
+            SubtitleOverlayImage(pngPath: '/w/a.png', startMs: 0, endMs: 1500),
+          ]);
+      expect(withSub, contains('/w/a.png'), reason: '字幕图是第二路输入');
+      final fc = valueAfter(withSub, '-filter_complex')!;
+      expect(fc, contains('tpad'));
+      expect(fc, contains("overlay=0:0:enable='between(t,0.000,1.500)'"));
+      expect(fc.indexOf('tpad'), lessThan(fc.indexOf('overlay')),
+          reason: '字幕时间轴是切片输出时间轴，必须在变速与补帧之后叠');
+      expect(valueAfter(withSub, '-map'), '[b1]');
+      expect(withSub, isNot(contains('-vf')));
+    });
+
+    test('不给字幕图就完全不碰滤镜链——和原行为一字不差', () {
+      expect(valueAfter(args, '-vf'), isNot(contains('overlay')));
+      expect(args, isNot(contains('-filter_complex')));
     });
   });
 

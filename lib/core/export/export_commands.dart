@@ -1,4 +1,5 @@
 import '../ffmpeg/media_spec.dart';
+import '../subtitle/subtitle_overlay.dart';
 import 'export_spec.dart';
 import 'speed_fit.dart';
 
@@ -104,6 +105,13 @@ class ExportCommands {
     required String out,
     int? candidateDurationMs,
 
+    /// 要叠在这段切片上的字幕图（镜头替换保留台词字幕用，见
+    /// subtitle_overlay.dart）。叠加发生在归一、变速、补帧**之后**：
+    /// 显隐时间按切片输出时间轴算，位置随图（图与输出同分辨率）。
+    /// 用 overlay 而不是 ass/drawtext——那两个滤镜依赖 libass/freetype，
+    /// 新版 Homebrew 的 ffmpeg 已经不带
+    List<SubtitleOverlayImage> subtitleOverlays = const [],
+
     /// 编成什么规格。**预览必须传原片的规格**：预览是把原片与这段切片拼成
     /// 一条 EDL 播，中间换一次编码，播放器就要重建一次解码器——用户看到的
     /// 是「突然加速、突然变慢」（真机实测，与素材规格不一致时同一个毛病）。
@@ -119,13 +127,20 @@ class ExportCommands {
     final speed = (factor - 1).abs() < 1e-6
         ? ''
         : ',setpts=PTS/${_trim(factor)}';
+    final baseChain = '${_scalePad(target)}$speed'
+        ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}';
     return [
       '-y', '-v', 'error',
       '-i', input,
+      for (final o in subtitleOverlays) ...['-i', o.pngPath],
       '-an',
-      '-vf',
-      '${_scalePad(target)}$speed'
-          ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}',
+      if (subtitleOverlays.isEmpty) ...[
+        '-vf', baseChain,
+      ] else ...[
+        '-filter_complex',
+        subtitleFilterComplex(baseChain: baseChain, overlays: subtitleOverlays),
+        '-map', subtitleFilterOutLabel(subtitleOverlays.length),
+      ],
       '-r', target == null ? '$fps' : target.frameRate,
       ..._encoder(),
       '-frames:v', '${frameCount(durationMs, atFps: target?.fps)}',

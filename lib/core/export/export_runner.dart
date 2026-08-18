@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../analysis/providers.dart' show AsrSentence;
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../ffmpeg/process_runner.dart';
@@ -9,6 +10,9 @@ import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 import '../audio/audio_track_builder.dart';
+import '../subtitle/subtitle_overlay.dart';
+import '../subtitle/subtitle_rasterizer.dart';
+import '../subtitle/subtitle_style.dart';
 import 'export_commands.dart';
 import 'export_plan.dart';
 import 'export_spec.dart';
@@ -66,6 +70,11 @@ class ExportRunner {
   /// 返回 null，那时退回裁/冻帧而不是瞎猜倍率。
   final Future<int?> Function(String path)? probeDurationMs;
 
+  final SubtitleStyle subtitleStyle;
+
+  /// 字幕图渲染器（系统渲字）。测试注入假实现
+  final SubtitleRasterizer rasterizer;
+
   ExportRunner({
     required this.run,
     required this.workDir,
@@ -73,8 +82,10 @@ class ExportRunner {
     this.resolveBgm,
     this.separateMaterial,
     this.probeDurationMs,
+    this.subtitleStyle = SubtitleStyle.standard,
+    SubtitleRasterizer? rasterizer,
     this.defaultSpec = ExportSpec.standard,
-  });
+  }) : rasterizer = rasterizer ?? SubtitleRasterizer();
 
   /// 出片前的拦截：有任何一条会让成片**静默出错**就返回原因，否则 null。
   ///
@@ -145,6 +156,7 @@ class ExportRunner {
     String? vocalsPath,
     int limit = ReplacementPlan.maxCombinations,
     ExportSpec? spec,
+    List<AsrSentence> subtitleSentences = const [],
     ExportProgress? onProgress,
   }) async {
     final combos = ExportPlanner.enumerate(
@@ -159,6 +171,8 @@ class ExportRunner {
       voiceAudio: voiceAudio,
       voices: voices,
       vocalsPath: vocalsPath,
+      spec: spec,
+      subtitleSentences: subtitleSentences,
       onProgress: onProgress,
     );
   }
@@ -182,6 +196,11 @@ class ExportRunner {
     VoicePlan voices = VoicePlan.empty,
     String? vocalsPath,
     ExportSpec? spec,
+
+    /// 句级转写（任务的 asrSentences）。镜头替换换掉画面后，原片烧在像素
+    /// 里的台词字幕跟着没了——用它在替换切片上重渲同一句台词；空表示没有
+    /// 转写（老任务/空白任务），切片照渲、不带字幕
+    List<AsrSentence> subtitleSentences = const [],
     ExportProgress? onProgress,
   }) async {
     if (combos.isEmpty) return const [];
@@ -319,6 +338,7 @@ class ExportRunner {
           outputDir: outputDir,
           clips: clips,
           renderSpec: renderSpec,
+          subtitleSentences: subtitleSentences,
         );
         out.add(ExportOutcome(index: combo.index, path: path));
       } catch (e) {
@@ -352,10 +372,12 @@ class ExportRunner {
     required Map<String, String> clips,
     required Future<String> Function(int id) material,
     required ExportSpec renderSpec,
+    required List<AsrSentence> subtitleSentences,
   }) async {
     final parts = <String>[];
     for (final segment in combo.segments) {
-      parts.add(await _renderSegment(segment, sourcePath, clips, material, renderSpec));
+      parts.add(await _renderSegment(
+          segment, sourcePath, clips, material, renderSpec, subtitleSentences));
     }
 
     final listFile = File(p.join(workDir.path, 'concat_${combo.index}.txt'))
@@ -400,11 +422,24 @@ class ExportRunner {
     Map<String, String> clips,
     Future<String> Function(int id) material,
     ExportSpec renderSpec,
+    List<AsrSentence> subtitleSentences,
   ) async {
     // 规格进指纹：同一段在 1080 和 720 下是两份不同的产物，
-    // 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格
+    // 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格。
+    // 镜头替换的字幕（内容 + 样式）同理——字幕在指纹里，改了就重渲
+    final subtitleLines = segment.shotIndex == null
+        ? const <SubtitleLine>[]
+        : subtitleLinesInSlot(
+            sentences: subtitleSentences,
+            slotStartMs: segment.startMs,
+            slotEndMs: segment.endMs,
+          );
+    final subKey = subtitleLines.isEmpty
+        ? ''
+        : '_sub${[for (final l in subtitleLines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
+            '_${subtitleStyle.fingerprint.hashCode}';
     final key = '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
-        '_${renderSpec.fingerprint}';
+        '_${renderSpec.fingerprint}$subKey';
     final hit = clips[key];
     if (hit != null) return hit;
 
@@ -437,13 +472,26 @@ class ExportRunner {
           'U${segment.unitIndex + 1} 的替换画面',
         );
       } else {
-        // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝）
+        // 镜头替换：变速对齐到原坑位（口播不动，画面必须严丝合缝），
+        // 并把这段台词的字幕重渲上去——原片的字幕烧在被换掉的画面里。
+        // 字幕图与切片同一个输出分辨率（fitCandidateVideo 不传 target
+        // 时按成片标准 1080×1920）
+        final overlays = subtitleLines.isEmpty
+            ? const <SubtitleOverlayImage>[]
+            : await rasterizer.rasterize(
+                lines: subtitleLines,
+                width: ExportCommands.width,
+                height: ExportCommands.height,
+                style: subtitleStyle,
+                outDir: workDir,
+              );
         await _ffmpeg(
           ExportCommands.fitCandidateVideo(
             input: path,
             durationMs: segment.durationMs,
             candidateDurationMs: await _probeQuietly(path),
             out: out,
+            subtitleOverlays: overlays,
           ),
           'U${segment.unitIndex + 1} 的替换画面',
         );
@@ -453,6 +501,9 @@ class ExportRunner {
     return out;
   }
 
+  /// 这一段镜头替换要烧的 ASS 字幕文档；没有转写或坑位里没台词时为 null。
+  /// [ExportSegment] 的起止就是坑位在**原片时间轴**上的位置，与 asrSentences
+  /// 同一个轴，直接相交即可
   Future<int?> _probeQuietly(String path) async {
     final probe = probeDurationMs;
     if (probe == null) return null;

@@ -136,6 +136,8 @@ Future<int> runExportCommand({
     outputDir: dest,
     bgm: task.bgm,
     vocalsPath: task.vocalsPath,
+    // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
+    subtitleSentences: task.asrSentences ?? const [],
     onProgress: (done, total, what) =>
         sink.writeln('[$done/$total] $what'),
   );
