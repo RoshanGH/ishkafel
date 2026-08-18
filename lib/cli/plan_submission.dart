@@ -1,6 +1,7 @@
 import '../core/export/export_plan.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
+import '../core/replacement/replacement_plan.dart';
 
 /// Agent 提交的一条**完整方案**：每个单元用什么，一次说清。
 ///
@@ -117,6 +118,22 @@ PlanValidation parsePlans(Object? raw, RenewTask task) {
     plans.add(SubmittedPlan(name: name, units: parsed));
   }
 
+  // 同一个单元在不同方案里必须用同一种模式：whole 与 perShot 并存的话，
+  // 投影到任务（审核页据以呈现）时两种粒度没法摆在同一个位置上
+  final modeOf = <int, String>{};
+  for (final plan in plans) {
+    for (final entry in plan.units.entries) {
+      final mode = entry.value.mode;
+      if (mode == 'keepOriginal') continue;
+      final seen = modeOf[entry.key];
+      if (seen != null && seen != mode) {
+        errors.add('U${entry.key + 1} 在不同方案里既有整体替换又有镜头替换——'
+            '同一个单元请统一用一种方式');
+      }
+      modeOf[entry.key] = mode;
+    }
+  }
+
   return errors.isEmpty
       ? PlanValidation(plans: plans)
       : PlanValidation(errors: errors);
@@ -216,4 +233,79 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
     }
   }
   return ExportCombination(index: index, segments: segments);
+}
+
+/// 把提交的方案**投影**成任务的替换现状（主流程的唯一真相）。
+///
+/// 这一步是「人审核 → Agent 导出」能接通的关键：审核页读的是
+/// `task.replacements`，投影落进去之后 `ishkafel review` 才有东西可审；
+/// 人剔除后再导出，由 [plansBlockedByReview] 对照现状拦截。
+///
+/// 投影是**整体覆盖**：方案是完整设计（没提到的单元 = 保留原片），
+/// 半新半旧的合并只会造出谁也没提交过的状态。
+List<UnitReplacement> projectPlansToReplacements(
+    List<SubmittedPlan> plans, List<SemanticUnit> units) {
+  return [
+    for (final unit in units)
+      () {
+        final whole = <int>[];
+        final byShot = <int, List<int>>{};
+        for (final plan in plans) {
+          final chosen = plan.units[unit.index];
+          if (chosen == null || chosen.mode == 'keepOriginal') continue;
+          if (chosen.mode == 'whole') {
+            if (!whole.contains(chosen.material)) whole.add(chosen.material!);
+          } else {
+            for (final e in chosen.shots.entries) {
+              final list = byShot[e.key] ??= [];
+              if (!list.contains(e.value)) list.add(e.value);
+            }
+          }
+        }
+        if (whole.isNotEmpty) {
+          return UnitReplacement.whole(whole, previewId: whole.first);
+        }
+        if (byShot.isNotEmpty) {
+          return UnitReplacement.perShot(byShot, previewIds: {
+            for (final e in byShot.entries) e.key: e.value.first,
+          });
+        }
+        return UnitReplacement.keepOriginal();
+      }(),
+  ];
+}
+
+/// 对照任务的替换现状（审核后的唯一真相）校验方案：方案里用到、但已不在
+/// 现状里的素材，就是**人在审核里剔掉的**——那条方案必须拦下点名，
+/// 静默导出被剔除的素材是成片才能发现的错。
+///
+/// [replacements] 为空表示这个任务从没进过审核/选材流程，不拦。
+List<String> plansBlockedByReview(
+    List<SubmittedPlan> plans, List<UnitReplacement>? replacements) {
+  if (replacements == null || replacements.isEmpty) return const [];
+  final problems = <String>[];
+  for (final plan in plans) {
+    for (final entry in plan.units.entries) {
+      final unitIndex = entry.key;
+      final chosen = entry.value;
+      final current = unitIndex < replacements.length
+          ? replacements[unitIndex]
+          : UnitReplacement.keepOriginal();
+      if (chosen.mode == 'whole') {
+        if (!current.wholeCandidateIds.contains(chosen.material)) {
+          problems.add('「${plan.name}」U${unitIndex + 1} 用的素材 '
+              '${chosen.material} 已在审核中被剔除，请换素材后重新提交方案');
+        }
+      } else if (chosen.mode == 'perShot') {
+        for (final shot in chosen.shots.entries) {
+          final allowed = current.shotCandidateIds[shot.key] ?? const [];
+          if (!allowed.contains(shot.value)) {
+            problems.add('「${plan.name}」U${unitIndex + 1}/S${shot.key + 1} '
+                '用的素材 ${shot.value} 已在审核中被剔除，请换素材后重新提交方案');
+          }
+        }
+      }
+    }
+  }
+  return problems;
 }

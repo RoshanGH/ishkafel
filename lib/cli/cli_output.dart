@@ -10,6 +10,10 @@ const int exitNotFound = 3;
 /// 被锁住了：别人正在操作这个任务
 const int exitLocked = 4;
 
+/// 环境未就绪：缺 AI 凭据、miaoa 不可用、app 没装——Agent 自己修不了，
+/// 该把 stderr 的话转给人去补环境，而不是重试
+const int exitEnv = 5;
+
 /// 一行一个 JSON，调用方按行读就行。
 ///
 /// 不缩进、不转义中文：这份输出既要给程序读，也要能被人一眼看懂——排查

@@ -71,13 +71,13 @@ Future<int> runAnalyzeCommand({
         'speech_access_token 三个文件放到：\n'
         '  ${p.join(dataDir.path, 'credentials')}/\n'
         '或者用环境变量 ARK_API_KEY / SPEECH_APP_ID / SPEECH_ACCESS_TOKEN');
-    return 1;
+    return exitEnv;
   }
 
   final pipeline = buildAnalysisPipeline(credentials, dataDir);
   if (pipeline == null) {
     sink.writeln('分析流水线装配失败（凭据不完整）');
-    return 1;
+    return exitEnv;
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: id);

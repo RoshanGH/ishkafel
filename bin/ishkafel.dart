@@ -37,6 +37,10 @@ Future<void> main(List<String> args) async {
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
+    ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
+    ..addOption('page', help: 'candidates 用：第几页（从 1 开始）')
+    ..addOption('tag-mode',
+        defaultsTo: 'or', help: 'candidates 用：标签检索 and（全满足）| or（任一）')
     ..addOption('dir',
         help: 'skill --install 用：装到指定技能目录（不认默认目录的 Agent 自报）')
     ..addOption('name', help: 'blank create 用：任务名')
@@ -122,6 +126,9 @@ Future<void> main(List<String> args) async {
         dataDir: dataDir,
         unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
         shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
+        keyword: parsed['keyword'] as String?,
+        page: int.tryParse(parsed['page'] as String? ?? '') ?? 1,
+        tagMode: parsed['tag-mode'] as String,
       ),
     _ => failWith('未知命令：$command\n\n${usageText(parser)}', code: exitBadUsage),
   };

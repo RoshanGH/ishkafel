@@ -52,7 +52,7 @@ Future<int> runReviewCommand({
   final result = await exec('open', ['-a', appPath]);
   if (result.exitCode != 0) {
     sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
-    return 1;
+    return exitEnv;
   }
   sink.writeln('审核界面已打开（${items.length} 条候选待审）。'
       '等用户告诉你继续；确认后 ishkafel task $id 里的方案就是审核后的最终结果');

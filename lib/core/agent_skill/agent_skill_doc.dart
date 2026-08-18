@@ -64,13 +64,21 @@ ishkafel analyze <task>
 # 3. 看任务全貌，规划要换哪些
 ishkafel task <task>
 
-# 4. 逐个位置看候选（带上下文）
+# 4. 逐个位置看候选（带上下文）。缺省按这一层的标签检索并自动收窄
+#    （剔掉 0 条的和「实拍」这类命中全库九成、等于没筛的标签）；
+#    --keyword 走画面描述语义搜；--page 翻页（每页 50，结果带 total）
 ishkafel candidates <task> --unit 1 --shot 5
+ishkafel candidates <task> --unit 1 --shot 5 --keyword 厨房喷洒清洁剂
+ishkafel candidates <task> --unit 1 --shot 5 --page 2 --tag-mode and
 
-# 5. 提交完整方案列表
+# 5. 提交完整方案列表（--file 或直接管道进 stdin）。
+#    提交即生效：方案会投影成任务的替换现状，供人审核
 ishkafel apply plans <task> --file plans.json
+echo '{"plans":[…]}' | ishkafel apply plans <task>
 
-# 6. 导出（规格可选，缺省 1080P/30fps/推荐码率/H.264/mp4）
+# 6. 导出（规格可选，缺省 1080P/30fps/推荐码率/H.264/mp4；
+#    不给 --out 时落到 ~/Desktop/ishkafel-<task>；人在 GUI 设过换音色的话，
+#    已生成的配音会自动带上，缺配音会被拦下点名）
 ishkafel export <task> --out ~/Desktop/成片 \
   [--resolution 480|720|1080|1440|2160] [--fps 24|25|30|50|60] \
   [--bitrate recommended|higher|lower|<kbps>] [--codec h264|hevc] [--format mp4|mov]
@@ -83,7 +91,7 @@ ishkafel export <task> --out ~/Desktop/成片 \
 
 ```bash
 ishkafel blank create --name 拼片A --tag-groups 1261   # 自带 4 个空分子
-ishkafel blank tags <task> --unit 0 --tags 促单,痛点    # 标签必须在词表内
+ishkafel blank tags <task> --unit 0 --tags 促单,痛点    # 标签必须在词表内；--tags 给空 = 清空
 ishkafel blank add <task>                              # 加一个分子
 ishkafel blank remove <task> --unit 4                  # 删一个（保底 4 个）
 ishkafel candidates <task> --unit 0                    # 之后照旧
@@ -99,8 +107,22 @@ ishkafel candidates <task> --unit 0                    # 之后照旧
 ishkafel open <task>    # 把 app 弹出来，落到这个任务的工作台
 ```
 
-所有命令输出一行 JSON；失败时 `stderr` 是能直接照做的中文，退出码：
-`2` 用法错误、`3` 找不到、`4` 被别人锁着。
+**输出约定**：成功时结果是一行 JSON 走 stdout（例外：`open`/`review` 只在
+stderr 给一句状态、`skill` 输出 Markdown）；进度和失败原因走 stderr，
+是能直接照做的中文。退出码：
+
+| 码 | 含义 | 你该做什么 |
+|---|---|---|
+| 0 | 成功 | 继续 |
+| 2 | 用法/参数错误 | 改命令重发 |
+| 3 | 找不到（任务/单元/候选） | 核对 id 后重发 |
+| 4 | 被别人锁着（人在操作） | 等人退出再试 |
+| 5 | 环境未就绪（缺凭据/miaoa 不可用/app 没装） | 把 stderr 的话转给人去补环境，别重试 |
+| 1 | 其他运行失败 | 看 stderr 决定 |
+
+**多环境**：数据目录默认与 GUI 一致；`--data-dir <目录>` 或环境变量
+`ISHKAFEL_DATA_DIR` 可换。app 不在 /Applications 时，`open`/`review`
+用环境变量 `ISHKAFEL_APP` 指到 app 路径。
 
 ---
 
@@ -160,7 +182,7 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
 
 ### ② 必须看前后，否则「每个都对，连起来不对」
 
-`candidates` 返回的 `context` 里有这些，**用它们**：
+`candidates` 返回的 `context`，**用它们**。带 `--shot`（镜头替换）时最全：
 
 ```json
 {
@@ -171,6 +193,13 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
   "next":     {"description": "台面上展示多瓶喷雾",   "pickedMaterialIds": [116719]}
 }
 ```
+
+不带 `--shot`（整体替换，空白任务只有这种）时 context 只有
+`unitIndex` / `slotMs` / `unitTranscript` / `unitTags`——没有镜头级
+描述和前后文，判断依据主要是台词和候选自己的 `description`。
+
+**标签搜不出东西时换 `--keyword`**：话术类标签（促单、痛点…）素材库里
+几乎没人打，按它们搜是空的不代表没素材——用画面描述再搜一轮。
 
 人挑素材时是有整体感的——知道这里是开箱、那里是演示效果，所以不会在
 「擦冰箱」后面接一个同类空镜。**你要做同样的事**：读台词知道这一段在说什么，
@@ -189,9 +218,9 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
 ### ④ 时长差异会变成变速
 
 镜头替换的候选比坑位长就加速、短就放慢，**倍率不设限制**——3 秒坑位塞
-10 秒素材就是 3.3× 快放，照常导出。但倍率大了观感就是快进/慢动作，
-`candidates` 又不返回时长（miaoa 的检索结果不含它），所以：时长差异明显的
-素材要不要用，是你的判断——拿不准就留备选，让人预览定夺。
+10 秒素材就是 3.3× 快放，照常导出。但倍率大了观感就是快进/慢动作，而
+`candidates` 不返回时长（逐条探测太慢，CLI 刻意不做），所以：时长差异明显
+的素材要不要用，是你的判断——拿不准就留备选，让人在审核里预览定夺。
 
 ---
 
@@ -231,6 +260,8 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
 规则：
 
 - **没提到的单元自动保留原片**，不用显式写 `keepOriginal`
+- **同一个单元在所有方案里要用同一种模式**——U1 在方案甲整体替换、在
+  方案乙镜头替换，投影到审核页时摆不到一个位置上，提交会被拒
 - `name` 必填且不能重名——它会成为导出文件名，重名会互相覆盖
 - **方案之间要有可见差异**。两条方案只差一个三秒镜头，等于导了两条一样的片子
 - 每条方案内部要前后顺畅（第 ② 条）
@@ -246,17 +277,22 @@ ffmpeg -ss <sampleAtSec> -i <sourcePath> -frames:v 1 -vf scale=180:-1 shot.jpg
 
 **① 快速把关（推荐）：`ishkafel review <task>`**
 
+前提是你已经 `apply plans` 提交过方案——提交那一刻方案会**投影成任务的
+替换现状**（`task` 输出里的 `replacements` 字段），审核页读的就是它。
+
 弹出专门的审核界面：你挑的每条候选和原片对照摆开，人悬停播放、点击剔除、
-一次确认。确认那一刻剔除**已经落进任务**——之后 `ishkafel task <task>` 里的
-方案就是最终结果，没有回执要取。
+一次确认。确认那一刻剔除落进 `replacements`——它是主流程的唯一真相。
 
-**然后等用户发话。** 人审完会告诉你「审核完了，继续」，你接着 export 即可。
-等不等、等多久、超时怎么办，是你和用户之间约定的策略（比如用户说
-「一分钟没回你就直接导」），软件不当流程裁判。
+**然后等用户发话。** 人审完会告诉你「审核完了，继续」。等不等、等多久、
+超时怎么办，是你和用户之间约定的策略（比如用户说「一分钟没回你就直接导」），
+软件不当流程裁判。
 
-想知道剔了哪几条？拿你提交过的方案和 `task` 的现状一比就有。被剔除的候选
-说明人不认可那一类选择——**下一轮挑选时避开相似的**，不要把刚被剔掉的
-又换个 id 提上来。
+**剔了哪几条**：跑 `ishkafel task <task>` 看 `replacements`——你提交过的
+素材 id 不在里面了，就是被人剔掉的。被剔除说明人不认可那一类选择——
+**更新方案换掉它们再导**，不要把刚被剔掉的又换个 id 提上来。
+
+**导出会替你把这道关**：方案里还引用着被剔除素材就跑 `export`，那条方案
+会被点名拦下（退出码 2）——绝不会把人剔掉的素材静默导出去。
 
 **互斥**：人在审核（或开着工作台）期间，你的写入命令会返回退出码 4
 「人正在操作」——等人退出再继续；反过来你在操作时人进不来。谁先进谁处理。

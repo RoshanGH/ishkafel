@@ -1,5 +1,6 @@
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
+import '../core/replacement/replacement_plan.dart';
 
 /// 任务的 JSON 视图——**给事实，不给结论**。
 ///
@@ -22,6 +23,14 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     // 分析出错时把原因带出来：调用方要能分辨「还在跑」和「跑挂了」
     'analysisError': task.analysisError,
     'units': units == null ? null : [for (final u in units) _unitToJson(u)],
+    // 替换现状（主流程唯一真相）：apply plans 投影进来、审核剔除也落这里。
+    // Agent 提交后靠它验证生效、审核后靠它看剔了什么——没有这块就只能盲跑
+    'replacements': task.replacements == null
+        ? null
+        : [
+            for (var i = 0; i < task.replacements!.length; i++)
+              _replacementToJson(i, task.replacements![i]),
+          ],
     'exports': [
       for (final e in task.exports)
         {
@@ -52,4 +61,14 @@ Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
             'tags': unit.shots[i].tags,
           },
       ],
+    };
+
+Map<String, dynamic> _replacementToJson(int index, UnitReplacement r) => {
+      'unit': index,
+      'mode': r.mode.name,
+      if (r.mode == ReplacementMode.whole) 'materials': r.wholeCandidateIds,
+      if (r.mode == ReplacementMode.perShot)
+        'shots': {
+          for (final e in r.shotCandidateIds.entries) '${e.key}': e.value,
+        },
     };

@@ -57,7 +57,7 @@ Future<int> runImportCommand({
       }
     } catch (e) {
       sink.writeln('读不到标签组：$e');
-      return 1;
+      return exitEnv;
     }
   } else {
     sink.writeln('警告：没有指定标签组，这条任务不会打标——'

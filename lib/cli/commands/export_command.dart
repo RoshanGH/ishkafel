@@ -86,6 +86,18 @@ Future<int> runExportCommand({
     return exitBadUsage;
   }
 
+  // 对照审核后的现状：人在审核里剔掉的素材绝不能静默导出去。
+  // 剔除落在 task.replacements（主流程唯一真相），方案文件只是提案
+  final blockedByReview =
+      plansBlockedByReview(validation.plans, task.replacements);
+  if (blockedByReview.isNotEmpty) {
+    sink.writeln('方案里有素材已被审核剔除，先更新方案再导出：');
+    for (final problem in blockedByReview) {
+      sink.writeln('· $problem');
+    }
+    return exitBadUsage;
+  }
+
   final lock = TaskLockFile(dataDir: dataDir, taskId: id);
   if (!lock.acquire(holder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，导不了');
@@ -127,6 +139,16 @@ Future<int> runExportCommand({
     ).vocalsOf,
   );
 
+  // 人在 GUI 设的换音色方案：配音产物按约定落在 voices/<taskId>/unit_<i>.mp3
+  // （见 VoiceSwapJob.audioFor）。不带上它们的话，CLI 导出会静默用回原声，
+  // 且「选了音色未生成配音」的交付拦截也会因 voices 为空而失效
+  final voiceDir = p.join(dataDir.path, 'voices', id);
+  final voiceAudio = {
+    for (final i in task.voices.assignedUnits)
+      if (File(p.join(voiceDir, 'unit_$i.mp3')).existsSync())
+        i: p.join(voiceDir, 'unit_$i.mp3'),
+  };
+
   final outcomes = await runner.exportCombinations(
     combos: combos,
     spec: spec,
@@ -135,6 +157,8 @@ Future<int> runExportCommand({
     replacements: task.replacements ?? const [],
     outputDir: dest,
     bgm: task.bgm,
+    voices: task.voices,
+    voiceAudio: voiceAudio,
     vocalsPath: task.vocalsPath,
     // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
     subtitleSentences: task.asrSentences ?? const [],

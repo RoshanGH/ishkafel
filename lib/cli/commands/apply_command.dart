@@ -123,6 +123,11 @@ Future<int> _applyWithLock({
   }
 
   _writePlans(dataDir, id, raw);
+  // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
+  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
+  await repository.save(task.copyWith(
+      replacements:
+          projectPlansToReplacements(validation.plans, task.units ?? const [])));
   emitJson({
     'ok': true,
     'plans': [

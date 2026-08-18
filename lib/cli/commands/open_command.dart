@@ -41,7 +41,7 @@ Future<int> runOpenCommand({
   final result = await exec('open', ['-a', appPath]);
   if (result.exitCode != 0) {
     sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
-    return 1;
+    return exitEnv;
   }
   return 0;
 }
