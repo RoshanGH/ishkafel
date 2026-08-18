@@ -46,6 +46,10 @@ class InspectorPanel extends StatefulWidget {
   /// 决定，本面板只负责转发点击事件。
   final VoidCallback? onSplitAtPlayhead;
 
+  /// 逐帧调整边界后把预览定位到那一帧——眼睛盯着的是画面，不是时间码。
+  /// 按住步进按钮连发时预览逐帧跟着走
+  final void Function(int ms)? onSeekTo;
+
   /// 只读回看模式（评审 Important 1）：true 时步进按钮、台词输入框、拆分/
   /// 并入按钮全部禁用——已确认（picking/exported）的切分结构不允许被
   /// 静默改写。默认 false（编辑态，行为与此前一致）。
@@ -76,6 +80,7 @@ class InspectorPanel extends StatefulWidget {
     required this.controller,
     required this.fps,
     this.onSplitAtPlayhead,
+    this.onSeekTo,
     this.voiceOf,
     this.onChangeVoice,
     this.previewVoice,
@@ -156,6 +161,28 @@ class _InspectorPanelState extends State<InspectorPanel> {
       return null;
     }
     return units[sel.unitIndex];
+  }
+
+  /// 逐帧调边界并让预览跟到那一帧：眼睛盯着的是画面——不跟随的话，
+  /// 用户只能看时间码数字变，根本不知道这一帧切在画面的哪里
+  void _nudgeAndFollow({required bool startEdge, required int frames}) {
+    final ok = widget.controller
+        .nudgeSelectedEdge(startEdge: startEdge, frames: frames);
+    if (!ok) return;
+    final sel = widget.controller.selection;
+    if (sel == null) return;
+    final units = widget.controller.units;
+    if (sel.unitIndex >= units.length) return;
+    final unit = units[sel.unitIndex];
+    final shotIndex = sel.shotIndex;
+    final ms = shotIndex == null
+        ? (startEdge ? unit.startMs : unit.endMs)
+        : (shotIndex < unit.shots.length
+            ? (startEdge
+                ? unit.shots[shotIndex].startMs
+                : unit.shots[shotIndex].endMs)
+            : null);
+    if (ms != null) widget.onSeekTo?.call(ms);
   }
 
   @override
@@ -267,10 +294,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
               plusKey: const Key('inspector-start-plus'),
               minusEnabled: canNudgeStart,
               plusEnabled: canNudgeStart,
-              onMinus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: true, frames: -1),
-              onPlus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: true, frames: 1),
+              onMinus: () => _nudgeAndFollow(startEdge: true, frames: -1),
+              onPlus: () => _nudgeAndFollow(startEdge: true, frames: 1),
             ),
             inspectorTimeRow(
               label: '结束',
@@ -279,10 +304,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
               plusKey: const Key('inspector-end-plus'),
               minusEnabled: canNudgeEnd,
               plusEnabled: canNudgeEnd,
-              onMinus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: false, frames: -1),
-              onPlus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: false, frames: 1),
+              onMinus: () => _nudgeAndFollow(startEdge: false, frames: -1),
+              onPlus: () => _nudgeAndFollow(startEdge: false, frames: 1),
             ),
             inspectorInfoRow(
                 '时长', '${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
@@ -373,10 +396,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
               plusKey: const Key('inspector-start-plus'),
               minusEnabled: canNudgeStart,
               plusEnabled: canNudgeStart,
-              onMinus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: true, frames: -1),
-              onPlus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: true, frames: 1),
+              onMinus: () => _nudgeAndFollow(startEdge: true, frames: -1),
+              onPlus: () => _nudgeAndFollow(startEdge: true, frames: 1),
             ),
             inspectorTimeRow(
               label: '镜头结束',
@@ -385,10 +406,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
               plusKey: const Key('inspector-end-plus'),
               minusEnabled: canNudgeEnd,
               plusEnabled: canNudgeEnd,
-              onMinus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: false, frames: -1),
-              onPlus: () => widget.controller
-                  .nudgeSelectedEdge(startEdge: false, frames: 1),
+              onMinus: () => _nudgeAndFollow(startEdge: false, frames: -1),
+              onPlus: () => _nudgeAndFollow(startEdge: false, frames: 1),
             ),
             inspectorInfoRow(
                 '时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),

@@ -136,7 +136,6 @@ class TimelineView extends StatefulWidget {
 
 class _TimelineViewState extends State<TimelineView> {
   List<ui.Image?>? _thumbImages;
-  TimelineHit? _dragHit;
 
   /// 正在配乐轨上框选的镜头区间（起点下标 / 当前下标）。
   /// 非空即表示这次拖拽是在选配乐区间，不是拖边界也不是滚动。
@@ -349,7 +348,6 @@ class _TimelineViewState extends State<TimelineView> {
     // 判定放在边界命中之前——刻度尺本来就不承载任何边界手柄，不会打架。
     if (_isScrubStart(details.localPosition)) {
       _scrubbing = true;
-      _dragHit = null;
       widget.onScrubStart?.call();
       _seekTo(details.localPosition.dx);
       return;
@@ -361,27 +359,17 @@ class _TimelineViewState extends State<TimelineView> {
       final grabbed = _grabBgmEdge(details.localPosition.dx);
       if (grabbed != null) {
         setState(() => _bgmResizing = grabbed);
-        _dragHit = null;
         return;
       }
       final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null) {
         setState(() => _bgmSelecting = (from: at, to: at));
-        _dragHit = null;
         return;
       }
     }
-    // 只读模式下不识别边界手柄命中（视为普通滚动手势），从而忽略会改数据
-    // 的边界拖拽，同时仍保留滚动能力（见 _handleDragUpdate 的 else 分支）。
-    final hit = widget.readOnly
-        ? null
-        : TimelineHitTester.hitTest(
-            details.localPosition, widget.controller.units, widget.geometry,
-            locks: widget.controller.locks);
-    _dragHit = hit;
-    if (hit is UnitBoundaryHit || hit is ShotBoundaryHit) {
-      widget.controller.beginDragSession();
-    }
+    // 边界不能拖了（产品决定 2026-08-18）：切分边界来自分析管线 + 帧信号，
+    // 人要做的是「切、合并、逐帧微调」，不是在轴上把两段拉来拉去——拖拽的
+    // 自由度只带来误操作。此处不再识别边界手柄，横向拖一律当滚动
   }
 
   /// 播放头的抓取半径。比边界手柄（±6px）宽一些：红线是贯穿全高的醒目目标，
@@ -493,18 +481,7 @@ class _TimelineViewState extends State<TimelineView> {
       _seekTo(details.localPosition.dx);
       return;
     }
-    final hit = _dragHit;
-    if (hit is UnitBoundaryHit) {
-      final ms = widget.geometry.pxToMs(details.localPosition.dx);
-      widget.controller.moveUnitBoundary(hit.leftUnitIndex, ms);
-      return;
-    }
-    if (hit is ShotBoundaryHit) {
-      final ms = widget.geometry.pxToMs(details.localPosition.dx);
-      widget.controller.moveShotBoundary(hit.unitIndex, hit.leftShotIndex, ms);
-      return;
-    }
-    // 未命中边界手柄：整段水平拖拽视为滚动
+    // 整段水平拖拽视为滚动（边界拖拽已移除——边界只能在属性面板逐帧调）
     final scrolled = widget.geometry
         .scrolledBy(-details.delta.dx, viewportWidthPx: _viewportWidth);
     widget.onGeometryChanged(scrolled);
@@ -528,8 +505,7 @@ class _TimelineViewState extends State<TimelineView> {
       // 少发一次 end，调用方那边的播放就永远恢复不回来
       widget.onScrubEnd?.call();
     }
-    _dragHit = null;
-    // 不在会话中时调用无副作用；在会话中则把本次拖拽合并为一条撤销记录
+    // 不在会话中时调用无副作用（历史上边界拖拽会开会话，现已移除）
     widget.controller.endDragSession();
   }
 

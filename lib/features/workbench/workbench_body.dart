@@ -191,11 +191,16 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                 color: AppColors.textPrimary)),
         backgroundColor: AppColors.surfaceCard,
         duration: _blockedNoticeFor,
-        action: SnackBarAction(
-          label: '去看素材',
-          textColor: AppColors.accentBlueLight,
-          onPressed: () => setState(() => _sideTab = SidePanelTab.candidates),
-        ),
+        // 「去看素材」只在被素材锁挡下时给：播放头出界这类拦截附这个
+        // 入口只会把人带去一个不相干的地方
+        action: widget.editor.blockedByMaterialLock
+            ? SnackBarAction(
+                label: '去看素材',
+                textColor: AppColors.accentBlueLight,
+                onPressed: () =>
+                    setState(() => _sideTab = SidePanelTab.candidates),
+              )
+            : null,
       ));
     // 说完就忘：下次再撞同一处仍然要说
     Future<void>.delayed(_blockedNoticeFor, () {
@@ -345,6 +350,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 fps: editor.fps,
                                 onSplitAtPlayhead: () =>
                                     _splitAtPlayhead(context, editor, playback),
+                                // 逐帧调边界时预览跟到那一帧（先停播——
+                                // 画面自己往前走的话根本对不准）
+                                onSeekTo: (ms) {
+                                  playback.pause();
+                                  playback.seekMs(ms);
+                                },
                                 readOnly: widget.readOnly,
                                 voiceOf: widget.voices.voiceOf,
                                 onChangeVoice: widget.onChangeVoice,
@@ -401,18 +412,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     }
   }
 
-  /// 「在游标处拆分」：播放头不落在所选单元/镜头范围内时 [SegmentationEditorController.
-  /// splitSelectedAt] 会返回 false（纯函数拒绝了非法拆分点），此前这里直接
-  /// 丢弃返回值，用户点击按钮却毫无反应，体验上像是按钮失灵。补一条
-  /// SnackBar 提示，让"为什么没有拆分"这件事对用户可见（Minor）。
+  /// 「在游标处拆分」。失败原因（没选中/播放头出界/贴边/素材锁定）由
+  /// 编辑器给出完整人话，走 [_reportBlockedEdit] 统一显示——这里不再
+  /// 自己拼一句笼统的（「播放头不在所选范围内」这种不带主语的拒绝，
+  /// 真机上把同事困住过）
   void _splitAtPlayhead(BuildContext context, SegmentationEditorController editor,
       PlaybackController playback) {
-    final ok = editor.splitSelectedAt(playback.positionMs);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('播放头不在所选范围内，无法在此处拆分')),
-      );
-    }
+    editor.splitSelectedAt(playback.positionMs);
   }
 
   Widget _buildTimelineArea(

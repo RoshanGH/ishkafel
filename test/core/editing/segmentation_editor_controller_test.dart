@@ -121,6 +121,39 @@ void main() {
   });
 
   group('splitSelectedAt', () {
+    test('播放头在哪就切哪：选中 U1、播放头在 U2 → 切的是 U2（产品决定 2026-08-18）', () {
+      final c = buildController3();
+      c.select(const EditorSelection.unit(0));
+      // 曾经这里会报「播放头不在所选范围内」——让用户满足一个看不见的
+      // 前置条件，真机上把同事困住过。现在对象自动取播放头所在的那个
+      expect(c.splitSelectedAt(6000), true);
+      expect(c.units.length, 4);
+      expect(c.units[1].endMs, 6000);
+      expect(c.units[2].startMs, 6000);
+    });
+
+    test('什么都没选中：默认切台词语义单元层，照样能切', () {
+      final c = buildController3();
+      c.select(null);
+      expect(c.splitSelectedAt(2000), true);
+      expect(c.units.length, 4);
+      expect(c.units[0].endMs, 2000);
+    });
+
+    test('播放头在片子范围外：说清没有可拆的位置', () {
+      final c = buildController3();
+      expect(c.splitSelectedAt(99000), false);
+      expect(c.takeBlockedReason(), contains('播放头不在片子范围内'));
+      expect(c.blockedByMaterialLock, isFalse,
+          reason: '这不是素材锁，UI 不该附「去看素材」入口');
+    });
+
+    test('播放头贴着现有边界：说清挪几帧再拆，而不是静默失败', () {
+      final c = buildController3();
+      expect(c.splitSelectedAt(4000), false, reason: '4000 正是 U1/U2 边界');
+      expect(c.takeBlockedReason(), contains('贴着'));
+    });
+
     test('选中单元 → 走 splitUnitAt', () {
       final c = buildController();
       c.select(const EditorSelection.unit(0));
@@ -164,21 +197,14 @@ void main() {
       expect(c.units[0].endMs, 6000);
     });
 
-    test('无选中 → 返回 false', () {
-      final c = buildController();
-      expect(c.splitSelectedAt(3000), false);
-    });
-
-    group('镜头层拆分只作用于选中的那个镜头（Critical 2）', () {
-      test('播放头落在别的镜头内 → 返回 false 且结构一字不动', () {
+    group('镜头层：选中镜头即切镜头层，对象自动取播放头所在', () {
+      test('选中镜头 0、播放头在镜头 1 → 切的是镜头 1（播放头在哪切哪）', () {
         final c = buildController();
-        // 选中 unit0 的镜头 0（[0,3000]），播放头停在 4500（落在镜头 1 内）
         c.select(const EditorSelection.shot(0, 0));
 
-        expect(c.splitSelectedAt(4500), false,
-            reason: '不能静默去拆播放头所在的镜头 1');
-        expect(c.units, fixture());
-        expect(c.canUndo, false);
+        expect(c.splitSelectedAt(4500), true);
+        expect(c.units[0].shots.length, 3);
+        expect(c.units[0].shots[1].endMs, 4500);
       });
 
       test('播放头落在选中镜头内 → 正常拆分该镜头', () {

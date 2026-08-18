@@ -132,8 +132,8 @@ class TimelinePainter extends CustomPainter {
   /// 单元内」是本产品的核心约束，写在轨道上比藏进帮助文档有效得多。
   void _paintTrackLabels(Canvas canvas, Size size) {
     final entries = <(double, String, String)>[
-      (TimelineTracks.unitsLabelTop, '台词语义单元', '拖大边界调整'),
-      (TimelineTracks.shotsLabelTop, '视觉镜头', '拖小边界调整，限制在所属单元内'),
+      (TimelineTracks.unitsLabelTop, '台词语义单元', '播放头处拆分；边界在右侧属性面板逐帧调'),
+      (TimelineTracks.shotsLabelTop, '视觉镜头', '选中后在播放头处拆分，限制在所属单元内'),
       (
         TimelineTracks.bgmLabelTop,
         '配乐',

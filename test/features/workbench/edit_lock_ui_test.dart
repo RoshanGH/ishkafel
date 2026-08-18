@@ -65,7 +65,10 @@ void main() {
     // 步进控件禁用时 onPressed/onTap 为 null
     if (widget is IconButton) return widget.onPressed != null;
     if (widget is InkWell) return widget.onTap != null;
-    if (widget is GestureDetector) return widget.onTap != null;
+    // 帧步进按钮（长按连发）：按下即触发，禁用时 onTapDown 为 null
+    if (widget is GestureDetector) {
+      return widget.onTap != null || widget.onTapDown != null;
+    }
     return true;
   }
 

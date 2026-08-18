@@ -110,6 +110,11 @@ class SegmentationEditorController extends ChangeNotifier {
   String? get blockedReason => _blockedReason;
   String? _blockedReason;
 
+  /// 上一次拦截是不是「已选替换素材」的锁——UI 据此决定要不要附
+  /// 「去看素材」的入口（播放头出界这类拦截给这个入口只会把人带偏）
+  bool get blockedByMaterialLock => _blockedByMaterialLock;
+  bool _blockedByMaterialLock = false;
+
   /// 取走并清空上一次的拦截原因——UI 弹完提示就该忘掉它
   String? takeBlockedReason() {
     final reason = _blockedReason;
@@ -117,8 +122,9 @@ class SegmentationEditorController extends ChangeNotifier {
     return reason;
   }
 
-  bool _block(String reason) {
+  bool _block(String reason, {bool materialLock = true}) {
     _blockedReason = reason;
+    _blockedByMaterialLock = materialLock;
     notifyListeners();
     return false;
   }
@@ -309,32 +315,57 @@ class SegmentationEditorController extends ChangeNotifier {
     return null;
   }
 
-  /// 选中单元→splitUnitAt；选中镜头→splitShotAt；无选中→false
+  /// 在播放头处拆分——**播放头在哪一帧就切哪一帧**。
   ///
-  /// 镜头层只拆**当前选中的那个镜头**（评审 Critical 2）：此前这里把
-  /// `sel.shotIndex` 丢掉了，域函数便自己去找"包含播放头的"镜头，导致用户
-  /// 选中 S1、播放头停在 S3 时点「拆分」会拆掉 S3。现在播放头不落在所选
-  /// 镜头内时域函数返回 null，本方法返回 false，由上层
-  /// （WorkbenchBody._splitAtPlayhead）弹 SnackBar 提示。
+  /// 层级跟当前选中走：选中的是视觉镜头就切镜头层，其余（选中单元或
+  /// 什么都没选）切台词语义单元层；**对象自动取播放头所在的那一个**。
+  /// 曾经要求「先选中、且播放头必须落在选中对象范围内」——那是让用户
+  /// 去满足一个看不见的前置条件，真机上把同事困住过。
   bool splitSelectedAt(int rawMs) {
-    final sel = _selection;
-    if (sel == null) return false;
-    final shotIndex = sel.shotIndex;
-    if (shotIndex == null) {
+    final unitIndex =
+        _units.indexWhere((u) => rawMs >= u.startMs && rawMs < u.endMs);
+    if (unitIndex < 0) {
+      return _block('播放头不在片子范围内，没有可拆分的位置——把它移到要拆的地方再按拆分',
+          materialLock: false);
+    }
+    final wantShotLayer = _selection?.shotIndex != null;
+
+    if (!wantShotLayer) {
       // 单元一拆两半，里面的镜头下标全变——只要单元里有任何挑过素材的东西
       // 都不能拆，否则钉在 S6 上的素材会跑到别的镜头上
-      final blocked = _unitStructureBlock(sel.unitIndex);
+      final blocked = _unitStructureBlock(unitIndex);
       if (blocked != null) return _block(blocked);
-      return _apply(SegmentationEditOps.splitUnitAt(_units, sel.unitIndex, rawMs,
-          fps: fps, sentences: sentences));
+      final result = SegmentationEditOps.splitUnitAt(_units, unitIndex, rawMs,
+          fps: fps, sentences: sentences);
+      if (result == null) {
+        return _block(
+            '播放头贴着 U${unitIndex + 1} 的现有边界，拆不出新的一段——往中间挪几帧再拆',
+            materialLock: false);
+      }
+      return _apply(result);
     }
-    if (_locks.isShotLocked(sel.unitIndex, shotIndex)) {
-      return _block(_locks.isUnitLocked(sel.unitIndex)
-          ? LockWording.unit(sel.unitIndex)
-          : LockWording.shot(sel.unitIndex, shotIndex));
+
+    final shots = _units[unitIndex].shots;
+    final shotIndex =
+        shots.indexWhere((sh) => rawMs >= sh.startMs && rawMs < sh.endMs);
+    if (shotIndex < 0) {
+      return _block(
+          '播放头这个位置在 U${unitIndex + 1} 里、但不在任何视觉镜头上——往旁边挪几帧再拆',
+          materialLock: false);
     }
-    return _apply(SegmentationEditOps.splitShotAt(_units, sel.unitIndex, rawMs,
-        fps: fps, shotIndex: shotIndex));
+    if (_locks.isShotLocked(unitIndex, shotIndex)) {
+      return _block(_locks.isUnitLocked(unitIndex)
+          ? LockWording.unit(unitIndex)
+          : LockWording.shot(unitIndex, shotIndex));
+    }
+    final result = SegmentationEditOps.splitShotAt(_units, unitIndex, rawMs,
+        fps: fps, shotIndex: shotIndex);
+    if (result == null) {
+      return _block(
+          '播放头贴着 U${unitIndex + 1}·S${shotIndex + 1} 的现有边界，拆不出新的一段——往中间挪几帧再拆',
+          materialLock: false);
+    }
+    return _apply(result);
   }
 
   /// 整个单元的结构要动（拆分/合并）时的拦截原因

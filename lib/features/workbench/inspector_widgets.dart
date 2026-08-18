@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -92,22 +93,71 @@ Widget inspectorTimeRow({
   );
 }
 
-Widget _stepButton(Key key, String glyph, VoidCallback? onTap) {
-  final enabled = onTap != null;
-  return InkWell(
-    key: key,
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(4),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2),
-      child: Text(glyph,
-          style: TextStyle(
-              color: enabled
-                  ? AppColors.textTertiary
-                  : AppColors.textTertiary.withValues(alpha: 0.35),
-              fontSize: AppFontSize.emphasis)),
-    ),
-  );
+Widget _stepButton(Key key, String glyph, VoidCallback? onTap) =>
+    _RepeatingStepButton(buttonKey: key, glyph: glyph, onStep: onTap);
+
+/// 帧步进按钮：点一下走一帧；**按住不放就连发快走**（按住 400ms 后
+/// 每 60ms 一步）——逐帧对齐一个隔了几十帧的边界，让人一下一下点是折磨
+class _RepeatingStepButton extends StatefulWidget {
+  /// 挂在 GestureDetector 上（而不是本组件上）：既有测试与锁定 UI 都按
+  /// 这个 key 探测「按钮是否可用」
+  final Key buttonKey;
+  final String glyph;
+  final VoidCallback? onStep;
+
+  const _RepeatingStepButton(
+      {required this.buttonKey, required this.glyph, this.onStep});
+
+  @override
+  State<_RepeatingStepButton> createState() => _RepeatingStepButtonState();
+}
+
+class _RepeatingStepButtonState extends State<_RepeatingStepButton> {
+  Timer? _holdDelay;
+  Timer? _repeat;
+
+  void _startHold() {
+    // 按下先走一步（即点即有反馈），停 400ms 再进入连发——
+    // 太快进入连发会让「想点一下」的人多走好几帧
+    widget.onStep?.call();
+    _holdDelay = Timer(const Duration(milliseconds: 400), () {
+      _repeat = Timer.periodic(
+          const Duration(milliseconds: 60), (_) => widget.onStep?.call());
+    });
+  }
+
+  void _stopHold() {
+    _holdDelay?.cancel();
+    _repeat?.cancel();
+    _holdDelay = null;
+    _repeat = null;
+  }
+
+  @override
+  void dispose() {
+    _stopHold();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onStep != null;
+    return GestureDetector(
+      key: widget.buttonKey,
+      onTapDown: enabled ? (_) => _startHold() : null,
+      onTapUp: (_) => _stopHold(),
+      onTapCancel: _stopHold,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Text(widget.glyph,
+            style: TextStyle(
+                color: enabled
+                    ? AppColors.textTertiary
+                    : AppColors.textTertiary.withValues(alpha: 0.35),
+                fontSize: AppFontSize.emphasis)),
+      ),
+    );
+  }
 }
 
 Widget inspectorTagChips(List<String> tags) {

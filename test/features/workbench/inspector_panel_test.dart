@@ -154,12 +154,12 @@ void main() {
           InspectorPanel(controller: controller, fps: _fps, readOnly: true),
         );
 
-        final startMinus = tester.widget<InkWell>(
+        final startMinus = tester.widget<GestureDetector>(
             find.byKey(const Key('inspector-start-minus')));
-        final startPlus = tester
-            .widget<InkWell>(find.byKey(const Key('inspector-start-plus')));
-        expect(startMinus.onTap, isNull);
-        expect(startPlus.onTap, isNull);
+        final startPlus = tester.widget<GestureDetector>(
+            find.byKey(const Key('inspector-start-plus')));
+        expect(startMinus.onTapDown, isNull);
+        expect(startPlus.onTapDown, isNull);
       });
 
       testWidgets('台词 TextField 禁用', (tester) async {
@@ -196,10 +196,10 @@ void main() {
           InspectorPanel(controller: controller, fps: _fps, readOnly: true),
         );
 
-        final splitBtn =
-            tester.widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
-        final mergeBtn =
-            tester.widget<InkWell>(find.byKey(const Key('inspector-merge-btn')));
+        final splitBtn = tester
+            .widget<InkWell>(find.byKey(const Key('inspector-split-btn')));
+        final mergeBtn = tester
+            .widget<InkWell>(find.byKey(const Key('inspector-merge-btn')));
         expect(splitBtn.onTap, isNull);
         expect(mergeBtn.onTap, isNull);
       });
@@ -212,9 +212,9 @@ void main() {
           InspectorPanel(controller: controller, fps: _fps, readOnly: true),
         );
 
-        final endPlus = tester
-            .widget<InkWell>(find.byKey(const Key('inspector-end-plus')));
-        expect(endPlus.onTap, isNull);
+        final endPlus = tester.widget<GestureDetector>(
+            find.byKey(const Key('inspector-end-plus')));
+        expect(endPlus.onTapDown, isNull);
       });
     });
 

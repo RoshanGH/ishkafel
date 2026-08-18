@@ -540,7 +540,7 @@ void main() {
     });
   }
 
-  testWidgets('在游标处拆分：播放头不在所选范围内时提示而非静默无操作（Minor）', (tester) async {
+  testWidgets('在游标处拆分：播放头在哪切哪，选中态不构成前置条件（产品决定 2026-08-18）', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(_wrapWithNavigator(task: task, repo: repo, playback: playback));
     await tester.tap(find.byKey(const Key('open-workbench')));
@@ -553,10 +553,16 @@ void main() {
     // 检查器面板内容在窄栏 + 小测试视口下可能需要滚动才可见
     await tester.ensureVisible(find.byKey(const Key('inspector-split-btn')));
     await tester.tap(find.byKey(const Key('inspector-split-btn')));
-    await tester.pump(); // SnackBar 入场动画的第一帧
-    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump();
 
-    expect(find.textContaining('播放头不在所选范围内'), findsOneWidget);
+    // 播放头在 0ms（U1 内）、选中的是 U2——曾经这里报「播放头不在所选
+    // 范围内」把同事困住；现在对象自动取播放头所在的 U1，直接切开。
+    // （0ms 贴着 U1 起点边界拆不出新段，会给「贴着边界」的人话提示——
+    //  两种结局都不再是那句没有主语的拒绝）
+    expect(find.textContaining('播放头不在所选范围内'), findsNothing,
+        reason: '那句没有主语的拒绝已经退役');
+    // 提示条自带 4 秒的自动消隐定时器，走完再结束测试
+    await tester.pump(const Duration(seconds: 5));
   });
 }
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ishkafel/core/editing/segmentation_edit_ops.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
@@ -106,7 +105,9 @@ void main() {
         reason: '实际 seekedMs=$seekedMs');
   });
 
-  testWidgets('③在单元交界处水平拖拽 → 单元边界变化且帧对齐', (tester) async {
+  testWidgets('③边界拖不动（产品决定 2026-08-18）：在单元交界处拖拽只滚动，不改边界', (tester) async {
+    // 切分边界来自分析管线 + 帧信号，人要做的是「切、合并、逐帧微调」——
+    // 在轴上把两段拉来拉去的自由度只带来误操作，已整体移除
     final controller = _makeController();
     final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
     await tester.pumpWidget(_wrap(
@@ -120,77 +121,10 @@ void main() {
     await tester.dragFrom(const Offset(400, 46), const Offset(40, 0));
     await tester.pump();
 
-    expect(controller.units[0].endMs, isNot(2000));
-    expect(controller.units[1].startMs, controller.units[0].endMs);
-    expect(
-      SegmentationEditOps.holdsInvariants(controller.units, 4000, 30),
-      isTrue,
-      reason: '边界移动后应仍满足帧对齐等不变量',
-    );
-  });
-
-  testWidgets('③b 一次拖拽（多次 update）应合并为一条撤销记录', (tester) async {
-    final controller = _makeController();
-    final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
-    await tester.pumpWidget(_wrap(
-      controller: controller,
-      geometry: geometry,
-      onSeek: (_) {},
-      onGeometryChanged: (_) {},
-    ));
-
-    // unit0/unit1 边界在 x=400px；手动分多次 moveBy 模拟一次连续拖拽触发的
-    // 多次 DragUpdate（真实拖拽一次会产生几十次 update）
-    final gesture = await tester.startGesture(const Offset(400, 46));
-    await tester.pump();
-    for (var i = 0; i < 5; i++) {
-      await gesture.moveBy(const Offset(10, 0));
-      await tester.pump();
-    }
-    await gesture.up();
-    await tester.pump();
-
-    expect(controller.units[0].endMs, isNot(2000));
-    expect(controller.canUndo, isTrue);
-
-    controller.undo();
-    expect(controller.units[0].endMs, 2000, reason: '一次 undo 应完全回到拖拽前状态');
+    expect(controller.units[0].endMs, 2000, reason: '边界一动不动');
     expect(controller.units[1].startMs, 2000);
-    expect(controller.canUndo, isFalse, reason: '一次拖拽应只产生一条撤销记录');
-  });
-
-  testWidgets('③c TimelineView 在拖拽会话进行中被卸载 → dispose 兜底结束会话', (tester) async {
-    final controller = _makeController();
-    final geometry = TimelineGeometry.fit(durationMs: 4000, viewportWidthPx: 800);
-    await tester.pumpWidget(_wrap(
-      controller: controller,
-      geometry: geometry,
-      onSeek: (_) {},
-      onGeometryChanged: (_) {},
-    ));
-
-    // 在单元边界处按下并移动，开启拖拽会话，但不 up（模拟手势尚未走完、
-    // onHorizontalDragEnd/Cancel 均未触发的情况下 widget 就被移除）；
-    // 分多次 moveBy 累积位移，确保超过触摸容差、真正触发 onHorizontalDragStart
-    final gesture = await tester.startGesture(const Offset(400, 46));
-    await tester.pump();
-    for (var i = 0; i < 5; i++) {
-      await gesture.moveBy(const Offset(10, 0));
-      await tester.pump();
-    }
-
-    expect(controller.inDragSession, isTrue, reason: '此时应已开启拖拽会话');
-
-    // 把 TimelineView 从树上整体移除
-    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: SizedBox())));
-    await gesture.up();
-    await tester.pump();
-
-    expect(controller.inDragSession, isFalse, reason: 'dispose 应兜底结束会话');
-
-    // 会话已被结束，之后的正常编辑应能照常入 undo 栈（撤销功能未失效）
-    expect(controller.moveUnitBoundary(0, 2500), isTrue);
-    expect(controller.canUndo, isTrue);
+    expect(controller.canUndo, isFalse, reason: '没有编辑发生，不产生撤销记录');
+    expect(controller.inDragSession, isFalse, reason: '不再开启拖拽会话');
   });
 
   testWidgets('④在空白块体处拖拽 → onGeometryChanged 收到滚动后的 geometry（zoom 后可滚状态）',
