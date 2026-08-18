@@ -49,6 +49,68 @@ void main() {
     });
   });
 
+  group('带词级时间戳：按词裁剪 + 长句拆段', () {
+    // 模拟用户真机反馈的场景：ASR 把两个短句识别成一整句（31 字级别），
+    // 镜头边界落在句子中间——S8 只该显示这段时间里实际说出口的那半句
+    AsrSentence longSentence() {
+      const chars = '还有一种是没用过滴露冰箱清洁剂的人我就想问问这玩意是犯了天条吗';
+      return AsrSentence(
+        startMs: 0,
+        endMs: chars.length * 100,
+        text: '还有一种是没用过滴露冰箱清洁剂的人，我就想问问这玩意是犯了天条吗？',
+        words: [
+          for (var i = 0; i < chars.length; i++)
+            AsrWord(
+                startMs: i * 100,
+                endMs: i * 100 + 80,
+                text: chars[i]),
+        ],
+      );
+    }
+
+    test('跨镜头边界：只显示落在坑位时间内的字，前半句归上一个镜头', () {
+      // 边界切在「…的人，|我就想…」之后：第 17 个字「我」从 1700ms 开始
+      final lines = subtitleLinesInSlot(
+          sentences: [longSentence()], slotStartMs: 1700, slotEndMs: 9000);
+      expect(lines.map((l) => l.text).join('|'), '我就想问问这玩意是犯了天条吗？');
+      expect(lines.first.startMs, 0, reason: '段首时间贴着坑位起点');
+    });
+
+    test('坑位在前半句：只显示前半句，且标点跟着词恢复出来', () {
+      final lines = subtitleLinesInSlot(
+          sentences: [longSentence()], slotStartMs: 0, slotEndMs: 1700);
+      expect(lines.map((l) => l.text).join('|'), '还有一种是没用过滴露冰箱清洁剂的人，');
+    });
+
+    test('整句都在坑内但太长：拆成多段先后出现，不堆成一大块', () {
+      final lines = subtitleLinesInSlot(
+          sentences: [longSentence()], slotStartMs: 0, slotEndMs: 9000);
+      expect(lines.length, greaterThanOrEqualTo(2),
+          reason: '31 字挂满全程就是三行大块字，原片的习惯是短句逐条出现');
+      for (final l in lines) {
+        expect(l.text.length, lessThanOrEqualTo(18));
+      }
+      // 优先在标点处切开——语义断点比硬切好读
+      expect(lines.first.text, endsWith('，'));
+      // 段与段时间衔接：前一段显示到后一段开始，中间不闪没
+      for (var i = 1; i < lines.length; i++) {
+        expect(lines[i - 1].endMs, lines[i].startMs);
+      }
+    });
+
+    test('短句在坑内：整句一段，时间来自词的首末', () {
+      const s = AsrSentence(startMs: 500, endMs: 1300, text: '哇塞！', words: [
+        AsrWord(startMs: 500, endMs: 800, text: '哇'),
+        AsrWord(startMs: 800, endMs: 1100, text: '塞'),
+      ]);
+      final lines = subtitleLinesInSlot(
+          sentences: const [s], slotStartMs: 0, slotEndMs: 5000);
+      expect(lines.single.text, '哇塞！');
+      expect(lines.single.startMs, 500);
+      expect(lines.single.endMs, 1100);
+    });
+  });
+
   group('overlay 滤镜链', () {
     const overlays = [
       SubtitleOverlayImage(pngPath: '/c/a.png', startMs: 40, endMs: 1160),
