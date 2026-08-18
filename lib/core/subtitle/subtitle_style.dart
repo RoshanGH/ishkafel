@@ -61,8 +61,10 @@ class SubtitleStyle {
     );
   }
 
-  /// 进渲染缓存指纹：样式一变，旧切片就不该再命中
+  /// 进渲染缓存指纹：样式一变，旧切片就不该再命中。
+  /// 末尾的 v 是**渲染实现版本**——画法本身改了（比如描边从一遍画改成
+  /// 两遍画）参数却没变时，靠它把旧图旧切片一并作废
   String get fingerprint =>
       'sub:${bottomRatio.toStringAsFixed(3)}:${fontRatio.toStringAsFixed(3)}'
-      ':${preset.name}';
+      ':${preset.name}:v2';
 }

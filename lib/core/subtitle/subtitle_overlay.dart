@@ -1,4 +1,4 @@
-import '../analysis/providers.dart' show AsrSentence;
+import '../analysis/providers.dart' show AsrSentence, AsrWord;
 
 /// 镜头替换切片上的字幕重渲（纯函数层，不碰进程）。
 ///
@@ -33,10 +33,18 @@ class SubtitleOverlayImage {
       {required this.pngPath, required this.startMs, required this.endMs});
 }
 
+/// 一段字幕最多多少个字。超过就拆开先后出现——原片字幕的习惯是短句
+/// 逐条，一大句 30 字挂满三行既难看又和相邻原片字幕的节奏对不上
+const int _maxCharsPerLine = 18;
+
 /// 裁出坑位 [slotStartMs, slotEndMs) 内要显示的字幕行。
 ///
-/// 跨越坑位边界的句子只显示相交的那一段——出坑的部分由相邻原片镜头自带的
-/// 字幕接手，同一时刻两边显示的是同一句话，内容是连续的。
+/// 有词级时间戳时按**词**归属：只显示这段时间里实际说出口的那几个字
+/// （词的时间中点落在坑内才算），跨句界的前后半句各归各的镜头；一段太长
+/// 还会按标点/停顿拆开先后出现。ASR 的句子边界和标点不可靠，但逐字的
+/// 时间戳相当准（真机数据是几十毫秒粒度）——规则全部建立在词时间上。
+///
+/// 老数据没有词级时间戳时退回整句：显示时间裁到相交区间、文本整句。
 List<SubtitleLine> subtitleLinesInSlot({
   required List<AsrSentence> sentences,
   required int slotStartMs,
@@ -49,10 +57,120 @@ List<SubtitleLine> subtitleLinesInSlot({
     if (end <= start) continue; // 不相交（贴边也算不相交，0ms 的闪现毫无意义）
     final text = s.text.trim();
     if (text.isEmpty) continue;
-    lines.add(SubtitleLine(
-        startMs: start - slotStartMs, endMs: end - slotStartMs, text: text));
+
+    if (s.words.isEmpty) {
+      // 兜底：没有词级时间戳，按整句显示
+      lines.add(SubtitleLine(
+          startMs: start - slotStartMs, endMs: end - slotStartMs, text: text));
+      continue;
+    }
+
+    // 词的时间中点落在坑内的才算「这段时间里说的话」
+    final words = _restorePunctuation(s);
+    final inSlot = [
+      for (final w in words)
+        if ((w.startMs + w.endMs) / 2 >= slotStartMs &&
+            (w.startMs + w.endMs) / 2 < slotEndMs)
+          w,
+    ];
+    if (inSlot.isEmpty) continue;
+
+    final segments = _splitByLength(inSlot);
+    for (var i = 0; i < segments.length; i++) {
+      final seg = segments[i];
+      // 段间无缝衔接：前一段显示到后一段开始，停顿处字幕不闪没
+      final segStart = i == 0
+          ? (seg.first.startMs > slotStartMs ? seg.first.startMs : slotStartMs)
+          : segments[i].first.startMs;
+      final rawEnd = i < segments.length - 1
+          ? segments[i + 1].first.startMs
+          : (seg.last.endMs < slotEndMs ? seg.last.endMs : slotEndMs);
+      if (rawEnd <= segStart) continue;
+      lines.add(SubtitleLine(
+        startMs: segStart - slotStartMs,
+        endMs: rawEnd - slotStartMs,
+        text: seg.map((w) => w.text).join(),
+      ));
+    }
   }
   return List.unmodifiable(lines);
+}
+
+class _TimedWord {
+  final int startMs;
+  final int endMs;
+  String text;
+  _TimedWord(this.startMs, this.endMs, this.text);
+}
+
+/// 把句子文本里的标点还原到词上（ASR 的词表里通常只有字，标点在句子
+/// 文本里）：顺序扫描，词与词之间的字符附加给前一个词的尾巴
+List<_TimedWord> _restorePunctuation(AsrSentence s) {
+  final out = <_TimedWord>[];
+  final text = s.text;
+  var pos = 0;
+  for (final AsrWord w in s.words) {
+    final idx = text.indexOf(w.text, pos);
+    if (idx < 0) {
+      out.add(_TimedWord(w.startMs, w.endMs, w.text));
+      continue;
+    }
+    if (out.isNotEmpty && idx > pos) {
+      out.last.text += text.substring(pos, idx).trim();
+    }
+    out.add(_TimedWord(w.startMs, w.endMs, w.text));
+    pos = idx + w.text.length;
+  }
+  if (out.isNotEmpty && pos < text.length) {
+    out.last.text += text.substring(pos).trim();
+  }
+  return out;
+}
+
+const _clauseEnders = '，。？！；：、…,.?!;:';
+
+/// 超长的词串按上限拆段。切点优先级：窗口内**最后一个带句读标点的词**
+/// （语义断点最好读）> 窗口内词间停顿最大处 > 硬切在窗口末尾
+List<List<_TimedWord>> _splitByLength(List<_TimedWord> words) {
+  final out = <List<_TimedWord>>[];
+  var rest = words;
+  int charsOf(List<_TimedWord> ws) =>
+      ws.fold(0, (n, w) => n + w.text.length);
+  while (charsOf(rest) > _maxCharsPerLine) {
+    // 累计字数不超上限的最长前缀
+    var window = 0;
+    var chars = 0;
+    while (window < rest.length &&
+        chars + rest[window].text.length <= _maxCharsPerLine) {
+      chars += rest[window].text.length;
+      window++;
+    }
+    if (window == 0) window = 1; // 单词就超限：也得切走，防死循环
+    var cut = -1;
+    for (var i = window - 1; i >= 0; i--) {
+      final tail = rest[i].text;
+      if (tail.isNotEmpty && _clauseEnders.contains(tail[tail.length - 1])) {
+        cut = i;
+        break;
+      }
+    }
+    if (cut < 0) {
+      // 没有标点：在窗口内词间停顿最大处切
+      var bestGap = -1;
+      for (var i = 0; i < window - 1; i++) {
+        final gap = rest[i + 1].startMs - rest[i].endMs;
+        if (gap > bestGap) {
+          bestGap = gap;
+          cut = i;
+        }
+      }
+      if (cut < 0) cut = window - 1;
+    }
+    out.add(rest.sublist(0, cut + 1));
+    rest = rest.sublist(cut + 1);
+  }
+  if (rest.isNotEmpty) out.add(rest);
+  return out;
 }
 
 /// 把主画面滤镜链和若干字幕图拼成一条 filter_complex。
