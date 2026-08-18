@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/miaoa_project_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart' show MiaoaException;
 
 /// 取自真实 `miaoa project list --json` 的返回结构
@@ -22,10 +23,10 @@ MiaoaProjectService _service(
   String stderr = '',
   int exitCode = 0,
 }) =>
-    MiaoaProjectService(run: (bin, args) async {
+    MiaoaProjectService(gateway: MiaoaGateway(run: (bin, args) async {
       calls.add(args);
       return ProcessResult(1, exitCode, stdout ?? _realShaped(), stderr);
-    });
+    }, binary: 'miaoa'));
 
 void main() {
   test('拉全部启用中的项目，一页取完', () async {

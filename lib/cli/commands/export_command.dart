@@ -12,7 +12,6 @@ import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/miaoa/material_downloader.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
-import '../../core/miaoa/miaoa_locator.dart';
 import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
@@ -115,7 +114,7 @@ Future<int> runExportCommand({
             .duration
             .inMilliseconds,
     fetchMaterial: MaterialDownloader(
-      content: MiaoaContentService(binary: resolveMiaoaBinary()),
+      content: MiaoaContentService(),
       cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
     ).fetch,
     // 整体替换的段落铺了配乐时用素材的纯人声——与 GUI 同一条规则

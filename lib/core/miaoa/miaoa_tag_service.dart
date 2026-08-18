@@ -1,16 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
-import '../ffmpeg/process_runner.dart';
-import 'miaoa_locator.dart';
 import '../log/app_log.dart';
+import 'miaoa_exception.dart';
+import 'miaoa_gateway.dart';
 
-/// miaoa CLI 调用失败（非零退出码或返回内容非法）
-class MiaoaException implements Exception {
-  final String message;
-  const MiaoaException(this.message);
-  @override
-  String toString() => 'MiaoaException: $message';
-}
+// 老调用方都是从这里 show MiaoaException 的，转发一份保持导入路径不变
+export 'miaoa_exception.dart' show MiaoaException;
 
 /// 标签组（对应 miaoa tag group list 输出）
 class TagGroup {
@@ -83,30 +77,27 @@ class TagInfo {
 
 /// miaoa 标签体系拉取（标签组、标签，均为只读子进程调用）
 class MiaoaTagService {
-  final ProcessRunner run;
-  final String binary;
+  final MiaoaGateway gateway;
 
-  /// [binary] 缺省即解析真实安装路径，理由见 MiaoaContentService
-  MiaoaTagService({this.run = systemProcessRunner, String? binary})
-      : binary = binary ?? resolveMiaoaBinary();
+  MiaoaTagService({MiaoaGateway? gateway}) : gateway = gateway ?? MiaoaGateway();
 
   static const _groupAction = 'tag group list';
   static const _tagAction = 'tag list';
 
   Future<List<TagGroup>> listGroups() async {
-    final result = await run(
-        binary,
-        // --include-tags：一次把组内标签也带回来。多出的约 200KB 换掉了
-        // 「每选一个组再拉一次标签」的往返，也让搜索能匹配标签名
-        ['tag', 'group', 'list', '--scope', 'tenant', '--include-tags', '--json']);
-    final raw = _decodeList(result, _groupAction);
+    // --include-tags：一次把组内标签也带回来。多出的约 200KB 换掉了
+    // 「每选一个组再拉一次标签」的往返，也让搜索能匹配标签名
+    final stdout = await gateway.text(
+        ['tag', 'group', 'list', '--scope', 'tenant', '--include-tags', '--json'],
+        what: '读取标签组');
+    final raw = _decodeList(stdout, _groupAction);
     return _parseEntries(raw, TagGroup.tryFromJson, _groupAction);
   }
 
   Future<List<TagInfo>> listTags(int groupId) async {
-    final result =
-        await run(binary, ['tag', 'list', '--group', '$groupId', '--json']);
-    final raw = _decodeList(result, _tagAction);
+    final stdout = await gateway
+        .text(['tag', 'list', '--group', '$groupId', '--json'], what: '读取标签');
+    final raw = _decodeList(stdout, _tagAction);
     return _parseEntries(raw, TagInfo.tryFromJson, _tagAction);
   }
 
@@ -132,14 +123,10 @@ class MiaoaTagService {
     return List.unmodifiable(items);
   }
 
-  /// CLI 输出是不可信输入：类型、JSON 合法性、顶层结构逐级校验，
-  /// 一律转成中文 [MiaoaException]，不让 TypeError 原文穿透到用户面前
-  List<Object?> _decodeList(ProcessResult result, String action) {
-    if (result.exitCode != 0) {
-      throw MiaoaException(
-          'miaoa $action 失败（exit=${result.exitCode}）：${_asText(result.stderr)}');
-    }
-    final stdout = _stdoutText(result.stdout, action);
+  /// CLI 输出是不可信输入：JSON 合法性、顶层结构逐级校验，
+  /// 一律转成中文 [MiaoaException]，不让 TypeError 原文穿透到用户面前。
+  /// （退出码与「起不来」已由 [MiaoaGateway] 挡掉并分类）
+  List<Object?> _decodeList(String stdout, String action) {
     final Object? decoded;
     try {
       decoded = jsonDecode(stdout);
@@ -151,16 +138,4 @@ class MiaoaTagService {
     }
     return decoded;
   }
-
-  /// [ProcessResult.stdout] 的静态类型是 dynamic：默认执行器给 String，
-  /// 而 `stdoutEncoding: null` 的执行器给的是 `List<int>`——两种都要认
-  static String _stdoutText(Object? stdout, String action) {
-    if (stdout is String) return stdout;
-    if (stdout is List<int>) return utf8.decode(stdout, allowMalformed: true);
-    throw MiaoaException('miaoa $action 输出类型异常，无法解析');
-  }
-
-  /// stderr 同样可能是字节流，拼进错误消息前先解码，避免显示成一串数字
-  static String _asText(Object? raw) =>
-      raw is List<int> ? utf8.decode(raw, allowMalformed: true) : '$raw';
 }

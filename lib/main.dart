@@ -22,7 +22,6 @@ import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
 import 'core/diagnostics/tool_installer.dart';
 import 'core/miaoa/miaoa_auth_service.dart';
-import 'core/miaoa/miaoa_locator.dart';
 import 'core/diagnostics/environment_report.dart';
 import 'core/storage/cache_usage.dart';
 import 'core/storage/task_artifacts.dart';
@@ -116,7 +115,7 @@ Future<void> main(List<String> args) async {
       bgmFetcherProvider.overrideWithValue(bgmCache(dataDir).fetch),
       // 挑素材时就把本体下到本地：和导出读同一个缓存目录，导出时不必再下
       materialFetcherProvider.overrideWithValue(MaterialDownloader(
-        content: MiaoaContentService(binary: resolveMiaoaBinary()),
+        content: MiaoaContentService(),
         cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
       ).fetch),
       // 预览与导出共用同一份素材人声：听到的就是要交付的
@@ -137,7 +136,7 @@ Future<void> main(List<String> args) async {
                 .duration
                 .inMilliseconds,
             fetchMaterial: MaterialDownloader(
-              content: MiaoaContentService(binary: resolveMiaoaBinary()),
+              content: MiaoaContentService(),
               cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
             ).fetch,
           )),

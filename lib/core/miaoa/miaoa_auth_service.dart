@@ -1,9 +1,8 @@
 import 'dart:convert';
 
-import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import 'miaoa_failure.dart';
-import 'miaoa_locator.dart';
+import 'miaoa_gateway.dart';
 
 /// 一次登录动作的结果。失败时 [message] 是**能直接展示**的中文。
 class MiaoaAuthResult {
@@ -93,18 +92,15 @@ const _smsKeywords = <_SmsProblem, List<String>>{
 /// 出现在本机进程列表里（`ps` 可见）。CLI 只提供这一种非交互入口，绕不开；
 /// 验证码几分钟即失效，且这两样都不会被本 app 写进任何文件或日志。
 class MiaoaAuthService {
-  final ProcessRunner run;
-  final String Function() resolveBinary;
+  final MiaoaGateway gateway;
 
   /// 默认国家码。CLI 的默认值也是 +86，显式传是为了让命令自解释
   final String countryCode;
 
   MiaoaAuthService({
-    ProcessRunner? run,
-    String Function()? resolveBinary,
+    MiaoaGateway? gateway,
     this.countryCode = '+86',
-  })  : run = run ?? systemProcessRunner,
-        resolveBinary = resolveBinary ?? resolveMiaoaBinary;
+  }) : gateway = gateway ?? MiaoaGateway();
 
   /// 第一步：给这个手机号发验证码
   Future<MiaoaAuthResult> requestCode({required String phone}) async {
@@ -252,7 +248,7 @@ class MiaoaAuthService {
     List<MiaoaWorkspace> Function(Map<String, dynamic>) parse,
   ) async {
     try {
-      final result = await run(resolveBinary(), args);
+      final result = await gateway.raw(args);
       if (result.exitCode != 0) {
         return MiaoaWorkspaceList.failed(
             _authGuidance(classifyMiaoaFailure('${result.stderr}${result.stdout}'), what));
@@ -272,7 +268,7 @@ class MiaoaAuthService {
   Future<MiaoaAuthResult> _act(
       List<String> args, String what, String onSuccess) async {
     try {
-      final result = await run(resolveBinary(), args);
+      final result = await gateway.raw(args);
       if (result.exitCode == 0) return MiaoaAuthResult.success(onSuccess);
       return _classify('${result.stderr}${result.stdout}', what);
     } catch (e) {
@@ -283,7 +279,7 @@ class MiaoaAuthService {
   /// 退出登录：由 CLI 吊销 token 并清掉本地凭据
   Future<MiaoaAuthResult> logout() async {
     try {
-      final result = await run(resolveBinary(), ['auth', 'logout', '--json']);
+      final result = await gateway.raw(['auth', 'logout', '--json']);
       if (result.exitCode == 0) {
         return const MiaoaAuthResult.success('已退出登录');
       }
@@ -300,7 +296,7 @@ class MiaoaAuthService {
     bool requireLoggedIn = false,
   }) async {
     try {
-      final result = await run(resolveBinary(), ['auth', 'login', ...args]);
+      final result = await gateway.raw(['auth', 'login', ...args]);
       final text = '${result.stderr}${result.stdout}';
       if (result.exitCode != 0) return _classify(text, what);
       if (requireLoggedIn && !_saysLoggedIn(result.stdout)) {

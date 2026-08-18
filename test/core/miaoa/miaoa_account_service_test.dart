@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/miaoa_account_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_failure.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 const _loggedInJson = '''
 {
@@ -19,8 +20,7 @@ const _loggedInJson = '''
 ''';
 
 MiaoaAccountService _service(String stdout, {int exitCode = 0, String stderr = ''}) =>
-    MiaoaAccountService(
-        run: (_, _) async => ProcessResult(1, exitCode, stdout, stderr));
+    MiaoaAccountService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, exitCode, stdout, stderr), binary: 'miaoa'));
 
 void main() {
   group('账号信息的解析', () {
@@ -93,8 +93,7 @@ void main() {
     });
 
     test('CLI 没装时提示去装 miaoa，而不是「请重试」', () async {
-      final service = MiaoaAccountService(
-          run: (_, _) async => throw const ProcessException('miaoa', []));
+      final service = MiaoaAccountService(gateway: MiaoaGateway(run: (_, _) async => throw const ProcessException('miaoa', []), binary: 'miaoa'));
 
       final status = await service.fetch();
 
@@ -114,10 +113,10 @@ void main() {
   group('调用方式', () {
     test('用 --json 取结构化输出，不去解析人类可读文案', () async {
       final args = <List<String>>[];
-      final service = MiaoaAccountService(run: (_, a) async {
+      final service = MiaoaAccountService(gateway: MiaoaGateway(run: (_, a) async {
         args.add(a);
         return ProcessResult(1, 0, _loggedInJson, '');
-      });
+      }, binary: 'miaoa'));
 
       await service.fetch();
 

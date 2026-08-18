@@ -6,11 +6,10 @@ library;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
-import 'package:ishkafel/core/miaoa/miaoa_locator.dart';
 
 void main() {
   test('音频库能列出内容，且时长/人声解析得对', () async {
-    final library = BgmLibrary(binary: resolveMiaoaBinary());
+    final library = BgmLibrary();
 
     final items = (await library.search(pageSize: 30)).items;
 
@@ -35,7 +34,7 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 2)));
 
   test('拿成片的项目去筛会筛空，这时要自动放开到全库', () async {
-    final library = BgmLibrary(binary: resolveMiaoaBinary());
+    final library = BgmLibrary();
 
     // 104 = 滴露植源喷雾。音频库不按成片项目归档，硬筛回来是 0 条
     final page = await library.search(projectIds: const [104], pageSize: 10);

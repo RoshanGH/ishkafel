@@ -1,10 +1,8 @@
 import 'dart:convert';
 
-import '../ffmpeg/process_runner.dart';
-import 'miaoa_locator.dart';
 import '../log/app_log.dart';
-import 'miaoa_errors.dart';
-import 'miaoa_tag_service.dart' show MiaoaException;
+import 'miaoa_exception.dart';
+import 'miaoa_gateway.dart';
 
 /// 候选素材（miaoa 分镜库的一条记录）
 ///
@@ -127,13 +125,10 @@ enum CandidateSearchMode {
 /// 全部限定 `--type storyboard`：本产品替换的是**视觉镜头**，对应 miaoa 的
 /// 分镜库；成片库（`--type video`）是整条片子，不是替换素材。
 class MiaoaContentService {
-  final ProcessRunner run;
-  final String binary;
+  final MiaoaGateway gateway;
 
-  /// [binary] 缺省即解析真实安装路径——GUI 进程的 PATH 不含 ~/.local/bin，
-  /// 裸名会误报「未安装」（settings 能读、素材面板不能读的那个 bug）
-  MiaoaContentService({this.run = systemProcessRunner, String? binary})
-      : binary = binary ?? resolveMiaoaBinary();
+  MiaoaContentService({MiaoaGateway? gateway})
+      : gateway = gateway ?? MiaoaGateway();
 
   /// 按标签检索。[mode] 为 `and`（全部满足）或 `or`（任一满足）；
   /// [projectIds] 为空表示不限项目（我的全部项目聚合）
@@ -219,20 +214,15 @@ class MiaoaContentService {
   /// 一条一次调用：`content search --ids` 服务端目前直接 500（真机实测），
   /// 不能拿它当批量入口。找不到返回 null，由调用方决定是跳过还是报错。
   Future<CandidateMaterial?> fetchById(int id) async {
-    final result = await run(binary, [
+    final stdout = await gateway.text([
       'content',
       'get',
       '$id',
       '--type',
       'storyboard',
       '--json',
-    ]);
-    if (result.exitCode != 0) {
-      throw MiaoaException(miaoaFriendlyError(result.exitCode,
-          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
-    }
-    final decoded = _decode(_text(result.stdout));
-    return CandidateMaterial.tryFromJson(decoded);
+    ], what: '读取素材详情');
+    return CandidateMaterial.tryFromJson(_decode(stdout));
   }
 
   static List<String> _paging(int page, int pageSize) => [
@@ -243,22 +233,15 @@ class MiaoaContentService {
       ];
 
   Future<CandidatePage> _search(List<String> extraArgs) async {
-    final args = [
+    final stdout = await gateway.text([
       'content',
       'search',
       '--type',
       'storyboard',
       ...extraArgs,
       '--json',
-    ];
-    final result = await run(binary, args);
-
-    if (result.exitCode != 0) {
-      throw MiaoaException(miaoaFriendlyError(result.exitCode,
-          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
-    }
-
-    final decoded = _decode(_text(result.stdout));
+    ], what: '素材库检索');
+    final decoded = _decode(stdout);
     final records = decoded['records'];
     if (records is! List) {
       throw MiaoaException('素材库返回的数据格式无法识别，请稍后重试');
@@ -286,13 +269,6 @@ class MiaoaContentService {
     );
   }
 
-  /// 子进程输出既可能是 String，也可能是 `List<int>`（取决于 stdoutEncoding）
-  static String _text(Object? out) {
-    if (out is String) return out;
-    if (out is List<int>) return utf8.decode(out, allowMalformed: true);
-    return '';
-  }
-
   static Map<String, dynamic> _decode(String stdout) {
     try {
       final decoded = jsonDecode(stdout);
@@ -302,6 +278,4 @@ class MiaoaContentService {
     }
     throw MiaoaException('素材库返回的数据格式无法识别，请稍后重试');
   }
-
-  /// 把 CLI 的退出码与 stderr 翻译成用户能照做的中文提示
 }

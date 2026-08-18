@@ -20,7 +20,6 @@ import '../core/ai/taggers.dart';
 import '../core/analysis/audio_extractor.dart';
 import '../core/audio/vocal_separator.dart';
 import '../core/log/app_log.dart';
-import '../core/miaoa/miaoa_locator.dart';
 import '../core/miaoa/miaoa_tag_service.dart';
 import '../core/storage/file_task_repository.dart';
 import '../core/analysis/tag_vocabulary.dart';
@@ -69,6 +68,6 @@ AnalysisPipeline? buildAnalysisPipeline(
     unitTagger: UnitTagger(chat: chat),
     shotTagger: ShotTagger(chat: chat),
     vocabulary: MiaoaTagVocabularySource(
-        MiaoaTagService(binary: resolveMiaoaBinary())),
+        MiaoaTagService()),
   );
 }

@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import '../ai/ai_credentials.dart';
+import '../miaoa/miaoa_gateway.dart';
 import '../ffmpeg/media_tools_locator.dart';
 import '../ffmpeg/process_runner.dart';
 import '../audio/vocal_separator.dart';
-import '../miaoa/miaoa_locator.dart';
 
 /// 子进程执行签名（与 [ProcessRunner] 同型，这里另起别名只为让测试的替身
 /// 声明读起来直白）
@@ -123,10 +123,7 @@ EnvironmentProbe defaultEnvironmentProbe({
 }) =>
     EnvironmentProbe(
       mediaTools: mediaTools,
-      resolveMiaoa: () {
-        final resolved = resolveMiaoaBinary();
-        return resolved == 'miaoa' ? null : resolved;
-      },
+      resolveMiaoa: MiaoaGateway.installedPath,
       resolveSeparator: () {
         final resolved = resolveVocalSeparatorBinary();
         return resolved == 'audio-separator' ? null : resolved;

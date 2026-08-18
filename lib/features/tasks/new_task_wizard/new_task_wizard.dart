@@ -98,7 +98,10 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     } catch (e) {
       AppLog.warn('读取 miaoa 标签组失败：$e');
       if (!mounted) return;
-      setState(() => _groupsError = miaoaFriendlyMessage(e));
+      // 网关的异常自带可照做的中文（错误出口只此一份）；
+      // 陌生异常才落到关键词兜底
+      setState(() => _groupsError =
+          e is MiaoaException ? e.message : miaoaFriendlyMessage(e));
     }
   }
 

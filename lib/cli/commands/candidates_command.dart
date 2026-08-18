@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import '../../core/miaoa/miaoa_content_service.dart';
-import '../../core/miaoa/miaoa_locator.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
 import '../../core/storage/file_task_repository.dart';
@@ -54,7 +53,7 @@ Future<int> runCandidatesCommand({
 
   // 打标产出的是标签**名**（受控词表就是名字），而 miaoa 的检索只收标签
   // **id**，中间必须有一次映射，映射表来自任务选定的标签组
-  final resolver = TagIdResolver(MiaoaTagService(binary: resolveMiaoaBinary()));
+  final resolver = TagIdResolver(MiaoaTagService());
   await resolver.loadAll({
     for (final g in task.unitTagGroups) g.id,
     for (final g in task.shotTagGroups) g.id,
@@ -74,7 +73,7 @@ Future<int> runCandidatesCommand({
     return exitNotFound;
   }
 
-  final page = await MiaoaContentService(binary: resolveMiaoaBinary())
+  final page = await MiaoaContentService()
       .searchByTags(
     tagIds: tagIds,
     mode: 'or',

@@ -8,6 +8,7 @@ import 'package:ishkafel/core/miaoa/miaoa_auth_service.dart';
 import 'package:ishkafel/features/settings/sections/account_section.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/settings/workspace_picker_sheet.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// 选企业 / 选项目。
 ///
@@ -32,15 +33,12 @@ void main() {
     final calls = <List<String>>[];
     return (
       calls: calls,
-      service: MiaoaAuthService(
-        resolveBinary: () => 'miaoa',
-        run: (bin, args) async {
+      service: MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
           calls.add(args);
           final hit = byCommand[args.take(2).join(' ')];
           return ProcessResult(
               0, hit?.code ?? 0, hit?.out ?? '{}', hit == null ? '' : '');
-        },
-      ),
+        }, binary: 'miaoa')),
     );
   }
 
@@ -150,9 +148,7 @@ void main() {
       final calls = <List<String>>[];
       return (
         calls: calls,
-        service: MiaoaAuthService(
-          resolveBinary: () => 'miaoa',
-          run: (bin, args) async {
+        service: MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
             calls.add(args);
             final page =
                 int.parse(args[args.indexOf('--page') + 1]);
@@ -164,8 +160,7 @@ void main() {
             ];
             return ProcessResult(
                 0, 0, '{"total":$total,"records":[${records.join(',')}]}', '');
-          },
-        ),
+          }, binary: 'miaoa')),
       );
     }
 
@@ -192,9 +187,7 @@ void main() {
 
     test('翻到一半断了，先把已经拿到的给用户用', () async {
       var call = 0;
-      final service = MiaoaAuthService(
-        resolveBinary: () => 'miaoa',
-        run: (bin, args) async {
+      final service = MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
           call++;
           if (call == 1) {
             final records = [
@@ -205,8 +198,7 @@ void main() {
                 0, 0, '{"total":250,"records":[${records.join(',')}]}', '');
           }
           return ProcessResult(0, 1, '', 'error: connection reset');
-        },
-      );
+        }, binary: 'miaoa'));
       final list = await service.listProjects();
       expect(list.items, hasLength(100));
       expect(list.ok, isTrue, reason: '拿到一部分总比什么都没有强');

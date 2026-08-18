@@ -4,6 +4,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/miaoa/miaoa_failure.dart';
 import '../../core/models/shot.dart';
 import '../../core/replacement/replacement_plan.dart';
 import 'candidate_card.dart';
@@ -33,6 +34,14 @@ class CandidatePanel extends StatelessWidget {
 
   /// 重新拉标签表并重跑检索。为空表示上层没接（测试里常见）
   final VoidCallback? onRetryTags;
+
+  /// 检索失败后原样重发。为空则失败提示不带「重试」按钮
+  final VoidCallback? onRetrySearch;
+
+  /// 打开 miaoa 登录（检索因登录失效而失败时的对症动作）。
+  /// 为空则退回普通「重试」——但正常接线时不该为空：让用户对着一句
+  /// 「请去重新登录」自己找路，等于没给动作
+  final VoidCallback? onRelogin;
 
   /// 当前检索方式（三选一互斥）
   final CandidateSearchMode searchMode;
@@ -84,6 +93,8 @@ class CandidatePanel extends StatelessWidget {
     required this.scope,
     this.tagPlan,
     this.onRetryTags,
+    this.onRetrySearch,
+    this.onRelogin,
     required this.searchMode,
     required this.onSearchModeChanged,
     required this.onModeChanged,
@@ -550,8 +561,7 @@ class CandidatePanel extends StatelessWidget {
             child: SizedBox(
                 width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
       case CandidateSearchStatus.failed:
-        return _hint(search.failureMessage ?? '素材库检索失败，请稍后重试',
-            color: AppColors.red, icon: Icons.error_outline);
+        return _searchFailure();
       case CandidateSearchStatus.ready:
         if (search.entries.isEmpty) {
           return _emptyResult();
@@ -639,6 +649,39 @@ class CandidatePanel extends StatelessWidget {
                   height: 1.5)),
         ],
       );
+
+  /// 检索失败：文案 + 对症的动作按钮，绝不让用户对着一句红字无路可走。
+  /// 登录失效给「重新登录」（一键拉起登录页），其余失败给「重试」
+  Widget _searchFailure() {
+    final needsLogin = search.failureKind == MiaoaFailureKind.unauthorized;
+    final action = needsLogin && onRelogin != null
+        ? FilledButton.tonal(
+            key: const ValueKey('candidate-relogin'),
+            onPressed: onRelogin,
+            child: const Text('重新登录'))
+        : onRetrySearch != null
+            ? OutlinedButton(
+                key: const ValueKey('candidate-retry-search'),
+                onPressed: onRetrySearch,
+                child: const Text('重试'))
+            : null;
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          PickingHint(
+              text: search.failureMessage ?? '素材库检索失败，请稍后重试',
+              color: AppColors.red,
+              icon: Icons.error_outline),
+          if (action != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            action,
+          ],
+        ]),
+      ),
+    );
+  }
 
   Widget _hint(String text,
           {Color color = AppColors.textSecondary,

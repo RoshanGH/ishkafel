@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_cache.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 import 'package:path/path.dart' as p;
 
 const _material = BgmMaterial(
@@ -18,13 +19,11 @@ Directory _temp() {
   return dir;
 }
 
-BgmLibrary _library() => BgmLibrary(
-      run: (binary, args) async => ProcessResult(
+BgmLibrary _library() => BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async => ProcessResult(
           1,
           0,
           '{"id":108,"mediaFile":{"previewUrl":"https://cdn/a.mp3?sign=fresh"}}',
-          ''),
-    );
+          ''), binary: 'miaoa'));
 
 void main() {
   test('缓存里躺着一个坏文件时，删掉重下', () async {

@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 import '../../app/service_wiring.dart';
 import '../../core/ai/ai_credentials.dart';
 import '../../core/analysis/tag_vocabulary.dart';
-import '../../core/miaoa/miaoa_locator.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
@@ -160,7 +159,7 @@ Future<int> runAnalyzeCommand({
 /// 知道自己错在哪。
 Future<List<String>> vocabularyFor(List<TagGroupRef> groups) async {
   final source =
-      MiaoaTagVocabularySource(MiaoaTagService(binary: resolveMiaoaBinary()));
+      MiaoaTagVocabularySource(MiaoaTagService());
   final all = <String>{};
   for (final group in groups) {
     all.addAll(await source.vocabularyOf(group.id));

@@ -169,7 +169,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
       setState(() => _page = page);
     } catch (e) {
       if (!mounted || generation != _generation) return;
-      // e 已是人话（BgmLibrary 走 miaoaFriendlyError 翻译过）
+      // e 已是人话（网关统一翻译过）
       setState(() => _error = '$e');
     }
   }

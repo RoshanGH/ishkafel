@@ -1,9 +1,8 @@
 import 'dart:convert';
 
-import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
-import '../miaoa/miaoa_tag_service.dart' show MiaoaException;
-import '../miaoa/miaoa_errors.dart';
+import '../miaoa/miaoa_exception.dart';
+import '../miaoa/miaoa_gateway.dart';
 import 'bgm_plan.dart';
 
 /// 一页检索结果，外加「这页是怎么来的」。
@@ -25,10 +24,9 @@ class BgmSearchPage {
 /// 两边的参数互相污染——打成 storyboard 会返回一堆画面素材，用户拿去当 BGM
 /// 一首都放不出来。
 class BgmLibrary {
-  final ProcessRunner run;
-  final String binary;
+  final MiaoaGateway gateway;
 
-  BgmLibrary({this.run = systemProcessRunner, this.binary = 'miaoa'});
+  BgmLibrary({MiaoaGateway? gateway}) : gateway = gateway ?? MiaoaGateway();
 
   /// 检索音频素材。[keyword] 为空（或只有空白）时列出音频库里的内容。
   ///
@@ -67,7 +65,7 @@ class BgmLibrary {
     required int pageSize,
   }) async {
     final trimmed = keyword?.trim() ?? '';
-    final result = await run(binary, [
+    final stdout = await gateway.text([
       'content',
       'search',
       '--type',
@@ -80,14 +78,8 @@ class BgmLibrary {
       '--page-size',
       '$pageSize',
       '--json',
-    ]);
-
-    if (result.exitCode != 0) {
-      throw MiaoaException(miaoaFriendlyError(result.exitCode,
-          miaoaErrorText(_text(result.stdout), _text(result.stderr))));
-    }
-
-    final decoded = _decode(_text(result.stdout));
+    ], what: '音频库检索');
+    final decoded = _decode(stdout);
     final records = decoded['records'];
     if (records is! List) {
       throw MiaoaException('音频库返回的数据格式无法识别，请稍后重试');
@@ -114,13 +106,10 @@ class BgmLibrary {
   /// 取不到返回 null，由调用方决定退回旧地址还是报错。
   Future<String?> freshPreviewUrl(int id) async {
     try {
-      final result = await run(
-          binary, ['content', 'get', '--type', 'audio', '--json', '$id']);
-      if (result.exitCode != 0) {
-        AppLog.warn('取音频 $id 的新地址失败（exit=${result.exitCode}）');
-        return null;
-      }
-      final decoded = jsonDecode(_text(result.stdout));
+      final stdout = await gateway
+          .text(['content', 'get', '--type', 'audio', '--json', '$id'],
+              what: '取音频地址');
+      final decoded = jsonDecode(stdout);
       if (decoded is! Map) return null;
       final media = decoded['mediaFile'];
       final url = media is Map ? media['previewUrl'] : null;
@@ -189,12 +178,6 @@ class BgmLibrary {
       // 不是 JSON 就按纯文本看待
     }
     return asrText.trim() != 'null';
-  }
-
-  static String _text(Object? out) {
-    if (out is String) return out;
-    if (out is List<int>) return utf8.decode(out, allowMalformed: true);
-    return '';
   }
 
   static Map<String, dynamic> _decode(String stdout) {

@@ -2,7 +2,6 @@ import 'dart:io';
 
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
-import '../../core/miaoa/miaoa_locator.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/tag_group_ref.dart';
@@ -99,7 +98,7 @@ Future<int> _create(
         '可用 ishkafel tag-groups 查看可选项');
     return exitBadUsage;
   }
-  final all = await MiaoaTagService(binary: resolveMiaoaBinary()).listGroups();
+  final all = await MiaoaTagService().listGroups();
   final groups = [
     for (final g in all)
       if (ids.contains(g.id)) TagGroupRef(id: g.id, name: g.name),

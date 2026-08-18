@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/miaoa/miaoa_exception.dart';
+import '../../core/miaoa/miaoa_failure.dart';
 import 'picking_messages.dart';
 
 /// 候选怎么看：台词列表 / 画面网格。
@@ -77,6 +79,7 @@ class CandidateSearchController extends ChangeNotifier {
 
   CandidateSearchStatus _status = CandidateSearchStatus.idle;
   String? _failureMessage;
+  MiaoaFailureKind? _failureKind;
   List<CandidateEntry> _entries = const [];
   int _total = 0;
   int _skipped = 0;
@@ -89,6 +92,9 @@ class CandidateSearchController extends ChangeNotifier {
 
   /// 失败原因（已是可直接展示的中文；成功时为 null）
   String? get failureMessage => _failureMessage;
+
+  /// 失败成因分类；UI 靠它决定动作按钮（登录失效给「重新登录」，其余给「重试」）
+  MiaoaFailureKind? get failureKind => _failureKind;
 
   List<CandidateEntry> get entries => _entries;
 
@@ -154,6 +160,14 @@ class CandidateSearchController extends ChangeNotifier {
   Future<void> nextPage() => goToPage(_page + 1);
   Future<void> prevPage() => goToPage(_page - 1);
 
+  /// 失败后原样重发上一次检索（重新登录回来、网络恢复后走这里）。
+  /// 没有可重发的检索时静默返回——按钮本就不该在那种状态下出现
+  Future<void> retry() async {
+    final query = _lastQuery;
+    if (query == null) return;
+    await _run(() => query(_page));
+  }
+
   /// 新的检索：一律从第 1 页开始。换了检索键还停在第 7 页，
   /// 用户看到的会是一片空白（新结果没那么多页）。
   Future<void> _start(Future<CandidatePage> Function(int page) query) {
@@ -171,6 +185,7 @@ class CandidateSearchController extends ChangeNotifier {
     _total = 0;
     _skipped = 0;
     _failureMessage = null;
+    _failureKind = null;
     _status = CandidateSearchStatus.idle;
     _notify();
   }
@@ -179,6 +194,7 @@ class CandidateSearchController extends ChangeNotifier {
     final generation = ++_generation;
     _status = CandidateSearchStatus.loading;
     _failureMessage = null;
+    _failureKind = null;
     _entries = const [];
     _notify();
 
@@ -188,8 +204,9 @@ class CandidateSearchController extends ChangeNotifier {
     } catch (e) {
       if (generation != _generation) return; // 过期的失败同样不该覆盖新结果
       _status = CandidateSearchStatus.failed;
-      // 服务层已经把 401/403/未安装/超时翻译成可照做的中文，原样透出
+      // 网关已经把 401/403/未安装/超时翻译成可照做的中文，原样透出
       _failureMessage = describeSearchFailure(e);
+      _failureKind = e is MiaoaException ? e.kind : null;
       _entries = const [];
       _notify();
       return;

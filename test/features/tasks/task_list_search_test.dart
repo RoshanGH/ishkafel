@@ -11,6 +11,7 @@ import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 import 'package:ishkafel/features/tasks/source_availability.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 class _Repo implements TaskRepository {
   final _store = <String, RenewTask>{};
@@ -54,7 +55,7 @@ Future<void> _pump(WidgetTester tester) async {
       taskRepositoryProvider.overrideWithValue(repo),
       fileExistsProbeProvider.overrideWithValue((_) async => true),
       miaoaTagServiceProvider.overrideWithValue(
-          MiaoaTagService(run: (_, _) async => ProcessResult(1, 0, '[]', ''))),
+          MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, '[]', ''), binary: 'miaoa'))),
       videoFilePickerProvider.overrideWithValue(() async => null),
     ],
     child: const MaterialApp(home: TaskListPage()),
@@ -125,8 +126,7 @@ void main() {
         overrides: [
           taskRepositoryProvider.overrideWithValue(_Repo()),
           fileExistsProbeProvider.overrideWithValue((_) async => true),
-          miaoaTagServiceProvider.overrideWithValue(MiaoaTagService(
-              run: (_, _) async => ProcessResult(1, 0, '[]', ''))),
+          miaoaTagServiceProvider.overrideWithValue(MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, '[]', ''), binary: 'miaoa'))),
           videoFilePickerProvider.overrideWithValue(() async => null),
         ],
         child: const MaterialApp(home: TaskListPage()),

@@ -8,14 +8,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_cache.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
-import 'package:ishkafel/core/miaoa/miaoa_locator.dart';
 
 void main() {
   test('存下来的签名地址失效后，按 id 现取一个新的并落到本地', () async {
     final dir = Directory('${Platform.environment['HOME']}/Library/Application Support/com.jichuang.ishkafel/ishkafel_data/bgm_cache');
     if (dir.existsSync()) dir.deleteSync(recursive: true);
     final cache = BgmCache(
-      library: BgmLibrary(binary: resolveMiaoaBinary()),
+      library: BgmLibrary(),
       cacheDir: dir,
     );
     // 任务里存的那个签名地址已经 403

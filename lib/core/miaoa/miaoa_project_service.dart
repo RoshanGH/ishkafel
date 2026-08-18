@@ -2,11 +2,9 @@ import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
-import 'miaoa_errors.dart';
-import 'miaoa_locator.dart';
-import 'miaoa_tag_service.dart' show MiaoaException;
+import 'miaoa_exception.dart';
+import 'miaoa_gateway.dart';
 
 /// miaoa 里的一个项目（素材按项目归属）
 class MiaoaProject {
@@ -30,32 +28,25 @@ class MiaoaProject {
 /// 检索时用它把范围收到一个项目内：素材库里四万多条分镜横跨几十个项目，
 /// 不限项目搜出来的东西大多不是这条片子能用的。
 class MiaoaProjectService {
-  final ProcessRunner run;
-  final String binary;
+  final MiaoaGateway gateway;
 
-  /// [binary] 缺省即解析真实安装路径，理由见 MiaoaContentService
-  MiaoaProjectService({this.run = systemProcessRunner, String? binary})
-      : binary = binary ?? resolveMiaoaBinary();
+  MiaoaProjectService({MiaoaGateway? gateway})
+      : gateway = gateway ?? MiaoaGateway();
 
   /// 一次取回全部项目。
   ///
   /// 只要启用中的：停用的项目不会再有新素材进来，摆在选择列表里只会让人
   /// 多翻几屏。page-size 给足，几十个项目一页装得下——分页翻起来反而更慢。
   Future<List<MiaoaProject>> listProjects() async {
-    final result = await run(binary, [
+    final stdout = await gateway.text([
       'project',
       'list',
       '--enabled-only',
       '--page-size',
       '200',
       '--json',
-    ]);
-    if (result.exitCode != 0) {
-      throw MiaoaException(
-          miaoaFriendlyError(result.exitCode, '${result.stderr}'));
-    }
-
-    final decoded = _decode('${result.stdout}');
+    ], what: '读取项目列表');
+    final decoded = _decode(stdout);
     final records = decoded['records'];
     if (records is! List) {
       throw const MiaoaException('项目列表返回的数据格式无法识别，请稍后重试');
@@ -81,5 +72,5 @@ class MiaoaProjectService {
 
 /// 默认构造不会启动子进程（只有真正调 listProjects 时才 exec），
 /// 所以这里给真实实现是安全的；单测一律 override。
-final miaoaProjectServiceProvider = Provider<MiaoaProjectService>(
-    (ref) => MiaoaProjectService(binary: resolveMiaoaBinary()));
+final miaoaProjectServiceProvider =
+    Provider<MiaoaProjectService>((ref) => MiaoaProjectService());

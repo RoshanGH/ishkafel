@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// miaoa `content search --type audio` 的真实返回形状（字段名取自真机探针）
 String _json(List<Map<String, dynamic>> records) => jsonEncode({
@@ -32,12 +33,10 @@ Map<String, dynamic> _record({
 
 BgmLibrary _lib(List<Map<String, dynamic>> records,
         {int exitCode = 0, String stderr = '', List<String>? capture}) =>
-    BgmLibrary(
-      run: (binary, args) async {
+    BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async {
         capture?.addAll(args);
         return ProcessResult(1, exitCode, _json(records), stderr);
-      },
-    );
+      }, binary: 'miaoa'));
 
 /// 带项目条件时返回 [scoped]、不带时返回 [all]——用来验「项目内为空就放开」
 BgmLibrary _libByScope({
@@ -45,13 +44,11 @@ BgmLibrary _libByScope({
   required List<Map<String, dynamic>> all,
   List<List<String>>? calls,
 }) =>
-    BgmLibrary(
-      run: (binary, args) async {
+    BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async {
         calls?.add(args);
         final byProject = args.contains('--projects');
         return ProcessResult(1, 0, _json(byProject ? scoped : all), '');
-      },
-    );
+      }, binary: 'miaoa'));
 
 void main() {
   group('检索音频库', () {

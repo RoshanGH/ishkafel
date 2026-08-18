@@ -28,7 +28,6 @@ import 'package:ishkafel/core/analysis/silence_detector.dart';
 import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
-import 'package:ishkafel/core/miaoa/miaoa_locator.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
@@ -98,7 +97,7 @@ void main() {
       unitTagger: UnitTagger(chat: chat),
       shotTagger: ShotTagger(chat: chat),
       vocabulary:
-          MiaoaTagVocabularySource(MiaoaTagService(binary: resolveMiaoaBinary())),
+          MiaoaTagVocabularySource(MiaoaTagService()),
     );
 
     final sw = Stopwatch()..start();

@@ -19,6 +19,7 @@ import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// 内存假实现，避免 UI 测试碰文件系统
 class InMemoryTaskRepository implements TaskRepository {
@@ -85,8 +86,7 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
         // 默认假定源文件都在：测试不该依赖真实文件系统
         fileExistsProbeProvider.overrideWithValue((_) async => true),
         // 单测零真实依赖：绝不真的去调 miaoa CLI 或弹系统文件框
-        miaoaTagServiceProvider.overrideWithValue(MiaoaTagService(
-            run: (_, _) async => ProcessResult(1, 0, '[]', ''))),
+        miaoaTagServiceProvider.overrideWithValue(MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, '[]', ''), binary: 'miaoa'))),
         videoFilePickerProvider.overrideWithValue(() async => null),
         ...overrides,
       ],

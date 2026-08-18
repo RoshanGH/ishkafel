@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'miaoa_tag_service.dart';
+import 'miaoa_exception.dart';
 
 /// miaoa CLI 失败的成因分类。
 ///
@@ -30,6 +30,12 @@ enum MiaoaFailureKind {
 /// 关键词按「先专有后宽泛」的顺序匹配，避免 401 的报文里带 timeout 之类的
 /// 词而被误判成网络问题
 const _kindKeywords = <MiaoaFailureKind, List<String>>{
+  // shell 起不来子进程时这些话会落在 stderr 文本里（而非 ProcessException）
+  MiaoaFailureKind.cliMissing: [
+    'no such file or directory',
+    'command not found',
+    'executable file not found',
+  ],
   MiaoaFailureKind.unauthorized: [
     '401',
     'unauthorized',
@@ -48,6 +54,7 @@ const _kindKeywords = <MiaoaFailureKind, List<String>>{
     'network is unreachable',
     'i/o timeout',
     'timeout',
+    'timed out',
     'deadline exceeded',
     'dial tcp',
     '网络',
@@ -56,6 +63,11 @@ const _kindKeywords = <MiaoaFailureKind, List<String>>{
 
 /// 把任意异常归入 [MiaoaFailureKind]。纯函数，便于单测穷举各种 CLI 报文。
 MiaoaFailureKind classifyMiaoaFailure(Object error) {
+  // 网关抛出的异常已经分类过了，认它的——关键词匹配只对原始报文有效，
+  // 对翻译后的中文引导会一律误判成 unknown
+  if (error is MiaoaException && error.kind != MiaoaFailureKind.unknown) {
+    return error.kind;
+  }
   // 子进程起不来只有一种现实成因：可执行文件不在 PATH 里
   if (error is ProcessException) return MiaoaFailureKind.cliMissing;
   final text = _errorText(error).toLowerCase();

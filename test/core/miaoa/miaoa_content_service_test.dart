@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart' show MiaoaException;
 
 /// 取自真实 `miaoa content search --type storyboard --json` 的返回结构
@@ -40,10 +41,10 @@ MiaoaContentService _service(
   String stderr = '',
   int exitCode = 0,
 }) =>
-    MiaoaContentService(run: (bin, args) async {
+    MiaoaContentService(gateway: MiaoaGateway(run: (bin, args) async {
       capturedArgs.add(args);
       return ProcessResult(1, exitCode, stdout ?? _realShapedResponse(), stderr);
-    });
+    }, binary: 'miaoa'));
 
 void main() {
   group('检索范围限定在一个项目内', () {
@@ -222,7 +223,7 @@ void main() {
         expectMessage('HTTP 403 Forbidden', '权限'));
 
     test('CLI 未安装 → 指出要先安装', () =>
-        expectMessage('No such file or directory', '未检测到'));
+        expectMessage('No such file or directory', '未找到 miaoa'));
 
     test('超时 → 指向网络', () => expectMessage('operation timed out', '网络'));
   });

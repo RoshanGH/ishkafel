@@ -9,6 +9,7 @@ import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_body.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// 带 tags：标签组现在用 `--include-tags` 一次拉回，预览直接用这份数据，
 /// 不再为每个组单独请求一次
@@ -54,7 +55,7 @@ Widget wrap({
   return ProviderScope(
     overrides: [
       miaoaTagServiceProvider.overrideWithValue(
-          MiaoaTagService(run: run ?? fakeCli())),
+          MiaoaTagService(gateway: MiaoaGateway(run: run ?? fakeCli(), binary: 'miaoa'))),
       videoFilePickerProvider
           .overrideWithValue(picker ?? () async => '/videos/滴露_测试片.mp4'),
     ],
@@ -133,10 +134,11 @@ void main() {
   });
 
   group('miaoa 不可用时给可执行的中文引导（不是只写日志）', () {
-    testWidgets('CLI 未安装 → 引导安装与 PATH，并给「重试」', (tester) async {
+    testWidgets('CLI 未安装 → 引导先安装，并给「重试」', (tester) async {
       await openWizard(tester, wrap(run: missingCli));
 
-      expect(find.textContaining('PATH'), findsOneWidget);
+      // 网关的统一文案：说清「装 miaoa 并登录」，不拿 PATH 这种黑话吓用户
+      expect(find.textContaining('未找到 miaoa 命令行工具'), findsOneWidget);
       expect(find.text('重试'), findsOneWidget);
     });
 

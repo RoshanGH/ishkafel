@@ -1,9 +1,8 @@
 import 'dart:convert';
 
-import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import 'miaoa_failure.dart';
-import 'miaoa_locator.dart';
+import 'miaoa_gateway.dart';
 
 /// 账号状态读取失败的描述（分类 + 可直接展示的中文引导）
 class MiaoaAccountFailure {
@@ -80,17 +79,15 @@ String accountFailureGuidance(MiaoaFailureKind kind) => switch (kind) {
 /// 只跑 `auth status`——纯读操作，不触发登录、不改上下文。登录本身由 CLI
 /// 完成（短信验证码/设备流），app 不代收凭据。
 class MiaoaAccountService {
-  final ProcessRunner run;
-  final String Function() resolveBinary;
+  final MiaoaGateway gateway;
 
-  MiaoaAccountService({ProcessRunner? run, String Function()? resolveBinary})
-      : run = run ?? systemProcessRunner,
-        resolveBinary = resolveBinary ?? resolveMiaoaBinary;
+  MiaoaAccountService({MiaoaGateway? gateway})
+      : gateway = gateway ?? MiaoaGateway();
 
   Future<MiaoaAccountStatus> fetch() async {
     try {
       // 人类可读输出的措辞随时会改，靠正则扒字段迟早会静默失效
-      final result = await run(resolveBinary(), ['auth', 'status', '--json']);
+      final result = await gateway.raw(['auth', 'status', '--json']);
       final json = _tryDecode(result.stdout);
       if (json == null) {
         // 拿不到结构化输出时，退出码与 stderr 才是判断依据

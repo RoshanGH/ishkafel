@@ -26,6 +26,8 @@ import '../picking/picking_widgets.dart';
 import '../picking/picking_scope.dart';
 import 'search_mode_policy.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
+import '../settings/miaoa_login_sheet.dart';
+import '../../core/miaoa/miaoa_auth_service.dart';
 
 /// 工作台右栏的「替换素材」视图。
 ///
@@ -561,6 +563,13 @@ class CandidateTabState extends State<CandidateTab> {
     _picking.markSaved();
   }
 
+  /// 登录失效的对症动作：拉起登录页，登录成功就原样重发检索。
+  /// 用户视角是「点一下 → 登录 → 结果回来了」，不用自己再找一遍入口
+  Future<void> _reloginThenRetry(BuildContext context) async {
+    final ok = await MiaoaLoginSheet.show(context, MiaoaAuthService());
+    if (ok == true) await _search.retry();
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
         animation: Listenable.merge([_picking, _search]),
@@ -570,6 +579,8 @@ class CandidateTabState extends State<CandidateTab> {
           scope: _scope,
           tagPlan: _tagPlan,
           onRetryTags: _retryTagVocabulary,
+          onRetrySearch: _search.retry,
+          onRelogin: () => _reloginThenRetry(context),
           searchMode: _searchMode,
           onSearchModeChanged: _onSearchModeChanged,
           onModeChanged: _onModeChanged,

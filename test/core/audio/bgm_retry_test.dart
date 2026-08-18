@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_cache.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 const _material = BgmMaterial(
     id: 108, name: '快乐的尤克里里', durationMs: 122540, previewUrl: 'https://cdn/a.mp3');
@@ -15,15 +16,11 @@ Directory _temp() {
 }
 
 BgmLibrary _library({String fresh = 'https://cdn/a.mp3?sign=fresh'}) =>
-    BgmLibrary(
-      run: (binary, args) async => ProcessResult(1, 0,
-          '{"id":108,"mediaFile":{"previewUrl":"$fresh"}}', ''),
-    );
+    BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async => ProcessResult(1, 0,
+          '{"id":108,"mediaFile":{"previewUrl":"$fresh"}}', ''), binary: 'miaoa'));
 
 /// 素材已从素材库删除：现取地址拿不到，任务里存的那个也 404
-BgmLibrary _deleted() => BgmLibrary(
-      run: (binary, args) async => ProcessResult(1, 0, '{"id":108}', ''),
-    );
+BgmLibrary _deleted() => BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async => ProcessResult(1, 0, '{"id":108}', ''), binary: 'miaoa'));
 
 void main() {
   group('网络抖一下不该让人重选配乐', () {

@@ -8,6 +8,7 @@ import 'package:ishkafel/core/miaoa/miaoa_auth_service.dart';
 import 'package:ishkafel/features/settings/miaoa_login_sheet.dart';
 import 'package:ishkafel/features/settings/sections/account_section.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// 在设置里登录 miaoa。
 ///
@@ -23,15 +24,12 @@ void main() {
     var i = 0;
     return (
       calls: calls,
-      service: MiaoaAuthService(
-        resolveBinary: () => 'miaoa',
-        run: (bin, args) async {
+      service: MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
           calls.add(args);
           final r =
               responses[i < responses.length ? i++ : responses.length - 1];
           return ProcessResult(0, r.code, r.out, r.err);
-        },
-      ),
+        }, binary: 'miaoa')),
     );
   }
 

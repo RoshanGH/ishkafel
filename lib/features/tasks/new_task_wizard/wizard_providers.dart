@@ -1,7 +1,6 @@
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/miaoa/miaoa_locator.dart';
 import '../../../core/miaoa/miaoa_tag_service.dart';
 import '../../../core/models/project_ref.dart';
 import '../../../core/models/tag_group_ref.dart';
@@ -56,4 +55,4 @@ final videoFilePickerProvider =
 /// 所以在这里给真实实现是安全的；单测一律 override 成注入假 ProcessRunner 的
 /// 实例，绝不碰真实 CLI。
 final miaoaTagServiceProvider = Provider<MiaoaTagService>(
-    (ref) => MiaoaTagService(binary: resolveMiaoaBinary()));
+    (ref) => MiaoaTagService());

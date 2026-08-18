@@ -14,7 +14,6 @@ import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/tag_vocabulary.dart';
 import 'package:ishkafel/core/analysis/tagging_service.dart';
 import 'package:ishkafel/core/ffmpeg/thumbnail_service.dart';
-import 'package:ishkafel/core/miaoa/miaoa_locator.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
@@ -58,7 +57,7 @@ void main() {
       return;
     }
 
-    final tagService = MiaoaTagService(binary: resolveMiaoaBinary());
+    final tagService = MiaoaTagService();
     final groups = await tagService.listGroups();
     final shotRefs = [
       for (final name in _shotGroups)

@@ -4,7 +4,6 @@ import 'package:path/path.dart' as p;
 
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
-import '../../core/miaoa/miaoa_locator.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
@@ -43,7 +42,7 @@ Future<int> runImportCommand({
   var groups = <TagGroupRef>[];
   if (ids.isNotEmpty) {
     try {
-      final all = await MiaoaTagService(binary: resolveMiaoaBinary())
+      final all = await MiaoaTagService()
           .listGroups();
       groups = [
         for (final g in all)
@@ -90,7 +89,7 @@ Future<int> runImportCommand({
 Future<int> runTagGroupsCommand({StringSink? out, StringSink? err}) async {
   try {
     final groups =
-        await MiaoaTagService(binary: resolveMiaoaBinary()).listGroups();
+        await MiaoaTagService().listGroups();
     emitJson({
       'groups': [
         for (final g in groups) {'id': g.id, 'name': g.name},

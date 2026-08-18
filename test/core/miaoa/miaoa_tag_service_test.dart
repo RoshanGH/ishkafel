@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/log/app_log.dart';
 import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_failure.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// Step 0 实测样例（截断自真实 CLI 输出，字段与顺序保持一致）：
 /// miaoa tag group list --scope tenant --json
@@ -28,8 +30,7 @@ const tagListJson = '''
 void main() {
   group('MiaoaTagService.listGroups', () {
     test('解析实测 fixture 为 TagGroup 列表', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, groupListJson, ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, groupListJson, ''), binary: 'miaoa'));
       final groups = await service.listGroups();
       expect(groups.length, 2);
       expect(groups.first.id, 396);
@@ -41,11 +42,11 @@ void main() {
     test('命令参数正确', () async {
       late String usedExe;
       late List<String> usedArgs;
-      final service = MiaoaTagService(binary: 'miaoa', run: (exe, args) async {
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (exe, args) async {
         usedExe = exe;
         usedArgs = args;
         return ProcessResult(1, 0, groupListJson, '');
-      });
+      }, binary: 'miaoa'));
       await service.listGroups();
       expect(usedExe, 'miaoa');
       expect(usedArgs,
@@ -62,8 +63,7 @@ void main() {
    "tags":[{"id":11,"tagName":"真人口播"},{"id":12,"tagName":"产品特写"}]}
 ]
 ''';
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, withTags, ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, withTags, ''), binary: 'miaoa'));
 
       final groups = await service.listGroups();
 
@@ -74,8 +74,7 @@ void main() {
       const noTags = '''
 [{"id":1,"groupName":"画面类型","materialType":"STORYBOARD","tagType":"AI"}]
 ''';
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, noTags, ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, noTags, ''), binary: 'miaoa'));
 
       final groups = await service.listGroups();
 
@@ -90,27 +89,25 @@ void main() {
    "tags":[{"id":11,"tagName":"真人口播"},{"id":12},{"tagName":123}]}
 ]
 ''';
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, partial, ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, partial, ''), binary: 'miaoa'));
 
       final groups = await service.listGroups();
 
       expect(groups.single.tags, ['真人口播']);
     });
 
-    test('非零退出码抛 MiaoaException 且带 stderr', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 1, '', '未登录'));
+    test('非零退出码抛已分类的 MiaoaException——stderr 原文进日志，用户看引导', () async {
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 1, '', '未登录'), binary: 'miaoa'));
       expect(
         () => service.listGroups(),
         throwsA(isA<MiaoaException>()
-            .having((e) => e.message, 'message', contains('未登录'))),
+            .having((e) => e.kind, 'kind', MiaoaFailureKind.unauthorized)
+            .having((e) => e.message, 'message', contains('重新登录'))),
       );
     });
 
     test('stdout 非合法 JSON 抛 MiaoaException', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, 'not json', ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, 'not json', ''), binary: 'miaoa'));
       expect(
         () => service.listGroups(),
         throwsA(isA<MiaoaException>()),
@@ -120,8 +117,7 @@ void main() {
 
   group('MiaoaTagService.listTags', () {
     test('解析实测 fixture 为 TagInfo 列表', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, tagListJson, ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, tagListJson, ''), binary: 'miaoa'));
       final tags = await service.listTags(1281);
       expect(tags.length, 2);
       expect(tags.first.id, 18519);
@@ -130,27 +126,26 @@ void main() {
 
     test('命令参数正确', () async {
       late List<String> usedArgs;
-      final service = MiaoaTagService(run: (exe, args) async {
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (exe, args) async {
         usedArgs = args;
         return ProcessResult(1, 0, tagListJson, '');
-      });
+      }, binary: 'miaoa'));
       await service.listTags(1281);
       expect(usedArgs, ['tag', 'list', '--group', '1281', '--json']);
     });
 
-    test('非零退出码抛 MiaoaException 且带 stderr', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 1, '', '分组不存在'));
+    test('非零退出码抛已分类的 MiaoaException——404 类给「已不存在」引导', () async {
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 1, '', '分组不存在'), binary: 'miaoa'));
       expect(
         () => service.listTags(1281),
         throwsA(isA<MiaoaException>()
-            .having((e) => e.message, 'message', contains('分组不存在'))),
+            .having((e) => e.kind, 'kind', MiaoaFailureKind.notFound)
+            .having((e) => e.message, 'message', contains('找不到'))),
       );
     });
 
     test('stdout 非合法 JSON 抛 MiaoaException', () async {
-      final service = MiaoaTagService(
-          run: (_, _) async => ProcessResult(1, 0, '{invalid', ''));
+      final service = MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, '{invalid', ''), binary: 'miaoa'));
       expect(
         () => service.listTags(1281),
         throwsA(isA<MiaoaException>()),
@@ -168,8 +163,7 @@ void main() {
       addTearDown(() => AppLog.sink = previous);
     });
 
-    MiaoaTagService serviceReturning(Object? stdout) => MiaoaTagService(
-        run: (_, _) async => ProcessResult(1, 0, stdout, ''));
+    MiaoaTagService serviceReturning(Object? stdout) => MiaoaTagService(gateway: MiaoaGateway(run: (_, _) async => ProcessResult(1, 0, stdout, ''), binary: 'miaoa'));
 
     test('stdout 是字节流（stdoutEncoding: null 时的真实类型）也能解析', () async {
       final service = serviceReturning(utf8.encode(groupListJson));
@@ -179,10 +173,11 @@ void main() {
     });
 
     test('stdout 既不是字符串也不是字节流 → MiaoaException 而不是 TypeError', () async {
+      // 网关把认不出的输出类型当空文本，落到「非法 JSON」这条中文路径上
       await expectLater(
         serviceReturning(42).listGroups(),
         throwsA(isA<MiaoaException>()
-            .having((e) => e.message, 'message', contains('输出'))),
+            .having((e) => e.message, 'message', contains('JSON'))),
       );
     });
 

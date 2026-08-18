@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/miaoa/miaoa_auth_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_failure.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 
 /// 在 app 里登录 miaoa。
 ///
@@ -17,25 +18,19 @@ void main() {
   ) {
     calls = [];
     var i = 0;
-    return MiaoaAuthService(
-      resolveBinary: () => 'miaoa',
-      run: (bin, args) async {
+    return MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
         calls.add(args);
         final r = responses[i < responses.length ? i++ : responses.length - 1];
         return ProcessResult(0, r.code, r.out, r.err);
-      },
-    );
+      }, binary: 'miaoa'));
   }
 
   MiaoaAuthService serviceThrowing(Object error) {
     calls = [];
-    return MiaoaAuthService(
-      resolveBinary: () => 'miaoa',
-      run: (bin, args) async {
+    return MiaoaAuthService(gateway: MiaoaGateway(run: (bin, args) async {
         calls.add(args);
         throw error;
-      },
-    );
+      }, binary: 'miaoa'));
   }
 
   group('手机号在进 CLI 之前就要挡住', () {

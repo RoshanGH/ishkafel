@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_cache.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 import 'package:path/path.dart' as p;
 
 const _material = BgmMaterial(
@@ -22,14 +23,12 @@ Directory _temp() {
 
 /// 假 miaoa：`content get --type audio <id>` 返回一个新签名地址
 BgmLibrary _library({String fresh = 'https://cdn/a.mp3?sign=fresh'}) =>
-    BgmLibrary(
-      run: (binary, args) async => ProcessResult(
+    BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async => ProcessResult(
           1,
           0,
           '{"id":108,"name":"快乐的尤克里里",'
               '"mediaFile":{"duration":122540,"previewUrl":"$fresh"}}',
-          ''),
-    );
+          ''), binary: 'miaoa'));
 
 void main() {
   test('第一次用就下到本地，之后不再联网', () async {
@@ -76,8 +75,7 @@ void main() {
     final dir = _temp();
     final asked = <String>[];
     final cache = BgmCache(
-      library: BgmLibrary(
-          run: (binary, args) async => ProcessResult(1, 1, '', 'boom')),
+      library: BgmLibrary(gateway: MiaoaGateway(run: (binary, args) async => ProcessResult(1, 1, '', 'boom'), binary: 'miaoa')),
       cacheDir: dir,
       download: (url, to) async {
         asked.add(url);
