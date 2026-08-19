@@ -8,6 +8,9 @@
 /// 清空文案自动变画面行——编导只管写，不用理解「类型」这个概念。
 library;
 
+import '../audio/bgm_plan.dart';
+import '../subtitle/subtitle_style.dart';
+
 enum ScriptLineType { voiced, visual }
 
 /// 一行配音的状态（派生，不落盘）：
@@ -353,21 +356,48 @@ class ScriptLine {
 class ScriptDoc {
   final List<ScriptLine> lines;
 
-  ScriptDoc(List<ScriptLine> lines) : lines = List.unmodifiable(lines);
+  /// 全局字幕样式（位置/字号/颜色/形态）。行级覆盖后续版本挂到行上
+  final SubtitleStyle subtitle;
+
+  /// 整片配乐（null = 不配）与音量。行区间铺设是后续升级，
+  /// 单曲整片时「相邻同曲连续」天然成立
+  final BgmMaterial? bgm;
+  final double bgmVolume;
+
+  ScriptDoc(
+    List<ScriptLine> lines, {
+    this.subtitle = SubtitleStyle.standard,
+    this.bgm,
+    this.bgmVolume = BgmSegment.defaultVolume,
+  }) : lines = List.unmodifiable(lines);
 
   /// 新脚本自带一个空行：编导打开就能写，不用先学会「加行」
   factory ScriptDoc.empty() => ScriptDoc([ScriptLine.create()]);
 
+  /// 换行列表、保留全局设置（字幕/配乐跟文档走，不跟某次行操作走）
+  ScriptDoc _withLines(List<ScriptLine> next) =>
+      ScriptDoc(next, subtitle: subtitle, bgm: bgm, bgmVolume: bgmVolume);
+
+  ScriptDoc withSubtitle(SubtitleStyle next) =>
+      ScriptDoc(lines, subtitle: next, bgm: bgm, bgmVolume: bgmVolume);
+
+  ScriptDoc withBgm(BgmMaterial? material, {double? volume}) => ScriptDoc(
+        lines,
+        subtitle: subtitle,
+        bgm: material,
+        bgmVolume: volume ?? bgmVolume,
+      );
+
   ScriptDoc insertAfter(int index, {String text = ''}) {
     final next = [...lines];
     next.insert(index + 1, ScriptLine.create(text: text));
-    return ScriptDoc(next);
+    return _withLines(next);
   }
 
   /// 最后一行不许删——脚本至少有一行可写
   ScriptDoc removeAt(int index) {
     if (lines.length <= 1 || index < 0 || index >= lines.length) return this;
-    return ScriptDoc([...lines]..removeAt(index));
+    return _withLines([...lines]..removeAt(index));
   }
 
   ScriptDoc move(int from, int to) {
@@ -377,7 +407,7 @@ class ScriptDoc {
     final next = [...lines];
     final line = next.removeAt(from);
     next.insert(to, line);
-    return ScriptDoc(next);
+    return _withLines(next);
   }
 
   ScriptDoc updateText(int index, String text) =>
@@ -417,11 +447,15 @@ class ScriptDoc {
     if (index < 0 || index >= lines.length) return this;
     final next = [...lines];
     next[index] = f(next[index]);
-    return ScriptDoc(next);
+    return _withLines(next);
   }
 
-  Map<String, dynamic> toJson() =>
-      {'lines': [for (final l in lines) l.toJson()]};
+  Map<String, dynamic> toJson() => {
+        'lines': [for (final l in lines) l.toJson()],
+        'subtitle': subtitle.toJson(),
+        if (bgm != null) 'bgm': bgm!.toJson(),
+        if (bgmVolume != BgmSegment.defaultVolume) 'bgmVolume': bgmVolume,
+      };
 
   /// 宽松解析；整体坏掉退回空脚本（打不开任务比丢一份草稿更糟）
   static ScriptDoc fromJson(Object? raw) {
@@ -431,6 +465,14 @@ class ScriptDoc {
     final lines = [
       for (final l in rawLines) ?ScriptLine.tryFromJson(l),
     ];
-    return lines.isEmpty ? ScriptDoc.empty() : ScriptDoc(lines);
+    if (lines.isEmpty) return ScriptDoc.empty();
+    return ScriptDoc(
+      lines,
+      subtitle: SubtitleStyle.fromJson(raw['subtitle']),
+      bgm: BgmMaterial.tryFromJson(raw['bgm']),
+      bgmVolume: raw['bgmVolume'] is num
+          ? (raw['bgmVolume'] as num).toDouble().clamp(0.0, 1.0)
+          : BgmSegment.defaultVolume,
+    );
   }
 }

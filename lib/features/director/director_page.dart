@@ -35,11 +35,13 @@ import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_list_controller.dart';
+import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
 import 'line_inspector.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
+import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
 /// 编导台——「脚本成片」的工作页（对仗审片台）。
@@ -127,6 +129,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   final Map<String, String> _speedClips = {};
   final Set<String> _renderingClips = {};
 
+  /// 配乐固定：选中即下到本地（与工作台同一份 bgm_cache）
+  PickedMediaCache? _bgmCache;
+
   @override
   void initState() {
     super.initState();
@@ -134,8 +139,67 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _acquireLock();
     _mediaCache = _buildMediaCache();
     _mediaCache?.addListener(_onMediaCache);
+    _bgmCache = _buildBgmCache();
+    _bgmCache?.addListener(_onMediaCache);
+    _pinBgm();
     _pinAllShots();
     _setupPreview();
+  }
+
+  PickedMediaCache? _buildBgmCache() {
+    final fetch = ref.read(bgmFetcherProvider);
+    final dataDir = ref.read(dataDirProvider);
+    if (fetch == null || dataDir == null) return null;
+    return PickedMediaCache(
+      extension: 'mp3',
+      fetch: (id) {
+        final material = _doc.bgm;
+        if (material == null || material.id != id) {
+          throw StateError('这首配乐已经不在方案里了');
+        }
+        return fetch(material);
+      },
+      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+    );
+  }
+
+  void _pinBgm() {
+    final material = _doc.bgm;
+    if (material != null) _bgmCache?.pinAll({material.id});
+  }
+
+  // ---- 配乐 / 字幕 ----
+
+  Future<void> _pickBgm() async {
+    final total = _planResult.plan.totalMs;
+    final choice = await showBgmPicker(
+      context,
+      rangeMs: total > 0 ? total : 15000,
+      rangeLabel: '整条片子',
+      canClear: _doc.bgm != null,
+      projectIds: [if (_task.project != null) _task.project!.id],
+      initialVolume: _doc.bgmVolume,
+      initialMaterials: [if (_doc.bgm != null) _doc.bgm!],
+    );
+    if (choice == null || !mounted) return;
+    switch (choice) {
+      case BgmPicked(:final materials, :final previewIndex, :final volume):
+        final material =
+            materials.isEmpty ? null : materials[previewIndex.clamp(0, materials.length - 1)];
+        _mutate((d) => d.withBgm(material, volume: volume));
+        _pinBgm();
+      case BgmVolumeChanged(:final volume):
+        _mutate((d) => d.withBgm(_doc.bgm, volume: volume));
+      case BgmCleared():
+        _mutate((d) => d.withBgm(null));
+    }
+  }
+
+  Future<void> _editSubtitleStyle() async {
+    final style =
+        await showSubtitleStyleSheet(context, initial: _doc.subtitle);
+    if (style == null) return;
+    _mutate((d) => d.withSubtitle(style));
   }
 
   void _setupPreview() {
@@ -227,7 +291,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       return local == null
           ? null
           : ShotSource(local, inMs: shot.trimStartMs);
-    });
+    }, bgmPath: _doc.bgm == null ? null : _bgmCache?.localPathOf(_doc.bgm!.id));
     if (!mounted) return;
     setState(() => _planResult = result);
     if (playback is MultitrackPlayback) {
@@ -285,6 +349,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       final out = await runner.export(
         doc: _doc,
         outPath: p.join(outDir, name),
+        bgmPath:
+            _doc.bgm == null ? null : _bgmCache?.localPathOf(_doc.bgm!.id),
         onProgress: (progress) => _exportProgress.value = progress,
       );
       if (!mounted) return;
@@ -409,6 +475,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _lock?.release(_holder);
     _mediaCache?.removeListener(_onMediaCache);
     _mediaCache?.dispose();
+    _bgmCache?.removeListener(_onMediaCache);
+    _bgmCache?.dispose();
     _previewRebuild?.cancel();
     unawaited(_positionSub?.cancel());
     unawaited(_playingSub?.cancel());
@@ -838,6 +906,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   fontSize: AppFontSize.caption,
                   color: AppColors.textTertiary)),
           const SizedBox(width: AppSpacing.sm),
+          IconButton(
+            key: const ValueKey('director-bgm'),
+            visualDensity: VisualDensity.compact,
+            onPressed: _pickBgm,
+            iconSize: 16,
+            icon: Icon(Icons.music_note_outlined,
+                color: _doc.bgm != null
+                    ? AppColors.accentBlueLight
+                    : AppColors.textSecondary),
+            tooltip: _doc.bgm == null ? '配乐' : '配乐：${_doc.bgm!.name}',
+          ),
+          IconButton(
+            key: const ValueKey('director-subtitle'),
+            visualDensity: VisualDensity.compact,
+            onPressed: _editSubtitleStyle,
+            iconSize: 16,
+            icon: const Icon(Icons.subtitles_outlined,
+                color: AppColors.textSecondary),
+            tooltip: '字幕样式',
+          ),
+          const SizedBox(width: AppSpacing.xs),
           _extractButton(),
           const SizedBox(width: AppSpacing.sm),
           FilledButton.icon(

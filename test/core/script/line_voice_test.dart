@@ -9,11 +9,9 @@ import 'package:ishkafel/core/script/script_doc.dart';
 /// 「生成配音」：一行台词 → TTS → 落盘 → 量时长；状态由快照对比派生。
 class _FakeTts extends TtsClient {
   final TtsResult? result;
-  final Object? throwing;
   final calls = <(String, String, int?)>[];
 
-  _FakeTts({this.result, this.throwing})
-      : super(appId: 'test', accessToken: 'test');
+  _FakeTts({this.result}) : super(appId: 'test', accessToken: 'test');
 
   @override
   Future<TtsResult> synthesize({
@@ -25,7 +23,6 @@ class _FakeTts extends TtsClient {
     Duration timeout = const Duration(seconds: 60),
   }) async {
     calls.add((text, speaker, speechRate));
-    if (throwing != null) throw throwing!;
     return result!;
   }
 }

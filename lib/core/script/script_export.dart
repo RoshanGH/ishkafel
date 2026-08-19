@@ -56,10 +56,19 @@ class ScriptExportRunner {
     required ScriptDoc doc,
     required String outPath,
     ExportSpec spec = ExportSpec.standard,
-    SubtitleStyle subtitleStyle = SubtitleStyle.standard,
+    SubtitleStyle? subtitleStyle,
     bool burnSubtitles = true,
+
+    /// 整片配乐的本地路径。doc.bgm 非空却给不出本地文件时直接拦下——
+    /// 成片悄悄少配乐不行
+    String? bgmPath,
     void Function(ScriptExportProgress progress)? onProgress,
   }) async {
+    final style = subtitleStyle ?? doc.subtitle;
+    if (doc.bgm != null && bgmPath == null) {
+      throw const ScriptExportException(
+          '配乐还没下载到本地，导出被拦下（稍等下载完成或先取消配乐）。');
+    }
     final lines = _readyLines(doc);
     if (lines.isEmpty) {
       throw const ScriptExportException('脚本里还没有可导出的行。');
@@ -92,6 +101,7 @@ class ScriptExportRunner {
           slotStartMs: shotAtMs,
           slotEndMs: shotAtMs + allocMs,
           spec: spec,
+          style: style,
         );
         final out = p.join(workDir.path, 'v_${lineIndex}_$j.mp4');
         await _exec(
@@ -153,9 +163,29 @@ class ScriptExportRunner {
       '-c', 'copy', audioConcat,
     ], what: '拼接声音');
 
+    var finalAudio = audioConcat;
+    if (doc.bgm != null && bgmPath != null) {
+      final mixed = p.join(workDir.path, 'audio_bgm.wav');
+      final totalMs = lines.fold(
+          0,
+          (a, e) =>
+              a + e.line.shots.fold(0, (b, s) => b + (s.allocMs ?? 0)));
+      await _exec(
+          ExportCommands.mixBgm(
+            voice: audioConcat,
+            bgm: bgmPath,
+            out: mixed,
+            startMs: 0,
+            durationMs: totalMs,
+            bgmVolume: doc.bgmVolume,
+          ),
+          what: '混配乐');
+      finalAudio = mixed;
+    }
+
     await File(outPath).parent.create(recursive: true);
     await _exec(
-        ExportCommands.mux(video: videoConcat, audio: audioConcat, out: outPath),
+        ExportCommands.mux(video: videoConcat, audio: finalAudio, out: outPath),
         what: '合成成片');
     tick('合成成片');
     return outPath;
@@ -218,6 +248,7 @@ class ScriptExportRunner {
     required int slotStartMs,
     required int slotEndMs,
     required ExportSpec spec,
+    required SubtitleStyle style,
   }) async {
     if (sentences.isEmpty) return const [];
     final lines = subtitleLinesInSlot(
@@ -226,7 +257,7 @@ class ScriptExportRunner {
       lines: lines,
       width: spec.width,
       height: spec.height,
-      style: SubtitleStyle.standard,
+      style: style,
       outDir: Directory(p.join(workDir.path, 'subtitles')),
     );
   }

@@ -60,7 +60,7 @@ class _FakeCli {
   }
 }
 
-ShotSearchServices fakeServices(_FakeCli cli) {
+ShotSearchServices _fakeServices(_FakeCli cli) {
   final gateway = MiaoaGateway(run: cli.call, binary: 'miaoa');
   return ShotSearchServices(
     content: MiaoaContentService(gateway: gateway),
@@ -120,7 +120,7 @@ void main() {
   testWidgets('行标签预填成 chips 并自动按标签预搜，候选带时长徽标', (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
-    await openSheet(tester, services: fakeServices(cli), line: line);
+    await openSheet(tester, services: _fakeServices(cli), line: line);
 
     expect(find.byKey(const ValueKey('shot-tag-痛点引入')), findsOneWidget);
     expect(find.byKey(const ValueKey('shot-candidate-100')), findsOneWidget,
@@ -133,7 +133,7 @@ void main() {
   testWidgets('行没有标签时退回按台词的画面描述预搜', (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它');
-    await openSheet(tester, services: fakeServices(cli), line: line);
+    await openSheet(tester, services: _fakeServices(cli), line: line);
 
     expect(cli.searchArgs.single, contains('--keyword'));
     expect(cli.searchArgs.single, contains('细菌怕它'));
@@ -142,7 +142,7 @@ void main() {
   testWidgets('点选落地：按点选顺序返回镜头，取消选择也生效', (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
-    final result = await openSheet(tester, services: fakeServices(cli), line: line);
+    final result = await openSheet(tester, services: _fakeServices(cli), line: line);
 
     await tester.tap(find.byKey(const ValueKey('shot-candidate-101')));
     await tester.pump();
@@ -163,7 +163,7 @@ void main() {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
     await openSheet(tester,
-        services: fakeServices(cli), line: line, usedBy: const {102: 3});
+        services: _fakeServices(cli), line: line, usedBy: const {102: 3});
 
     expect(find.text('第 4 行在用'), findsOneWidget,
         reason: '能选，但必须看得见别人在用');

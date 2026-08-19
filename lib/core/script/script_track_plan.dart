@@ -33,6 +33,9 @@ class ScriptPlanResult {
 ScriptPlanResult buildScriptTrackPlan(
   ScriptDoc doc, {
   required ShotSource? Function(LineShot shot) sourceOf,
+
+  /// 整片配乐的本地路径；null = 没配或还没下载好（后者由调用方交代）
+  String? bgmPath,
 }) {
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
@@ -101,8 +104,17 @@ ScriptPlanResult buildScriptTrackPlan(
     cursorMs = shotAt;
   }
 
+  final bgm = <BgmTrackSegment>[];
+  final material = doc.bgm;
+  if (material != null && bgmPath != null && cursorMs > 0) {
+    bgm.add(BgmTrackSegment(
+      clip: TrackSegment(atMs: 0, durationMs: cursorMs, source: bgmPath),
+      volume: doc.bgmVolume,
+      sourceDurationMs: material.durationMs,
+    ));
+  }
   return ScriptPlanResult(
-    plan: TrackPlan(video: video, voice: voice),
+    plan: TrackPlan(video: video, voice: voice, bgm: bgm),
     skippedLines: skipped,
   );
 }

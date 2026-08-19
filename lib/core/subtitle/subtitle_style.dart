@@ -26,10 +26,15 @@ class SubtitleStyle {
 
   final SubtitlePreset preset;
 
+  /// 自定义字色（RRGGBB 十六进制，不带 #）。null = 用预设自己的颜色。
+  /// 编导台的六色选择走这里，preset 只决定描边/底条形态
+  final String? colorHex;
+
   const SubtitleStyle({
     this.bottomRatio = 0.22,
     this.fontRatio = 0.034,
     this.preset = SubtitlePreset.whiteOutline,
+    this.colorHex,
   });
 
   /// 开箱即用的默认样式
@@ -39,6 +44,7 @@ class SubtitleStyle {
         'bottomRatio': bottomRatio,
         'fontRatio': fontRatio,
         'preset': preset.name,
+        if (colorHex != null) 'colorHex': colorHex,
       };
 
   /// 宽松解析：字段缺失或认不出一律退回默认值——样式坏了不该让任务打不开
@@ -58,6 +64,10 @@ class SubtitleStyle {
               .where((p) => p.name == preset)
               .firstOrNull ??
           standard.preset,
+      colorHex: raw['colorHex'] is String &&
+              RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(raw['colorHex'] as String)
+          ? raw['colorHex'] as String
+          : null,
     );
   }
 
@@ -66,5 +76,5 @@ class SubtitleStyle {
   /// 两遍画）参数却没变时，靠它把旧图旧切片一并作废
   String get fingerprint =>
       'sub:${bottomRatio.toStringAsFixed(3)}:${fontRatio.toStringAsFixed(3)}'
-      ':${preset.name}:v3';
+      ':${preset.name}:${colorHex ?? '-'}:v3';
 }

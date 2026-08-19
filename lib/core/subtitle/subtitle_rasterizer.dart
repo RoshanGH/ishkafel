@@ -44,10 +44,17 @@ class SubtitleRasterizer {
 
     final script = File(p.join(outDir.path, 'subrender.js'))
       ..writeAsStringSync(_jxaScript);
-    final (r, g, b) = switch (style.preset) {
-      SubtitlePreset.yellowOutline => (1.0, 0.85, 0.0),
-      _ => (1.0, 1.0, 1.0),
-    };
+    final custom = style.colorHex;
+    final (r, g, b) = custom != null
+        ? (
+            int.parse(custom.substring(0, 2), radix: 16) / 255,
+            int.parse(custom.substring(2, 4), radix: 16) / 255,
+            int.parse(custom.substring(4, 6), radix: 16) / 255,
+          )
+        : switch (style.preset) {
+            SubtitlePreset.yellowOutline => (1.0, 0.85, 0.0),
+            _ => (1.0, 1.0, 1.0),
+          };
     final spec = File(p.join(outDir.path, 'subrender_spec.json'))
       ..writeAsStringSync(jsonEncode({
         'width': width,
