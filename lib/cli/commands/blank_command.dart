@@ -7,6 +7,7 @@ import '../../core/models/renew_task.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 import 'analyze_command.dart';
@@ -48,7 +49,7 @@ Future<int> runBlankCommand({
     return exitBadUsage;
   }
   final id = rest[1];
-  final task = await repository.findById(id);
+  final task = await resolveTaskRef(repository, id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
@@ -59,7 +60,7 @@ Future<int> runBlankCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: id);
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，改不了');
     return exitLocked;
@@ -117,6 +118,7 @@ Future<int> _create(
   final now = DateTime.now();
   final task = RenewTask(
     id: now.microsecondsSinceEpoch.toRadixString(36),
+    seq: await nextTaskSeq(repository),
     name: (name ?? '').trim().isEmpty ? '拼片任务' : name!.trim(),
     sourcePath: null,
     units: laid,

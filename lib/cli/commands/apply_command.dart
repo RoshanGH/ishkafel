@@ -7,6 +7,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../app/service_wiring.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../task_view.dart';
 import '../todo_view.dart';
@@ -43,14 +44,14 @@ Future<int> runApplyCommand({
   final id = rest[1];
 
   final repository = FileTaskRepository(dataDir);
-  final task = await repository.findById(id);
+  final task = await resolveTaskRef(repository, id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
   }
 
   // 别人正持着锁就不写——两边同时写会互相覆盖，而且悄无声息
-  final lock = TaskLockFile(dataDir: dataDir, taskId: id);
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder)) {
     final current = lock.read();
     sink.writeln('${current?.holder ?? '别人'} 正在操作这个任务，写不进去。'

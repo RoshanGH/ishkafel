@@ -15,6 +15,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../plan_submission.dart';
 import 'apply_command.dart';
@@ -60,7 +61,7 @@ Future<int> runExportCommand({
   final id = rest.first;
 
   final repository = FileTaskRepository(dataDir);
-  final task = await repository.findById(id);
+  final task = await resolveTaskRef(repository, id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
@@ -98,14 +99,15 @@ Future<int> runExportCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: id);
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，导不了');
     return exitLocked;
   }
 
   final dest = Directory(outputDir ??
-      p.join(Platform.environment['HOME'] ?? '.', 'Desktop', 'ishkafel-$id'));
+      p.join(Platform.environment['HOME'] ?? '.', 'Desktop',
+          'ishkafel-${task.id}'));
   final combos = [
     for (var i = 0; i < validation.plans.length; i++)
       toCombination(validation.plans[i], units, index: i),

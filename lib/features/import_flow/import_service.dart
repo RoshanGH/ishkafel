@@ -13,6 +13,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/models/project_ref.dart';
 import '../../core/models/video_info.dart';
 import '../../core/storage/task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import 'import_exception.dart';
 
 /// 导入编排：探测元信息 → 创建任务 → 抽封面 → 落库
@@ -56,6 +57,7 @@ class ImportService {
     final now = clock();
     final task = RenewTask(
       id: idGenerator(),
+      seq: await nextTaskSeq(repository),
       name: name.trim().isEmpty ? '未命名脚本' : name.trim(),
       sourcePath: null,
       script: ScriptDoc.empty(),
@@ -83,6 +85,7 @@ class ImportService {
     final now = clock();
     final task = RenewTask(
       id: idGenerator(),
+      seq: await nextTaskSeq(repository),
       name: name.trim().isEmpty ? '未命名拼片' : name.trim(),
       // 没有原片。用 null 而不是空串：空串是个谎，且不会有任何地方报错
       sourcePath: null,
@@ -132,6 +135,7 @@ class ImportService {
     await thumbnails.extractCover(videoPath: filePath, outPath: coverPath);
     final task = RenewTask(
       id: id,
+      seq: await nextTaskSeq(repository),
       name: p.basenameWithoutExtension(filePath),
       sourcePath: filePath,
       videoInfo: info,

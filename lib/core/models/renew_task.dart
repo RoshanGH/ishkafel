@@ -33,6 +33,13 @@ enum RenewTaskStatus { analyzing, ready }
 class RenewTask {
   final String id;
   final String name;
+
+  /// 人念得出口的短编号（#1、#2……），建任务时分配、终生不变。
+  ///
+  /// [id] 是机器身份（长随机串），没法在对话里指代——「把 #12 导出一下」
+  /// 才是人跟 Agent 沟通的方式；任务名冗长且可能重复，顶不了这个用。
+  /// 旧任务没有此字段，加载时按创建时间补号（见 ensureTaskSeqs）。
+  final int? seq;
   /// 原片路径。**为 null 表示这是一条空白任务**——没有原片，分子和标签
   /// 手动填，只靠标签检索素材拼片（见 docs/superpowers/specs/
   /// 2026-08-12-blank-task-design.md）。
@@ -147,6 +154,7 @@ class RenewTask {
     required this.name,
     this.sourcePath,
     this.script,
+    this.seq,
     this.miaoaVideoId,
     this.videoInfo,
     this.coverPath,
@@ -223,6 +231,7 @@ class RenewTask {
   RenewTask copyWith({
     String? id,
     String? name,
+    int? seq,
     String? sourcePath,
     ScriptDoc? script,
     String? miaoaVideoId,
@@ -254,6 +263,7 @@ class RenewTask {
       RenewTask(
         id: id ?? this.id,
         name: name ?? this.name,
+        seq: seq ?? this.seq,
         sourcePath: sourcePath ?? this.sourcePath,
         script: script ?? this.script,
         miaoaVideoId: miaoaVideoId ?? this.miaoaVideoId,
@@ -285,6 +295,7 @@ class RenewTask {
   Map<String, dynamic> toJson() => {
         'id': id,
         'name': name,
+        if (seq != null) 'seq': seq,
         'sourcePath': sourcePath,
         if (script != null) 'script': script!.toJson(),
         'miaoaVideoId': miaoaVideoId,
@@ -324,6 +335,7 @@ class RenewTask {
     return RenewTask(
         id: json['id'] as String,
         name: json['name'] as String,
+        seq: json['seq'] is num ? (json['seq'] as num).toInt() : null,
         sourcePath: json['sourcePath'] as String?,
         script: json['script'] is Map
             ? ScriptDoc.fromJson(json['script'])

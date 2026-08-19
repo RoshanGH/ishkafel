@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/ui_wake.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import 'open_command.dart';
 
@@ -30,7 +31,7 @@ Future<int> runReviewCommand({
     return exitBadUsage;
   }
   final id = rest.first;
-  final task = await FileTaskRepository(dataDir).findById(id);
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;

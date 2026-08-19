@@ -4,6 +4,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import '../../features/picking/tag_hit_probe.dart';
 import '../../features/picking/tag_query_narrowing.dart';
 import '../candidate_context.dart';
@@ -52,7 +53,7 @@ Future<int> runCandidatesCommand({
     return exitBadUsage;
   }
 
-  final task = await FileTaskRepository(dataDir).findById(rest.first);
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), rest.first);
   if (task == null) {
     sink.writeln('没有这个任务：${rest.first}');
     return exitNotFound;

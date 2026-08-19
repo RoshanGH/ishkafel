@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
+import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import '../../core/storage/ui_wake.dart';
 import '../cli_output.dart';
 
@@ -25,16 +25,17 @@ Future<int> runOpenCommand({
     sink.writeln('用法：ishkafel open <任务 id>');
     return exitBadUsage;
   }
-  final id = rest.first;
-  // 先确认任务在不在：拉起一个空窗口只会让人困惑
-  if (!File(p.join(dataDir.path, 'tasks', '$id.json')).existsSync()) {
-    sink.writeln('没有这个任务：$id');
+  // 先确认任务在不在（顺带把 #12 这类短编号解析成真实 id）：
+  // 拉起一个空窗口只会让人困惑
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
     return exitNotFound;
   }
   // 意图走唤醒文件，不走 --args：启动参数只在冷启动时生效，app 已经在跑
   // 时会被静默丢弃（真机撞到过：再次 open/review 只是把窗口调到前台，
   // 什么都不发生）。文件冷热启动一条路，GUI 轮询读到即删
-  writeUiWake(dataDir, id, review: false);
+  writeUiWake(dataDir, task.id, review: false);
   final appPath =
       (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
   final exec = run ?? Process.run;

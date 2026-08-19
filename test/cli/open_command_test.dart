@@ -14,7 +14,10 @@ void main() {
   setUp(() {
     dir = Directory.systemTemp.createTempSync('ishkafel_open_');
     Directory('${dir.path}/tasks').createSync(recursive: true);
-    File('${dir.path}/tasks/t1.json').writeAsStringSync('{"id":"t1"}');
+    // open 现在通过仓储解析任务（顺带支持 #编号），档要能被 fromJson 读出
+    File('${dir.path}/tasks/t1.json').writeAsStringSync(
+        '{"id":"t1","name":"测试","sourcePath":"/v/t1.mp4","status":"ready",'
+        '"createdAt":"2026-08-19T00:00:00Z","updatedAt":"2026-08-19T00:00:00Z"}');
   });
   tearDown(() => dir.deleteSync(recursive: true));
 

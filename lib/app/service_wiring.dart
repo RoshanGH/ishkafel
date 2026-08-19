@@ -21,6 +21,7 @@ import '../core/analysis/audio_extractor.dart';
 import '../core/audio/vocal_separator.dart';
 import '../core/log/app_log.dart';
 import '../core/miaoa/miaoa_tag_service.dart';
+import '../core/script/script_transcriber.dart';
 import '../core/storage/file_task_repository.dart';
 import '../core/analysis/tag_vocabulary.dart';
 
@@ -29,6 +30,23 @@ import '../core/analysis/tag_vocabulary.dart';
 /// **GUI 与 CLI 共用同一份**：两边各装一套的话，迟早会出现「app 里分析出来
 /// 是这样、命令行跑出来是那样」——而那种差异极难查。放在这里而不是
 /// `main.dart` 里，就是为了让 `bin/ishkafel.dart` 也够得着。
+/// 编导台「从视频提取脚本」的装配：抽音频 → ASR → 语义断句。
+/// 凭据不全时返回 null，界面把入口禁用并说明原因（不静默）。
+ScriptTranscriber? buildScriptTranscriber(
+    AiCredentials credentials, Directory dataDir) {
+  if (!credentials.isComplete) return null;
+  return ScriptTranscriber(
+    audio: AudioExtractor(),
+    asr: VolcanoAsrProvider(
+      appId: credentials.speechAppId,
+      accessToken: credentials.speechAccessToken,
+    ),
+    splitter: VolcanoSemanticSplitter(
+        chat: ArkChatClient(apiKey: credentials.arkApiKey)),
+    workDir: Directory(p.join(dataDir.path, 'analysis_work')),
+  );
+}
+
 AnalysisPipeline? buildAnalysisPipeline(
     AiCredentials credentials, Directory dataDir) {
   if (!credentials.isComplete) {

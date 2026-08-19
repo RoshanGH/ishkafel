@@ -14,6 +14,8 @@ Map<String, dynamic> taskToJson(RenewTask task) {
   final units = task.units;
   return {
     'id': task.id,
+    // 人对 Agent 说的是「#12」这种短编号；回传出去，Agent 复述时才对得上
+    'seq': task.seq,
     'name': task.name,
     'status': task.status.name,
     'sourcePath': task.sourcePath,

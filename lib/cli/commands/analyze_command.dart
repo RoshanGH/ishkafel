@@ -11,6 +11,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
 import '../cli_output.dart';
@@ -39,7 +40,7 @@ Future<int> runAnalyzeCommand({
   final id = rest.first;
 
   final repository = FileTaskRepository(dataDir);
-  final task = await repository.findById(id);
+  final task = await resolveTaskRef(repository, id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
@@ -80,7 +81,7 @@ Future<int> runAnalyzeCommand({
     return exitEnv;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: id);
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，分析不了');
     return exitLocked;

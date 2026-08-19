@@ -12,6 +12,7 @@ import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/skill_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
+import 'package:ishkafel/cli/commands/tasks_command.dart';
 import 'package:ishkafel/cli/commands/todo_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
 
@@ -108,6 +109,7 @@ Future<void> main(List<String> args) async {
       ),
     'todo' => await runTodoCommand(rest: rest, dataDir: dataDir),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
+    'tasks' => await runTasksCommand(dataDir: dataDir),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
         rest: rest, dataDir: dataDir, file: parsed['file'] as String?),
@@ -157,7 +159,10 @@ ishkafel —— 成片翻新工具的命令行入口
                    给 Agent 的操作手册。--install 装成技能（缺省认
                    Claude Code / Codex 的目录；别家用 --dir 自报），
                    之后在任意文件夹、任意会话都生效
-  task <id>        任务全貌（单元、镜头、标签、导出历史）
+  tasks            列出所有任务（短编号/id/名字/状态）。用户说「#12」时
+                   用这条把编号换成 id
+  task <id>        任务全貌（单元、镜头、标签、导出历史）。<id> 处也可以
+                   直接给短编号（#12 或 12）——所有带 <id> 的命令都认
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）
   open <id>        把 app 弹出来并落到这个任务的工作台

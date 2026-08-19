@@ -106,6 +106,18 @@ class TaskCard extends ConsumerWidget {
               children: [
                 Row(
                   children: [
+                    // 短编号：跟 Agent/同事沟通时的指代锚点（「把 #12 导出」），
+                    // 放名字前面、弱化显示——它是句柄不是主角
+                    if (task.seq != null)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 5),
+                        child: Text('#${task.seq}',
+                            style: const TextStyle(
+                                fontSize: AppFontSize.body,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textTertiary,
+                                fontFeatures: [FontFeature.tabularFigures()])),
+                      ),
                     Expanded(
                       // 12.5 不在阶梯上（相邻两级只差 0.5px 读不出层级），
                       // 收敛到 body 级

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
@@ -25,7 +26,7 @@ Future<int> runTodoCommand({
   }
   final id = rest.first;
 
-  final task = await FileTaskRepository(dataDir).findById(id);
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), id);
   if (task == null) {
     sink.writeln('没有这个任务：$id');
     return exitNotFound;

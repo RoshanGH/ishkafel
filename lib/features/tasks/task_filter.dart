@@ -33,16 +33,20 @@ enum TaskFilter {
 
 /// 按关键词 + 状态过滤，返回**新列表**（不就地改动传入的列表）。
 ///
-/// 关键词同时匹配任务名与任务 id：设计稿的搜索框写的就是「任务名 / ID」。
+/// 关键词同时匹配任务名、任务 id 与短编号（「#12」或「12」都能搜到 #12）。
 List<RenewTask> applyTaskFilter(
   List<RenewTask> tasks, {
   String query = '',
   TaskFilter filter = TaskFilter.all,
 }) {
   final keyword = query.trim().toLowerCase();
+  // 「#12」按编号精确找；纯数字「12」也先试编号（比名字里凑巧含 12 更符合意图）
+  final seqQuery = int.tryParse(
+      keyword.startsWith('#') ? keyword.substring(1) : keyword);
   return List.unmodifiable(tasks.where((task) =>
       filter.matches(task) &&
       (keyword.isEmpty ||
+          (seqQuery != null && task.seq == seqQuery) ||
           task.name.toLowerCase().contains(keyword) ||
           task.id.toLowerCase().contains(keyword))));
 }

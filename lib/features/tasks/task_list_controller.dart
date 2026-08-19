@@ -15,6 +15,7 @@ import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_repository.dart';
+import '../../core/storage/task_seq.dart';
 import '../import_flow/import_service.dart';
 import 'analysis_error_message.dart';
 import 'analysis_progress_store.dart';
@@ -100,7 +101,10 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   @override
   Future<List<RenewTask>> build() async {
     final tasks = await _findAll();
-    return _recoverStalledTasks(tasks);
+    // 老任务补短编号（#N，见 task_seq.dart）：幂等，只在启动装载做一次
+    final numbered =
+        await ensureTaskSeqs(ref.read(taskRepositoryProvider), tasks);
+    return _recoverStalledTasks(numbered);
   }
 
   Future<List<RenewTask>> _findAll() async {

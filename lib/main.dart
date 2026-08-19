@@ -17,6 +17,7 @@ import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'app/flutter_error_bridge.dart';
 import 'app/service_wiring.dart';
+import 'features/director/director_providers.dart';
 import 'cli/commands/open_command.dart';
 import 'core/log/app_log.dart';
 import 'core/miaoa/miaoa_account_service.dart';
@@ -93,6 +94,9 @@ Future<void> main(List<String> args) async {
       taskRepositoryProvider.overrideWithValue(repository),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider.overrideWithValue(analysisPipeline),
+      // 编导台「从视频提取脚本」：凭据齐了才给实例，否则入口禁用并说明
+      scriptTranscriberProvider
+          .overrideWithValue(buildScriptTranscriber(credentials, dataDir)),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里

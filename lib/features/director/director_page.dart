@@ -9,19 +9,20 @@ import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/script_transcriber.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
 import '../settings/settings_providers.dart';
+import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_list_controller.dart';
+import 'director_providers.dart';
+import 'line_inspector.dart';
 import 'script_panel.dart';
 
 /// 编导台——「脚本成片」的工作页（对仗审片台）。
 ///
 /// 三栏：左 = 脚本（唯一的真相 + 总览导航）；中 = 预览（成片的影子）；
 /// 右 = 当前行的工作台（聚焦深工）。见 docs/2026-08-19 设计稿。
-///
-/// M1 骨架：脚本编辑 + 落盘 + 锁；预览与行工作台后续里程碑点亮
-/// （占位必须说明自己是什么，不摆死界面）。
 class DirectorPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
@@ -31,15 +32,39 @@ class DirectorPage extends ConsumerStatefulWidget {
   ConsumerState<DirectorPage> createState() => _DirectorPageState();
 }
 
+/// 「从视频提取脚本」此刻的状态：没在跑 / 跑到哪一步 / 挂在哪
+sealed class _ExtractState {
+  const _ExtractState();
+}
+
+class _ExtractRunning extends _ExtractState {
+  final ScriptTranscribeStage stage;
+  const _ExtractRunning(this.stage);
+}
+
+class _ExtractFailed extends _ExtractState {
+  final String message;
+  const _ExtractFailed(this.message);
+}
+
 class _DirectorPageState extends ConsumerState<DirectorPage> {
   late RenewTask _task = widget.task;
   late ScriptDoc _doc = widget.task.script ?? ScriptDoc.empty();
   int _selected = 0;
 
+  /// 刚插入的行：让它的输入框自动聚焦（回车后手不离键盘）
+  String? _autofocusLineId;
+
   Timer? _autosave;
+  bool _saving = false;
   TaskLockFile? _lock;
   Timer? _lockHeartbeat;
   String? _blockedBy;
+
+  _ExtractState? _extract;
+
+  /// 用户在空脚本上点了「直接开始写」：起步引导让位给预览
+  bool _guideDismissed = false;
 
   /// initState 里取好：dispose 阶段还要落一次盘，那时不能再碰 ref
   late final TaskRepository _repo;
@@ -110,178 +135,468 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     super.dispose();
   }
 
-  /// 改动随手落库（800ms 防抖），与审片台同一习惯——没有「保存」这回事
+  /// 改动随手落库（800ms 防抖）——写作软件没有「保存」这回事
   void _mutate(ScriptDoc Function(ScriptDoc) f) {
-    setState(() => _doc = f(_doc));
+    setState(() {
+      _doc = f(_doc);
+      _saving = true;
+    });
     _autosave?.cancel();
     _autosave = Timer(const Duration(milliseconds: 800), _flushNow);
   }
 
   void _flushNow() {
     _autosave?.cancel();
-    _task = _task.copyWith(script: _doc);
-    unawaited(_repo.save(_task).catchError((Object e) {
+    _task = _task.copyWith(script: _doc, updatedAt: DateTime.now());
+    unawaited(_repo.save(_task).then((_) {
+      if (mounted) setState(() => _saving = false);
+    }).catchError((Object e) {
       AppLog.warn('脚本落库失败（taskId=${_task.id}）：$e');
     }));
+  }
+
+  bool get _scriptIsPristine =>
+      _doc.lines.length == 1 && _doc.lines.single.text.trim().isEmpty;
+
+  /// 「从视频提取脚本」全流程：选文件 → （非空时确认覆盖）→ 三步提取 →
+  /// 覆盖填充。失败给原因和重试，不静默。
+  Future<void> _extractFromVideo() async {
+    final transcriber = ref.read(scriptTranscriberProvider);
+    if (transcriber == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务（语音识别与语义分行），无法从视频提取脚本。')));
+      return;
+    }
+    if (!_scriptIsPristine) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('用提取结果替换当前脚本？'),
+          content: Text(
+              '当前脚本已有 ${_doc.lines.length} 行，提取出的台词会整体替换它们，'
+              '此操作无法撤销。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('替换')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    if (!mounted) return;
+    final path = await ref.read(videoFilePickerProvider)();
+    if (path == null || !mounted) return;
+
+    setState(() =>
+        _extract = const _ExtractRunning(ScriptTranscribeStage.extractingAudio));
+    try {
+      final lines = await transcriber.extract(path, onStage: (stage) {
+        if (mounted) setState(() => _extract = _ExtractRunning(stage));
+      });
+      if (!mounted) return;
+      setState(() {
+        _doc = ScriptDoc(lines);
+        _selected = 0;
+        _extract = null;
+        _guideDismissed = true;
+      });
+      _flushNow();
+    } on ScriptTranscribeException catch (e) {
+      AppLog.warn('脚本提取失败（$path）：${e.cause ?? e.message}');
+      if (mounted) setState(() => _extract = _ExtractFailed(e.message));
+    } catch (e) {
+      AppLog.warn('脚本提取失败（$path）：$e');
+      if (mounted) {
+        setState(() =>
+            _extract = const _ExtractFailed('提取失败，请稍后重试。'));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     if (_blockedBy != null) return _blockedView();
+    final extracting = _extract is _ExtractRunning;
     return Scaffold(
-      backgroundColor: AppColors.surface,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        leading: BackButton(onPressed: () => Navigator.of(context).maybePop()),
-        title: Text('${_task.name} · 编导台',
-            style: const TextStyle(
-                fontSize: AppFontSize.emphasis, fontWeight: FontWeight.w600)),
-      ),
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // 左：脚本——唯一的真相
-          SizedBox(
-            width: 380,
-            child: ScriptPanel(
-              doc: _doc,
-              selected: _selected,
-              onSelect: (i) => setState(() => _selected = i),
-              onInsertAfter: (i) {
-                _mutate((d) => d.insertAfter(i));
-                setState(() => _selected = i + 1);
-              },
-              onRemove: (i) {
-                _mutate((d) => d.removeAt(i));
-                if (_selected >= _doc.lines.length) {
-                  setState(() => _selected = _doc.lines.length - 1);
-                }
-              },
-              onMove: (from, to) {
-                _mutate((d) => d.move(from, to));
-                setState(() => _selected = to);
-              },
-              onTextChanged: (i, text) => _mutate((d) => d.updateText(i, text)),
+      backgroundColor: AppColors.background,
+      body: Column(children: [
+        _topBar(),
+        const Divider(height: 1, thickness: 1, color: AppColors.border),
+        Expanded(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // 左：脚本——唯一的真相
+            Container(
+              width: 360,
+              color: AppColors.surface,
+              child: Column(children: [
+                if (_extract != null) _extractBanner(),
+                Expanded(
+                  child: IgnorePointer(
+                    ignoring: extracting,
+                    child: ScriptPanel(
+                      doc: _doc,
+                      selected: _selected,
+                      autofocusLineId: _autofocusLineId,
+                      onSelect: (i) => setState(() => _selected = i),
+                      onInsertAfter: (i) {
+                        _mutate((d) => d.insertAfter(i));
+                        setState(() {
+                          _selected = i + 1;
+                          _autofocusLineId = _doc.lines[i + 1].id;
+                          _guideDismissed = true;
+                        });
+                      },
+                      onRemove: (i) {
+                        _mutate((d) => d.removeAt(i));
+                        if (_selected >= _doc.lines.length) {
+                          setState(
+                              () => _selected = _doc.lines.length - 1);
+                        }
+                      },
+                      onMove: (from, to) {
+                        _mutate((d) => d.move(from, to));
+                        setState(() => _selected = to);
+                      },
+                      onTextChanged: (i, text) =>
+                          _mutate((d) => d.updateText(i, text)),
+                    ),
+                  ),
+                ),
+              ]),
             ),
-          ),
-          const VerticalDivider(width: 1, color: AppColors.border),
-          // 中：预览（M4 点亮）
-          Expanded(child: _previewPlaceholder()),
-          const VerticalDivider(width: 1, color: AppColors.border),
-          // 右：当前行工作台（M2 配音 / M3 镜头逐步点亮）
-          SizedBox(width: 360, child: _lineWorkbench()),
-        ],
-      ),
+            const VerticalDivider(
+                width: 1, thickness: 1, color: AppColors.border),
+            // 中：预览（M4 点亮）；空脚本时先当起步引导的舞台
+            Expanded(
+              child: _scriptIsPristine && !_guideDismissed && _extract == null
+                  ? _startGuide()
+                  : _previewStage(),
+            ),
+            const VerticalDivider(
+                width: 1, thickness: 1, color: AppColors.border),
+            // 右：当前行工作台（M2 配音 / M3 镜头逐步点亮）
+            Container(
+              width: 340,
+              color: AppColors.surface,
+              child: (_selected >= 0 && _selected < _doc.lines.length)
+                  ? LineInspector(
+                      index: _selected,
+                      line: _doc.lines[_selected],
+                      onManualMsChanged: (ms) =>
+                          _mutate((d) => d.setManualMs(_selected, ms)),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ]),
+        ),
+      ]),
     );
   }
 
-  Widget _previewPlaceholder() => Container(
-        color: AppColors.surfaceCard,
-        alignment: Alignment.center,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          AspectRatio(
-            aspectRatio: 9 / 16,
-            child: Container(
-              margin: const EdgeInsets.all(AppSpacing.xl),
-              decoration: BoxDecoration(
-                color: Colors.black,
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              alignment: Alignment.center,
-              child: const Text('预览\n配音与镜头就绪后在这里试片',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: AppFontSize.caption,
-                      height: 1.6)),
-            ),
+  /// 顶栏：返回 + 身份（#编号 · 名字 · 模块徽标）+ 保存状态。
+  /// 自动保存要**说出来**——用户不问「存了没」是因为界面一直在回答
+  Widget _topBar() => Container(
+        height: 48,
+        color: AppColors.surface,
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+        child: Row(children: [
+          IconButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            icon: const Icon(Icons.arrow_back_ios_new,
+                size: 15, color: AppColors.textSecondary),
+            tooltip: '返回任务列表',
           ),
+          const SizedBox(width: AppSpacing.xs),
+          if (_task.seq != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text('#${_task.seq}',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      color: AppColors.textTertiary,
+                      fontFeatures: [FontFeature.tabularFigures()])),
+            ),
+          Flexible(
+            child: Text(_task.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: AppFontSize.emphasis,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.accentBlue.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: const Text('编导台',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.accentBlueLight)),
+          ),
+          const Spacer(),
+          Text(_saving ? '保存中…' : '更改已自动保存',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textTertiary)),
+          const SizedBox(width: AppSpacing.sm),
+          _extractButton(),
+          const SizedBox(width: AppSpacing.xs),
         ]),
       );
 
-  Widget _lineWorkbench() {
-    if (_selected < 0 || _selected >= _doc.lines.length) {
-      return const SizedBox.shrink();
+  Widget _extractButton() {
+    final available = ref.watch(scriptTranscriberProvider) != null;
+    final running = _extract is _ExtractRunning;
+    final button = OutlinedButton.icon(
+      key: const ValueKey('director-extract-script'),
+      onPressed: available && !running ? _extractFromVideo : null,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary,
+        side: const BorderSide(color: AppColors.border),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: 6),
+        textStyle: const TextStyle(fontSize: AppFontSize.body),
+      ),
+      icon: const Icon(Icons.subtitles_outlined, size: 14),
+      label: const Text('从视频提取脚本'),
+    );
+    if (available) return button;
+    // 禁用要说明原因——点不动又不解释的按钮等于坏了
+    return Tooltip(
+        message: '尚未配置 AI 服务（语音识别与语义分行），无法提取',
+        child: button);
+  }
+
+  /// 提取进行中/失败的交代条：等待有进度，失败有原因和重试
+  Widget _extractBanner() {
+    final state = _extract;
+    if (state is _ExtractRunning) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.md),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                    strokeWidth: 1.5, color: AppColors.accentBlue)),
+            const SizedBox(width: AppSpacing.sm),
+            Text(state.stage.label,
+                style: const TextStyle(
+                    fontSize: AppFontSize.body,
+                    color: AppColors.textSecondary)),
+          ]),
+          const SizedBox(height: AppSpacing.sm),
+          const LinearProgressIndicator(
+              minHeight: 2,
+              color: AppColors.accentBlue,
+              backgroundColor: AppColors.surfaceCard),
+        ]),
+      );
     }
-    final line = _doc.lines[_selected];
-    final voiced = line.type == ScriptLineType.voiced;
-    return Container(
-      color: AppColors.surface,
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('第 ${_selected + 1} 行 · ${voiced ? '配音行' : '画面行'}',
+    if (state is _ExtractFailed) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(
+            AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, 0),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.red.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(state.message,
               style: const TextStyle(
-                  fontSize: AppFontSize.body, fontWeight: FontWeight.w600)),
+                  fontSize: AppFontSize.body,
+                  color: AppColors.red,
+                  height: 1.4)),
           const SizedBox(height: AppSpacing.xs),
-          Text(
-              voiced
-                  ? '配音时长将是这一行时间轴的根'
-                  : '没有台词——有画面、可铺配乐；时长手填或跟随所选素材',
-              style: const TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: AppFontSize.caption,
-                  height: 1.5)),
-          const SizedBox(height: AppSpacing.lg),
-          if (!voiced) _manualMsField(line),
-          const Spacer(),
-          const Text('配音与镜头工作台在后续版本点亮',
+          Row(children: [
+            TextButton(
+                onPressed: _extractFromVideo, child: const Text('重试')),
+            TextButton(
+                onPressed: () => setState(() => _extract = null),
+                child: const Text('关闭')),
+          ]),
+        ]),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// 空脚本的起步引导：回答「从哪里开始」，而不是摆三块空板子。
+  /// 两条路对应脚本的两个来源（设计稿问题①）
+  Widget _startGuide() {
+    final canExtract = ref.watch(scriptTranscriberProvider) != null;
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('这条片子，从哪里开始？',
               style: TextStyle(
-                  color: AppColors.textTertiary,
-                  fontSize: AppFontSize.caption)),
-        ],
+                  fontSize: AppFontSize.title,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const SizedBox(height: AppSpacing.xs),
+          const Text('脚本是唯一的起点——配音、镜头、字幕都会从它长出来',
+              style: TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textTertiary)),
+          const SizedBox(height: AppSpacing.xl),
+          _guideCard(
+            key: const ValueKey('director-guide-extract'),
+            icon: Icons.movie_outlined,
+            title: '用一条成片提取脚本',
+            description: canExtract
+                ? '上传参考成片，自动识别台词并按语义分行，改几个字就能用'
+                : '需要先配置 AI 服务（语音识别与语义分行）',
+            accent: true,
+            enabled: canExtract,
+            onTap: _extractFromVideo,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _guideCard(
+            key: const ValueKey('director-guide-write'),
+            icon: Icons.edit_note,
+            title: '直接开始写',
+            description: '在左栏逐行写台词，回车新起一行；空行就是画面行',
+            accent: false,
+            enabled: true,
+            onTap: () => setState(() => _guideDismissed = true),
+          ),
+        ]),
+        ),
       ),
     );
   }
 
-  /// 画面行的手填时长：设计稿——手填即根，不填随所选素材
-  Widget _manualMsField(ScriptLine line) {
-    final seconds = line.manualMs == null
-        ? ''
-        : (line.manualMs! / 1000).toStringAsFixed(1);
-    return Row(children: [
-      const Text('时长',
-          style: TextStyle(
-              color: AppColors.textSecondary, fontSize: AppFontSize.body)),
-      const SizedBox(width: AppSpacing.sm),
-      SizedBox(
-        width: 90,
-        child: TextFormField(
-          key: ValueKey('manual-ms-${line.id}'),
-          initialValue: seconds,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-              isDense: true, suffixText: '秒', hintText: '随素材'),
-          onChanged: (v) {
-            final parsed = double.tryParse(v.trim());
-            _mutate((d) => d.setManualMs(_selected,
-                parsed == null || parsed <= 0 ? null : (parsed * 1000).round()));
-          },
+  Widget _guideCard({
+    required Key key,
+    required IconData icon,
+    required String title,
+    required String description,
+    required bool accent,
+    required bool enabled,
+    required VoidCallback onTap,
+  }) =>
+      InkWell(
+        key: key,
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          decoration: BoxDecoration(
+            color: AppColors.surfaceRaised,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+                color: accent && enabled
+                    ? AppColors.accentBlue.withValues(alpha: 0.5)
+                    : AppColors.border),
+          ),
+          child: Row(children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: (accent && enabled
+                        ? AppColors.accentBlue
+                        : AppColors.textTertiary)
+                    .withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Icon(icon,
+                  size: 18,
+                  color: accent && enabled
+                      ? AppColors.accentBlueLight
+                      : AppColors.textSecondary),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              child:
+                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title,
+                    style: TextStyle(
+                        fontSize: AppFontSize.emphasis,
+                        fontWeight: FontWeight.w600,
+                        color: enabled
+                            ? AppColors.textPrimary
+                            : AppColors.textTertiary)),
+                const SizedBox(height: 3),
+                Text(description,
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textSecondary,
+                        height: 1.4)),
+              ]),
+            ),
+            Icon(Icons.chevron_right,
+                size: 16,
+                color: enabled
+                    ? AppColors.textTertiary
+                    : AppColors.textTertiary.withValues(alpha: 0.4)),
+          ]),
         ),
-      ),
-      const SizedBox(width: AppSpacing.sm),
-      const Expanded(
-        child: Text('不填则跟随所选素材的时长',
-            style: TextStyle(
-                color: AppColors.textTertiary, fontSize: AppFontSize.caption)),
-      ),
-    ]);
-  }
+      );
+
+  /// 预览舞台：竖屏幕布居中。占位要说明自己是什么，不摆死界面
+  Widget _previewStage() => Container(
+        color: AppColors.background,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: 9 / 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.stageBackground,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Icon(Icons.play_circle_outline,
+                    size: 30,
+                    color: AppColors.textTertiary.withValues(alpha: 0.6)),
+                const SizedBox(height: AppSpacing.sm),
+                const Text('预览',
+                    style: TextStyle(
+                        fontSize: AppFontSize.body,
+                        color: AppColors.textSecondary)),
+                const SizedBox(height: 3),
+                const Text('配音与镜头就绪后，在这里试片',
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textTertiary)),
+              ]),
+            ),
+          ),
+        ),
+      );
 
   Widget _blockedView() => Scaffold(
-        backgroundColor: AppColors.surface,
-        appBar: AppBar(backgroundColor: AppColors.surface),
+        backgroundColor: AppColors.background,
         body: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             Text('「$_blockedBy」正在处理这个任务',
-                style: const TextStyle(fontSize: AppFontSize.emphasis)),
+                style: const TextStyle(
+                    fontSize: AppFontSize.title,
+                    color: AppColors.textPrimary)),
             const SizedBox(height: AppSpacing.sm),
             const Text('等它结束再进（谁先进谁处理）',
                 style: TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: AppFontSize.caption)),
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.lg),
             Row(mainAxisSize: MainAxisSize.min, children: [
               OutlinedButton(
                   onPressed: () => Navigator.of(context).maybePop(),
