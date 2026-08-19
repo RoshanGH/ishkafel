@@ -11,6 +11,14 @@ import '../../core/models/renew_task.dart';
 String taskCardHint(RenewTask task, {bool sourceMissing = false}) {
   if (sourceMissing) return '源文件已不在原位，放回后才能继续';
   if (task.analysisError != null) return '分析未完成，可在右键菜单里「重新分析」';
+  // 脚本任务没有原片和分析，卡片说的是脚本本身的规模与去处
+  if (task.isScript) {
+    final lines = task.script?.lines ?? const [];
+    final voiced = lines.where((l) => l.text.trim().isNotEmpty).length;
+    return voiced == 0
+        ? '脚本成片 · 点击进入编导台开写'
+        : '脚本成片 · $voiced 句台词，点击进入编导台';
+  }
 
   final scale = _scale(task);
   return switch (task.status) {

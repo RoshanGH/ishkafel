@@ -5,6 +5,7 @@ import '../ai/ai_usage.dart';
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/picked_material.dart';
+import '../script/script_doc.dart';
 import '../replacement/replacement_plan.dart';
 import 'project_ref.dart';
 import 'tag_group_ref.dart';
@@ -42,7 +43,14 @@ class RenewTask {
   final String? miaoaVideoId;
 
   /// 空白任务：没有原片。分子手动添加、标签手动填，每个分子都走整体替换
-  bool get isBlank => sourcePath == null;
+  bool get isBlank => sourcePath == null && script == null;
+
+  /// 脚本成片任务：以脚本行为根（「脚本即成片」），工作页是编导台。
+  /// 与空白任务同样没有原片，靠 [script] 判别
+  bool get isScript => script != null;
+
+  /// 脚本成片的脚本文档；非脚本任务为 null
+  final ScriptDoc? script;
   final VideoInfo? videoInfo;
   final String? coverPath;
   final RenewTaskStatus status;
@@ -138,6 +146,7 @@ class RenewTask {
     required this.id,
     required this.name,
     this.sourcePath,
+    this.script,
     this.miaoaVideoId,
     this.videoInfo,
     this.coverPath,
@@ -215,6 +224,7 @@ class RenewTask {
     String? id,
     String? name,
     String? sourcePath,
+    ScriptDoc? script,
     String? miaoaVideoId,
     VideoInfo? videoInfo,
     String? coverPath,
@@ -245,6 +255,7 @@ class RenewTask {
         id: id ?? this.id,
         name: name ?? this.name,
         sourcePath: sourcePath ?? this.sourcePath,
+        script: script ?? this.script,
         miaoaVideoId: miaoaVideoId ?? this.miaoaVideoId,
         videoInfo: videoInfo ?? this.videoInfo,
         coverPath: coverPath ?? this.coverPath,
@@ -275,6 +286,7 @@ class RenewTask {
         'id': id,
         'name': name,
         'sourcePath': sourcePath,
+        if (script != null) 'script': script!.toJson(),
         'miaoaVideoId': miaoaVideoId,
         'videoInfo': videoInfo?.toJson(),
         'coverPath': coverPath,
@@ -313,6 +325,9 @@ class RenewTask {
         id: json['id'] as String,
         name: json['name'] as String,
         sourcePath: json['sourcePath'] as String?,
+        script: json['script'] is Map
+            ? ScriptDoc.fromJson(json['script'])
+            : null,
         miaoaVideoId: json['miaoaVideoId'] as String?,
         videoInfo: json['videoInfo'] == null
             ? null

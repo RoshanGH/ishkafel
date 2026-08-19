@@ -8,6 +8,7 @@ import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/script/script_doc.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/models/project_ref.dart';
 import '../../core/models/video_info.dart';
@@ -42,6 +43,35 @@ class ImportService {
   /// 跟导入的差别只有「没有原片」这一件事：不探规格、不抽封面、不排分析，
   /// 建出来直接是 ready。标签组照旧——那是「上哪儿找素材、按什么打标」，
   /// 跟有没有原片无关。
+  /// 脚本成片任务：以脚本行为根（「脚本即成片」），工作页是编导台。
+  /// 建出来自带一个空行，编导打开就能写
+  Future<RenewTask> createScript({
+    required String name,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
+    ProjectRef? project,
+  }) async {
+    final now = clock();
+    final task = RenewTask(
+      id: idGenerator(),
+      name: name.trim().isEmpty ? '未命名脚本' : name.trim(),
+      sourcePath: null,
+      script: ScriptDoc.empty(),
+      status: RenewTaskStatus.ready,
+      createdAt: now,
+      updatedAt: now,
+      unitTagGroups: unitTagGroups,
+      shotTagGroups: shotTagGroups,
+      unitTagPrompt: unitTagPrompt,
+      shotTagPrompt: shotTagPrompt,
+      project: project,
+    );
+    await repository.save(task);
+    return task;
+  }
+
   Future<RenewTask> createBlank({
     required String name,
     List<TagGroupRef> unitTagGroups = const [],

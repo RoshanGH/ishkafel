@@ -7,7 +7,8 @@ import '../../../app/theme/app_typography.dart';
 
 /// 第 1 步：成片来源。
 ///
-/// 三条通道：本地文件、miaoa 成片库（未开放）、**不用原片从素材拼**。
+/// 四条通道：本地文件、**不用原片从素材拼**、**脚本成片**（写脚本长出
+/// 成片，工作页是编导台）、miaoa 成片库（未开放）。
 /// miaoa 通道保留但明确标注未开放并写清原因——项目刚清理过一个「点不动、
 /// 没有任何解释」的死按钮，那种控件只会让用户反复点击并怀疑软件坏了。
 class WizardSourceStep extends StatelessWidget {
@@ -18,12 +19,18 @@ class WizardSourceStep extends StatelessWidget {
   final bool blank;
   final VoidCallback onPickBlank;
 
+  /// 选了「脚本成片」这一路。此时 [filePath] 一定为 null
+  final bool script;
+  final VoidCallback onPickScript;
+
   const WizardSourceStep({
     super.key,
     required this.filePath,
     required this.onPickFile,
     this.blank = false,
     required this.onPickBlank,
+    this.script = false,
+    required this.onPickScript,
   });
 
   static const miaoaChannelNote = '本期未开放：需要 miaoa 成片下载通道。'
@@ -41,6 +48,8 @@ class WizardSourceStep extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(child: _localCard()),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: _scriptCard()),
           const SizedBox(width: AppSpacing.sm),
           Expanded(child: _blankCard()),
           const SizedBox(width: AppSpacing.sm),
@@ -75,13 +84,26 @@ class WizardSourceStep extends StatelessWidget {
         onTap: onPickBlank,
       );
 
+  /// 「脚本即成片」：编导写脚本，配音/镜头/字幕从脚本长出来。
+  /// 与「成片翻新」互为镜像——一个从成片出发换画面，一个从脚本出发长成片
+  Widget _scriptCard() => _SourceCard(
+        cardKey: const Key('wizard-script-source'),
+        icon: Icons.edit_note,
+        title: '脚本成片',
+        description: '写脚本，配音配镜长出成片',
+        selected: script,
+        onTap: onPickScript,
+      );
+
+  // 卡面只写短句（四卡一行，长文案会把整行撑高、把下方「重试」等按钮
+  // 挤出折叠线）；完整原因悬停可见
   Widget _miaoaCard() => Tooltip(
         message: miaoaChannelNote,
         child: const _SourceCard(
           cardKey: Key('wizard-miaoa-source'),
           icon: Icons.link,
           title: 'miaoa 成片库',
-          description: miaoaChannelNote,
+          description: '本期未开放，请下载到本地再导入',
           selected: false,
           onTap: null,
         ),

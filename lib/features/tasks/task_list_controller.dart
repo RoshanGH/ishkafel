@@ -319,6 +319,27 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     await reload();
   }
 
+  /// 建一条脚本成片任务。**不排分析**——脚本从空白写起，建出来直接进编导台
+  Future<RenewTask> createScriptTask({
+    required String name,
+    List<TagGroupRef> unitTagGroups = const [],
+    List<TagGroupRef> shotTagGroups = const [],
+    String unitTagPrompt = '',
+    String shotTagPrompt = '',
+    ProjectRef? project,
+  }) async {
+    final task = await ref.read(importServiceProvider).createScript(
+          name: name,
+          project: project,
+          unitTagGroups: unitTagGroups,
+          shotTagGroups: shotTagGroups,
+          unitTagPrompt: unitTagPrompt,
+          shotTagPrompt: shotTagPrompt,
+        );
+    await reload();
+    return task;
+  }
+
   Future<void> importFile(
     String path, {
     List<TagGroupRef> unitTagGroups = const [],

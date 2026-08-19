@@ -63,6 +63,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
 
   /// 走「不用原片，从素材拼」这一路
   bool _blank = false;
+  bool _script = false;
   List<TagGroup>? _groups;
   String? _groupsError;
   late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
@@ -112,6 +113,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
       setState(() {
         _filePath = path;
         _blank = false; // 选了本地文件就不再是空白任务
+        _script = false;
       });
     } catch (e) {
       AppLog.warn('选择成片文件失败：$e');
@@ -171,14 +173,25 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   ///
   /// 空白任务不需要原片，也**不需要镜头标签组**——它不分镜头。分子标签组
   /// 仍然必填：那是打标的受控词表，没有它后面挑素材时没有标签可用
+  /// 脚本成片与空白任务一样不需要原片；镜头标签组也不必填
+  /// （镜头层打标发生在参考分镜出现之后，届时用建任务时选的组）——
+  /// 但为了检索质量，脚本成片允许选镜头组，仅分子组必填
   List<String> get _missing => [
-        if (!_blank && _filePath == null) '选择本地成片文件或「不用原片」',
+        if (!_blank && !_script && _filePath == null)
+          '选择本地成片文件或「不用原片」',
         if (_unitGroups.isEmpty) '选择台词语义单元标签组',
-        if (!_blank && _shotGroups.isEmpty) '选择视觉镜头标签组',
+        if (!_blank && !_script && _shotGroups.isEmpty) '选择视觉镜头标签组',
       ];
 
   void _pickBlank() => setState(() {
         _blank = true;
+        _script = false;
+        _filePath = null;
+      });
+
+  void _pickScript() => setState(() {
+        _script = true;
+        _blank = false;
         _filePath = null;
       });
 
@@ -186,6 +199,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
     if (_missing.isNotEmpty) return;
     Navigator.of(context).pop(NewTaskWizardResult(
         filePath: _filePath,
+        script: _script,
         unitTagGroups: List.of(_unitGroups),
         shotTagGroups: List.of(_shotGroups),
         unitTagPrompt: _unitPrompt,
@@ -216,6 +230,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     onPickFile: _pickFile,
                     blank: _blank,
                     onPickBlank: _pickBlank,
+                    script: _script,
+                    onPickScript: _pickScript,
                     groups: _groups,
                     groupsError: _groupsError,
                     onRetryGroups: _loadGroups,
@@ -239,7 +255,11 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
               WizardFooter(
                 missing: _missing,
                 // 空白任务建出来就能编，没有任何东西要分析
-                startLabel: _blank ? '创建拼片任务' : '开始分析',
+                startLabel: _script
+                    ? '创建脚本成片'
+                    : _blank
+                        ? '创建拼片任务'
+                        : '开始分析',
                 onCancel: () => Navigator.of(context).pop(),
                 onStart: _start,
               ),

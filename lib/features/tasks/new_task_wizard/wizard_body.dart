@@ -19,6 +19,8 @@ class WizardBody extends StatelessWidget {
   /// 走「不用原片，从素材拼」这一路
   final bool blank;
   final VoidCallback onPickBlank;
+  final bool script;
+  final VoidCallback onPickScript;
 
   /// null 表示标签组仍在读取中
   final List<TagGroup>? groups;
@@ -50,6 +52,8 @@ class WizardBody extends StatelessWidget {
     required this.filePath,
     this.blank = false,
     required this.onPickBlank,
+    this.script = false,
+    required this.onPickScript,
     required this.onPickFile,
     required this.groups,
     required this.groupsError,
@@ -78,7 +82,9 @@ class WizardBody extends StatelessWidget {
             filePath: filePath,
             onPickFile: onPickFile,
             blank: blank,
-            onPickBlank: onPickBlank),
+            onPickBlank: onPickBlank,
+            script: script,
+            onPickScript: onPickScript),
         const SizedBox(height: AppSpacing.lg),
         const _StepLabel('第 2 步 · 项目与标签组（素材从哪儿来、按什么打标）'),
         // 项目在最上面：先定「上哪儿找素材」，再定「按什么打标」

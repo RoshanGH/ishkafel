@@ -24,8 +24,13 @@ class NewTaskWizardResult {
   /// 在哪个项目里找素材；null 表示不限项目
   final ProjectRef? project;
 
+  /// 选了「脚本成片」这一路（filePath 一定为 null）：以脚本行为根，
+  /// 建完进编导台
+  final bool script;
+
   NewTaskWizardResult({
     this.filePath,
+    this.script = false,
     required List<TagGroupRef> unitTagGroups,
     required List<TagGroupRef> shotTagGroups,
     this.unitTagPrompt = '',

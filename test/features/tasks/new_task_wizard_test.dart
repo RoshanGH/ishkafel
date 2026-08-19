@@ -96,6 +96,7 @@ Future<void> pickGroup(WidgetTester tester, Key fieldKey, String name) async {
 
 void main() {
   _blankSourceTests();
+  _scriptSourceTests();
   testWidgets('向导按设计稿分两步：成片来源 + 两个标签组', (tester) async {
     await openWizard(tester, wrap());
 
@@ -339,5 +340,50 @@ void _blankSourceTests() {
     expect(lastResult, isNotNull);
     expect(lastResult!.filePath, isNull, reason: 'null 就是「没有原片」这件事本身');
     expect(lastResult!.unitTagGroups, isNotEmpty);
+  });
+}
+
+/// 「脚本成片」这一路：写脚本，配音配镜长出成片（编导台）。
+///
+/// 与拼片同理：没有原片可导，也不分镜头，镜头标签组不必填；
+/// 分子标签组仍必填——它是台词打标与后续检索的受控词表。
+void _scriptSourceTests() {
+  testWidgets('第 1 步有「脚本成片」这张卡，并说清它是干什么的', (tester) async {
+    await openWizard(tester, wrap());
+    expect(find.text('脚本成片'), findsOneWidget);
+    expect(find.textContaining('写脚本'), findsOneWidget);
+  });
+
+  testWidgets('选了它之后不再要求选文件；只选分子标签组就能开始', (tester) async {
+    await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-script-source')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('选择本地成片文件'), findsNothing);
+
+    await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
+    await tester.ensureVisible(find.text('创建脚本成片'));
+    await tester.tap(find.text('创建脚本成片'));
+    await tester.pumpAndSettle();
+
+    expect(lastResult, isNotNull);
+    expect(lastResult!.script, isTrue);
+    expect(lastResult!.filePath, isNull);
+    expect(lastResult!.unitTagGroups, isNotEmpty);
+  });
+
+  testWidgets('脚本卡与拼片/本地文件互斥：后选的生效', (tester) async {
+    await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-script-source')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wizard-blank-source')));
+    await tester.pumpAndSettle();
+
+    await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
+    await tester.ensureVisible(find.text('创建拼片任务'));
+    await tester.tap(find.text('创建拼片任务'));
+    await tester.pumpAndSettle();
+
+    expect(lastResult!.script, isFalse, reason: '改选拼片后脚本选择必须被清掉');
   });
 }

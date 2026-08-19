@@ -1,0 +1,86 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/script/script_doc.dart';
+
+/// 脚本成片的数据根：脚本行。
+///
+/// 「脚本即成片」——行是唯一概念：配音行（有台词，配音时长是根）与
+/// 画面行（空文案，手填时长或随素材）。见 docs/2026-08-19 设计稿。
+void main() {
+  group('行类型由文案判定', () {
+    test('有文案 = 配音行', () {
+      expect(ScriptLine.create(text: '世界上只有两种人').type,
+          ScriptLineType.voiced);
+    });
+
+    test('空文案 = 画面行（空行也是结构的一部分）', () {
+      expect(ScriptLine.create(text: '').type, ScriptLineType.visual);
+      expect(ScriptLine.create(text: '   ').type, ScriptLineType.visual);
+    });
+
+    test('改文案后类型跟着变——画面行填上字就是配音行', () {
+      final line = ScriptLine.create(text: '');
+      final voiced = line.withText('新台词');
+      expect(voiced.type, ScriptLineType.voiced);
+      expect(voiced.id, line.id, reason: '行的身份不因内容变化而变');
+    });
+  });
+
+  group('文档操作（全部不可变）', () {
+    test('新建脚本自带一个空行——编导打开就能写，不用先学会「加行」', () {
+      final doc = ScriptDoc.empty();
+      expect(doc.lines, hasLength(1));
+      expect(doc.lines.single.type, ScriptLineType.visual);
+    });
+
+    test('插入新行在指定行之后', () {
+      final doc = ScriptDoc.empty().insertAfter(0, text: '第一句');
+      expect(doc.lines, hasLength(2));
+      expect(doc.lines[1].text, '第一句');
+    });
+
+    test('删除行；最后一行不许删——脚本至少有一行可写', () {
+      final doc = ScriptDoc.empty().insertAfter(0, text: 'A');
+      final removed = doc.removeAt(0);
+      expect(removed.lines.single.text, 'A');
+      expect(removed.removeAt(0).lines, hasLength(1),
+          reason: '删到只剩一行就不再删');
+    });
+
+    test('移动行（拖动排序）', () {
+      var doc = ScriptDoc.empty();
+      doc = doc.insertAfter(0, text: 'A').insertAfter(1, text: 'B');
+      final moved = doc.move(2, 0);
+      expect(moved.lines.map((l) => l.text).toList(), ['B', '', 'A']);
+    });
+
+    test('改某行文案', () {
+      final doc = ScriptDoc.empty().updateText(0, '填上了');
+      expect(doc.lines.single.text, '填上了');
+      expect(doc.lines.single.type, ScriptLineType.voiced);
+    });
+
+    test('画面行手填时长；配音行不存手填时长（配音时长才是根）', () {
+      final doc = ScriptDoc.empty().setManualMs(0, 4000);
+      expect(doc.lines.single.manualMs, 4000);
+    });
+  });
+
+  group('序列化', () {
+    test('json 往返一字不差', () {
+      var doc = ScriptDoc.empty();
+      doc = doc
+          .updateText(0, '第一句')
+          .insertAfter(0)
+          .setManualMs(1, 3000)
+          .insertAfter(1, text: '第三句');
+      final back = ScriptDoc.fromJson(doc.toJson());
+      expect(back.toJson(), doc.toJson());
+      expect(back.lines[1].manualMs, 3000);
+      expect(back.lines[2].text, '第三句');
+    });
+
+    test('认不出的 json 不炸——退回空脚本', () {
+      expect(ScriptDoc.fromJson({'lines': '坏数据'}).lines, hasLength(1));
+    });
+  });
+}

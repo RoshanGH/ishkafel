@@ -10,7 +10,7 @@ enum TaskCardAction { review, rename, reanalyze, delete }
 /// 在指定屏幕坐标弹出任务卡菜单（右键或「更多」按钮触发）
 Future<TaskCardAction?> showTaskCardMenu(
     BuildContext context, Offset globalPosition,
-    {bool canReview = false}) {
+    {bool canReview = false, bool canReanalyze = true}) {
   final overlay =
       Overlay.of(context).context.findRenderObject() as RenderBox?;
   final overlaySize = overlay?.size ?? MediaQuery.of(context).size;
@@ -38,11 +38,13 @@ Future<TaskCardAction?> showTaskCardMenu(
         height: 34,
         child: Text('重命名', style: _itemStyle),
       ),
-      const PopupMenuItem(
-        value: TaskCardAction.reanalyze,
-        height: 34,
-        child: Text('重新分析', style: _itemStyle),
-      ),
+      // 没有原片的任务（拼片/脚本成片）无从分析，点了必失败的入口不给
+      if (canReanalyze)
+        const PopupMenuItem(
+          value: TaskCardAction.reanalyze,
+          height: 34,
+          child: Text('重新分析', style: _itemStyle),
+        ),
       const PopupMenuDivider(height: 8),
       const PopupMenuItem(
         value: TaskCardAction.delete,

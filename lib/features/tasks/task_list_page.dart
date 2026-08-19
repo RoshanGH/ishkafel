@@ -18,6 +18,7 @@ import '../home/readiness_provider.dart';
 import '../home/welcome_view.dart';
 import '../import_flow/import_exception.dart';
 import '../settings/settings_page.dart';
+import '../director/director_page.dart';
 import '../workbench/workbench_page.dart';
 import 'new_task_wizard/new_task_wizard.dart';
 import 'environment_banner.dart';
@@ -168,6 +169,24 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       prefillProject: recent?.project,
     );
     if (result == null) return;
+    if (result.script) {
+      // 脚本成片：没有原片、不走分析，建出来直接进编导台开写
+      final task = await ref.read(taskListProvider.notifier).createScriptTask(
+            name: '脚本 ${DateTime.now().toString().substring(5, 16)}',
+            unitTagGroups: result.unitTagGroups,
+            shotTagGroups: result.shotTagGroups,
+            unitTagPrompt: result.unitTagPrompt,
+            shotTagPrompt: result.shotTagPrompt,
+            project: result.project,
+          );
+      if (context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
+        );
+        await ref.read(taskListProvider.notifier).reload();
+      }
+      return;
+    }
     final filePath = result.filePath;
     if (filePath == null) {
       // 空白任务：没有原片可导，直接建出来就能编辑
@@ -216,6 +235,14 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 「确认切分」主按钮）。
   Future<void> _openTask(
       BuildContext context, WidgetRef ref, RenewTask task) async {
+    // 脚本任务没有原片、不走分析——直接进编导台，下面的检查全不适用
+    if (task.isScript) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
+      );
+      await ref.read(taskListProvider.notifier).reload();
+      return;
+    }
     // 源文件缺失优先于一切：没有源视频，审片台的播放器、抽帧轨、波形轨全是
     // 空的，重新分析也必定失败——先把原因和补救办法说清楚。
     // 这里做一次实时校验而不是查缓存：缓存可能两个方向都陈旧（见
@@ -254,7 +281,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   Future<void> _openCardMenu(BuildContext context, WidgetRef ref,
       RenewTask task, Offset position) async {
     final action = await showTaskCardMenu(context, position,
-        canReview: collectReviewItems(task.replacements ?? const []).isNotEmpty);
+        canReview: collectReviewItems(task.replacements ?? const []).isNotEmpty,
+        canReanalyze: task.sourcePath != null);
     if (action == null || !context.mounted) return;
     final controller = ref.read(taskListProvider.notifier);
     switch (action) {
