@@ -122,7 +122,9 @@ Widget wrap(TaskRepository repo, RenewTask task,
         videoFilePickerProvider.overrideWithValue(() async => null),
         ...overrides,
       ],
-      child: MaterialApp(home: DirectorPage(task: task)),
+      // 播放器注入空工厂：单测不碰 libmpv，中栏保持占位态
+      child: MaterialApp(
+          home: DirectorPage(task: task, playbackFactory: () => null)),
     );
 
 /// hover 到某行上（拖柄/删除按钮都藏在 hover 里）

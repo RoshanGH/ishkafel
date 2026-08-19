@@ -14,6 +14,22 @@ import '../../core/script/script_doc.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
+import '../../core/ffmpeg/process_runner.dart';
+import '../../core/ffmpeg/rendered_cache.dart';
+import '../../core/playback/media_kit_follower.dart';
+import '../../core/playback/media_kit_playback.dart';
+import '../../core/playback/multitrack_playback.dart';
+import '../../core/playback/playback_controller.dart';
+import '../../core/playback/track_plan.dart';
+import '../../core/script/script_track_plan.dart';
+import '../../core/script/shot_allocation.dart';
+import '../../core/script/speed_clip_renderer.dart';
+import '../picking/picked_media_cache.dart';
+import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_list_controller.dart';
@@ -31,7 +47,11 @@ import 'voice_select_dialog.dart';
 class DirectorPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
-  const DirectorPage({super.key, required this.task});
+  /// 预览播放后端。缺省三轨真实播放器（画面主时钟 + 配音跟随）；
+  /// 测试注入假实现或 null 工厂，不碰 libmpv
+  final PlaybackController? Function()? playbackFactory;
+
+  const DirectorPage({super.key, required this.task, this.playbackFactory});
 
   @override
   ConsumerState<DirectorPage> createState() => _DirectorPageState();
@@ -81,11 +101,171 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// initState 里取好：dispose 阶段还要落一次盘，那时不能再碰 ref
   late final TaskRepository _repo;
 
+  /// 展开详情的镜头（右栏镜头节；随选中行切换而复位）
+  int? _expandedShot;
+
+  /// 素材固定：挑中的镜头视频下到本地（与工作台/导出同一份缓存目录）。
+  /// 下载器未接（测试环境/凭据不全）时为 null，卡片不显示下载状态
+  PickedMediaCache? _mediaCache;
+
+  // ---- 整片预览 ----
+
+  PlaybackController? _playback;
+  Widget? _videoWidget;
+  ScriptPlanResult _planResult =
+      const ScriptPlanResult(plan: TrackPlan.empty, skippedLines: {});
+  final ValueNotifier<int> _positionMs = ValueNotifier(0);
+  bool _previewPlaying = false;
+  StreamSubscription<int>? _positionSub;
+  StreamSubscription<bool>? _playingSub;
+  Timer? _previewRebuild;
+
+  /// 变速切片：渲染好的路径按指纹存着；正在渲的记 key 防重复
+  SpeedClipRenderer? _clipRenderer;
+  final Map<String, String> _speedClips = {};
+  final Set<String> _renderingClips = {};
+
   @override
   void initState() {
     super.initState();
     _repo = ref.read(taskRepositoryProvider);
     _acquireLock();
+    _mediaCache = _buildMediaCache();
+    _mediaCache?.addListener(_onMediaCache);
+    _pinAllShots();
+    _setupPreview();
+  }
+
+  void _setupPreview() {
+    final playback = widget.playbackFactory != null
+        ? widget.playbackFactory!()
+        : MultitrackPlayback(
+            video: MediaKitPlaybackController(),
+            voice: MediaKitFollower(),
+            bgm: MediaKitFollower(loop: true),
+          );
+    if (playback == null) return;
+    _playback = playback;
+    _videoWidget = switch (playback) {
+      MultitrackPlayback() => playback.buildVideoWidget(),
+      MediaKitPlaybackController() => playback.buildVideoWidget(),
+      _ => null,
+    };
+    _positionSub = playback.positionMsStream.listen((ms) {
+      if (mounted) _positionMs.value = ms;
+    });
+    _playingSub = playback.playingStream.listen((playing) {
+      if (mounted && _previewPlaying != playing) {
+        setState(() => _previewPlaying = playing);
+      }
+    });
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir != null) {
+      _clipRenderer = SpeedClipRenderer(
+        cache: RenderedCache(
+          dir: Directory(
+              p.join(dataDir.path, 'speed_fit_script', _task.id)),
+          run: const ResolvingProcessRunner().call,
+        ),
+      );
+    }
+    _schedulePreviewRebuild();
+  }
+
+  /// 内容一变就排一次轨道重建（600ms 防抖）。画面轨没变时
+  /// MultitrackPlayback 自己会挡住重复 open，不闪黑
+  void _schedulePreviewRebuild() {
+    if (_playback == null) return;
+    _previewRebuild?.cancel();
+    _previewRebuild =
+        Timer(const Duration(milliseconds: 600), _rebuildPreview);
+  }
+
+  String _clipKey(LineShot s) =>
+      '${s.materialId}|${s.trimStartMs}|${s.allocMs}|${s.speed}';
+
+  Future<void> _rebuildPreview() async {
+    final playback = _playback;
+    if (playback == null || !mounted) return;
+    // 变速镜头先渲对齐切片（按内容指纹缓存，改了才重渲）
+    for (final line in _doc.lines) {
+      for (final shot in line.shots) {
+        if (shot.speed == 1.0 || shot.allocMs == null) continue;
+        final key = _clipKey(shot);
+        if (_speedClips.containsKey(key) ||
+            _renderingClips.contains(key) ||
+            _clipRenderer == null) {
+          continue;
+        }
+        final src = _mediaCache?.localPathOf(shot.materialId);
+        if (src == null) continue;
+        _renderingClips.add(key);
+        unawaited(_clipRenderer!
+            .render(
+          materialId: shot.materialId,
+          sourcePath: src,
+          trimStartMs: shot.trimStartMs,
+          allocMs: shot.allocMs!,
+          speed: shot.speed,
+        )
+            .then((path) {
+          _speedClips[key] = path;
+          if (mounted) _schedulePreviewRebuild();
+        }).catchError((Object e) {
+          AppLog.warn('变速切片渲染失败（素材 ${shot.materialId}）：$e');
+        }).whenComplete(() => _renderingClips.remove(key)));
+      }
+    }
+    final result = buildScriptTrackPlan(_doc, sourceOf: (shot) {
+      if (shot.speed != 1.0) {
+        final clip = _speedClips[_clipKey(shot)];
+        return clip == null ? null : ShotSource(clip);
+      }
+      final local = _mediaCache?.localPathOf(shot.materialId);
+      return local == null
+          ? null
+          : ShotSource(local, inMs: shot.trimStartMs);
+    });
+    if (!mounted) return;
+    setState(() => _planResult = result);
+    if (playback is MultitrackPlayback) {
+      await playback.setPlan(result.plan);
+    }
+  }
+
+  Future<void> _togglePreviewPlay() async {
+    final playback = _playback;
+    if (playback == null) return;
+    if (_previewPlaying) {
+      await playback.pause();
+    } else {
+      await playback.play();
+    }
+  }
+
+  PickedMediaCache? _buildMediaCache() {
+    final fetch = ref.read(materialFetcherProvider);
+    final dataDir = ref.read(dataDirProvider);
+    if (fetch == null || dataDir == null) return null;
+    return PickedMediaCache(
+      fetch: fetch,
+      cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+    );
+  }
+
+  void _onMediaCache() {
+    if (mounted) setState(() {});
+  }
+
+  /// 把全部行的全部镜头固定到本地——挑中即下载，检索结果随时会变，
+  /// 凡是进入方案的都要钉死（最高准则）
+  void _pinAllShots() {
+    final cache = _mediaCache;
+    if (cache == null) return;
+    cache.pinAll({
+      for (final line in _doc.lines)
+        for (final shot in line.shots) shot.materialId,
+    });
   }
 
   static String get _holder => '人（编导台）';
@@ -144,6 +324,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _flushNow();
     _lockHeartbeat?.cancel();
     _lock?.release(_holder);
+    _mediaCache?.removeListener(_onMediaCache);
+    _mediaCache?.dispose();
+    _previewRebuild?.cancel();
+    unawaited(_positionSub?.cancel());
+    unawaited(_playingSub?.cancel());
+    _playback?.dispose();
+    _positionMs.dispose();
     unawaited(_voicePreview.dispose());
     super.dispose();
   }
@@ -191,6 +378,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       );
       if (!mounted) return;
       _mutate((d) => d.setVoiceoverById(lineId, vo));
+      // 配音时长是这一行时间轴的根：根变了，镜头的时长分配跟着重算
+      final updated = _doc.lines.firstWhere((l) => l.id == lineId);
+      if (updated.shots.isNotEmpty) {
+        _mutate((d) => d.setShotsById(
+            lineId, ShotAllocation.distribute(updated.shots, vo.durationMs)));
+      }
       _flushNow();
       // 新的落稳了才删旧的——失败时旧配音还能听
       if (old != null) service.deleteStale(old);
@@ -233,9 +426,55 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       usedBy: usedBy,
     );
     if (picked == null) return;
+    // 挑完就把时长按行的根均分好（默认全自动预填，人只做否决）；
+    // 行还没有根（没配音/没填时长）就先不分，界面会说清下一步
+    final root = ShotAllocation.rootMsOf(line.withShots(picked.shots));
+    final shots = root == null
+        ? picked.shots
+        : ShotAllocation.distribute(picked.shots, root);
     _mutate((d) =>
-        d.setShotsById(line.id, picked.shots).setTagsById(line.id, picked.tags));
+        d.setShotsById(line.id, shots).setTagsById(line.id, picked.tags));
     _flushNow();
+    _pinAllShots();
+  }
+
+  // ---- 时长分配 ----
+
+  void _updateShots(List<LineShot> shots) {
+    final line = _doc.lines[_selected];
+    _mutate((d) => d.setShotsById(line.id, shots));
+  }
+
+  void _distribute() {
+    final line = _doc.lines[_selected];
+    final root = ShotAllocation.rootMsOf(line);
+    if (root == null) return;
+    _updateShots(ShotAllocation.distribute(line.shots, root));
+  }
+
+  void _resizeShot(int i, int newAllocMs) {
+    final line = _doc.lines[_selected];
+    final next = ShotAllocation.resize(line.shots, i, newAllocMs);
+    if (next == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('调不动了：相邻镜头已经到底线（每镜最少 0.5 秒）。')));
+      return;
+    }
+    _updateShots(next);
+  }
+
+  void _trimShot(int i, int trimStartMs) {
+    final line = _doc.lines[_selected];
+    final next = [...line.shots];
+    next[i] = ShotAllocation.setTrimStart(next[i], trimStartMs);
+    _updateShots(next);
+  }
+
+  void _speedShot(int i, double speed) {
+    final line = _doc.lines[_selected];
+    final next = [...line.shots];
+    next[i] = ShotAllocation.setSpeed(next[i], speed);
+    _updateShots(next);
   }
 
   Future<void> _togglePlayVoice() async {
@@ -265,6 +504,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
     _autosave?.cancel();
     _autosave = Timer(const Duration(milliseconds: 800), _flushNow);
+    _schedulePreviewRebuild();
   }
 
   void _flushNow() {
@@ -367,7 +607,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       doc: _doc,
                       selected: _selected,
                       autofocusLineId: _autofocusLineId,
-                      onSelect: (i) => setState(() => _selected = i),
+                      onSelect: (i) => setState(() {
+                        _selected = i;
+                        _expandedShot = null;
+                      }),
                       onInsertAfter: (i) {
                         _mutate((d) => d.insertAfter(i));
                         setState(() {
@@ -428,7 +671,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onRemoveShot: (i) {
                         final line = _doc.lines[_selected];
                         final next = [...line.shots]..removeAt(i);
-                        _mutate((d) => d.setShotsById(line.id, next));
+                        // 删镜后剩下的镜头按根重新均分——空出的时长不能凭空消失
+                        final root = ShotAllocation.rootMsOf(line);
+                        _mutate((d) => d.setShotsById(
+                            line.id,
+                            root == null || next.isEmpty
+                                ? next
+                                : ShotAllocation.distribute(next, root)));
+                        setState(() => _expandedShot = null);
                       },
                       onRemoveTag: (tag) {
                         final line = _doc.lines[_selected];
@@ -436,6 +686,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                             line.tags.where((t) => t != tag).toList();
                         _mutate((d) => d.setTagsById(line.id, next));
                       },
+                      expandedShot: _expandedShot,
+                      onExpandShot: (i) =>
+                          setState(() => _expandedShot = i),
+                      onDistribute: _distribute,
+                      onResizeShot: _resizeShot,
+                      onTrimStart: _trimShot,
+                      onShotSpeed: _speedShot,
+                      shotStatus: (id) => _mediaCache?.statusOf(id),
+                      onRetryDownload: (id) => _mediaCache?.retry(id),
                     )
                   : const SizedBox.shrink(),
             ),
@@ -589,56 +848,101 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       );
 
   /// 预览舞台：竖屏幕布居中、限高——播放器窄而居中，不做顶天立地的黑洞。
-  /// 幕布下挂一条禁用态的时间码，先把「这里将来是播放器」这件事说清楚
-  Widget _previewStage() => Container(
-        color: AppColors.background,
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.xl, vertical: AppSpacing.xxl),
-        child: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Flexible(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 560),
-                child: AspectRatio(
-                  aspectRatio: 9 / 16,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.stageBackground,
-                      borderRadius: BorderRadius.circular(AppRadius.lg),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.play_circle_outline,
-                              size: 28,
-                              color: AppColors.textTertiary
-                                  .withValues(alpha: 0.55)),
-                          const SizedBox(height: AppSpacing.sm),
-                          const Text('配音与镜头就绪后，在这里试片',
-                              style: TextStyle(
-                                  fontSize: AppFontSize.caption,
-                                  color: AppColors.textTertiary)),
-                        ]),
+  /// 有可播内容时是真播放器 + 传输条；没有时占位说明「还差什么」
+  Widget _previewStage() {
+    final playable = !_planResult.isEmpty && _videoWidget != null;
+    return Container(
+      color: AppColors.background,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xl, vertical: AppSpacing.lg),
+      child: Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Flexible(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 560),
+              child: AspectRatio(
+                aspectRatio: 9 / 16,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.stageBackground,
+                    borderRadius: BorderRadius.circular(AppRadius.lg),
+                    border: Border.all(color: AppColors.border),
                   ),
+                  clipBehavior: Clip.antiAlias,
+                  child: playable
+                      ? _videoWidget!
+                      : Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.play_circle_outline,
+                                size: 28,
+                                color: AppColors.textTertiary
+                                    .withValues(alpha: 0.55)),
+                            const SizedBox(height: AppSpacing.sm),
+                            const Text('配音与镜头就绪后，在这里试片',
+                                style: TextStyle(
+                                    fontSize: AppFontSize.caption,
+                                    color: AppColors.textTertiary)),
+                          ]),
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.md),
-            // 传输条骨架（禁用态）：预告播放器的形状，而不是又一句解释
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.play_arrow,
-                  size: 18, color: AppColors.textTertiary.withValues(alpha: 0.4)),
-              const SizedBox(width: AppSpacing.sm),
-              Text('00:00 / 00:00',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          // 传输条：可播时活的，不可播时禁用态骨架
+          Row(mainAxisSize: MainAxisSize.min, children: [
+            IconButton(
+              key: const ValueKey('director-preview-play'),
+              visualDensity: VisualDensity.compact,
+              onPressed: playable ? _togglePreviewPlay : null,
+              iconSize: 20,
+              icon: Icon(_previewPlaying ? Icons.pause : Icons.play_arrow,
+                  color: playable
+                      ? AppColors.textPrimary
+                      : AppColors.textTertiary.withValues(alpha: 0.4)),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            ValueListenableBuilder<int>(
+              valueListenable: _positionMs,
+              builder: (_, ms, _) => Text(
+                  '${_mmss(playable ? ms : 0)} / ${_mmss(_planResult.plan.totalMs)}',
                   style: TextStyle(
                       fontSize: AppFontSize.caption,
-                      color: AppColors.textTertiary.withValues(alpha: 0.5),
+                      color: playable
+                          ? AppColors.textSecondary
+                          : AppColors.textTertiary.withValues(alpha: 0.5),
                       fontFeatures: const [FontFeature.tabularFigures()])),
-            ]),
+            ),
           ]),
-        ),
-      );
+          // 预览可以少几行——人还在编排——但少了哪几行必须点名
+          if (_planResult.skippedLines.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 340),
+                child: Text(
+                  [
+                    for (final e in _planResult.skippedLines.entries)
+                      '第 ${e.key + 1} 行未进预览：${e.value}',
+                  ].join('\n'),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.orange,
+                      height: 1.5),
+                ),
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+
+  static String _mmss(int ms) {
+    final s = ms ~/ 1000;
+    return '${(s ~/ 60).toString().padLeft(2, '0')}:'
+        '${(s % 60).toString().padLeft(2, '0')}';
+  }
 
   Widget _blockedView() => Scaffold(
         backgroundColor: AppColors.background,

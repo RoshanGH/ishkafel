@@ -5,6 +5,8 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/shot_allocation.dart';
+import '../picking/picked_media_cache.dart';
 
 /// 编导台右栏：当前行的工作台。
 ///
@@ -32,6 +34,18 @@ class LineInspector extends StatelessWidget {
   final ValueChanged<int> onRemoveShot;
   final ValueChanged<String> onRemoveTag;
 
+  /// 展开详情的镜头下标（时长/起点/速度都在详情里调）
+  final int? expandedShot;
+  final ValueChanged<int?> onExpandShot;
+  final VoidCallback onDistribute;
+  final void Function(int index, int newAllocMs) onResizeShot;
+  final void Function(int index, int trimStartMs) onTrimStart;
+  final void Function(int index, double speed) onShotSpeed;
+
+  /// 素材下载状态（null = 下载器未接，不显示状态）
+  final PickedMediaStatus? Function(int materialId) shotStatus;
+  final ValueChanged<int> onRetryDownload;
+
   const LineInspector({
     super.key,
     required this.index,
@@ -47,6 +61,14 @@ class LineInspector extends StatelessWidget {
     required this.onFindShots,
     required this.onRemoveShot,
     required this.onRemoveTag,
+    this.expandedShot,
+    required this.onExpandShot,
+    required this.onDistribute,
+    required this.onResizeShot,
+    required this.onTrimStart,
+    required this.onShotSpeed,
+    required this.shotStatus,
+    required this.onRetryDownload,
   });
 
   @override
@@ -155,7 +177,9 @@ class LineInspector extends StatelessWidget {
                     color: AppColors.textTertiary,
                     height: 1.4)),
           )
-        else
+        else ...[
+          _allocationHeader(),
+          const SizedBox(height: AppSpacing.sm),
           SizedBox(
             height: 118,
             child: ListView.separated(
@@ -166,13 +190,225 @@ class LineInspector extends StatelessWidget {
               itemBuilder: (context, i) => _shotCard(i, line.shots[i]),
             ),
           ),
+          if (expandedShot != null &&
+              expandedShot! >= 0 &&
+              expandedShot! < line.shots.length) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _shotDetail(expandedShot!, line.shots[expandedShot!]),
+          ],
+        ],
       ]);
 
-  Widget _shotCard(int i, LineShot shot) => Container(
+  /// 分配状态一行：行时长根、已分配、缺口警告与「均分」入口。
+  /// 「每一次等待都要有交代」同理——每一个数也要有出处
+  Widget _allocationHeader() {
+    final root = ShotAllocation.rootMsOf(line);
+    if (root == null) {
+      return Text(
+          line.type == ScriptLineType.voiced
+              ? '先生成配音，再给镜头分时长（配音时长是这一行的根）'
+              : '素材时长未知，先在上方填一个时长',
+          style: const TextStyle(
+              fontSize: AppFontSize.caption, color: AppColors.textTertiary));
+    }
+    final shortfall = ShotAllocation.shortfallMs(line.shots, root);
+    return Row(children: [
+      Text('行时长 ${_s(root)}',
+          style: const TextStyle(
+              fontSize: AppFontSize.caption,
+              color: AppColors.textSecondary,
+              fontFeatures: [FontFeature.tabularFigures()])),
+      const SizedBox(width: AppSpacing.sm),
+      if (shortfall > 0)
+        Expanded(
+          child: Text('还有 ${_s(shortfall)} 没分出去（素材可能不够长）',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption, color: AppColors.orange)),
+        )
+      else if (shortfall < 0)
+        Expanded(
+          child: Text('超分了 ${_s(-shortfall)}',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption, color: AppColors.orange)),
+        )
+      else
+        const Spacer(),
+      TextButton(
+        key: const ValueKey('inspector-distribute'),
+        onPressed: onDistribute,
+        style: TextButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            textStyle: const TextStyle(fontSize: AppFontSize.caption)),
+        child: const Text('均分'),
+      ),
+    ]);
+  }
+
+  static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
+
+  /// 选中镜头的详情：时长（邻镜联动）、起点（框选不必从头）、速度。
+  /// 帧级胶片条在后续版本升级；这里数值精确到 0.1s
+  Widget _shotDetail(int i, LineShot shot) {
+    final alloc = shot.allocMs;
+    final src = shot.durationMs;
+    final maxStart = src == null ? 0 : (src - shot.consumedSourceMs).clamp(0, src);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('第 ${i + 1} 镜',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const Spacer(),
+          Text(src == null ? '素材时长未知' : '素材 ${_s(src)}',
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+        ]),
+        const SizedBox(height: AppSpacing.sm),
+        // 时长：±0.5s 步进，邻镜联动
+        Row(children: [
+          const SizedBox(
+              width: 34,
+              child: Text('时长',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary))),
+          IconButton(
+            key: ValueKey('shot-alloc-minus-$i'),
+            visualDensity: VisualDensity.compact,
+            iconSize: 14,
+            onPressed: alloc == null
+                ? null
+                : () => onResizeShot(i, alloc - 500),
+            icon: const Icon(Icons.remove, color: AppColors.textSecondary),
+          ),
+          Text(alloc == null ? '未分配' : _s(alloc),
+              style: const TextStyle(
+                  fontSize: AppFontSize.body,
+                  color: AppColors.textPrimary,
+                  fontFeatures: [FontFeature.tabularFigures()])),
+          IconButton(
+            key: ValueKey('shot-alloc-plus-$i'),
+            visualDensity: VisualDensity.compact,
+            iconSize: 14,
+            onPressed: alloc == null
+                ? null
+                : () => onResizeShot(i, alloc + 500),
+            icon: const Icon(Icons.add, color: AppColors.textSecondary),
+          ),
+          const Spacer(),
+          Text('相邻镜头会自动让出/补上',
+              style: TextStyle(
+                  fontSize: AppFontSize.micro,
+                  color: AppColors.textTertiary.withValues(alpha: 0.8))),
+        ]),
+        // 起点：框选不必从头
+        if (src != null && maxStart > 0)
+          Row(children: [
+            const SizedBox(
+                width: 34,
+                child: Text('起点',
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textSecondary))),
+            Expanded(
+              child: SliderTheme(
+                data: const SliderThemeData(
+                    trackHeight: 2,
+                    thumbShape:
+                        RoundSliderThumbShape(enabledThumbRadius: 5)),
+                child: Slider(
+                  key: ValueKey('shot-trim-$i'),
+                  value: shot.trimStartMs
+                      .clamp(0, maxStart)
+                      .toDouble(),
+                  max: maxStart.toDouble(),
+                  activeColor: AppColors.accentBlue,
+                  onChanged: (v) => onTrimStart(i, v.round()),
+                ),
+              ),
+            ),
+            SizedBox(
+                width: 40,
+                child: Text(_s(shot.trimStartMs),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textSecondary,
+                        fontFeatures: [FontFeature.tabularFigures()]))),
+          ]),
+        const SizedBox(height: AppSpacing.xs),
+        // 速度：显式变速，变速清框重选
+        Row(children: [
+          const SizedBox(
+              width: 34,
+              child: Text('速度',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary))),
+          for (final v in const [0.75, 1.0, 1.25, 1.5])
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.xs),
+              child: InkWell(
+                key: ValueKey('shot-speed-$i-$v'),
+                onTap: () => onShotSpeed(i, v),
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: shot.speed == v
+                        ? AppColors.accentBlue.withValues(alpha: 0.16)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: shot.speed == v
+                            ? AppColors.accentBlue
+                            : AppColors.border),
+                  ),
+                  child: Text('${v}x',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          fontWeight: shot.speed == v
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                          color: shot.speed == v
+                              ? AppColors.accentBlueLight
+                              : AppColors.textSecondary)),
+                ),
+              ),
+            ),
+          const Spacer(),
+          Text('变速后重新框选',
+              style: TextStyle(
+                  fontSize: AppFontSize.micro,
+                  color: AppColors.textTertiary.withValues(alpha: 0.8))),
+        ]),
+      ]),
+    );
+  }
+
+  Widget _shotCard(int i, LineShot shot) {
+    final expanded = expandedShot == i;
+    final status = shotStatus(shot.materialId);
+    return InkWell(
+      key: ValueKey('inspector-shot-$i'),
+      onTap: () => onExpandShot(expanded ? null : i),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Container(
         width: 64,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppRadius.sm),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(
+              color: expanded ? AppColors.accentBlue : AppColors.border,
+              width: expanded ? 1.5 : 1),
           color: AppColors.surfaceRaised,
         ),
         clipBehavior: Clip.antiAlias,
@@ -218,19 +454,55 @@ class LineInspector extends StatelessWidget {
                   ),
                 ),
               ),
+              // 下载状态：素材固定到本地才有得播；失败点角标重试
+              if (status == PickedMediaStatus.downloading)
+                const Positioned(
+                  left: 3,
+                  bottom: 3,
+                  child: SizedBox(
+                      width: 9,
+                      height: 9,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.2, color: Colors.white)),
+                )
+              else if (status == PickedMediaStatus.failed)
+                Positioned(
+                  left: 1,
+                  bottom: 1,
+                  child: InkWell(
+                    key: ValueKey('inspector-shot-retry-$i'),
+                    onTap: () => onRetryDownload(shot.materialId),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                          color: AppColors.red.withValues(alpha: 0.85),
+                          borderRadius: BorderRadius.circular(3)),
+                      child: const Icon(Icons.refresh,
+                          size: 10, color: Colors.white),
+                    ),
+                  ),
+                ),
             ]),
           ),
           Padding(
             padding: const EdgeInsets.all(3),
             child: Text(
-                shot.durationMs == null
-                    ? '时长未知'
-                    : '${(shot.durationMs! / 1000).toStringAsFixed(1)}s',
-                style: const TextStyle(
-                    fontSize: 9, color: AppColors.textTertiary)),
+                shot.allocMs != null
+                    ? '${(shot.allocMs! / 1000).toStringAsFixed(1)}s'
+                    : (shot.durationMs == null
+                        ? '时长未知'
+                        : '${(shot.durationMs! / 1000).toStringAsFixed(1)}s'),
+                style: TextStyle(
+                    fontSize: 9,
+                    color: shot.allocMs != null
+                        ? AppColors.textSecondary
+                        : AppColors.textTertiary,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
           ),
         ]),
-      );
+      ),
+    );
+  }
 
   // ---- 配音节 ----
 

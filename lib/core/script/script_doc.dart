@@ -117,6 +117,17 @@ class LineShot {
   final String? fileKey;
   final int? durationMs;
 
+  /// 从素材的哪一刻开始截（框选起点，素材内坐标毫秒）
+  final int trimStartMs;
+
+  /// 显式变速（1.0 = 原速）。变速改的是「可用量」：素材 6s 在 1.5x 下
+  /// 只够出 4s 画面（见 availableMs）
+  final double speed;
+
+  /// 分到的**成片播放时长**（毫秒）。null = 还没分配。
+  /// 行内所有镜头的 allocMs 之和 = 行时长（总长锁死）
+  final int? allocMs;
+
   const LineShot({
     required this.materialId,
     required this.name,
@@ -125,7 +136,39 @@ class LineShot {
     this.thumbnailUrl,
     this.fileKey,
     this.durationMs,
+    this.trimStartMs = 0,
+    this.speed = 1.0,
+    this.allocMs,
   });
+
+  /// 从 [trimStartMs] 起、按 [speed] 播，这条素材最多还能出多少**成片时长**。
+  /// 素材时长未知时给一个「足够大」——探测失败不该把镜头卡死
+  int get availableMs => durationMs == null
+      ? 1 << 30
+      : ((durationMs! - trimStartMs) / speed).floor().clamp(0, 1 << 30);
+
+  /// 这一镜按当前分配要消耗素材多长（素材内坐标）
+  int get consumedSourceMs => ((allocMs ?? 0) * speed).round();
+
+  LineShot copyWith({
+    int? trimStartMs,
+    double? speed,
+    Object? allocMs = _unsetAlloc,
+  }) =>
+      LineShot(
+        materialId: materialId,
+        name: name,
+        voiceover: voiceover,
+        sceneDescription: sceneDescription,
+        thumbnailUrl: thumbnailUrl,
+        fileKey: fileKey,
+        durationMs: durationMs,
+        trimStartMs: trimStartMs ?? this.trimStartMs,
+        speed: speed ?? this.speed,
+        allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
+      );
+
+  static const _unsetAlloc = Object();
 
   /// 卡片上显示什么：台词 → 画面描述 → 素材名
   String get label => voiceover.isNotEmpty
@@ -140,6 +183,9 @@ class LineShot {
         if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl,
         if (fileKey != null) 'fileKey': fileKey,
         if (durationMs != null) 'durationMs': durationMs,
+        if (trimStartMs != 0) 'trimStartMs': trimStartMs,
+        if (speed != 1.0) 'speed': speed,
+        if (allocMs != null) 'allocMs': allocMs,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -157,6 +203,10 @@ class LineShot {
           raw['thumbnailUrl'] is String ? raw['thumbnailUrl'] as String : null,
       fileKey: raw['fileKey'] is String ? raw['fileKey'] as String : null,
       durationMs: raw['durationMs'] is int ? raw['durationMs'] as int : null,
+      trimStartMs:
+          raw['trimStartMs'] is int ? raw['trimStartMs'] as int : 0,
+      speed: raw['speed'] is num ? (raw['speed'] as num).toDouble() : 1.0,
+      allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
     );
   }
 }
