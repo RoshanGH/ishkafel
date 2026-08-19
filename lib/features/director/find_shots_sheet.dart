@@ -87,6 +87,9 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   bool _byTags = true;
   bool _tagging = false;
 
+  /// 正在按哪条素材找相似（以图搜图）；null = 不在相似模式
+  String? _similarToName;
+
   /// 已选镜头（保持加入顺序；预填本行已有的）
   late final List<LineShot> _picked = [...widget.line.shots];
 
@@ -151,6 +154,20 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       if (_keyword.text.trim().isEmpty) return;
       await _search.searchByDescription(_keyword.text);
     }
+  }
+
+  /// 以图搜图：拿一条候选的首帧找同款（设计稿的第三种检索）
+  Future<void> _searchSimilar(CandidateEntry entry) async {
+    final fileKey = entry.material.fileKey;
+    if (fileKey == null || fileKey.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('这条素材没有可用的查询帧，搜不了相似。')));
+      return;
+    }
+    final m = entry.material;
+    setState(() => _similarToName =
+        m.voiceover.isNotEmpty ? m.voiceover : m.name);
+    await _search.searchByImage(fileKey);
   }
 
   /// 自动打标：AI 从任务标签组的词表里给这行台词挑标签
@@ -250,6 +267,38 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         }),
         const SizedBox(width: AppSpacing.xs),
         _modePill('按画面描述', !_byTags, () => setState(() => _byTags = false)),
+        if (_similarToName != null) ...[
+          const SizedBox(width: AppSpacing.sm),
+          Flexible(
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.accentBlue.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Flexible(
+                  child: Text('相似于：$_similarToName',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.accentBlueLight)),
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () {
+                    setState(() => _similarToName = null);
+                    _runSearch();
+                  },
+                  child: const Icon(Icons.close,
+                      size: 11, color: AppColors.accentBlueLight),
+                ),
+              ]),
+            ),
+          ),
+        ],
         const Spacer(),
         if (_byTags && widget.tagger != null)
           TextButton.icon(
@@ -466,6 +515,25 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                   child: _badge('第 ${usedByLine + 1} 行在用',
                       AppColors.orange.withValues(alpha: 0.85), Colors.black),
                 ),
+              Positioned(
+                left: 4,
+                bottom: 4,
+                child: Tooltip(
+                  message: '找相似画面',
+                  child: InkWell(
+                    key: ValueKey('shot-similar-${m.id}'),
+                    onTap: () => _searchSimilar(entry),
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(4)),
+                      child: const Icon(Icons.image_search,
+                          size: 12, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
               if (picked)
                 Positioned(
                   right: 4,

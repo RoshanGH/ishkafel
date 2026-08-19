@@ -132,6 +132,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 配乐固定：选中即下到本地（与工作台同一份 bgm_cache）
   PickedMediaCache? _bgmCache;
 
+  /// 批量自动打标进度（提取脚本后跑）：(已完成, 总数)；null = 没在跑
+  (int, int)? _batchTagging;
+
   @override
   void initState() {
     super.initState();
@@ -712,12 +715,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       });
       if (!mounted) return;
       setState(() {
-        _doc = ScriptDoc(lines);
+        _doc = ScriptDoc(lines,
+            subtitle: _doc.subtitle, bgm: _doc.bgm, bgmVolume: _doc.bgmVolume);
         _selected = 0;
         _extract = null;
         _guideDismissed = true;
       });
       _flushNow();
+      unawaited(_offerBatchTagging());
     } on ScriptTranscribeException catch (e) {
       AppLog.warn('脚本提取失败（$path）：${e.cause ?? e.message}');
       if (mounted) setState(() => _extract = _ExtractFailed(e.message));
@@ -728,6 +733,62 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             _extract = const _ExtractFailed('提取失败，请稍后重试。'));
       }
     }
+  }
+
+  /// 提取完成后追问：要不要给全部台词自动打标（复刻链路的「两层自动
+  /// 打标」的行级版）。打标要花 AI 调用，必须显式确认，不许静默扣钱
+  Future<void> _offerBatchTagging() async {
+    final tagger = ref.read(lineTaggerProvider);
+    if (tagger == null || _task.unitTagGroups.isEmpty || !mounted) return;
+    final voiced = [
+      for (final l in _doc.lines)
+        if (l.type == ScriptLineType.voiced) l,
+    ];
+    if (voiced.isEmpty) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('顺手给台词打上标签？'),
+        content: Text('共 ${voiced.length} 句。标签来自任务选定的标签组，'
+            '找镜头时会自动按它检索（约 ${voiced.length} 次 AI 调用）。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('先不用')),
+          FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('打标')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    setState(() => _batchTagging = (0, voiced.length));
+    var failed = 0;
+    for (var i = 0; i < voiced.length; i++) {
+      if (!mounted) return;
+      try {
+        final tags = await tagger.tag(
+          text: voiced[i].text,
+          groups: _task.unitTagGroups,
+          constraint: _task.unitTagPrompt,
+        );
+        if (!mounted) return;
+        if (tags.isNotEmpty) {
+          _mutate((d) => d.setTagsById(voiced[i].id, tags));
+        }
+      } catch (e) {
+        failed++;
+        AppLog.warn('批量打标失败（第 ${i + 1} 句）：$e');
+      }
+      if (mounted) setState(() => _batchTagging = (i + 1, voiced.length));
+    }
+    if (!mounted) return;
+    setState(() => _batchTagging = null);
+    _flushNow();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(failed == 0
+            ? '打标完成：${voiced.length} 句台词的标签已挂上'
+            : '打标完成，但有 $failed 句失败（可在找镜头面板里单独重打）')));
   }
 
   @override
@@ -751,6 +812,24 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               color: AppColors.surface,
               child: Column(children: [
                 if (_extract != null) _extractBanner(),
+                if (_batchTagging case (final done, final total))
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 0),
+                    child: Row(children: [
+                      const SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              color: AppColors.accentBlue)),
+                      const SizedBox(width: AppSpacing.sm),
+                      Text('正在给台词打标（$done/$total）',
+                          style: const TextStyle(
+                              fontSize: AppFontSize.caption,
+                              color: AppColors.textSecondary)),
+                    ]),
+                  ),
                 Expanded(
                   child: IgnorePointer(
                     ignoring: extracting,
