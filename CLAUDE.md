@@ -48,6 +48,7 @@
 
 - **每次代码改动落地后（任务波/里程碑收尾时），必须重新构建并启动 app**，让用户能立即看到效果；不允许只报告"测试通过"就结束
 - **留给用户的必须是正式构建**：调试构建（`flutter build macos --debug` / `flutter run`）不带云端 AI 凭据和内置 CLI，用户接手会看到"未配置/未包含"的降级提示并以为软件坏了（真机发生过两次）。验证结束后必须退出调试版并启动 Release 产物（通常直接 `./scripts/pack.sh` 打新版号正式包），绝不把调试版留在前台
+- **构建一律走脚本，绝不裸跑 `flutter build`**：云端 AI 凭据只在编译期由 `scripts/build_macos.sh` 从 `.secrets/` 注入，裸 `flutter build macos --release` 出来的产物照样没有 key、照样弹「尚未配置 AI 服务」（真机发生过第三次）。给用户启动的 app 只能来自 `./scripts/build_macos.sh --release`（不动版本号）或 `./scripts/pack.sh`（发新版号）；裸 flutter 命令只许用于 analyze / test
 - macOS 调试运行若出现 `Failed to foreground app`，需主动用 `open build/macos/Build/Products/Debug/ishkafel.app` 或 AppleScript activate 把窗口带到前台并核实可见
 
 ## 语言
