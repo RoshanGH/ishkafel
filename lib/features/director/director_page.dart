@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -25,6 +26,7 @@ import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/multitrack_playback.dart';
 import '../../core/playback/playback_controller.dart';
 import '../../core/playback/track_plan.dart';
+import '../../core/script/script_export.dart';
 import '../../core/script/script_track_plan.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/script/speed_clip_renderer.dart';
@@ -240,6 +242,87 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       await playback.pause();
     } else {
       await playback.play();
+    }
+  }
+
+  // ---- 导出 ----
+
+  bool _exporting = false;
+  final ValueNotifier<ScriptExportProgress?> _exportProgress =
+      ValueNotifier(null);
+
+  Future<void> _exportScript() async {
+    final cache = _mediaCache;
+    final dataDir = ref.read(dataDirProvider);
+    if (cache == null || dataDir == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('当前环境没有素材下载器，无法导出。')));
+      return;
+    }
+    _flushNow();
+    setState(() => _exporting = true);
+    _exportProgress.value = const ScriptExportProgress('准备中', 0);
+    // 模态进度：导出中不许再改内容，改了也不会进这一版成片
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ExportProgressDialog(progress: _exportProgress),
+    ));
+    final runner = ScriptExportRunner(
+      workDir: Directory(p.join(dataDir.path, 'script_export', _task.id)),
+      localPathOf: cache.localPathOf,
+      run: const ResolvingProcessRunner().call,
+    );
+    final stamp = DateTime.now();
+    final outDir = p.join(Platform.environment['HOME'] ?? '.', 'Desktop',
+        'ishkafel-脚本成片');
+    final name = '#${_task.seq ?? ''}_'
+        '${stamp.month.toString().padLeft(2, '0')}'
+        '${stamp.day.toString().padLeft(2, '0')}_'
+        '${stamp.hour.toString().padLeft(2, '0')}'
+        '${stamp.minute.toString().padLeft(2, '0')}.mp4';
+    try {
+      final out = await runner.export(
+        doc: _doc,
+        outPath: p.join(outDir, name),
+        onProgress: (progress) => _exportProgress.value = progress,
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('成片已导出：$out'),
+        duration: const Duration(seconds: 6),
+        action: SnackBarAction(
+          label: '在访达中显示',
+          onPressed: () => Process.run('open', ['-R', out]),
+        ),
+      ));
+    } on ScriptExportException catch (e) {
+      AppLog.warn('脚本导出被拦/失败：${e.message} ${e.cause ?? ''}');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('没能导出'),
+            content: Text(e.message),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('知道了')),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      AppLog.warn('脚本导出失败：$e');
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('导出失败，请稍后重试。')));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
@@ -756,6 +839,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   color: AppColors.textTertiary)),
           const SizedBox(width: AppSpacing.sm),
           _extractButton(),
+          const SizedBox(width: AppSpacing.sm),
+          FilledButton.icon(
+            key: const ValueKey('director-export'),
+            onPressed: _exporting ? null : _exportScript,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accentBlue,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: 6),
+              textStyle: const TextStyle(
+                  fontSize: AppFontSize.body, fontWeight: FontWeight.w600),
+            ),
+            icon: const Icon(Icons.ios_share, size: 14),
+            label: Text(_exporting ? '导出中…' : '导出成片'),
+          ),
           const SizedBox(width: AppSpacing.xs),
         ]),
       );
@@ -967,6 +1064,37 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   onPressed: _forceTakeover, child: const Text('强制接管')),
             ]),
           ]),
+        ),
+      );
+}
+
+/// 导出进度对话框：一段一报，不许点掉——导出中改内容不会进这一版成片
+class _ExportProgressDialog extends StatelessWidget {
+  final ValueListenable<ScriptExportProgress?> progress;
+
+  const _ExportProgressDialog({required this.progress});
+
+  @override
+  Widget build(BuildContext context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          title: const Text('正在导出成片'),
+          content: ValueListenableBuilder<ScriptExportProgress?>(
+            valueListenable: progress,
+            builder: (_, value, _) =>
+                Column(mainAxisSize: MainAxisSize.min, children: [
+              LinearProgressIndicator(
+                  value: value?.fraction, color: AppColors.accentBlue),
+              const SizedBox(height: AppSpacing.md),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(value?.step ?? '准备中',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.body,
+                        color: AppColors.textSecondary)),
+              ),
+            ]),
+          ),
         ),
       );
 }
