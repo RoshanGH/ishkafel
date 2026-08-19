@@ -21,6 +21,7 @@ import '../core/analysis/audio_extractor.dart';
 import '../core/audio/vocal_separator.dart';
 import '../core/log/app_log.dart';
 import '../core/miaoa/miaoa_tag_service.dart';
+import '../core/script/line_tagger.dart';
 import '../core/script/script_transcriber.dart';
 import '../core/storage/file_task_repository.dart';
 import '../core/analysis/tag_vocabulary.dart';
@@ -45,6 +46,16 @@ ScriptTranscriber? buildScriptTranscriber(
       accessToken: credentials.speechAccessToken,
     ),
     workDir: Directory(p.join(dataDir.path, 'analysis_work')),
+  );
+}
+
+/// 编导台「自动打标」的装配：U 层打标员 + miaoa 词表。
+/// 方舟凭据缺失时返回 null，界面禁用并说明原因
+LineTagger? buildLineTagger(AiCredentials credentials) {
+  if (credentials.arkApiKey.isEmpty) return null;
+  return LineTagger(
+    tagger: UnitTagger(chat: ArkChatClient(apiKey: credentials.arkApiKey)),
+    vocabulary: MiaoaTagVocabularySource(MiaoaTagService()),
   );
 }
 

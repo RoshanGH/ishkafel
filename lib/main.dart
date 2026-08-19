@@ -100,6 +100,8 @@ Future<void> main(List<String> args) async {
       // 编导台「生成配音」：同上，语音凭据齐了才有
       lineVoiceFactoryProvider
           .overrideWithValue(defaultLineVoiceFactory(credentials, dataDir)),
+      // 编导台「自动打标」：方舟凭据齐了才有
+      lineTaggerProvider.overrideWithValue(buildLineTagger(credentials)),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里

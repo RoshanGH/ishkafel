@@ -18,6 +18,7 @@ import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_list_controller.dart';
 import 'director_providers.dart';
+import 'find_shots_sheet.dart';
 import 'line_inspector.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
@@ -210,6 +211,33 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
   }
 
+  // ---- 找镜头 ----
+
+  /// 打开找镜头面板；确认后整组落回行上（按行 id，面板期间行可能被移动）
+  Future<void> _findShots() async {
+    final line = _doc.lines[_selected];
+    // 防撞车：同任务其他行已用的素材要在面板里标出来
+    final usedBy = <int, int>{};
+    for (var i = 0; i < _doc.lines.length; i++) {
+      for (final shot in _doc.lines[i].shots) {
+        usedBy.putIfAbsent(shot.materialId, () => i);
+      }
+    }
+    final picked = await showFindShotsSheet(
+      context,
+      services: ref.read(shotSearchServicesProvider),
+      tagger: ref.read(lineTaggerProvider),
+      task: _task,
+      lineIndex: _selected,
+      line: line,
+      usedBy: usedBy,
+    );
+    if (picked == null) return;
+    _mutate((d) =>
+        d.setShotsById(line.id, picked.shots).setTagsById(line.id, picked.tags));
+    _flushNow();
+  }
+
   Future<void> _togglePlayVoice() async {
     final line = _doc.lines[_selected];
     final vo = line.voiceover;
@@ -396,6 +424,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                           _mutate((d) => d.setSpeechRate(_selected, rate)),
                       onGenerate: _generateVoice,
                       onTogglePlay: _togglePlayVoice,
+                      onFindShots: _findShots,
+                      onRemoveShot: (i) {
+                        final line = _doc.lines[_selected];
+                        final next = [...line.shots]..removeAt(i);
+                        _mutate((d) => d.setShotsById(line.id, next));
+                      },
+                      onRemoveTag: (tag) {
+                        final line = _doc.lines[_selected];
+                        final next =
+                            line.tags.where((t) => t != tag).toList();
+                        _mutate((d) => d.setTagsById(line.id, next));
+                      },
                     )
                   : const SizedBox.shrink(),
             ),

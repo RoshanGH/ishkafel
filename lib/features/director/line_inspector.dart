@@ -28,6 +28,9 @@ class LineInspector extends StatelessWidget {
   final ValueChanged<int> onSpeechRateChanged;
   final VoidCallback onGenerate;
   final VoidCallback onTogglePlay;
+  final VoidCallback onFindShots;
+  final ValueChanged<int> onRemoveShot;
+  final ValueChanged<String> onRemoveTag;
 
   const LineInspector({
     super.key,
@@ -41,6 +44,9 @@ class LineInspector extends StatelessWidget {
     required this.onSpeechRateChanged,
     required this.onGenerate,
     required this.onTogglePlay,
+    required this.onFindShots,
+    required this.onRemoveShot,
+    required this.onRemoveTag,
   });
 
   @override
@@ -78,13 +84,153 @@ class LineInspector extends StatelessWidget {
           _voiceSection(),
           const SizedBox(height: AppSpacing.xl),
         ],
-        _sectionTitle('镜头'),
-        const SizedBox(height: AppSpacing.sm),
-        _upcomingCard(Icons.grid_view_outlined, '找素材、排镜头位、分时长',
-            '后续版本在这里点亮'),
+        _shotsSection(),
       ],
     );
   }
+
+  // ---- 镜头节 ----
+
+  Widget _shotsSection() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          _sectionTitle('镜头'),
+          if (line.shots.isNotEmpty) ...[
+            const SizedBox(width: AppSpacing.xs),
+            Text('${line.shots.length} 个',
+                style: const TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.textTertiary)),
+          ],
+          const Spacer(),
+          TextButton.icon(
+            key: const ValueKey('inspector-find-shots'),
+            onPressed: onFindShots,
+            icon: const Icon(Icons.search, size: 13),
+            label: Text(line.shots.isEmpty ? '找镜头' : '增删镜头',
+                style: const TextStyle(fontSize: AppFontSize.caption)),
+          ),
+        ]),
+        if (line.tags.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Wrap(spacing: AppSpacing.xs, runSpacing: AppSpacing.xs, children: [
+            for (final tag in line.tags)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceRaised,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Text(tag,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.textSecondary)),
+                  const SizedBox(width: 3),
+                  InkWell(
+                    key: ValueKey('inspector-remove-tag-$tag'),
+                    onTap: () => onRemoveTag(tag),
+                    child: const Icon(Icons.close,
+                        size: 10, color: AppColors.textTertiary),
+                  ),
+                ]),
+              ),
+          ]),
+        ],
+        const SizedBox(height: AppSpacing.sm),
+        if (line.shots.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceRaised.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: const Text('还没有镜头。点「找镜头」从素材库挑几段画面',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textTertiary,
+                    height: 1.4)),
+          )
+        else
+          SizedBox(
+            height: 118,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: line.shots.length,
+              separatorBuilder: (_, _) =>
+                  const SizedBox(width: AppSpacing.sm),
+              itemBuilder: (context, i) => _shotCard(i, line.shots[i]),
+            ),
+          ),
+      ]);
+
+  Widget _shotCard(int i, LineShot shot) => Container(
+        width: 64,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: AppColors.border),
+          color: AppColors.surfaceRaised,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child:
+            Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(
+            child: Stack(fit: StackFit.expand, children: [
+              shot.thumbnailUrl == null
+                  ? Container(color: Colors.black)
+                  : Image.network(shot.thumbnailUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          Container(color: Colors.black)),
+              Positioned(
+                left: 3,
+                top: 3,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(3)),
+                  child: Text('${i + 1}',
+                      style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                ),
+              ),
+              Positioned(
+                right: 1,
+                top: 1,
+                child: InkWell(
+                  key: ValueKey('inspector-remove-shot-$i'),
+                  onTap: () => onRemoveShot(i),
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(3)),
+                    child: const Icon(Icons.close,
+                        size: 10, color: Colors.white),
+                  ),
+                ),
+              ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(3),
+            child: Text(
+                shot.durationMs == null
+                    ? '时长未知'
+                    : '${(shot.durationMs! / 1000).toStringAsFixed(1)}s',
+                style: const TextStyle(
+                    fontSize: 9, color: AppColors.textTertiary)),
+          ),
+        ]),
+      );
 
   // ---- 配音节 ----
 
@@ -249,35 +395,6 @@ class LineInspector extends StatelessWidget {
           fontSize: AppFontSize.caption,
           fontWeight: FontWeight.w600,
           color: AppColors.textSecondary));
-
-  /// 尚未点亮的分节：一张低调的占位卡，说明「这里将来是什么、什么时候来」
-  Widget _upcomingCard(IconData icon, String what, String when) => Container(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        decoration: BoxDecoration(
-          color: AppColors.surfaceRaised.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Row(children: [
-          Icon(icon, size: 16, color: AppColors.textTertiary),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(what,
-                      style: const TextStyle(
-                          fontSize: AppFontSize.caption,
-                          color: AppColors.textSecondary)),
-                  const SizedBox(height: 2),
-                  Text(when,
-                      style: const TextStyle(
-                          fontSize: AppFontSize.micro,
-                          color: AppColors.textTertiary)),
-                ]),
-          ),
-        ]),
-      );
 
   /// 画面行的手填时长：手填即根；不填则跟随所选素材（设计稿问题③）
   Widget _manualMsField() {

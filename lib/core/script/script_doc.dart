@@ -103,6 +103,64 @@ class LineVoiceover {
   }
 }
 
+/// 一行里的一个镜头位：从 miaoa 挑中的一条分镜素材。
+///
+/// 存的是素材的**身份与元信息快照**（名字/台词/画面描述/缩略图），不存
+/// 签名地址的时效性内容——previewUrl 会过期，播放时按 id 重新解析或用
+/// 已下载的本地文件。时长来自候选面板的规格探测；探不出为 null（不用 0 冒充）。
+class LineShot {
+  final int materialId;
+  final String name;
+  final String voiceover;
+  final String sceneDescription;
+  final String? thumbnailUrl;
+  final String? fileKey;
+  final int? durationMs;
+
+  const LineShot({
+    required this.materialId,
+    required this.name,
+    this.voiceover = '',
+    this.sceneDescription = '',
+    this.thumbnailUrl,
+    this.fileKey,
+    this.durationMs,
+  });
+
+  /// 卡片上显示什么：台词 → 画面描述 → 素材名
+  String get label => voiceover.isNotEmpty
+      ? voiceover
+      : (sceneDescription.isNotEmpty ? sceneDescription : name);
+
+  Map<String, dynamic> toJson() => {
+        'materialId': materialId,
+        'name': name,
+        if (voiceover.isNotEmpty) 'voiceover': voiceover,
+        if (sceneDescription.isNotEmpty) 'sceneDescription': sceneDescription,
+        if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl,
+        if (fileKey != null) 'fileKey': fileKey,
+        if (durationMs != null) 'durationMs': durationMs,
+      };
+
+  static LineShot? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final id = raw['materialId'];
+    if (id is! int) return null;
+    return LineShot(
+      materialId: id,
+      name: raw['name'] is String ? raw['name'] as String : '未命名素材',
+      voiceover: raw['voiceover'] is String ? raw['voiceover'] as String : '',
+      sceneDescription: raw['sceneDescription'] is String
+          ? raw['sceneDescription'] as String
+          : '',
+      thumbnailUrl:
+          raw['thumbnailUrl'] is String ? raw['thumbnailUrl'] as String : null,
+      fileKey: raw['fileKey'] is String ? raw['fileKey'] as String : null,
+      durationMs: raw['durationMs'] is int ? raw['durationMs'] as int : null,
+    );
+  }
+}
+
 class ScriptLine {
   /// 稳定身份：重排、镜头组引用、配音产物归属都靠它——行的内容会变，
   /// 身份不变
@@ -126,6 +184,9 @@ class ScriptLine {
   /// 已生成的配音产物；null = 还没生成过
   final LineVoiceover? voiceover;
 
+  /// 这一行的镜头序列（挑中的 miaoa 分镜，按播放顺序排）
+  final List<LineShot> shots;
+
   ScriptLine({
     required this.id,
     required this.text,
@@ -134,7 +195,9 @@ class ScriptLine {
     this.voiceId,
     this.speechRate = 0,
     this.voiceover,
-  }) : tags = List.unmodifiable(tags);
+    List<LineShot> shots = const [],
+  })  : tags = List.unmodifiable(tags),
+        shots = List.unmodifiable(shots);
 
   static int _seq = 0;
 
@@ -167,6 +230,7 @@ class ScriptLine {
     Object? voiceId = _unset,
     int? speechRate,
     Object? voiceover = _unset,
+    List<LineShot>? shots,
   }) =>
       ScriptLine(
         id: id,
@@ -177,6 +241,7 @@ class ScriptLine {
         speechRate: speechRate ?? this.speechRate,
         voiceover:
             voiceover == _unset ? this.voiceover : voiceover as LineVoiceover?,
+        shots: shots ?? this.shots,
       );
 
   static const _unset = Object();
@@ -195,6 +260,8 @@ class ScriptLine {
   /// （生成成功后才删旧的，失败时旧配音还能听）
   ScriptLine withVoiceover(LineVoiceover? vo) => _copy(voiceover: vo);
 
+  ScriptLine withShots(List<LineShot> next) => _copy(shots: next);
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'text': text,
@@ -203,6 +270,7 @@ class ScriptLine {
         if (voiceId != null) 'voiceId': voiceId,
         if (speechRate != 0) 'speechRate': speechRate,
         if (voiceover != null) 'voiceover': voiceover!.toJson(),
+        if (shots.isNotEmpty) 'shots': [for (final s in shots) s.toJson()],
       };
 
   /// 宽松解析：一条坏行只丢它自己，不牵连整份脚本
@@ -223,6 +291,10 @@ class ScriptLine {
       voiceId: raw['voiceId'] is String ? raw['voiceId'] as String : null,
       speechRate: raw['speechRate'] is int ? raw['speechRate'] as int : 0,
       voiceover: LineVoiceover.tryFromJson(raw['voiceover']),
+      shots: [
+        if (raw['shots'] is List)
+          for (final s in raw['shots'] as List) ?LineShot.tryFromJson(s),
+      ],
     );
   }
 }
@@ -277,6 +349,18 @@ class ScriptDoc {
   ScriptDoc setVoiceoverById(String lineId, LineVoiceover vo) {
     final index = lines.indexWhere((l) => l.id == lineId);
     return _update(index, (line) => line.withVoiceover(vo));
+  }
+
+  /// 按行 id 换镜头序列（找镜头面板是异步弹层，同理不信下标）
+  ScriptDoc setShotsById(String lineId, List<LineShot> shots) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withShots(shots));
+  }
+
+  /// 按行 id 换标签
+  ScriptDoc setTagsById(String lineId, List<String> tags) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withTags(tags));
   }
 
   ScriptDoc _update(int index, ScriptLine Function(ScriptLine) f) {
