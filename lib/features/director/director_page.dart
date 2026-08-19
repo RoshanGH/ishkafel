@@ -18,6 +18,7 @@ import '../tasks/task_list_controller.dart';
 import 'director_providers.dart';
 import 'line_inspector.dart';
 import 'script_panel.dart';
+import 'start_guide.dart';
 
 /// 编导台——「脚本成片」的工作页（对仗审片台）。
 ///
@@ -221,6 +222,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   Widget build(BuildContext context) {
     if (_blockedBy != null) return _blockedView();
     final extracting = _extract is _ExtractRunning;
+    // 起步引导激活时右栏收敛：一边问「从哪里开始」、一边摆开行工作台，
+    // 两套话语打架（真机截图核对时发现）
+    final showGuide =
+        _scriptIsPristine && !_guideDismissed && _extract == null;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
@@ -272,9 +277,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                 width: 1, thickness: 1, color: AppColors.border),
             // 中：预览（M4 点亮）；空脚本时先当起步引导的舞台
             Expanded(
-              child: _scriptIsPristine && !_guideDismissed && _extract == null
-                  ? _startGuide()
-                  : _previewStage(),
+              child: showGuide ? _startGuide() : _previewStage(),
             ),
             const VerticalDivider(
                 width: 1, thickness: 1, color: AppColors.border),
@@ -282,7 +285,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             Container(
               width: 340,
               color: AppColors.surface,
-              child: (_selected >= 0 && _selected < _doc.lines.length)
+              child: (!showGuide &&
+                      _selected >= 0 &&
+                      _selected < _doc.lines.length)
                   ? LineInspector(
                       index: _selected,
                       line: _doc.lines[_selected],
@@ -433,153 +438,62 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     return const SizedBox.shrink();
   }
 
-  /// 空脚本的起步引导：回答「从哪里开始」，而不是摆三块空板子。
-  /// 两条路对应脚本的两个来源（设计稿问题①）
-  Widget _startGuide() {
-    final canExtract = ref.watch(scriptTranscriberProvider) != null;
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('这条片子，从哪里开始？',
-              style: TextStyle(
-                  fontSize: AppFontSize.title,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary)),
-          const SizedBox(height: AppSpacing.xs),
-          const Text('脚本是唯一的起点——配音、镜头、字幕都会从它长出来',
-              style: TextStyle(
-                  fontSize: AppFontSize.caption,
-                  color: AppColors.textTertiary)),
-          const SizedBox(height: AppSpacing.xl),
-          _guideCard(
-            key: const ValueKey('director-guide-extract'),
-            icon: Icons.movie_outlined,
-            title: '用一条成片提取脚本',
-            description: canExtract
-                ? '上传参考成片，自动识别台词并按语义分行，改几个字就能用'
-                : '需要先配置 AI 服务（语音识别与语义分行）',
-            accent: true,
-            enabled: canExtract,
-            onTap: _extractFromVideo,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _guideCard(
-            key: const ValueKey('director-guide-write'),
-            icon: Icons.edit_note,
-            title: '直接开始写',
-            description: '在左栏逐行写台词，回车新起一行；空行就是画面行',
-            accent: false,
-            enabled: true,
-            onTap: () => setState(() => _guideDismissed = true),
-          ),
-        ]),
-        ),
-      ),
-    );
-  }
-
-  Widget _guideCard({
-    required Key key,
-    required IconData icon,
-    required String title,
-    required String description,
-    required bool accent,
-    required bool enabled,
-    required VoidCallback onTap,
-  }) =>
-      InkWell(
-        key: key,
-        onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: AppColors.surfaceRaised,
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-                color: accent && enabled
-                    ? AppColors.accentBlue.withValues(alpha: 0.5)
-                    : AppColors.border),
-          ),
-          child: Row(children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: (accent && enabled
-                        ? AppColors.accentBlue
-                        : AppColors.textTertiary)
-                    .withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(AppRadius.md),
-              ),
-              child: Icon(icon,
-                  size: 18,
-                  color: accent && enabled
-                      ? AppColors.accentBlueLight
-                      : AppColors.textSecondary),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title,
-                    style: TextStyle(
-                        fontSize: AppFontSize.emphasis,
-                        fontWeight: FontWeight.w600,
-                        color: enabled
-                            ? AppColors.textPrimary
-                            : AppColors.textTertiary)),
-                const SizedBox(height: 3),
-                Text(description,
-                    style: const TextStyle(
-                        fontSize: AppFontSize.caption,
-                        color: AppColors.textSecondary,
-                        height: 1.4)),
-              ]),
-            ),
-            Icon(Icons.chevron_right,
-                size: 16,
-                color: enabled
-                    ? AppColors.textTertiary
-                    : AppColors.textTertiary.withValues(alpha: 0.4)),
-          ]),
-        ),
+  /// 空脚本的起步引导（见 start_guide.dart）
+  Widget _startGuide() => StartGuide(
+        canExtract: ref.watch(scriptTranscriberProvider) != null,
+        onExtract: _extractFromVideo,
+        onWrite: () => setState(() => _guideDismissed = true),
       );
 
-  /// 预览舞台：竖屏幕布居中。占位要说明自己是什么，不摆死界面
+  /// 预览舞台：竖屏幕布居中、限高——播放器窄而居中，不做顶天立地的黑洞。
+  /// 幕布下挂一条禁用态的时间码，先把「这里将来是播放器」这件事说清楚
   Widget _previewStage() => Container(
         color: AppColors.background,
-        padding: const EdgeInsets.all(AppSpacing.xl),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xl, vertical: AppSpacing.xxl),
         child: Center(
-          child: AspectRatio(
-            aspectRatio: 9 / 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: AppColors.stageBackground,
-                borderRadius: BorderRadius.circular(AppRadius.lg),
-                border: Border.all(color: AppColors.border),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Flexible(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 560),
+                child: AspectRatio(
+                  aspectRatio: 9 / 16,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.stageBackground,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.play_circle_outline,
+                              size: 28,
+                              color: AppColors.textTertiary
+                                  .withValues(alpha: 0.55)),
+                          const SizedBox(height: AppSpacing.sm),
+                          const Text('配音与镜头就绪后，在这里试片',
+                              style: TextStyle(
+                                  fontSize: AppFontSize.caption,
+                                  color: AppColors.textTertiary)),
+                        ]),
+                  ),
+                ),
               ),
-              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                Icon(Icons.play_circle_outline,
-                    size: 30,
-                    color: AppColors.textTertiary.withValues(alpha: 0.6)),
-                const SizedBox(height: AppSpacing.sm),
-                const Text('预览',
-                    style: TextStyle(
-                        fontSize: AppFontSize.body,
-                        color: AppColors.textSecondary)),
-                const SizedBox(height: 3),
-                const Text('配音与镜头就绪后，在这里试片',
-                    style: TextStyle(
-                        fontSize: AppFontSize.caption,
-                        color: AppColors.textTertiary)),
-              ]),
             ),
-          ),
+            const SizedBox(height: AppSpacing.md),
+            // 传输条骨架（禁用态）：预告播放器的形状，而不是又一句解释
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.play_arrow,
+                  size: 18, color: AppColors.textTertiary.withValues(alpha: 0.4)),
+              const SizedBox(width: AppSpacing.sm),
+              Text('00:00 / 00:00',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textTertiary.withValues(alpha: 0.5),
+                      fontFeatures: const [FontFeature.tabularFigures()])),
+            ]),
+          ]),
         ),
       );
 

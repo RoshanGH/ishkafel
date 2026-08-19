@@ -30,19 +30,20 @@ import '../core/analysis/tag_vocabulary.dart';
 /// **GUI 与 CLI 共用同一份**：两边各装一套的话，迟早会出现「app 里分析出来
 /// 是这样、命令行跑出来是那样」——而那种差异极难查。放在这里而不是
 /// `main.dart` 里，就是为了让 `bin/ishkafel.dart` 也够得着。
-/// 编导台「从视频提取脚本」的装配：抽音频 → ASR → 语义断句。
-/// 凭据不全时返回 null，界面把入口禁用并说明原因（不静默）。
+/// 编导台「从视频提取脚本」的装配：抽音频 → ASR，一句一行。
+/// 只依赖语音凭据；不全时返回 null，界面把入口禁用并说明原因（不静默）。
 ScriptTranscriber? buildScriptTranscriber(
     AiCredentials credentials, Directory dataDir) {
-  if (!credentials.isComplete) return null;
+  if (credentials.speechAppId.isEmpty ||
+      credentials.speechAccessToken.isEmpty) {
+    return null;
+  }
   return ScriptTranscriber(
     audio: AudioExtractor(),
     asr: VolcanoAsrProvider(
       appId: credentials.speechAppId,
       accessToken: credentials.speechAccessToken,
     ),
-    splitter: VolcanoSemanticSplitter(
-        chat: ArkChatClient(apiKey: credentials.arkApiKey)),
     workDir: Directory(p.join(dataDir.path, 'analysis_work')),
   );
 }

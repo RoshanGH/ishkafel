@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
-import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 import 'package:ishkafel/core/script/script_transcriber.dart';
@@ -38,14 +37,6 @@ class _FakeAsr implements AsrProvider {
   Future<List<AsrSentence>> transcribe(String pcmPath) async => sentences;
 }
 
-class _FakeSplitter implements SemanticSplitter {
-  @override
-  Future<List<UnitDraft>> split(List<AsrSentence> sentences) async => [
-        for (final s in sentences)
-          UnitDraft(startMs: s.startMs, endMs: s.endMs, transcript: s.text),
-      ];
-}
-
 /// 纯内存 stub：widget 测试跑在 fake-async 区，真实文件 IO 的 future
 /// 永远不会完成（pumpAndSettle 会挂死），所以 extract 整个换掉。
 /// 真实的抽音频→ASR→断句编排逻辑在 test/core/script/ 的普通单测里覆盖
@@ -56,7 +47,6 @@ class _StubTranscriber extends ScriptTranscriber {
       : super(
           audio: AudioExtractor(run: (_, _) async => ProcessResult(1, 0, '', '')),
           asr: _FakeAsr(const []),
-          splitter: _FakeSplitter(),
           workDir: Directory.systemTemp,
         );
 
@@ -127,11 +117,15 @@ void main() {
     await pumpDirector(tester, wrap(_MemoryRepo(), scriptTask()));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('从哪里开始'), findsOneWidget);
+    expect(find.textContaining('写下脚本'), findsOneWidget);
     expect(find.byKey(const ValueKey('director-guide-extract')), findsOneWidget);
     expect(find.byKey(const ValueKey('director-guide-write')), findsOneWidget);
     // 未配置 AI 服务时提取那条路禁用并说明原因，绝不是点了没反应
     expect(find.textContaining('需要先配置 AI 服务'), findsOneWidget);
+    expect(find.text('推荐'), findsNothing,
+        reason: '不可用的路径不该还挂着「推荐」');
+    expect(find.text('画面行'), findsNothing,
+        reason: '引导激活时右栏行工作台收敛，两套话语不打架');
   });
 
   testWidgets('点「直接开始写」后引导让位给预览舞台', (tester) async {
@@ -141,9 +135,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('director-guide-write')));
     await tester.pumpAndSettle();
 
-    expect(find.text('预览'), findsOneWidget);
     expect(find.textContaining('在这里试片'), findsOneWidget,
         reason: '占位不许是一块死区域，要说明这里将来是什么');
+    expect(find.text('00:00 / 00:00'), findsOneWidget,
+        reason: '传输条骨架预告播放器的形状');
   });
 
   testWidgets('非空脚本直接进写作台：三栏 + 顶栏身份与自动保存说明', (tester) async {
@@ -152,7 +147,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('脚本'), findsOneWidget);
-    expect(find.text('预览'), findsOneWidget);
+    expect(find.textContaining('在这里试片'), findsOneWidget);
     expect(find.text('#7'), findsOneWidget, reason: '顶栏要带短编号');
     expect(find.text('编导台'), findsOneWidget);
     expect(find.textContaining('自动保存'), findsOneWidget,
@@ -162,6 +157,9 @@ void main() {
 
   testWidgets('写字自动变配音行，右栏徽标跟着变', (tester) async {
     await pumpDirector(tester, wrap(_MemoryRepo(), scriptTask()));
+    await tester.pumpAndSettle();
+    // 空脚本先是引导态，选「直接写」进入写作台
+    await tester.tap(find.byKey(const ValueKey('director-guide-write')));
     await tester.pumpAndSettle();
 
     expect(find.text('画面行'), findsOneWidget);

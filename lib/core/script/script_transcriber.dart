@@ -4,14 +4,12 @@ import 'package:path/path.dart' as p;
 
 import '../analysis/audio_extractor.dart';
 import '../analysis/providers.dart';
-import '../analysis/segmentation_builder.dart';
 import 'script_doc.dart';
 
 /// 提取进行到哪一步了——界面拿它给用户交代（等待必须有交代）
 enum ScriptTranscribeStage {
   extractingAudio('正在读取视频音频'),
-  transcribing('正在识别台词'),
-  splitting('正在按语义分行');
+  transcribing('正在识别台词');
 
   final String label;
   const ScriptTranscribeStage(this.label);
@@ -26,18 +24,20 @@ class ScriptTranscribeException implements Exception {
   String toString() => message;
 }
 
-/// 「上传成片 → ASR → 语义断句 → 脚本行」。
+/// 「上传成片 → ASR → 脚本行」。
 ///
 /// 脚本的两个来源之一（另一个是手写）：编导手里往往已经有一条参考成片，
-/// 台词照着念一遍 ASR 就有了，没必要逐句敲。断句复用成片翻新分析里同一个
-/// 语义切分（一段一个完整意思），出来的每个单元就是一行台词。
+/// 台词照着念一遍 ASR 就有了，没必要逐句敲。
+///
+/// **一句一行**：脚本行的粒度是「一句可配音的话」，直接取 ASR 按停顿切出
+/// 的句子。不复用成片翻新的语义单元切分——那是段落级（一个卖点一段），
+/// 拿来当脚本行会切出半篇文章长的行（真机验证撞到过）。
 ///
 /// 只产出**文本行**，不带时间戳进脚本——脚本成片里行的时长由配音定
 /// （「配音时长是根」），参考片的原始时间轴在这里没有意义。
 class ScriptTranscriber {
   final AudioExtractor audio;
   final AsrProvider asr;
-  final SemanticSplitter splitter;
 
   /// PCM 中间产物的落脚处（用完即删，不留孤儿数据）
   final Directory workDir;
@@ -45,7 +45,6 @@ class ScriptTranscriber {
   ScriptTranscriber({
     required this.audio,
     required this.asr,
-    required this.splitter,
     required this.workDir,
   });
 
@@ -82,32 +81,15 @@ class ScriptTranscriber {
             '台词识别失败（语音服务不可用或网络异常），请稍后重试。',
             cause: e);
       }
-      if (sentences.every((s) => s.text.trim().isEmpty)) {
+      final lines = [
+        for (final s in sentences)
+          if (s.text.trim().isNotEmpty) ScriptLine.create(text: s.text.trim()),
+      ];
+      if (lines.isEmpty) {
         throw const ScriptTranscribeException(
             '这条视频里没有识别到任何台词——请确认它有人声口播。');
       }
-
-      onStage?.call(ScriptTranscribeStage.splitting);
-      List<UnitDraft> drafts;
-      try {
-        drafts = await splitter.split(sentences);
-      } catch (e) {
-        throw ScriptTranscribeException(
-            '语义分行失败（AI 服务不可用或网络异常），请稍后重试。', cause: e);
-      }
-      // 断句结果不可靠时退回「一句一行」：宁可行多让人合并，不能空手而归
-      if (drafts.isEmpty) {
-        drafts = [
-          for (final s in sentences)
-            if (s.text.trim().isNotEmpty)
-              UnitDraft(startMs: s.startMs, endMs: s.endMs, transcript: s.text),
-        ];
-      }
-      return [
-        for (final d in drafts)
-          if (d.transcript.trim().isNotEmpty)
-            ScriptLine.create(text: d.transcript.trim()),
-      ];
+      return lines;
     } finally {
       // 中间产物用完即弃（几分钟的 PCM 有几十 MB）
       try {

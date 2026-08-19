@@ -50,23 +50,53 @@ class LineInspector extends StatelessWidget {
           _sectionTitle('时长'),
           const SizedBox(height: AppSpacing.sm),
           _manualMsField(),
-          const SizedBox(height: AppSpacing.lg),
+          const SizedBox(height: AppSpacing.xl),
         ],
-        const Divider(height: 1, color: AppColors.border),
-        const SizedBox(height: AppSpacing.lg),
-        // 未来的分节要预告，不留一片让人疑惑的空白
-        Text(
-            voiced
-                ? '配音（选音色、生成试听）与镜头（找素材、排镜头位）'
-                    '将在后续版本出现在这里'
-                : '镜头（找素材）与配乐将在后续版本出现在这里',
-            style: const TextStyle(
-                color: AppColors.textTertiary,
-                fontSize: AppFontSize.caption,
-                height: 1.5)),
+        // 未来的分节按最终形态占位：让右栏此刻就有「工作台」的骨架，
+        // 而不是一句孤零零的解释加一片空白
+        if (voiced) ...[
+          _sectionTitle('配音'),
+          const SizedBox(height: AppSpacing.sm),
+          _upcomingCard(Icons.graphic_eq, '选音色、生成配音、试听',
+              '下个版本在这里点亮'),
+          const SizedBox(height: AppSpacing.xl),
+        ],
+        _sectionTitle('镜头'),
+        const SizedBox(height: AppSpacing.sm),
+        _upcomingCard(Icons.grid_view_outlined, '找素材、排镜头位、分时长',
+            '后续版本在这里点亮'),
       ],
     );
   }
+
+  /// 尚未点亮的分节：一张低调的占位卡，说明「这里将来是什么、什么时候来」
+  Widget _upcomingCard(IconData icon, String what, String when) => Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceRaised.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 16, color: AppColors.textTertiary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(what,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.caption,
+                          color: AppColors.textSecondary)),
+                  const SizedBox(height: 2),
+                  Text(when,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.textTertiary)),
+                ]),
+          ),
+        ]),
+      );
 
   Widget _typeBadge(bool voiced) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
