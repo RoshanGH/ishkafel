@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/audio/audio_preview.dart';
+import '../../core/audio/tts_client.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/script_doc.dart';
@@ -19,6 +21,7 @@ import 'director_providers.dart';
 import 'line_inspector.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
+import 'voice_select_dialog.dart';
 
 /// 编导台——「脚本成片」的工作页（对仗审片台）。
 ///
@@ -66,6 +69,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 用户在空脚本上点了「直接开始写」：起步引导让位给预览
   bool _guideDismissed = false;
+
+  /// 正在生成配音的行 id（生成是异步的，期间行可能被移动，下标不可靠）
+  final Set<String> _generatingLineIds = {};
+
+  /// 正在试听配音的行 id；试听播放器整页共用一个
+  String? _playingLineId;
+  final AudioPreview _voicePreview = AudioPreview();
 
   /// initState 里取好：dispose 阶段还要落一次盘，那时不能再碰 ref
   late final TaskRepository _repo;
@@ -133,7 +143,90 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _flushNow();
     _lockHeartbeat?.cancel();
     _lock?.release(_holder);
+    unawaited(_voicePreview.dispose());
     super.dispose();
+  }
+
+  // ---- 配音 ----
+
+  /// 给当前行挑音色。选完只是记下——生成才花钱
+  Future<void> _pickVoice() async {
+    final line = _doc.lines[_selected];
+    // 预填：本行已选的，其次全文档最近一次用过的（连着几行同一个声音是常态）
+    final fallback = _doc.lines
+        .lastWhere((l) => l.voiceId != null, orElse: () => line)
+        .voiceId;
+    final picked = await showVoiceSelectDialog(context,
+        selected: line.voiceId ?? fallback);
+    if (picked == null) return;
+    _mutate((d) => d.setVoiceId(_selected, picked));
+  }
+
+  /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
+  Future<void> _generateVoice() async {
+    final factory = ref.read(lineVoiceFactoryProvider);
+    if (factory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务（语音合成），无法生成配音。')));
+      return;
+    }
+    var line = _doc.lines[_selected];
+    if (line.voiceId == null) {
+      // 还没选音色：先弹选择器，选完直接接着生成——别让用户点两遍
+      await _pickVoice();
+      line = _doc.lines[_selected];
+      if (line.voiceId == null) return;
+    }
+    final lineId = line.id;
+    final old = line.voiceover;
+    setState(() => _generatingLineIds.add(lineId));
+    try {
+      final service = factory(_task);
+      final vo = await service.generate(
+        lineId: lineId,
+        text: line.text,
+        voiceId: line.voiceId!,
+        speechRate: line.speechRate,
+      );
+      if (!mounted) return;
+      _mutate((d) => d.setVoiceoverById(lineId, vo));
+      _flushNow();
+      // 新的落稳了才删旧的——失败时旧配音还能听
+      if (old != null) service.deleteStale(old);
+    } on TtsException catch (e) {
+      AppLog.warn('配音生成失败（line=$lineId）：${e.message}');
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('配音生成失败：${e.message}')));
+      }
+    } catch (e) {
+      AppLog.warn('配音生成失败（line=$lineId）：$e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('配音生成失败，请稍后重试。')));
+      }
+    } finally {
+      if (mounted) setState(() => _generatingLineIds.remove(lineId));
+    }
+  }
+
+  Future<void> _togglePlayVoice() async {
+    final line = _doc.lines[_selected];
+    final vo = line.voiceover;
+    if (vo == null) return;
+    if (_playingLineId == line.id) {
+      setState(() => _playingLineId = null);
+      await _voicePreview.stop();
+      return;
+    }
+    setState(() => _playingLineId = line.id);
+    await _voicePreview.play(vo.audioPath);
+    // 简单起见按时长收尾：播完把按钮复位（期间切行/重播由上面的分支处理）
+    Future.delayed(Duration(milliseconds: vo.durationMs + 200), () {
+      if (mounted && _playingLineId == line.id) {
+        setState(() => _playingLineId = null);
+      }
+    });
   }
 
   /// 改动随手落库（800ms 防抖）——写作软件没有「保存」这回事
@@ -293,6 +386,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       line: _doc.lines[_selected],
                       onManualMsChanged: (ms) =>
                           _mutate((d) => d.setManualMs(_selected, ms)),
+                      voiceAvailable:
+                          ref.watch(lineVoiceFactoryProvider) != null,
+                      generating: _generatingLineIds
+                          .contains(_doc.lines[_selected].id),
+                      playing: _playingLineId == _doc.lines[_selected].id,
+                      onPickVoice: _pickVoice,
+                      onSpeechRateChanged: (rate) =>
+                          _mutate((d) => d.setSpeechRate(_selected, rate)),
+                      onGenerate: _generateVoice,
+                      onTogglePlay: _togglePlayVoice,
                     )
                   : const SizedBox.shrink(),
             ),

@@ -214,20 +214,35 @@ class _LineRowState extends State<_LineRow> {
                 ),
               ),
             ),
-            // 状态点：配音行实心、画面行空心。配音状态（草稿/已生成/已过期）
-            // 在 M2 点亮成三色
+            // 状态点：画面行空心；配音行按配音状态着色——
+            // 灰 = 还没生成，绿 = 配音是最新的，橙 = 台词改了配音还是旧的
             Padding(
               padding: const EdgeInsets.only(top: 15),
-              child: Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: visual ? Colors.transparent : AppColors.textSecondary,
-                  border: Border.all(
-                      color: visual
-                          ? AppColors.textTertiary
-                          : AppColors.textSecondary),
+              child: Tooltip(
+                message: visual
+                    ? '画面行'
+                    : switch (widget.line.voiceState) {
+                        LineVoiceState.none => '还没生成配音',
+                        LineVoiceState.fresh => '配音已生成',
+                        LineVoiceState.stale => '内容已改，配音是旧的',
+                      },
+                child: Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: visual
+                        ? Colors.transparent
+                        : switch (widget.line.voiceState) {
+                            LineVoiceState.none => AppColors.textSecondary,
+                            LineVoiceState.fresh => AppColors.green,
+                            LineVoiceState.stale => AppColors.orange,
+                          },
+                    border: Border.all(
+                        color: visual
+                            ? AppColors.textTertiary
+                            : Colors.transparent),
+                  ),
                 ),
               ),
             ),

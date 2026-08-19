@@ -97,6 +97,9 @@ Future<void> main(List<String> args) async {
       // 编导台「从视频提取脚本」：凭据齐了才给实例，否则入口禁用并说明
       scriptTranscriberProvider
           .overrideWithValue(buildScriptTranscriber(credentials, dataDir)),
+      // 编导台「生成配音」：同上，语音凭据齐了才有
+      lineVoiceFactoryProvider
+          .overrideWithValue(defaultLineVoiceFactory(credentials, dataDir)),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里

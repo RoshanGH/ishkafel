@@ -8,6 +8,8 @@ import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
+import 'package:ishkafel/core/audio/tts_client.dart';
+import 'package:ishkafel/core/script/line_voice_service.dart';
 import 'package:ishkafel/core/script/script_transcriber.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/director/director_page.dart';
@@ -60,6 +62,37 @@ class _StubTranscriber extends ScriptTranscriber {
         ScriptLine.create(text: text),
     ];
   }
+}
+
+/// 纯内存配音服务：不碰 TTS 与文件系统
+class _StubVoiceService extends LineVoiceService {
+  final bool fail;
+  _StubVoiceService({this.fail = false})
+      : super(
+          tts: const TtsClient(appId: 't', accessToken: 't'),
+          outputDir: Directory.systemTemp,
+          measureMs: (_) async => 0,
+        );
+
+  @override
+  Future<LineVoiceover> generate({
+    required String lineId,
+    required String text,
+    required String voiceId,
+    int speechRate = 0,
+  }) async {
+    if (fail) throw const TtsException('连接语音合成服务超时，请检查网络后重试');
+    return LineVoiceover(
+      audioPath: '/tmp/fake.mp3',
+      durationMs: 3200,
+      sourceText: text.trim(),
+      voiceId: voiceId,
+      speechRate: speechRate,
+    );
+  }
+
+  @override
+  void deleteStale(LineVoiceover old) {}
 }
 
 RenewTask scriptTask({ScriptDoc? doc}) => RenewTask(
@@ -298,5 +331,97 @@ void main() {
 
     expect(find.textContaining('没有识别到任何台词'), findsOneWidget);
     expect(find.text('重试'), findsOneWidget);
+  });
+  group('配音节（M2）', () {
+    testWidgets('未配置语音服务时按钮禁用；配置后选音色→生成→试听条与绿点',
+        (tester) async {
+      final repo = _MemoryRepo();
+      await pumpDirector(
+          tester, wrap(repo, scriptTask(doc: docWith(['你好呀']))));
+      await tester.pumpAndSettle();
+
+      // 默认没有 factory：按钮禁用（点了不该有任何反应）
+      final btn = find.byKey(const ValueKey('inspector-generate-voice'));
+      expect(tester.widget<FilledButton>(btn).onPressed, isNull);
+    });
+
+    testWidgets('生成一路走通：先弹音色选择，选完直接生成，状态点变绿',
+        (tester) async {
+      final repo = _MemoryRepo();
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: docWith(['你好呀'])), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService()),
+          ]));
+      await tester.pumpAndSettle();
+
+      await tester
+          .tap(find.byKey(const ValueKey('inspector-generate-voice')));
+      await tester.pumpAndSettle();
+      // 没选过音色：先弹选择器
+      expect(find.text('选择音色'), findsWidgets);
+      await tester.tap(find
+          .byKey(const ValueKey('voice-option-zh_female_vv_uranus_bigtts')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('就用这个'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('3.2 秒'), findsOneWidget, reason: '试听条显示实际时长');
+      expect(find.text('已生成'), findsOneWidget);
+      final saved = await repo.findById('t1');
+      expect(saved?.script?.lines.first.voiceover?.durationMs, 3200,
+          reason: '配音产物要落盘');
+    });
+
+    testWidgets('改台词后状态变黄、旧配音仍可听、按钮变「重新生成」', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['你好呀']);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/tmp/old.mp3',
+              durationMs: 2000,
+              sourceText: '你好呀',
+              voiceId: 'zh_female_vv_uranus_bigtts',
+              speechRate: 0));
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService()),
+          ]));
+      await tester.pumpAndSettle();
+      expect(find.text('已生成'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).first, '你好呀改了');
+      await tester.pumpAndSettle();
+
+      expect(find.text('已过期'), findsOneWidget);
+      expect(find.textContaining('这是旧配音'), findsOneWidget);
+      expect(find.text('重新生成'), findsOneWidget);
+      expect(find.text('2.0 秒'), findsOneWidget, reason: '旧配音仍可试听');
+    });
+
+    testWidgets('生成失败给中文原因，不静默', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['你好呀']);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService(fail: true)),
+          ]));
+      await tester.pumpAndSettle();
+
+      await tester
+          .tap(find.byKey(const ValueKey('inspector-generate-voice')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('配音生成失败'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5)); // 等 SnackBar 收场
+    });
   });
 }
