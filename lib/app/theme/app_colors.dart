@@ -22,4 +22,11 @@ abstract final class AppColors {
   /// 播放器舞台底色：视频画面区域背后的纯黑背景，与其余暗色层级区分，
   /// 让内容（画面/占位图标）在舞台内保持最高对比度。
   static const stageBackground = Color(0xFF000000);
+
+  /// 中栏舞台区的地面：比全局背景再沉一级，让预览区从两侧工作栏里
+  /// 「凹」下去成为剧场——预览是主角，视觉重量要给它
+  static const stageWell = Color(0xFF0D0D0F);
+
+  /// 悬停反馈：白 4%，暗色下可感知但不喧宾
+  static const hover = Color(0x0AFFFFFF);
 }

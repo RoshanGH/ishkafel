@@ -41,6 +41,7 @@ import '../workbench/bgm_picker_sheet.dart';
 import 'bgm_segments_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
+import 'preview_subtitle.dart';
 import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';
@@ -1710,7 +1711,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 草片刚做完：对勾一拍（elasticOut 弹入），紧接着开播
     if (_draftCelebrating) {
       return Container(
-        color: AppColors.background,
+        color: AppColors.stageWell,
         child: Center(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TweenAnimationBuilder<double>(
@@ -1746,7 +1747,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 而不是对着死黑块等
     if (_draftProgress case (final stage, final text, final done, final total)) {
       return Container(
-        color: AppColors.background,
+        color: AppColors.stageWell,
         padding: const EdgeInsets.all(AppSpacing.xl),
         child: Center(
           child: ConstrainedBox(
@@ -1787,7 +1788,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
     final playable = !_planResult.isEmpty && _videoWidget != null;
     return Container(
-      color: AppColors.background,
+      color: AppColors.stageWell,
       padding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.xl, vertical: AppSpacing.lg),
       child: Center(
@@ -1805,7 +1806,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: playable
-                      ? _videoWidget!
+                      ? Stack(fit: StackFit.expand, children: [
+                          _videoWidget!,
+                          // 实时字幕层：播放到哪句显示哪句，样式即改即见
+                          // （所见即所得——不用导出才知道字幕长什么样）
+                          ValueListenableBuilder<int>(
+                            valueListenable: _positionMs,
+                            builder: (_, _, _) => _previewSubtitle(),
+                          ),
+                        ])
                       : Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -1907,6 +1916,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             ),
         ]),
       ),
+    );
+  }
+
+  /// 当前播放行的字幕（跟随 [_previewLineIndex]；行级样式覆盖优先）。
+  /// 画面行没台词，不出字幕
+  Widget _previewSubtitle() {
+    final index = _previewLineIndex;
+    if (index == null || index < 0 || index >= _doc.lines.length) {
+      return const SizedBox.shrink();
+    }
+    final line = _doc.lines[index];
+    if (line.type != ScriptLineType.voiced) return const SizedBox.shrink();
+    return PreviewSubtitle(
+      text: line.text.trim(),
+      style: line.subtitleOverride ?? _doc.subtitle,
     );
   }
 

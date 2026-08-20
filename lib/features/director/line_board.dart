@@ -193,6 +193,7 @@ class _LineBand extends StatelessWidget {
     return InkWell(
       onTap: () => handlers.onFocusLine(index),
       borderRadius: BorderRadius.circular(AppRadius.md),
+      hoverColor: AppColors.hover,
       // 点亮/选中的过渡要有呼吸（180ms）：播放跟随换行时块与块之间
       // 不再闪跳；左缘 3px 播放条是真实元素，不是投影 hack
       child: AnimatedContainer(
@@ -497,6 +498,7 @@ class _LineBand extends StatelessWidget {
       key: ValueKey('band-shot-$index-$j'),
       onTap: () => onExpandShot(expanded ? null : j),
       borderRadius: BorderRadius.circular(AppRadius.sm),
+      hoverColor: AppColors.hover,
       child: Container(
         width: 74,
         decoration: BoxDecoration(
@@ -604,6 +606,7 @@ class _LineBand extends StatelessWidget {
         key: ValueKey('band-find-shots-$index'),
         onTap: () => handlers.onFindShots(index),
         borderRadius: BorderRadius.circular(AppRadius.sm),
+        hoverColor: AppColors.hover,
         child: Container(
           width: 74,
           decoration: BoxDecoration(
