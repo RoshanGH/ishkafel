@@ -41,8 +41,9 @@ ScriptPlanResult buildScriptTrackPlan(
   ScriptDoc doc, {
   required ShotSource? Function(LineShot shot) sourceOf,
 
-  /// 整片配乐的本地路径；null = 没配或还没下载好（后者由调用方交代）
-  String? bgmPath,
+  /// 配乐曲子的本地路径（materialId → path）；null = 还没下载好，
+  /// 该段先不铺（由调用方交代下载状态）
+  String? Function(int materialId)? bgmPathOf,
 }) {
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
@@ -123,14 +124,47 @@ ScriptPlanResult buildScriptTrackPlan(
     cursorMs = shotAt;
   }
 
+  // 配乐段：行区间 → 预览轴区间（只算进了预览的行）。
+  // 相邻段同一首曲子时合并成一个 clip——播放连续不重头
+  // （BgmSegment 引擎的同一语义）
   final bgm = <BgmTrackSegment>[];
-  final material = doc.bgm;
-  if (material != null && bgmPath != null && cursorMs > 0) {
-    bgm.add(BgmTrackSegment(
-      clip: TrackSegment(atMs: 0, durationMs: cursorMs, source: bgmPath),
-      volume: doc.bgmVolume,
-      sourceDurationMs: material.durationMs,
-    ));
+  for (final seg in doc.bgmSegments) {
+    final path = bgmPathOf?.call(seg.material.id);
+    if (path == null) continue;
+    int? fromMs;
+    var toMs = 0;
+    for (var i = seg.startLine; i <= seg.endLine && i < doc.lines.length; i++) {
+      final start = lineStarts[i];
+      if (start == null) continue; // 该行没进预览
+      fromMs ??= start;
+      final nextStart = lineStarts.entries
+          .where((e) => e.key > i)
+          .fold<int?>(null, (a, e) => a == null || e.value < a ? e.value : a);
+      toMs = nextStart ?? cursorMs;
+    }
+    if (fromMs == null || toMs <= fromMs) continue;
+    final last = bgm.isEmpty ? null : bgm.last;
+    if (last != null &&
+        last.clip.source == path &&
+        last.clip.endMs == fromMs &&
+        last.volume == seg.volume) {
+      // 相邻同曲：并成一段，接着播不重头
+      bgm[bgm.length - 1] = BgmTrackSegment(
+        clip: TrackSegment(
+            atMs: last.clip.atMs,
+            durationMs: toMs - last.clip.atMs,
+            source: path),
+        volume: last.volume,
+        sourceDurationMs: last.sourceDurationMs,
+      );
+    } else {
+      bgm.add(BgmTrackSegment(
+        clip: TrackSegment(
+            atMs: fromMs, durationMs: toMs - fromMs, source: path),
+        volume: seg.volume,
+        sourceDurationMs: seg.material.durationMs,
+      ));
+    }
   }
   return ScriptPlanResult(
     plan: TrackPlan(video: video, voice: voice, bgm: bgm),

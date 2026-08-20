@@ -64,15 +64,18 @@ class ScriptExportRunner {
     SubtitleStyle? subtitleStyle,
     bool burnSubtitles = true,
 
-    /// 整片配乐的本地路径。doc.bgm 非空却给不出本地文件时直接拦下——
-    /// 成片悄悄少配乐不行
-    String? bgmPath,
+    /// 配乐曲子的本地路径（materialId → path）。方案里有段却给不出
+    /// 本地文件时直接拦下——成片悄悄少配乐不行
+    String? Function(int materialId)? bgmPathOf,
     void Function(ScriptExportProgress progress)? onProgress,
   }) async {
     final style = subtitleStyle ?? doc.subtitle;
-    if (doc.bgm != null && bgmPath == null) {
-      throw const ScriptExportException(
-          '配乐还没下载到本地，导出被拦下（稍等下载完成或先取消配乐）。');
+    for (final seg in doc.bgmSegments) {
+      if (bgmPathOf?.call(seg.material.id) == null) {
+        throw ScriptExportException(
+            '配乐「${seg.material.name}」还没下载到本地，导出被拦下'
+            '（稍等下载完成或先移除该段）。');
+      }
     }
     final lines = _readyLines(doc);
     if (lines.isEmpty) {
@@ -90,7 +93,9 @@ class ScriptExportRunner {
     for (final entry in lines) {
       final line = entry.line;
       final lineIndex = entry.index;
-      // 行的字幕（相对行起点的时间轴）；跨镜连续由逐镜裁剪自然形成
+      // 行的字幕（相对行起点的时间轴）；跨镜连续由逐镜裁剪自然形成。
+      // 行级覆盖优先（素材自带字幕位置不同时按行改）
+      final lineStyle = line.subtitleOverride ?? style;
       final sentences = burnSubtitles ? _sentenceOf(line) : const <AsrSentence>[];
       var shotAtMs = 0;
       for (var j = 0; j < line.shots.length; j++) {
@@ -115,7 +120,7 @@ class ScriptExportRunner {
           slotStartMs: shotAtMs,
           slotEndMs: shotAtMs + allocMs,
           spec: spec,
-          style: style,
+          style: lineStyle,
         );
         final out = p.join(workDir.path, 'v_${lineIndex}_$j.mp4');
         await _exec(
@@ -210,24 +215,42 @@ class ScriptExportRunner {
       '-c', 'copy', audioConcat,
     ], what: '拼接声音');
 
+    // 配乐段逐个叠上去（行区间 → 成片轴区间；每段各自的曲子与音量）
     var finalAudio = audioConcat;
-    if (doc.bgm != null && bgmPath != null) {
-      final mixed = p.join(workDir.path, 'audio_bgm.wav');
-      final totalMs = lines.fold(
-          0,
-          (a, e) =>
-              a + e.line.shots.fold(0, (b, s) => b + (s.allocMs ?? 0)));
-      await _exec(
-          ExportCommands.mixBgm(
-            voice: audioConcat,
-            bgm: bgmPath,
-            out: mixed,
-            startMs: 0,
-            durationMs: totalMs,
-            bgmVolume: doc.bgmVolume,
-          ),
-          what: '混配乐');
-      finalAudio = mixed;
+    if (doc.bgmSegments.isNotEmpty && bgmPathOf != null) {
+      // 每行在成片轴的起点：按就绪行的画面长顺序累计
+      final lineStartMs = <int, int>{};
+      var at = 0;
+      for (final entry in lines) {
+        lineStartMs[entry.index] = at;
+        at += entry.line.shots.fold(0, (b, s) => b + (s.allocMs ?? 0));
+      }
+      var mixIndex = 0;
+      for (final seg in doc.bgmSegments) {
+        int? fromMs;
+        var toMs = 0;
+        for (final entry in lines) {
+          if (entry.index < seg.startLine || entry.index > seg.endLine) {
+            continue;
+          }
+          fromMs ??= lineStartMs[entry.index];
+          toMs = lineStartMs[entry.index]! +
+              entry.line.shots.fold(0, (b, s) => b + (s.allocMs ?? 0));
+        }
+        if (fromMs == null || toMs <= fromMs) continue;
+        final mixed = p.join(workDir.path, 'audio_bgm_${mixIndex++}.wav');
+        await _exec(
+            ExportCommands.mixBgm(
+              voice: finalAudio,
+              bgm: bgmPathOf(seg.material.id)!,
+              out: mixed,
+              startMs: fromMs,
+              durationMs: toMs - fromMs,
+              bgmVolume: seg.volume,
+            ),
+            what: '混配乐（${seg.material.name}）');
+        finalAudio = mixed;
+      }
     }
 
     await File(outPath).parent.create(recursive: true);

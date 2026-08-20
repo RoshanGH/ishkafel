@@ -330,6 +330,9 @@ class ScriptLine {
   /// 这一句在参考片里的区间（提取脚本时自动落；手写的行没有）
   final LineRef? reference;
 
+  /// 行级字幕样式覆盖；null = 跟随全局（素材自带字幕位置不同时按行改）
+  final SubtitleStyle? subtitleOverride;
+
   ScriptLine({
     required this.id,
     required this.text,
@@ -340,6 +343,7 @@ class ScriptLine {
     this.voiceover,
     List<LineShot> shots = const [],
     this.reference,
+    this.subtitleOverride,
   })  : tags = List.unmodifiable(tags),
         shots = List.unmodifiable(shots);
 
@@ -377,6 +381,7 @@ class ScriptLine {
     int? speechRate,
     Object? voiceover = _unset,
     List<LineShot>? shots,
+    Object? subtitleOverride = _unset,
   }) =>
       ScriptLine(
         id: id,
@@ -389,6 +394,9 @@ class ScriptLine {
             voiceover == _unset ? this.voiceover : voiceover as LineVoiceover?,
         shots: shots ?? this.shots,
         reference: reference,
+        subtitleOverride: subtitleOverride == _unset
+            ? this.subtitleOverride
+            : subtitleOverride as SubtitleStyle?,
       );
 
   static const _unset = Object();
@@ -409,6 +417,9 @@ class ScriptLine {
 
   ScriptLine withShots(List<LineShot> next) => _copy(shots: next);
 
+  ScriptLine withSubtitleOverride(SubtitleStyle? next) =>
+      _copy(subtitleOverride: next);
+
   /// 换参考段（行级上传参考视频用）。_copy 不动 reference（它跟行身份走），
   /// 这里显式重建
   ScriptLine withReference(LineRef? next) => ScriptLine(
@@ -421,6 +432,7 @@ class ScriptLine {
         voiceover: voiceover,
         shots: shots,
         reference: next,
+        subtitleOverride: subtitleOverride,
       );
 
   Map<String, dynamic> toJson() => {
@@ -433,6 +445,8 @@ class ScriptLine {
         if (voiceover != null) 'voiceover': voiceover!.toJson(),
         if (shots.isNotEmpty) 'shots': [for (final s in shots) s.toJson()],
         if (reference != null) 'reference': reference!.toJson(),
+        if (subtitleOverride != null)
+          'subtitleOverride': subtitleOverride!.toJson(),
       };
 
   /// 宽松解析：一条坏行只丢它自己，不牵连整份脚本
@@ -458,6 +472,52 @@ class ScriptLine {
           for (final s in raw['shots'] as List) ?LineShot.tryFromJson(s),
       ],
       reference: LineRef.tryFromJson(raw['reference']),
+      subtitleOverride: raw['subtitleOverride'] is Map
+          ? SubtitleStyle.fromJson(raw['subtitleOverride'])
+          : null,
+    );
+  }
+}
+
+/// 一段配乐铺在哪几行上（行区间，闭区间）。
+///
+/// 相邻两段同一首曲子时播放连续不重头（BgmSegment 引擎的同一语义，
+/// 预览构轨时合并区间实现）。
+class ScriptBgmSegment {
+  final int startLine;
+  final int endLine;
+  final BgmMaterial material;
+  final double volume;
+
+  const ScriptBgmSegment({
+    required this.startLine,
+    required this.endLine,
+    required this.material,
+    required this.volume,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'startLine': startLine,
+        'endLine': endLine,
+        'material': material.toJson(),
+        'volume': volume,
+      };
+
+  static ScriptBgmSegment? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final start = raw['startLine'];
+    final end = raw['endLine'];
+    final material = BgmMaterial.tryFromJson(raw['material']);
+    if (start is! int || end is! int || end < start || material == null) {
+      return null;
+    }
+    return ScriptBgmSegment(
+      startLine: start,
+      endLine: end,
+      material: material,
+      volume: raw['volume'] is num
+          ? (raw['volume'] as num).toDouble().clamp(0.0, 1.0)
+          : BgmSegment.defaultVolume,
     );
   }
 }
@@ -469,10 +529,9 @@ class ScriptDoc {
   /// 全局字幕样式（位置/字号/颜色/形态）。行级覆盖后续版本挂到行上
   final SubtitleStyle subtitle;
 
-  /// 整片配乐（null = 不配）与音量。行区间铺设是后续升级，
-  /// 单曲整片时「相邻同曲连续」天然成立
-  final BgmMaterial? bgm;
-  final double bgmVolume;
+  /// 配乐段（行区间铺设，可多段多曲）。空 = 不配乐。
+  /// 旧档的整片单曲（bgm/bgmVolume 字段）读取时迁移成一段全区间
+  final List<ScriptBgmSegment> bgmSegments;
 
   /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
   final String? refVideoPath;
@@ -480,10 +539,10 @@ class ScriptDoc {
   ScriptDoc(
     List<ScriptLine> lines, {
     this.subtitle = SubtitleStyle.standard,
-    this.bgm,
-    this.bgmVolume = BgmSegment.defaultVolume,
+    List<ScriptBgmSegment> bgmSegments = const [],
     this.refVideoPath,
-  }) : lines = List.unmodifiable(lines);
+  })  : lines = List.unmodifiable(lines),
+        bgmSegments = List.unmodifiable(bgmSegments);
 
   /// 新脚本自带一个空行：编导打开就能写，不用先学会「加行」
   factory ScriptDoc.empty() => ScriptDoc([ScriptLine.create()]);
@@ -491,23 +550,16 @@ class ScriptDoc {
   /// 换行列表、保留全局设置（字幕/配乐/参考片跟文档走，不跟行操作走）
   ScriptDoc _withLines(List<ScriptLine> next) => ScriptDoc(next,
       subtitle: subtitle,
-      bgm: bgm,
-      bgmVolume: bgmVolume,
+      bgmSegments: bgmSegments,
       refVideoPath: refVideoPath);
 
   ScriptDoc withSubtitle(SubtitleStyle next) => ScriptDoc(lines,
       subtitle: next,
-      bgm: bgm,
-      bgmVolume: bgmVolume,
+      bgmSegments: bgmSegments,
       refVideoPath: refVideoPath);
 
-  ScriptDoc withBgm(BgmMaterial? material, {double? volume}) => ScriptDoc(
-        lines,
-        subtitle: subtitle,
-        bgm: material,
-        bgmVolume: volume ?? bgmVolume,
-        refVideoPath: refVideoPath,
-      );
+  ScriptDoc withBgmSegments(List<ScriptBgmSegment> next) => ScriptDoc(lines,
+      subtitle: subtitle, bgmSegments: next, refVideoPath: refVideoPath);
 
   ScriptDoc insertAfter(int index, {String text = ''}) {
     final next = [...lines];
@@ -570,6 +622,12 @@ class ScriptDoc {
     return _update(index, (line) => line.withReference(reference));
   }
 
+  /// 按行 id 设字幕覆盖（null = 恢复跟随全局）
+  ScriptDoc setSubtitleOverrideById(String lineId, SubtitleStyle? style) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withSubtitleOverride(style));
+  }
+
   ScriptDoc _update(int index, ScriptLine Function(ScriptLine) f) {
     if (index < 0 || index >= lines.length) return this;
     final next = [...lines];
@@ -580,8 +638,8 @@ class ScriptDoc {
   Map<String, dynamic> toJson() => {
         'lines': [for (final l in lines) l.toJson()],
         'subtitle': subtitle.toJson(),
-        if (bgm != null) 'bgm': bgm!.toJson(),
-        if (bgmVolume != BgmSegment.defaultVolume) 'bgmVolume': bgmVolume,
+        if (bgmSegments.isNotEmpty)
+          'bgmSegments': [for (final s in bgmSegments) s.toJson()],
         if (refVideoPath != null) 'refVideoPath': refVideoPath,
       };
 
@@ -594,13 +652,29 @@ class ScriptDoc {
       for (final l in rawLines) ?ScriptLine.tryFromJson(l),
     ];
     if (lines.isEmpty) return ScriptDoc.empty();
+    // 旧档迁移：整片单曲（bgm/bgmVolume）→ 一段全区间
+    final legacy = BgmMaterial.tryFromJson(raw['bgm']);
+    final segments = [
+      if (raw['bgmSegments'] is List)
+        for (final s in raw['bgmSegments'] as List)
+          ?ScriptBgmSegment.tryFromJson(s),
+    ];
     return ScriptDoc(
       lines,
       subtitle: SubtitleStyle.fromJson(raw['subtitle']),
-      bgm: BgmMaterial.tryFromJson(raw['bgm']),
-      bgmVolume: raw['bgmVolume'] is num
-          ? (raw['bgmVolume'] as num).toDouble().clamp(0.0, 1.0)
-          : BgmSegment.defaultVolume,
+      bgmSegments: segments.isNotEmpty
+          ? segments
+          : [
+              if (legacy != null)
+                ScriptBgmSegment(
+                  startLine: 0,
+                  endLine: lines.length - 1,
+                  material: legacy,
+                  volume: raw['bgmVolume'] is num
+                      ? (raw['bgmVolume'] as num).toDouble().clamp(0.0, 1.0)
+                      : BgmSegment.defaultVolume,
+                ),
+            ],
       refVideoPath: raw['refVideoPath'] is String
           ? raw['refVideoPath'] as String
           : null,
