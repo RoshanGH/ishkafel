@@ -133,17 +133,32 @@ class CandidateSearchController extends ChangeNotifier {
             pageSize: pageSize,
           ));
 
-  Future<void> searchByDescription(String keyword) =>
+  Future<void> searchByDescription(String keyword,
+          {List<int> tagIds = const []}) =>
       _start((page) => service.searchByDescription(
             keyword: keyword,
+            tagIds: tagIds,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,
           ));
 
-  Future<void> searchByImage(String fileKey) =>
+  /// 按台词语义搜（参考片这一句在说什么，就找说同类话的分镜）
+  Future<void> searchByVoiceover(String keyword,
+          {List<int> tagIds = const []}) =>
+      _start((page) => service.searchByVoiceover(
+            keyword: keyword,
+            tagIds: tagIds,
+            projectIds: projectIds,
+            page: page,
+            pageSize: pageSize,
+          ));
+
+  Future<void> searchByImage(String fileKey,
+          {List<int> tagIds = const []}) =>
       _start((page) => service.searchByImage(
             fileKey: fileKey,
+            tagIds: tagIds,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,

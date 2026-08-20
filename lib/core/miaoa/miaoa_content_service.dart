@@ -152,9 +152,10 @@ class MiaoaContentService {
     ]);
   }
 
-  /// 按画面描述语义检索
+  /// 按画面描述语义检索。[tagIds] 是可叠加的标签约束（所有维度通用）
   Future<CandidatePage> searchByDescription({
     required String keyword,
+    List<int> tagIds = const [],
     List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
@@ -167,6 +168,29 @@ class MiaoaContentService {
       keyword.trim(),
       '--by',
       'content',
+      ..._tagFilter(tagIds),
+      ..._projects(projectIds),
+      ..._paging(page, pageSize),
+    ]);
+  }
+
+  /// 按台词（旁白）语义检索——参考片这一句在说什么，就找说同类话的分镜
+  Future<CandidatePage> searchByVoiceover({
+    required String keyword,
+    List<int> tagIds = const [],
+    List<int> projectIds = const [],
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    if (keyword.trim().isEmpty) {
+      throw MiaoaException('台词为空，无法检索候选素材');
+    }
+    return await _search([
+      '--keyword',
+      keyword.trim(),
+      '--by',
+      'voiceover',
+      ..._tagFilter(tagIds),
       ..._projects(projectIds),
       ..._paging(page, pageSize),
     ]);
@@ -175,6 +199,7 @@ class MiaoaContentService {
   /// 首帧以图搜图。[fileKey] 是 OSS key，不是 URL
   Future<CandidatePage> searchByImage({
     required String fileKey,
+    List<int> tagIds = const [],
     List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,
@@ -185,10 +210,16 @@ class MiaoaContentService {
     return await _search([
       '--like-image',
       fileKey.trim(),
+      ..._tagFilter(tagIds),
       ..._projects(projectIds),
       ..._paging(page, pageSize),
     ]);
   }
+
+  /// 标签约束（任一满足）。空列表整个不传——空约束不该发给服务端
+  static List<String> _tagFilter(List<int> tagIds) => tagIds.isEmpty
+      ? const []
+      : ['--public-tag', tagIds.join(','), '--public-mode', 'or'];
 
   /// 这个项目里一共有多少条分镜。
   ///

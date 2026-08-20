@@ -9,6 +9,11 @@ import '../../core/script/line_tagger.dart';
 import '../../core/script/script_doc.dart';
 import '../picking/candidate_search_controller.dart';
 import 'director_providers.dart';
+import 'tag_picker.dart';
+
+/// 检索维度（用户定的三个）：台词 / 画面描述 / 首帧找相似。
+/// 标签与项目不是维度，是所有维度共用的外部约束
+enum _SearchDim { voiceover, description, similar }
 
 /// 给一行找镜头（M3）。
 ///
@@ -73,22 +78,30 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
     projectIds: [if (widget.task.project != null) widget.task.project!.id],
   );
 
-  late final TextEditingController _keyword =
+  /// 台词维度的检索词（预填本行台词——参考片这一句在说什么）
+  late final TextEditingController _voiceoverKw =
       TextEditingController(text: widget.line.text.trim());
 
-  /// 检索用的标签（预填行标签；勾选状态就在这里维护）
+  /// 画面描述维度的检索词（人来描述想要的画面）
+  final TextEditingController _descKw = TextEditingController();
+
+  /// 检索用的标签（预填行标签；勾选状态就在这里维护）。
+  /// 标签不是一个独立维度，是**所有维度共用的外部约束**
   late final List<String> _tags = [...widget.line.tags];
   late final Set<String> _enabledTags = {...widget.line.tags};
 
-  /// 标签名 → miaoa 标签 id。打开面板时按任务的分子标签组拉一次
+  /// 标签名 → miaoa 标签 id。打开面板时按任务的分子标签组拉一次；
+  /// 从标签选择器新加的标签会把解析好的 id 补进来
   Map<String, int>? _tagIds;
   String? _tagIdsError;
 
-  bool _byTags = true;
+  /// 当前检索维度
+  _SearchDim _dim = _SearchDim.voiceover;
   bool _tagging = false;
 
-  /// 正在按哪条素材找相似（以图搜图）；null = 不在相似模式
+  /// 找相似的查询帧（候选卡「找相似」发起）；null = 还没有目标
   String? _similarToName;
+  String? _similarFileKey;
 
   /// 已选镜头（保持加入顺序；预填本行已有的）
   late final List<LineShot> _picked = [...widget.line.shots];
@@ -106,13 +119,8 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
     await _loadTagIds();
     if (!mounted) return;
     // 自动预搜（设计稿：默认全自动预填，人只做否决）：
-    // 有能映射的标签就按标签搜，否则退回按台词的画面描述搜
-    if (_byTags && _enabledTagIds.isNotEmpty) {
-      await _search.searchByTags(tagIds: _enabledTagIds);
-    } else if (_keyword.text.trim().isNotEmpty) {
-      setState(() => _byTags = false);
-      await _search.searchByDescription(_keyword.text);
-    }
+    // 默认按台词搜——检索依据就是参考片这一句的 ASR 台词，行标签作约束
+    await _runSearch();
   }
 
   Future<void> _loadTagIds() async {
@@ -141,22 +149,31 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           if (_enabledTags.contains(name)) ?_tagIds?[name],
       ];
 
+  /// 统一检索入口：当前维度 + 标签约束（约束贴在每一种维度上）。
+  /// 维度输入为空而约束非空时，退化为纯标签筛
   Future<void> _runSearch() async {
-    if (_byTags) {
-      final ids = _enabledTagIds;
-      if (ids.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('没有可用的标签（未勾选或词表里对不上），试试画面描述搜。')));
-        return;
-      }
-      await _search.searchByTags(tagIds: ids);
-    } else {
-      if (_keyword.text.trim().isEmpty) return;
-      await _search.searchByDescription(_keyword.text);
+    final ids = _enabledTagIds;
+    switch (_dim) {
+      case _SearchDim.voiceover:
+        final kw = _voiceoverKw.text.trim();
+        if (kw.isEmpty && ids.isEmpty) return;
+        await (kw.isEmpty
+            ? _search.searchByTags(tagIds: ids)
+            : _search.searchByVoiceover(kw, tagIds: ids));
+      case _SearchDim.description:
+        final kw = _descKw.text.trim();
+        if (kw.isEmpty && ids.isEmpty) return;
+        await (kw.isEmpty
+            ? _search.searchByTags(tagIds: ids)
+            : _search.searchByDescription(kw, tagIds: ids));
+      case _SearchDim.similar:
+        final key = _similarFileKey;
+        if (key == null) return;
+        await _search.searchByImage(key, tagIds: ids);
     }
   }
 
-  /// 以图搜图：拿一条候选的首帧找同款（设计稿的第三种检索）
+  /// 找相似：拿一条候选的首帧当查询帧，切到「找相似」维度
   Future<void> _searchSimilar(CandidateEntry entry) async {
     final fileKey = entry.material.fileKey;
     if (fileKey == null || fileKey.isEmpty) {
@@ -165,9 +182,38 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       return;
     }
     final m = entry.material;
-    setState(() => _similarToName =
-        m.voiceover.isNotEmpty ? m.voiceover : m.name);
-    await _search.searchByImage(fileKey);
+    setState(() {
+      _dim = _SearchDim.similar;
+      _similarToName = m.voiceover.isNotEmpty ? m.voiceover : m.name;
+      _similarFileKey = fileKey;
+    });
+    await _runSearch();
+  }
+
+  /// 打开标签选择器：从妙啊标签体系里搜索、点选、替换约束标签
+  Future<void> _pickTags() async {
+    final picked = await showTagPicker(
+      context,
+      tags: widget.services.tags,
+      selected: [
+        for (final t in _tags)
+          if (_enabledTags.contains(t)) t,
+      ],
+      preferredGroupIds: {for (final g in widget.task.unitTagGroups) g.id},
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _tags
+        ..clear()
+        ..addAll(picked.map((t) => t.name));
+      _enabledTags
+        ..clear()
+        ..addAll(picked.map((t) => t.name));
+      for (final t in picked) {
+        if (t.id != null) (_tagIds ??= {})[t.name] = t.id!;
+      }
+    });
+    await _runSearch();
   }
 
   /// 自动打标：AI 从任务标签组的词表里给这行台词挑标签
@@ -209,7 +255,8 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   void dispose() {
     _search.removeListener(_onSearch);
     _search.dispose();
-    _keyword.dispose();
+    _voiceoverKw.dispose();
+    _descKw.dispose();
     super.dispose();
   }
 
@@ -260,47 +307,29 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
 
   Widget _searchBar() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // 三个检索维度（可切）；标签在下面一行，是所有维度共用的约束
       Row(children: [
-        _modePill('按标签', _byTags, () {
-          setState(() => _byTags = true);
-          if (_enabledTagIds.isNotEmpty) _runSearch();
-        }),
+        _modePill('按台词', _dim == _SearchDim.voiceover, () {
+          setState(() => _dim = _SearchDim.voiceover);
+          _runSearch();
+        }, key: const ValueKey('shots-dim-voiceover')),
         const SizedBox(width: AppSpacing.xs),
-        _modePill('按画面描述', !_byTags, () => setState(() => _byTags = false)),
-        if (_similarToName != null) ...[
-          const SizedBox(width: AppSpacing.sm),
-          Flexible(
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppColors.accentBlue.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Flexible(
-                  child: Text('相似于：$_similarToName',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: AppFontSize.micro,
-                          color: AppColors.accentBlueLight)),
-                ),
-                const SizedBox(width: 4),
-                InkWell(
-                  onTap: () {
-                    setState(() => _similarToName = null);
-                    _runSearch();
-                  },
-                  child: const Icon(Icons.close,
-                      size: 11, color: AppColors.accentBlueLight),
-                ),
-              ]),
-            ),
-          ),
-        ],
+        _modePill('按画面描述', _dim == _SearchDim.description, () {
+          setState(() => _dim = _SearchDim.description);
+          if (_descKw.text.trim().isNotEmpty) _runSearch();
+        }, key: const ValueKey('shots-dim-description')),
+        const SizedBox(width: AppSpacing.xs),
+        _modePill('找相似', _dim == _SearchDim.similar, () {
+          if (_similarFileKey == null) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('先在下面的候选卡上点「找相似」，以那条的首帧为查询帧。')));
+            return;
+          }
+          setState(() => _dim = _SearchDim.similar);
+          _runSearch();
+        }, key: const ValueKey('shots-dim-similar')),
         const Spacer(),
-        if (_byTags && widget.tagger != null)
+        if (widget.tagger != null)
           TextButton.icon(
             key: const ValueKey('shots-auto-tag'),
             onPressed: _tagging ? null : _autoTag,
@@ -315,49 +344,85 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           ),
       ]),
       const SizedBox(height: AppSpacing.sm),
-      if (_byTags) _tagChips() else _keywordField(),
+      switch (_dim) {
+        _SearchDim.voiceover => _keywordField(
+            _voiceoverKw, '这一句台词说什么，就找说同类话的分镜',
+            key: const ValueKey('shots-keyword-voiceover')),
+        _SearchDim.description => _keywordField(
+            _descKw, '描述想要的画面，例如「厨房喷洒清洁剂」',
+            key: const ValueKey('shots-keyword-desc')),
+        _SearchDim.similar => _similarBar(),
+      },
+      const SizedBox(height: AppSpacing.sm),
+      _constraintChips(),
     ]);
   }
 
-  Widget _tagChips() {
-    if (_tagIdsError != null) {
-      return Text(_tagIdsError!,
-          style:
-              const TextStyle(fontSize: AppFontSize.caption, color: AppColors.orange));
-    }
-    if (_tags.isEmpty) {
-      return Text(
-          widget.tagger == null
-              ? '这一行还没有标签。可以切到「按画面描述」直接搜'
-              : '这一行还没有标签——点右上「自动打标」让 AI 从词表里挑，或切到「按画面描述」直接搜',
-          style: const TextStyle(
-              fontSize: AppFontSize.caption, color: AppColors.textTertiary));
-    }
-    return Wrap(spacing: AppSpacing.xs, runSpacing: AppSpacing.xs, children: [
-      for (final tag in _tags)
-        FilterChip(
-          key: ValueKey('shot-tag-$tag'),
-          label: Text(tag, style: const TextStyle(fontSize: AppFontSize.caption)),
-          selected: _enabledTags.contains(tag),
-          visualDensity: VisualDensity.compact,
-          onSelected: (on) {
-            setState(() => on ? _enabledTags.add(tag) : _enabledTags.remove(tag));
-            _runSearch();
-          },
+  /// 找相似维度的当前查询帧说明
+  Widget _similarBar() => Row(children: [
+        const Icon(Icons.image_search, size: 14, color: AppColors.textTertiary),
+        const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: Text('以「${_similarToName ?? ''}」的首帧找相似画面',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textSecondary)),
         ),
-    ]);
+      ]);
+
+  /// 标签约束条：所有维度共用。点选启停；「+ 标签」打开词表选择器
+  Widget _constraintChips() {
+    final error = _tagIdsError;
+    return Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(_tags.isEmpty ? '标签约束：不限' : '标签约束：',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption, color: AppColors.textTertiary)),
+          for (final tag in _tags)
+            FilterChip(
+              key: ValueKey('shot-tag-$tag'),
+              label: Text(tag,
+                  style: const TextStyle(fontSize: AppFontSize.caption)),
+              selected: _enabledTags.contains(tag),
+              visualDensity: VisualDensity.compact,
+              onSelected: (on) {
+                setState(
+                    () => on ? _enabledTags.add(tag) : _enabledTags.remove(tag));
+                _runSearch();
+              },
+            ),
+          ActionChip(
+            key: const ValueKey('shots-pick-tags'),
+            avatar: const Icon(Icons.add, size: 13),
+            label: const Text('标签',
+                style: TextStyle(fontSize: AppFontSize.caption)),
+            visualDensity: VisualDensity.compact,
+            onPressed: _pickTags,
+          ),
+          if (error != null)
+            Text(error,
+                style: const TextStyle(
+                    fontSize: AppFontSize.micro, color: AppColors.orange)),
+        ]);
   }
 
-  Widget _keywordField() => Row(children: [
+  Widget _keywordField(TextEditingController controller, String hint,
+          {Key? key}) =>
+      Row(children: [
         Expanded(
           child: TextField(
-            key: const ValueKey('shots-keyword'),
-            controller: _keyword,
+            key: key,
+            controller: controller,
             style: const TextStyle(fontSize: AppFontSize.body),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
                 isDense: true,
-                prefixIcon: Icon(Icons.search, size: 15),
-                hintText: '描述想要的画面，例如「厨房喷洒清洁剂」'),
+                prefixIcon: const Icon(Icons.search, size: 15),
+                hintText: hint),
             onSubmitted: (_) => _runSearch(),
           ),
         ),
@@ -368,7 +433,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             child: const Text('搜索')),
       ]);
 
-  Widget _modePill(String label, bool selected, VoidCallback onTap) => InkWell(
+  Widget _modePill(String label, bool selected, VoidCallback onTap,
+          {Key? key}) =>
+      InkWell(
+        key: key,
         onTap: onTap,
         borderRadius: BorderRadius.circular(999),
         child: Container(

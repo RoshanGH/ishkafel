@@ -173,6 +173,17 @@ class _DraftFakeCli {
               '"previewUrl":"https://e.com/$id.mp4","fileKey":"oss/$id.mp4"}}]}',
           '');
     }
+    if (args.contains('group')) {
+      return ProcessResult(
+          1,
+          0,
+          '[{"id":10,"groupName":"话术结构","materialType":"STORYBOARD",'
+              '"tagType":"PUBLIC","tags":[{"tagName":"促单"}]}]',
+          '');
+    }
+    if (args.contains('tag')) {
+      return ProcessResult(1, 0, '[{"id":101,"tagName":"促单"}]', '');
+    }
     return ProcessResult(1, 0, '[]', '');
   }
 }
@@ -612,6 +623,29 @@ void main() {
       expect(shot.speed, lessThan(1.0), reason: '放慢吃掉缺口');
       expect(shot.allocMs, 6000);
       expect(find.textContaining('没分出去'), findsNothing);
+    });
+
+    testWidgets('行块标签可点开改：从词表选择器替换后落盘', (tester) async {
+      final repo = _MemoryRepo();
+      final cli = _DraftFakeCli();
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: docWith(['台词'])), overrides: [
+            shotSearchServicesProvider
+                .overrideWithValue(_draftFakeServices(cli)),
+          ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('band-tags-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('促单'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('tag-picker-ok')));
+      await tester.pump(const Duration(milliseconds: 900)); // 过自动保存
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.tags, ['促单']);
     });
 
     testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {

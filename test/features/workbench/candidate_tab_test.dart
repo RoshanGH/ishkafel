@@ -33,6 +33,7 @@ class _FakeContentService implements MiaoaContentService {
   @override
   Future<CandidatePage> searchByDescription({
     required String keyword,
+    List<int> tagIds = const [],
     List<int> projectIds = const [],
     int page = 1,
     int pageSize = 20,

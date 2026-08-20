@@ -40,6 +40,7 @@ import '../workbench/bgm_picker_sheet.dart';
 import 'bgm_segments_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
+import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
@@ -595,6 +596,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         d.setShotsById(line.id, shots).setTagsById(line.id, picked.tags));
     _flushNow();
     _pinAllShots();
+  }
+
+  /// 改行标签：从妙啊标签体系里搜索、点选、替换（不只是删）
+  Future<void> _editTags(int index) async {
+    final line = _doc.lines[index];
+    final picked = await showTagPicker(
+      context,
+      tags: ref.read(shotSearchServicesProvider).tags,
+      selected: line.tags,
+      preferredGroupIds: {for (final g in _task.unitTagGroups) g.id},
+    );
+    if (picked == null || !mounted) return;
+    _mutate(
+        (d) => d.setTagsById(line.id, [for (final t in picked) t.name]));
   }
 
   // ---- 时长分配 ----
@@ -1261,6 +1276,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onSpeedShot: _speedShot,
                       onDistribute: _distribute,
                       onSlowFill: _slowFill,
+                      onEditTags: _editTags,
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,

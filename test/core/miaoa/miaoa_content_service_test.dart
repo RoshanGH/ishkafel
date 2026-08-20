@@ -134,6 +134,40 @@ void main() {
           containsAllInOrder(['--like-image', 'prod/tenant-19/x.mov']));
     });
 
+    test('台词语义搜：--by voiceover（Round 2 三维度之一）', () async {
+      final calls = <List<String>>[];
+      await _service(calls).searchByVoiceover(keyword: ' 再不买就恢复 ');
+
+      final args = calls.single;
+      expect(args, containsAllInOrder(['--keyword', '再不买就恢复']));
+      expect(args, containsAllInOrder(['--by', 'voiceover']));
+    });
+
+    test('标签是所有维度的统一外部约束：keyword 维度可叠 --public-tag',
+        () async {
+      final calls = <List<String>>[];
+      final service = _service(calls);
+      await service.searchByDescription(keyword: '厨房', tagIds: [7, 9]);
+      await service.searchByVoiceover(keyword: '词', tagIds: [7]);
+      await service.searchByImage(fileKey: 'k', tagIds: [9]);
+
+      for (final args in calls) {
+        expect(args, contains('--public-tag'),
+            reason: '标签约束要贴在每一种检索维度上');
+      }
+      expect(calls[0], containsAllInOrder(['--public-tag', '7,9']));
+      expect(calls[0], containsAllInOrder(['--public-mode', 'or']));
+      expect(calls[1], containsAllInOrder(['--public-tag', '7']));
+      expect(calls[2], containsAllInOrder(['--public-tag', '9']));
+    });
+
+    test('不带标签约束时不发 --public-tag（别把空约束发给服务端）',
+        () async {
+      final calls = <List<String>>[];
+      await _service(calls).searchByVoiceover(keyword: '词');
+      expect(calls.single, isNot(contains('--public-tag')));
+    });
+
     test('空输入直接拒绝，不发起无意义的检索', () async {
       final calls = <List<String>>[];
       final service = _service(calls);
@@ -141,6 +175,8 @@ void main() {
       await expectLater(
           service.searchByTags(tagIds: const []), throwsA(isA<MiaoaException>()));
       await expectLater(service.searchByDescription(keyword: '   '),
+          throwsA(isA<MiaoaException>()));
+      await expectLater(service.searchByVoiceover(keyword: ' '),
           throwsA(isA<MiaoaException>()));
       await expectLater(
           service.searchByImage(fileKey: ''), throwsA(isA<MiaoaException>()));

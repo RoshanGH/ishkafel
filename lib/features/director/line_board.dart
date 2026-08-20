@@ -27,6 +27,9 @@ class LineBoardHandlers {
 
   /// 素材偏短分不满时：放慢镜头把整行充满
   final void Function(int index) onSlowFill;
+
+  /// 改这一行的标签（从妙啊标签体系里搜索/点选/替换）
+  final void Function(int index) onEditTags;
   final void Function(int index, int? manualMs) onManualMs;
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
@@ -54,6 +57,7 @@ class LineBoardHandlers {
     required this.onSpeedShot,
     required this.onDistribute,
     required this.onSlowFill,
+    required this.onEditTags,
     required this.onManualMs,
     required this.onPickVoice,
     required this.onSpeechRate,
@@ -215,13 +219,25 @@ class _LineBand extends StatelessWidget {
               color: voiced ? AppColors.textPrimary : AppColors.textTertiary),
         ),
       ),
-      if (line.tags.isNotEmpty)
-        Padding(
-          padding: const EdgeInsets.only(left: AppSpacing.sm),
-          child: Text(line.tags.take(2).join(' · '),
-              style: const TextStyle(
-                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+      // 标签可以点开改：从素材库的标签体系里搜索、点选、替换
+      Padding(
+        padding: const EdgeInsets.only(left: AppSpacing.sm),
+        child: InkWell(
+          key: ValueKey('band-tags-$index'),
+          onTap: () => handlers.onEditTags(index),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Text(
+                line.tags.isEmpty ? '＋标签' : line.tags.take(2).join(' · '),
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: line.tags.isEmpty
+                        ? AppColors.textTertiary.withValues(alpha: 0.7)
+                        : AppColors.textTertiary)),
+          ),
         ),
+      ),
     ]);
   }
 

@@ -117,7 +117,8 @@ Future<FindShotsResult? Function()> openSheet(
 }
 
 void main() {
-  testWidgets('行标签预填成 chips 并自动按标签预搜，候选带时长徽标', (tester) async {
+  testWidgets('打开即按台词预搜，行标签自动成为约束（贴在检索上）',
+      (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
     await openSheet(tester, services: _fakeServices(cli), line: line);
@@ -125,18 +126,54 @@ void main() {
     expect(find.byKey(const ValueKey('shot-tag-痛点引入')), findsOneWidget);
     expect(find.byKey(const ValueKey('shot-candidate-100')), findsOneWidget,
         reason: '打开即自动预搜，人只做否决');
-    expect(cli.searchArgs.single, contains('--public-tag'));
-    expect(cli.searchArgs.single, contains('1'), reason: '标签名映射成词表里的 id');
+    final args = cli.searchArgs.single;
+    expect(args, containsAllInOrder(['--keyword', '细菌怕它']));
+    expect(args, containsAllInOrder(['--by', 'voiceover']),
+        reason: '默认维度是台词：参考片这句说什么就找说同类话的分镜');
+    expect(args, containsAllInOrder(['--public-tag', '1']),
+        reason: '标签是统一外部约束，贴在每一种维度上');
     expect(find.text('6.8s'), findsWidgets, reason: '规格探测出的时长要上卡');
   });
 
-  testWidgets('行没有标签时退回按台词的画面描述预搜', (tester) async {
+  testWidgets('三维度可切：画面描述维度独立输入；找相似没有目标时先提示',
+      (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它');
     await openSheet(tester, services: _fakeServices(cli), line: line);
+    cli.searchArgs.clear();
 
-    expect(cli.searchArgs.single, contains('--keyword'));
-    expect(cli.searchArgs.single, contains('细菌怕它'));
+    await tester.tap(find.byKey(const ValueKey('shots-dim-description')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('shots-keyword-desc')), '厨房喷洒');
+    await tester.tap(find.byKey(const ValueKey('shots-search')));
+    await tester.pumpAndSettle();
+    expect(cli.searchArgs.single, containsAllInOrder(['--by', 'content']));
+    expect(cli.searchArgs.single, containsAllInOrder(['--keyword', '厨房喷洒']));
+
+    await tester.tap(find.byKey(const ValueKey('shots-dim-similar')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('先在下面的候选卡上点「找相似」'), findsOneWidget,
+        reason: '没有查询帧时不能空转，要说清怎么发起');
+  });
+
+  testWidgets('标签选择器：从词表加约束标签，加完立即重搜', (tester) async {
+    final cli = _FakeCli();
+    final line = ScriptLine.create(text: '细菌怕它');
+    await openSheet(tester, services: _fakeServices(cli), line: line);
+    cli.searchArgs.clear();
+
+    await tester.tap(find.byKey(const ValueKey('shots-pick-tags')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('产品引入'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tag-picker-ok')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('shot-tag-产品引入')), findsOneWidget,
+        reason: '选好的标签进约束条');
+    expect(cli.searchArgs.last, containsAllInOrder(['--public-tag', '2']),
+        reason: '新标签的 id 立即生效到检索');
   });
 
   testWidgets('点选落地：按点选顺序返回镜头，取消选择也生效', (tester) async {
