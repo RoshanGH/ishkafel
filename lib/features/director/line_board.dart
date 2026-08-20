@@ -31,6 +31,9 @@ class LineBoardHandlers {
   /// 改这一行的标签（从妙啊标签体系里搜索/点选/替换）
   final void Function(int index) onEditTags;
 
+  /// 取段胶片条的素材帧（没抽好返回 null，条退回纯色）
+  final List<String>? Function(LineShot shot) shotFramesOf;
+
   /// 从第 [shotIndex] 镜起分小行（弹台词切点选择器，把这段字指到镜头组）
   final void Function(int index, int shotIndex) onSplitSubline;
 
@@ -64,6 +67,7 @@ class LineBoardHandlers {
     required this.onDistribute,
     required this.onSlowFill,
     required this.onEditTags,
+    required this.shotFramesOf,
     required this.onSplitSubline,
     required this.onMergeSubline,
     required this.onManualMs,
@@ -138,17 +142,21 @@ class LineBoard extends StatelessWidget {
   }
 }
 
-/// 素材取段条：底条 = 素材全长，蓝色窗口 = 这一镜实际用的那一段。
-/// **拖窗口整体平移** = 换起点（在素材上滑动裁切）；**拖右缘把手** =
-/// 改时长（多退少补由邻镜配合）。剪辑软件的直接操纵，替代抽象滑杆
+/// 素材取段条（胶片形态）：底条铺**素材的实际帧画面**——拖窗口时
+/// 看得见取的是哪段画面，不用猜（用户给的参考图口径）。蓝色窗口 =
+/// 这一镜实际用的那一段：**拖窗口整体平移** = 换起点（在素材上滑动
+/// 裁切）；**拖右缘把手** = 改时长（多退少补由邻镜配合）。
+/// 帧还没抽好时退回纯色条，功能不等待
 class _TrimBar extends StatelessWidget {
   final LineShot shot;
+  final List<String>? frames;
   final ValueChanged<int> onTrim;
   final ValueChanged<int> onResize;
 
   const _TrimBar({
     super.key,
     required this.shot,
+    required this.frames,
     required this.onTrim,
     required this.onResize,
   });
@@ -164,20 +172,45 @@ class _TrimBar extends StatelessWidget {
       final winLeft = (shot.trimStartMs * pxPerMs).clamp(0.0, w);
       final winWidth =
           (shot.consumedSourceMs * pxPerMs).clamp(8.0, w - winLeft);
+      final fs = frames;
       return SizedBox(
-        height: 26,
+        height: 44,
         child: Stack(children: [
-          // 底条：素材全长
+          // 底条：素材全长——有帧铺帧（看得见画面），没帧退纯色
           Positioned.fill(
-            top: 6,
-            bottom: 6,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: AppColors.surfaceCard,
-                borderRadius: BorderRadius.circular(4),
-              ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: fs == null || fs.isEmpty
+                  ? const ColoredBox(color: AppColors.surfaceCard)
+                  : Row(children: [
+                      for (final f in fs)
+                        Expanded(
+                          child: Image.file(File(f),
+                              fit: BoxFit.cover,
+                              height: double.infinity,
+                              errorBuilder: (_, _, _) => const ColoredBox(
+                                  color: AppColors.surfaceCard)),
+                        ),
+                    ]),
             ),
           ),
+          // 窗口外的画面压暗：选中的那段自然亮起来
+          if (fs != null && fs.isNotEmpty) ...[
+            Positioned(
+              left: 0,
+              width: winLeft,
+              top: 0,
+              bottom: 0,
+              child: const ColoredBox(color: Color(0x99000000)),
+            ),
+            Positioned(
+              left: winLeft + winWidth,
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: const ColoredBox(color: Color(0x99000000)),
+            ),
+          ],
           // 选段窗口：拖体平移（换起点）
           Positioned(
             left: winLeft,
@@ -192,17 +225,29 @@ class _TrimBar extends StatelessWidget {
                     (shot.trimStartMs + d.delta.dx / pxPerMs).round()),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
-                    color: AppColors.accentBlue.withValues(alpha: 0.28),
-                    border: Border.all(color: AppColors.accentBlue, width: 1.2),
+                    // 有帧时窗口只描边不盖色——里面就是选中的画面本身；
+                    // 纯色条才需要填充示意
+                    color: fs == null || fs.isEmpty
+                        ? AppColors.accentBlue.withValues(alpha: 0.28)
+                        : Colors.transparent,
+                    border: Border.all(color: AppColors.accentBlue, width: 1.6),
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: Center(
-                    child: Text(_s(alloc),
-                        style: const TextStyle(
-                            fontSize: AppFontSize.micro,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                            fontFeatures: [FontFeature.tabularFigures()])),
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(3)),
+                      child: Text('选用 ${_s(alloc)}',
+                          style: const TextStyle(
+                              fontSize: AppFontSize.micro,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                              fontFeatures: [FontFeature.tabularFigures()])),
+                    ),
                   ),
                 ),
               ),
@@ -222,7 +267,7 @@ class _TrimBar extends StatelessWidget {
                     (alloc + d.delta.dx / pxPerMs / shot.speed).round()),
                 child: Center(
                   child: Container(
-                    width: 3,
+                    width: 4,
                     decoration: BoxDecoration(
                         color: AppColors.accentBlueLight,
                         borderRadius: BorderRadius.circular(2)),
@@ -234,6 +279,29 @@ class _TrimBar extends StatelessWidget {
         ]),
       );
     });
+  }
+
+  /// 取段的数字口径（参考图样式）：左「0.8s ~ 1.5s」（素材内起止）、
+  /// 右「素材可用 3.5s」
+  Widget rangeCaption() {
+    final from = shot.trimStartMs;
+    final to = shot.trimStartMs + shot.consumedSourceMs;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(children: [
+        Text('${_s(from)} ~ ${_s(to)}',
+            style: const TextStyle(
+                fontSize: AppFontSize.micro,
+                color: AppColors.textSecondary,
+                fontFeatures: [FontFeature.tabularFigures()])),
+        const Spacer(),
+        Text('素材可用 ${_s(shot.durationMs!)}',
+            style: const TextStyle(
+                fontSize: AppFontSize.micro,
+                color: AppColors.textTertiary,
+                fontFeatures: [FontFeature.tabularFigures()])),
+      ]),
+    );
   }
 
   static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
@@ -860,26 +928,32 @@ class _LineBand extends StatelessWidget {
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
         if (src != null && shot.allocMs != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(
-                      width: 30,
-                      child: Text('取段',
-                          style: TextStyle(
-                              fontSize: AppFontSize.micro,
-                              color: AppColors.textSecondary))),
-                  Expanded(
-                    child: _TrimBar(
-                      key: ValueKey('band-trim-$index-$j'),
-                      shot: shot,
-                      onTrim: (ms) => handlers.onTrimShot(index, j, ms),
-                      onResize: (ms) => handlers.onResizeShot(index, j, ms),
+          Builder(builder: (context) {
+            final bar = _TrimBar(
+              key: ValueKey('band-trim-$index-$j'),
+              shot: shot,
+              frames: handlers.shotFramesOf(shot),
+              onTrim: (ms) => handlers.onTrimShot(index, j, ms),
+              onResize: (ms) => handlers.onResizeShot(index, j, ms),
+            );
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const SizedBox(
+                        width: 30,
+                        child: Text('取段',
+                            style: TextStyle(
+                                fontSize: AppFontSize.micro,
+                                color: AppColors.textSecondary))),
+                    Expanded(
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [bar, bar.rangeCaption()]),
                     ),
-                  ),
-                ]),
-          ),
+                  ]),
+            );
+          }),
         Row(children: [
           const SizedBox(
               width: 30,

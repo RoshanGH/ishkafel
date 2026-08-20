@@ -130,6 +130,63 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 重新起一个 ffmpeg（真实发生过：源文件不在时无限重试，测试挂死）
   final Set<String> _refThumbFailed = {};
 
+  /// 取段胶片条的素材帧（materialId → 8 帧路径）。拖窗口时看得见
+  /// 取的是哪段画面——纯色条只能靠猜。按素材缓存，算过一次不再抽
+  final Map<int, List<String>> _shotFrames = {};
+  final Set<int> _shotFramesBusy = {};
+  final Set<int> _shotFramesFailed = {};
+  static const _filmstripFrameCount = 8;
+
+  /// 确保素材的胶片帧就绪（本地文件在才抽；异步落盘后刷新）
+  void _ensureShotFrames(LineShot shot) {
+    final id = shot.materialId;
+    if (_shotFrames.containsKey(id) ||
+        _shotFramesBusy.contains(id) ||
+        _shotFramesFailed.contains(id)) {
+      return;
+    }
+    final src = shot.localSource ?? _mediaCache?.localPathOf(id);
+    final dataDir = ref.read(dataDirProvider);
+    final durMs = shot.durationMs;
+    if (src == null || dataDir == null || durMs == null || durMs <= 0) return;
+    final dir = Directory(
+        p.join(dataDir.path, 'shot_frames', _task.id, '${id}_$durMs'));
+    final expect = [
+      for (var i = 0; i < _filmstripFrameCount; i++)
+        p.join(dir.path, 'f$i.jpg'),
+    ];
+    if (expect.every((f) => File(f).existsSync())) {
+      _shotFrames[id] = expect;
+      return;
+    }
+    _shotFramesBusy.add(id);
+    unawaited(() async {
+      try {
+        await dir.create(recursive: true);
+        // 均匀取 8 帧：第 i 帧取素材 (i+0.5)/8 处（本地源用区间内坐标）
+        final baseMs = shot.localSource != null ? shot.trimStartMs : 0;
+        for (var i = 0; i < _filmstripFrameCount; i++) {
+          final at = baseMs + durMs * (i + 0.5) / _filmstripFrameCount;
+          final r = await const ResolvingProcessRunner().call('ffmpeg', [
+            '-y', '-v', 'error',
+            '-ss', (at / 1000).toStringAsFixed(3),
+            '-i', src,
+            '-frames:v', '1',
+            '-vf', 'scale=-2:72',
+            expect[i],
+          ]);
+          if (r.exitCode != 0) throw StateError('ffmpeg exit=${r.exitCode}');
+        }
+        if (mounted) setState(() => _shotFrames[id] = expect);
+      } catch (e) {
+        _shotFramesFailed.add(id);
+        AppLog.warn('取段胶片帧抽取失败（素材 $id）：$e');
+      } finally {
+        _shotFramesBusy.remove(id);
+      }
+    }());
+  }
+
   /// 右板滚动控制（左栏点行 → 滚到对应块）
   final ScrollController _boardScroll = ScrollController();
 
@@ -1472,6 +1529,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onDistribute: _distribute,
                       onSlowFill: _slowFill,
                       onEditTags: _editTags,
+                      shotFramesOf: (shot) {
+                        _ensureShotFrames(shot);
+                        return _shotFrames[shot.materialId];
+                      },
                       onSplitSubline: _splitSubline,
                       onMergeSubline: _mergeSubline,
                       onManualMs: (index, ms) =>
