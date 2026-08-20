@@ -20,10 +20,17 @@ class LineVoiceService {
   /// 不能信字级时间戳的尾字（尾部常有静音）
   final Future<int> Function(File audio) measureMs;
 
+  /// 给合成音频补词级时间戳（ASR 转写）。TTS 服务实测不回词级时间戳
+  /// （enable_subtitle 只有句级文本），而字幕按镜头切分全靠词的时间——
+  /// 「家人们」归第一镜、后半句归后面的镜头。null = 不补（老装配）；
+  /// 抛异常不挡配音，words 留空、字幕退回整句
+  final Future<List<VoiceWord>> Function(File audio)? transcribeWords;
+
   LineVoiceService({
     required this.tts,
     required this.outputDir,
     required this.measureMs,
+    this.transcribeWords,
   });
 
   /// 为一行生成配音。失败抛 [TtsException]（中文、可直接展示）。
@@ -54,16 +61,25 @@ class LineVoiceService {
       } catch (_) {}
       throw const TtsException('合成出的音频是空的，请重试。');
     }
+    var words = [
+      for (final w in result.words)
+        VoiceWord(text: w.word, startMs: w.startMs, endMs: w.endMs),
+    ];
+    if (words.isEmpty && transcribeWords != null) {
+      try {
+        words = await transcribeWords!(file);
+      } catch (e) {
+        AppLog.warn('配音词级时间戳转写失败（line=$lineId，字幕退回整句）：$e');
+        words = const [];
+      }
+    }
     return LineVoiceover(
       audioPath: file.path,
       durationMs: durationMs,
       sourceText: trimmed,
       voiceId: voiceId,
       speechRate: speechRate,
-      words: [
-        for (final w in result.words)
-          VoiceWord(text: w.word, startMs: w.startMs, endMs: w.endMs),
-      ],
+      words: words,
     );
   }
 

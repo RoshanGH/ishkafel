@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/ai/ai_credentials.dart';
+import '../../core/ai/volcano_asr_provider.dart';
 import '../../core/audio/tts_client.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/log/app_log.dart';
@@ -13,6 +14,7 @@ import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/line_tagger.dart';
 import '../../core/script/line_voice_service.dart';
+import '../../core/script/script_doc.dart' show VoiceWord;
 import '../../core/script/script_transcriber.dart';
 
 /// 「从视频提取脚本」的服务。null = AI 凭据不全——编导台把入口禁用并
@@ -48,13 +50,19 @@ typedef LineVoiceFactory = LineVoiceService Function(RenewTask task);
 final lineVoiceFactoryProvider = Provider<LineVoiceFactory?>((ref) => null);
 
 /// 真实装配：TTS 走豆包 2.0，产物落 `<dataDir>/voices/<taskId>/`
-/// （与工作台换音色同一目录规矩，TaskArtifacts 收编、删任务随目录清走）
+/// （与工作台换音色同一目录规矩，TaskArtifacts 收编、删任务随目录清走）。
+/// 词级时间戳由 ASR 对合成音频转写补上（TTS 服务不回词级），
+/// 字幕才能按镜头切分——「家人们」归第一镜，后半句归后面的镜头
 LineVoiceFactory? defaultLineVoiceFactory(
     AiCredentials credentials, Directory dataDir) {
   if (credentials.speechAppId.isEmpty ||
       credentials.speechAccessToken.isEmpty) {
     return null;
   }
+  final asr = VolcanoAsrProvider(
+    appId: credentials.speechAppId,
+    accessToken: credentials.speechAccessToken,
+  );
   return (task) => LineVoiceService(
         tts: TtsClient(
           appId: credentials.speechAppId,
@@ -62,7 +70,34 @@ LineVoiceFactory? defaultLineVoiceFactory(
         ),
         outputDir: Directory(p.join(dataDir.path, 'voices', task.id)),
         measureMs: _measureFileMs,
+        transcribeWords: (audio) => _transcribeVoiceWords(asr, audio),
       );
+}
+
+/// mp3 → 16k 单声道 PCM（临时文件，用完即删）→ ASR → 词级时间戳
+Future<List<VoiceWord>> _transcribeVoiceWords(
+    VolcanoAsrProvider asr, File audio) async {
+  final pcm = File('${audio.path}.pcm');
+  try {
+    final r = await systemProcessRunner('ffmpeg', [
+      '-y', '-i', audio.path,
+      '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le',
+      pcm.path,
+    ]);
+    if (r.exitCode != 0) {
+      throw StateError('ffmpeg 转 PCM 失败（exit=${r.exitCode}）');
+    }
+    final sentences = await asr.transcribe(pcm.path);
+    return [
+      for (final s in sentences)
+        for (final w in s.words)
+          VoiceWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
+    ];
+  } finally {
+    try {
+      pcm.deleteSync();
+    } catch (_) {}
+  }
 }
 
 /// 用 ffprobe 量 mp3 实际时长——配音时长是行时间轴的根，不能按比特率估

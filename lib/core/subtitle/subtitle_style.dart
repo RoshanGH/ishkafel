@@ -45,6 +45,22 @@ class SubtitleStyle {
   /// 开箱即用的默认样式
   static const standard = SubtitleStyle();
 
+  SubtitleStyle copyWith({
+    double? bottomRatio,
+    double? fontRatio,
+    SubtitlePreset? preset,
+    Object? colorHex = _unsetColor,
+  }) =>
+      SubtitleStyle(
+        bottomRatio: bottomRatio ?? this.bottomRatio,
+        fontRatio: fontRatio ?? this.fontRatio,
+        preset: preset ?? this.preset,
+        colorHex:
+            identical(colorHex, _unsetColor) ? this.colorHex : colorHex as String?,
+      );
+
+  static const _unsetColor = Object();
+
   Map<String, dynamic> toJson() => {
         'bottomRatio': bottomRatio,
         'fontRatio': fontRatio,

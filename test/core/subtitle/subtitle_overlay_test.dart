@@ -13,6 +13,63 @@ void main() {
     AsrSentence(startMs: 5000, endMs: 7000, text: '第三句'),
   ];
 
+  group('整行按镜头边界切字幕段（预览与导出同一套规则）', () {
+    // 「家人们，这是我们最新的产品」：镜头 1 只出「家人们」，
+    // 后面的镜头出后半句——广告片的常规节奏
+    const line = AsrSentence(
+      startMs: 0,
+      endMs: 3000,
+      text: '家人们，这是我们最新的产品。',
+      words: [
+        AsrWord(text: '家', startMs: 0, endMs: 200),
+        AsrWord(text: '人', startMs: 200, endMs: 400),
+        AsrWord(text: '们', startMs: 400, endMs: 600),
+        AsrWord(text: '这', startMs: 900, endMs: 1100),
+        AsrWord(text: '是', startMs: 1100, endMs: 1300),
+        AsrWord(text: '我', startMs: 1300, endMs: 1500),
+        AsrWord(text: '们', startMs: 1500, endMs: 1700),
+        AsrWord(text: '最', startMs: 1700, endMs: 1900),
+        AsrWord(text: '新', startMs: 1900, endMs: 2100),
+        AsrWord(text: '的', startMs: 2100, endMs: 2300),
+        AsrWord(text: '产', startMs: 2300, endMs: 2600),
+        AsrWord(text: '品', startMs: 2600, endMs: 2900),
+      ],
+    );
+
+    test('镜头 1 占 0~800ms：只出「家人们」，后半句归后面的镜头', () {
+      final segs = lineSubtitleSegments(
+          sentence: line, shotBoundaries: const [0, 800, 3000]);
+      expect(segs.first.text, '家人们');
+      expect(segs.first.startMs, 0);
+      expect(segs.map((s) => s.text).join('|'), '家人们|这是我们最新的产品');
+      expect(segs[1].startMs, 900, reason: '后半句从它真正开口的时刻出现');
+    });
+
+    test('没有镜头边界（单镜/无镜头）：退化为整行一个坑', () {
+      final segs = lineSubtitleSegments(
+          sentence: line, shotBoundaries: const [0, 3000]);
+      // 12 字 <18 上限但有标点拆段规则——按现行规则切成两段也可，
+      // 关键是覆盖全部文本且时间连续
+      expect(segs.map((s) => s.text).join(), '家人们这是我们最新的产品');
+    });
+
+    test('没有词级时间戳：每个镜头都显示整句（兜底，与导出一致）', () {
+      const bare = AsrSentence(startMs: 0, endMs: 3000, text: '家人们看过来');
+      final segs = lineSubtitleSegments(
+          sentence: bare, shotBoundaries: const [0, 800, 3000]);
+      expect(segs, hasLength(2));
+      expect(segs.every((s) => s.text == '家人们看过来'), isTrue);
+    });
+  });
+
+  group('剥标点不能伤内容', () {
+    test('数字间的小数点是价格，不是句读——69.9 绝不能变 699', () {
+      expect(stripPunctuation('再不买就恢复69.9一瓶了。'), '再不买就恢复69.9一瓶了');
+      expect(stripPunctuation('杀菌率99.9%，放心'), '杀菌率99.9%放心');
+      expect(stripPunctuation('句尾的点。要剥'), '句尾的点要剥');
+    });
+  });
+
   group('裁出坑位内的字幕行', () {
     test('完全落在坑位里的句子原样保留，时间平移到切片时间轴', () {
       final lines = subtitleLinesInSlot(

@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/analysis/providers.dart' show AsrSentence, AsrWord;
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
@@ -46,6 +47,7 @@ import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
+import '../../core/subtitle/subtitle_overlay.dart' show lineSubtitleSegments;
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
@@ -153,6 +155,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 草片刚做完的庆祝一拍（对勾动效那 1.1 秒），结束即开播
   bool _draftCelebrating = false;
+
+  /// 字幕拖动中的临时位置（bottomRatio）；null = 没在拖。
+  /// 拖动实时预览、松手才落盘
+  double? _subtitleDragRatio;
 
   /// 草片流水线进度：(阶段名, 当前句摘要, 已完成, 总数)；null = 没在跑。
   /// 这是产品的魔法时刻——提取完一条参考片，几分钟后中央屏幕自动
@@ -1919,8 +1925,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
   }
 
-  /// 当前播放行的字幕（跟随 [_previewLineIndex]；行级样式覆盖优先）。
-  /// 画面行没台词，不出字幕
+  /// 当前播放行的字幕：按镜头边界与词级时间戳切段（与导出同一套规则）
+  /// ——「家人们」只在第一镜出现，后半句归后面的镜头。画面行没台词不出。
+  /// 字幕本身可操作：点一下改样式，上下拖直接调位置
   Widget _previewSubtitle() {
     final index = _previewLineIndex;
     if (index == null || index < 0 || index >= _doc.lines.length) {
@@ -1928,9 +1935,59 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
     final line = _doc.lines[index];
     if (line.type != ScriptLineType.voiced) return const SizedBox.shrink();
+    final vo = line.voiceover;
+    final lineStart = _planResult.lineStarts[index] ?? 0;
+    final relMs = _positionMs.value - lineStart;
+    String text;
+    if (vo == null) {
+      text = line.text.trim();
+    } else {
+      // 行内镜头累计边界；无镜头则整行一个坑
+      final boundaries = <int>[0];
+      for (final s in line.shots) {
+        boundaries.add(boundaries.last + (s.allocMs ?? 0));
+      }
+      if (boundaries.length == 1 || boundaries.last == 0) {
+        boundaries
+          ..clear()
+          ..addAll([0, vo.durationMs]);
+      }
+      final segs = lineSubtitleSegments(
+        sentence: AsrSentence(
+          startMs: 0,
+          endMs: vo.durationMs,
+          text: vo.sourceText,
+          words: [
+            for (final w in vo.words)
+              AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
+          ],
+        ),
+        shotBoundaries: boundaries,
+      );
+      final current = segs
+          .where((s) => relMs >= s.startMs && relMs < s.endMs)
+          .firstOrNull;
+      text = current?.text ?? '';
+    }
+    if (text.isEmpty) return const SizedBox.shrink();
+    final style = line.subtitleOverride ?? _doc.subtitle;
     return PreviewSubtitle(
-      text: line.text.trim(),
-      style: line.subtitleOverride ?? _doc.subtitle,
+      text: text,
+      style: style,
+      onTap: _editSubtitleStyle,
+      onDragRatio: (ratio) =>
+          setState(() => _subtitleDragRatio = ratio),
+      onDragEnd: (ratio) {
+        _subtitleDragRatio = null;
+        // 拖的是谁就落谁：行级覆盖在改行级，否则改全局
+        if (line.subtitleOverride != null) {
+          _mutate((d) => d.setSubtitleOverrideById(
+              line.id, style.copyWith(bottomRatio: ratio)));
+        } else {
+          _mutate((d) => d.withSubtitle(style.copyWith(bottomRatio: ratio)));
+        }
+      },
+      dragRatio: _subtitleDragRatio,
     );
   }
 

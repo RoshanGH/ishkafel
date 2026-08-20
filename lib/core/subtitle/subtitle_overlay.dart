@@ -117,6 +117,35 @@ List<SubtitleLine> subtitleLinesInSlot({
   return List.unmodifiable(lines);
 }
 
+/// 一整行台词按**镜头边界**切成字幕段（行时间轴，0 = 行首）。
+///
+/// 预览的实时字幕层和导出的逐镜 overlay 用的是同一套规则：行内每个
+/// 镜头是一个坑位，词的时间中点归属哪个坑，那几个字就在哪个镜头出现
+/// ——「家人们」归第一镜、「这是我们最新的产品」归后面的镜头。
+/// [shotBoundaries] 是行内镜头的累计边界（首 0、尾行长，长度 = 镜头数+1）；
+/// 传 `[0, 行长]` 即无镜头切分的整行。
+List<SubtitleLine> lineSubtitleSegments({
+  required AsrSentence sentence,
+  required List<int> shotBoundaries,
+}) {
+  final out = <SubtitleLine>[];
+  for (var i = 0; i + 1 < shotBoundaries.length; i++) {
+    final slotStart = shotBoundaries[i];
+    final slotEnd = shotBoundaries[i + 1];
+    if (slotEnd <= slotStart) continue;
+    for (final seg in subtitleLinesInSlot(
+        sentences: [sentence], slotStartMs: slotStart, slotEndMs: slotEnd)) {
+      // subtitleLinesInSlot 返回的时间相对坑位，平移回行时间轴
+      out.add(SubtitleLine(
+        startMs: seg.startMs + slotStart,
+        endMs: seg.endMs + slotStart,
+        text: seg.text,
+      ));
+    }
+  }
+  return List.unmodifiable(out);
+}
+
 class _TimedWord {
   final int startMs;
   final int endMs;
@@ -153,9 +182,17 @@ const _clauseEnders = '，。？！；：、…,.?!;:';
 /// 渲染文本里的标点全部剥掉（不留空格）——原片字幕就是无标点的堆字
 /// 风格，句读靠「逐段出现」的节奏表达。标点只在**拆段**阶段用
 /// （[_splitByLength] 优先在标点处切开），不进画面。
-String stripPunctuation(String text) => text.replaceAll(
+///
+/// **数字间的小数点不是句读**：69.9 剥成 699 是把价格改错了
+/// （真机字幕实测出过这个事故），先保住再剥
+String stripPunctuation(String text) {
+  final guarded = text.replaceAllMapped(
+      RegExp(r'(\d)\.(\d)'), (m) => '${m[1]}\u0000${m[2]}');
+  final stripped = guarded.replaceAll(
     RegExp('[，。？！；：、…,.?!;:~～·\'"\u201c\u201d\u2018\u2019()（）《》<>\\[\\]【】—-]'),
-    '');
+      '');
+  return stripped.replaceAll('\u0000', '.');
+}
 
 /// 超长的词串按上限拆段。切点优先级：窗口内**最后一个带句读标点的词**
 /// （语义断点最好读）> 窗口内词间停顿最大处 > 硬切在窗口末尾

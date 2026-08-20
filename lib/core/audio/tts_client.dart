@@ -105,6 +105,9 @@ class TtsClient {
     Object? failure;
 
     final sessionId = _uuid();
+    // 注：enable_subtitle 只带回句级文本；词级时间戳这个服务不给
+    // （enable_timestamp / additions.with_timestamp 都实测无效），
+    // 词级时间戳由 LineVoiceService 用 ASR 对合成音频转写补上
     final audioParams = <String, dynamic>{
       'format': 'mp3',
       'sample_rate': 24000,

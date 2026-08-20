@@ -130,6 +130,28 @@ class LineBoard extends StatelessWidget {
   }
 }
 
+/// 悬停时露出遮罩动作（胶片格的播放/用它）：平时画面干净，
+/// 指过去操作才出现
+class _HoverReveal extends StatefulWidget {
+  final Widget Function(bool hovering) builder;
+
+  const _HoverReveal({required this.builder});
+
+  @override
+  State<_HoverReveal> createState() => _HoverRevealState();
+}
+
+class _HoverRevealState extends State<_HoverReveal> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: widget.builder(_hovering),
+      );
+}
+
 /// 播放跟到哪一行，就把那一行块滚到可见——人看着自己的片子走，
 /// 不用自己追着滚
 class _ScrollIntoView extends StatefulWidget {
@@ -319,22 +341,23 @@ class _LineBand extends StatelessWidget {
     ]);
   }
 
-  // ---- 卡片行：参考卡 + 镜头卡 + 找镜头 ----
+  // ---- 参考胶片条（上，原文）+ 镜头卡行（下，译文）----
 
   Widget _shotStrip() {
     final root = ShotAllocation.rootMsOf(line);
     final shortfall =
         root == null ? 0 : ShotAllocation.shortfallMs(line.shots, root);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // 参考是一个**整体**（这一句在原片里的完整区间 = 台词语义单元），
+      // 内部按视觉切点分格（= 视觉镜头）。胶片条形态：外框一体、格间
+      // 细分隔，灰调不与下面的工作镜头抢——原文在上、译文在下，对照着配
+      _referenceStrip(),
+      const SizedBox(height: AppSpacing.xs),
       SizedBox(
         height: 132,
         child: ListView(
           scrollDirection: Axis.horizontal,
           children: [
-            if (line.reference != null)
-              ..._refCards()
-            else
-              _uploadRefCard(),
             for (var j = 0; j < line.shots.length; j++) ...[
               _shotCard(j, line.shots[j]),
               const SizedBox(width: AppSpacing.sm),
@@ -380,114 +403,131 @@ class _LineBand extends StatelessWidget {
   }
 
   /// 参考分镜卡：这一句在参考片里的原始画面，按视觉切点切成多镜
-  /// （一镜一卡）。灰调+角标区分，不进成片；「用它」一键把该镜区间
-  /// 填为本行镜头
-  List<Widget> _refCards() {
-    final ref = line.reference!;
+  /// 参考胶片条：这一句在原片里的**完整区间**是一个整体（台词语义单元），
+  /// 内部按视觉切点分格（视觉镜头）——格与格无缝相连、细线分隔，
+  /// 一眼读出「一句话在原片里换了几个镜头」。灰调、比工作镜头矮一档，
+  /// 参考只是原文，不与下面的译文（我的镜头）抢戏。
+  /// 悬停格上出现「用它」；点格播放该镜区间
+  Widget _referenceStrip() {
+    final ref = line.reference;
+    if (ref == null) {
+      // 没参考：给一条低调的「传参考」入口，手写的行也能挂原片对照
+      return InkWell(
+        key: ValueKey('band-upload-ref-$index'),
+        onTap: () => handlers.onUploadReference(index),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        hoverColor: AppColors.hover,
+        child: Container(
+          height: 24,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.video_call_outlined,
+                size: 13, color: AppColors.textTertiary.withValues(alpha: 0.8)),
+            const SizedBox(width: 4),
+            Text('传一段参考画面，对照着配镜',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.textTertiary.withValues(alpha: 0.8))),
+          ]),
+        ),
+      );
+    }
     final segments = ref.segments;
-    return [
-      for (var k = 0; k < segments.length; k++)
-        _refSegCard(k, segments[k], segments.length),
-    ];
+    return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+      // 竖排「参 考」标签：条子的身份，别再靠每格角标重复喊
+      Container(
+        width: 16,
+        height: 56,
+        alignment: Alignment.center,
+        child: Text('参\n考',
+            style: TextStyle(
+                fontSize: 9,
+                height: 1.3,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textTertiary.withValues(alpha: 0.9))),
+      ),
+      const SizedBox(width: 4),
+      Flexible(
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(
+                color: AppColors.textTertiary.withValues(alpha: 0.35)),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (var k = 0; k < segments.length; k++) ...[
+              if (k > 0)
+                Container(
+                    width: 1,
+                    color: AppColors.textTertiary.withValues(alpha: 0.35)),
+              _refCell(k, segments[k]),
+            ],
+          ]),
+        ),
+      ),
+    ]);
   }
 
-  Widget _refSegCard(int k, (int, int) seg, int total) {
+  /// 胶片条里的一格 = 一个视觉镜头。宽随该镜时长成比例（有节奏感），
+  /// 夹在 [44, 96] 之间保证可点可辨
+  Widget _refCell(int k, (int, int) seg) {
     final thumb = handlers.refThumbOf(line, k);
-    return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.sm),
-      child: SizedBox(
-        width: 74,
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Expanded(
-            child: InkWell(
-              key: ValueKey('band-ref-$index-$k'),
-              onTap: () => handlers.onPlayReference(index, k),
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(AppRadius.sm),
-                  border: Border.all(
-                      color: AppColors.textTertiary.withValues(alpha: 0.55)),
+    final ms = seg.$2 - seg.$1;
+    final width = (ms / 60.0).clamp(44.0, 96.0);
+    return _HoverReveal(
+      builder: (hovering) => InkWell(
+        key: ValueKey('band-ref-$index-$k'),
+        onTap: () => handlers.onPlayReference(index, k),
+        child: SizedBox(
+          width: width,
+          child: Stack(fit: StackFit.expand, children: [
+            if (thumb != null)
+              Image.file(File(thumb), fit: BoxFit.cover)
+            else
+              Container(
                   color: Colors.black,
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Stack(fit: StackFit.expand, children: [
-                  if (thumb != null)
-                    Image.file(File(thumb), fit: BoxFit.cover)
-                  else
-                    const Center(
-                        child: Icon(Icons.hourglass_empty,
-                            size: 12, color: AppColors.textTertiary)),
-                  Positioned(
-                    left: 3,
-                    top: 3,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 1),
-                      decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(3)),
-                      child: Text(total > 1 ? '参考${k + 1}' : '参考',
-                          style: const TextStyle(
-                              fontSize: AppFontSize.micro,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white)),
-                    ),
-                  ),
-                  const Center(
-                      child: Icon(Icons.play_arrow,
-                          size: 16, color: Colors.white70)),
-                ]),
-              ),
-            ),
-          ),
-          const SizedBox(height: 2),
-          InkWell(
-            key: ValueKey('band-use-ref-$index-$k'),
-            onTap: () => handlers.onUseReference(index, k),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Text('${_s(seg.$2 - seg.$1)} · 用它',
-                  textAlign: TextAlign.center,
+                  child: const Icon(Icons.hourglass_empty,
+                      size: 11, color: AppColors.textTertiary)),
+            // 灰调：参考是原文引用，不与工作镜头的彩色缩略图抢
+            Container(color: Colors.black.withValues(alpha: 0.18)),
+            Positioned(
+              right: 2,
+              bottom: 2,
+              child: Text(_s(ms),
                   style: const TextStyle(
-                      fontSize: AppFontSize.micro,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.accentBlueLight)),
+                      fontSize: 9,
+                      color: Colors.white70,
+                      fontFeatures: [FontFeature.tabularFigures()])),
             ),
-          ),
-        ]),
+            if (hovering)
+              Container(
+                color: Colors.black.withValues(alpha: 0.45),
+                child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.play_arrow,
+                          size: 14, color: Colors.white),
+                      InkWell(
+                        key: ValueKey('band-use-ref-$index-$k'),
+                        onTap: () => handlers.onUseReference(index, k),
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child: Text('用它',
+                              style: TextStyle(
+                                  fontSize: AppFontSize.micro,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.accentBlueLight)),
+                        ),
+                      ),
+                    ]),
+              ),
+          ]),
+        ),
       ),
     );
   }
-
-  /// 没参考的行给「传参考」入口：手写的行也能挂一段参考视频对照着配镜
-  Widget _uploadRefCard() => Padding(
-        padding: const EdgeInsets.only(right: AppSpacing.sm),
-        child: InkWell(
-          key: ValueKey('band-upload-ref-$index'),
-          onTap: () => handlers.onUploadReference(index),
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          child: Container(
-            width: 74,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(AppRadius.sm),
-              border: Border.all(
-                  color: AppColors.textTertiary.withValues(alpha: 0.35)),
-            ),
-            child:
-                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.video_call_outlined,
-                  size: 15,
-                  color: AppColors.textTertiary.withValues(alpha: 0.8)),
-              const SizedBox(height: 2),
-              Text('传参考',
-                  style: TextStyle(
-                      fontSize: AppFontSize.micro,
-                      color: AppColors.textTertiary.withValues(alpha: 0.8))),
-            ]),
-          ),
-        ),
-      );
 
   Widget _shotCard(int j, LineShot shot) {
     final expanded = expandedShot == j;

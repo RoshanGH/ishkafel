@@ -16,7 +16,25 @@ class PreviewSubtitle extends StatelessWidget {
   final String text;
   final SubtitleStyle style;
 
-  const PreviewSubtitle({super.key, required this.text, required this.style});
+  /// 点字幕：打开样式编辑（操作就在字幕上，不用去顶栏找）
+  final VoidCallback? onTap;
+
+  /// 上下拖字幕：实时回报新的 bottomRatio；松手时 [onDragEnd] 落盘
+  final ValueChanged<double>? onDragRatio;
+  final ValueChanged<double>? onDragEnd;
+
+  /// 拖动中的临时位置（未落盘）；null = 用 [style] 的
+  final double? dragRatio;
+
+  const PreviewSubtitle({
+    super.key,
+    required this.text,
+    required this.style,
+    this.onTap,
+    this.onDragRatio,
+    this.onDragEnd,
+    this.dragRatio,
+  });
 
   Color get _fill {
     final hex = style.colorHex;
@@ -37,8 +55,10 @@ class PreviewSubtitle extends StatelessWidget {
     return LayoutBuilder(builder: (context, constraints) {
       final h = constraints.maxHeight;
       final fontSize = h * style.fontRatio;
-      // 导出侧 marginV 是字幕**底边**距画面底的距离，这里用 bottom 对齐
-      final bottom = h * style.bottomRatio;
+      // 导出侧 marginV 是字幕**底边**距画面底的距离，这里用 bottom 对齐；
+      // 拖动中用临时位置实时预览
+      final ratio = dragRatio ?? style.bottomRatio;
+      final bottom = h * ratio;
       // 描边占字号百分比与导出 spec 一致：有衬底收细
       final stroke = fontSize * (_hasBacking ? 0.03 : 0.09);
       final textStyle = TextStyle(
@@ -87,13 +107,40 @@ class PreviewSubtitle extends StatelessWidget {
           ),
         );
       }
-      return IgnorePointer(
-        child: Padding(
-          padding: EdgeInsets.only(
-              bottom: bottom, left: fontSize, right: fontSize),
-          child: Align(alignment: Alignment.bottomCenter, child: label),
+      // 字幕本身就是操作对象：点一下改样式、上下拖直接调位置。
+      // 只有字幕文字区域可命中，画面其余部分不拦（播放器手势不受影响）
+      final interactive = onTap != null || onDragRatio != null;
+      final positioned = Padding(
+        padding:
+            EdgeInsets.only(bottom: bottom, left: fontSize, right: fontSize),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: interactive
+              ? MouseRegion(
+                  cursor: SystemMouseCursors.grab,
+                  child: GestureDetector(
+                    key: const ValueKey('preview-subtitle-hit'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onTap,
+                    onVerticalDragUpdate: onDragRatio == null
+                        ? null
+                        : (d) {
+                            final next = ((dragRatio ?? style.bottomRatio) -
+                                    d.delta.dy / h)
+                                .clamp(0.03, 0.7);
+                            onDragRatio!(next);
+                          },
+                    onVerticalDragEnd: onDragEnd == null
+                        ? null
+                        : (_) =>
+                            onDragEnd!(dragRatio ?? style.bottomRatio),
+                    child: label,
+                  ),
+                )
+              : label,
         ),
       );
+      return interactive ? positioned : IgnorePointer(child: positioned);
     });
   }
 }

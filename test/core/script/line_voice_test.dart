@@ -55,6 +55,61 @@ void main() {
     expect(tts.calls.single.$3, 25);
   });
 
+  test('TTS 不给词级时间戳时用 ASR 转写补上（字幕按镜头切分的地基）',
+      () async {
+    final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
+    File? transcribed;
+    final service = LineVoiceService(
+      tts: tts,
+      outputDir: dir,
+      measureMs: (_) async => 2000,
+      transcribeWords: (audio) async {
+        transcribed = audio;
+        return const [
+          VoiceWord(text: '家人们', startMs: 0, endMs: 600),
+          VoiceWord(text: '看', startMs: 700, endMs: 900),
+        ];
+      },
+    );
+    final vo = await service.generate(
+        lineId: 'l1', text: '家人们看', voiceId: 'v');
+    expect(transcribed, isNotNull, reason: '合成完把 mp3 交给 ASR 转写');
+    expect(vo.words.map((w) => w.text), ['家人们', '看']);
+  });
+
+  test('ASR 转写失败不挡配音——words 留空，字幕退回整句', () async {
+    final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
+    final service = LineVoiceService(
+      tts: tts,
+      outputDir: dir,
+      measureMs: (_) async => 2000,
+      transcribeWords: (_) async => throw Exception('网络断了'),
+    );
+    final vo =
+        await service.generate(lineId: 'l1', text: '词', voiceId: 'v');
+    expect(vo.words, isEmpty);
+    expect(vo.durationMs, 2000, reason: '配音本体不受转写失败影响');
+  });
+
+  test('TTS 自带词级时间戳时不再多花一次 ASR', () async {
+    final tts = _FakeTts(
+        result: TtsResult(audio: Uint8List.fromList([1]), words: const [
+      TtsWord(word: '词', startMs: 0, endMs: 300),
+    ]));
+    var asrCalls = 0;
+    final service = LineVoiceService(
+      tts: tts,
+      outputDir: dir,
+      measureMs: (_) async => 2000,
+      transcribeWords: (_) async {
+        asrCalls++;
+        return const [];
+      },
+    );
+    await service.generate(lineId: 'l1', text: '词', voiceId: 'v');
+    expect(asrCalls, 0);
+  });
+
   test('语速 0 不传给 TTS（火山原速就是不带参数）', () async {
     final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
     await build(tts).generate(lineId: 'l1', text: '词', voiceId: 'v');

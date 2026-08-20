@@ -517,9 +517,18 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('band-ref-0-0')), findsOneWidget,
-          reason: 'ASR 切出的原片区间要作为参考视频摆在块里');
-      expect(find.text('参考'), findsOneWidget);
+          reason: 'ASR 切出的原片区间要作为参考胶片条摆在块里');
+      expect(find.text('参\n考'), findsOneWidget,
+          reason: '胶片条的竖排身份标签——参考是一个整体，不是散卡');
 
+      // 「用它」悬停才出现：把鼠标挪到格上再点
+      final gesture =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(
+          tester.getCenter(find.byKey(const ValueKey('band-ref-0-0'))));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('band-use-ref-0-0')));
       await tester.pump(const Duration(seconds: 1));
 
