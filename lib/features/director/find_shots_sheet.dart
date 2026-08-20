@@ -642,7 +642,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             color: bg, borderRadius: BorderRadius.circular(4)),
         child: Text(text,
             style: TextStyle(
-                fontSize: 9, fontWeight: FontWeight.w600, color: fg)),
+                fontSize: AppFontSize.micro, fontWeight: FontWeight.w600, color: fg)),
       );
 
   void _toggle(CandidateEntry entry) {

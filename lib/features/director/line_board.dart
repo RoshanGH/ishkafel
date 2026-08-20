@@ -193,9 +193,12 @@ class _LineBand extends StatelessWidget {
     return InkWell(
       onTap: () => handlers.onFocusLine(index),
       borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Container(
+      // 点亮/选中的过渡要有呼吸（180ms）：播放跟随换行时块与块之间
+      // 不再闪跳；左缘 3px 播放条是真实元素，不是投影 hack
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
         decoration: BoxDecoration(
-          // 播放到这一行时块底色微亮 + 左缘播放条：预览走到哪，块亮到哪
           color: previewing
               ? Color.lerp(
                   AppColors.surfaceRaised, AppColors.accentBlue, 0.06)!
@@ -204,30 +207,48 @@ class _LineBand extends StatelessWidget {
           border: Border.all(
               color: selected ? AppColors.accentBlue : AppColors.border,
               width: selected ? 1.2 : 1),
-          boxShadow: previewing
-              ? const [
-                  BoxShadow(
-                      color: AppColors.accentBlue,
-                      blurRadius: 0,
-                      spreadRadius: 0,
-                      offset: Offset(-2.5, 0)),
-                ]
-              : null,
         ),
-        padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          _header(),
-          const SizedBox(height: AppSpacing.sm),
-          _shotStrip(),
-          if (expandedShot != null &&
-              expandedShot! >= 0 &&
-              expandedShot! < line.shots.length) ...[
-            const SizedBox(height: AppSpacing.sm),
-            _shotDetail(expandedShot!, line.shots[expandedShot!]),
-          ],
-          const SizedBox(height: AppSpacing.sm),
-          if (voiced) _voiceRow() else _visualRow(),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md + 3, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _header(),
+                  const SizedBox(height: AppSpacing.sm),
+                  _shotStrip(),
+                  // 镜头详情的展开/收起不许硬切——200ms 缓出
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: (expandedShot != null &&
+                            expandedShot! >= 0 &&
+                            expandedShot! < line.shots.length)
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: AppSpacing.sm),
+                            child: _shotDetail(
+                                expandedShot!, line.shots[expandedShot!]),
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  if (voiced) _voiceRow() else _visualRow(),
+                ]),
+          ),
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 3,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 180),
+              opacity: previewing ? 1 : 0,
+              child: const ColoredBox(color: AppColors.accentBlue),
+            ),
+          ),
         ]),
       ),
     );
@@ -305,7 +326,7 @@ class _LineBand extends StatelessWidget {
         root == null ? 0 : ShotAllocation.shortfallMs(line.shots, root);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       SizedBox(
-        height: 108,
+        height: 132,
         child: ListView(
           scrollDirection: Axis.horizontal,
           children: [
@@ -374,7 +395,7 @@ class _LineBand extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
-        width: 62,
+        width: 74,
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             child: InkWell(
@@ -407,7 +428,7 @@ class _LineBand extends StatelessWidget {
                           borderRadius: BorderRadius.circular(3)),
                       child: Text(total > 1 ? '参考${k + 1}' : '参考',
                           style: const TextStyle(
-                              fontSize: 9,
+                              fontSize: AppFontSize.micro,
                               fontWeight: FontWeight.w600,
                               color: Colors.white)),
                     ),
@@ -423,10 +444,15 @@ class _LineBand extends StatelessWidget {
           InkWell(
             key: ValueKey('band-use-ref-$index-$k'),
             onTap: () => handlers.onUseReference(index, k),
-            child: Text('${_s(seg.$2 - seg.$1)} · 用它',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 9, color: AppColors.accentBlueLight)),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Text('${_s(seg.$2 - seg.$1)} · 用它',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.accentBlueLight)),
+            ),
           ),
         ]),
       ),
@@ -441,7 +467,7 @@ class _LineBand extends StatelessWidget {
           onTap: () => handlers.onUploadReference(index),
           borderRadius: BorderRadius.circular(AppRadius.sm),
           child: Container(
-            width: 62,
+            width: 74,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadius.sm),
               border: Border.all(
@@ -455,7 +481,7 @@ class _LineBand extends StatelessWidget {
               const SizedBox(height: 2),
               Text('传参考',
                   style: TextStyle(
-                      fontSize: 9,
+                      fontSize: AppFontSize.micro,
                       color: AppColors.textTertiary.withValues(alpha: 0.8))),
             ]),
           ),
@@ -472,7 +498,7 @@ class _LineBand extends StatelessWidget {
       onTap: () => onExpandShot(expanded ? null : j),
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: Container(
-        width: 62,
+        width: 74,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppRadius.sm),
           border: Border.all(
@@ -505,7 +531,7 @@ class _LineBand extends StatelessWidget {
                       borderRadius: BorderRadius.circular(3)),
                   child: Text('${j + 1}',
                       style: const TextStyle(
-                          fontSize: 9,
+                          fontSize: AppFontSize.micro,
                           fontWeight: FontWeight.w700,
                           color: Colors.white)),
                 ),
@@ -563,7 +589,7 @@ class _LineBand extends StatelessWidget {
                     : (shot.durationMs == null ? '?' : _s(shot.durationMs!)),
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    fontSize: 9,
+                    fontSize: AppFontSize.micro,
                     color: shot.allocMs != null
                         ? AppColors.textSecondary
                         : AppColors.textTertiary,
@@ -579,7 +605,7 @@ class _LineBand extends StatelessWidget {
         onTap: () => handlers.onFindShots(index),
         borderRadius: BorderRadius.circular(AppRadius.sm),
         child: Container(
-          width: 62,
+          width: 74,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppRadius.sm),
             border: Border.all(color: AppColors.border),
@@ -589,7 +615,7 @@ class _LineBand extends StatelessWidget {
             const SizedBox(height: 2),
             Text(line.shots.isEmpty ? '找镜头' : '增删',
                 style: const TextStyle(
-                    fontSize: 9, color: AppColors.textSecondary)),
+                    fontSize: AppFontSize.micro, color: AppColors.textSecondary)),
           ]),
         ),
       );
@@ -653,7 +679,7 @@ class _LineBand extends StatelessWidget {
           const Spacer(),
           Text('多退少补，旁边的镜头自动配合',
               style: TextStyle(
-                  fontSize: 9,
+                  fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
         if (src != null && maxStart > 0)
@@ -709,7 +735,7 @@ class _LineBand extends StatelessWidget {
                 ),
                 child: Text('${shot.speed}x',
                     style: const TextStyle(
-                        fontSize: 9,
+                        fontSize: AppFontSize.micro,
                         fontWeight: FontWeight.w600,
                         color: AppColors.accentBlueLight)),
               ),
@@ -736,7 +762,7 @@ class _LineBand extends StatelessWidget {
                   ),
                   child: Text('${v}x',
                       style: TextStyle(
-                          fontSize: 9,
+                          fontSize: AppFontSize.micro,
                           fontWeight:
                               shot.speed == v ? FontWeight.w600 : FontWeight.w400,
                           color: shot.speed == v
@@ -748,7 +774,7 @@ class _LineBand extends StatelessWidget {
           const Spacer(),
           Text('换速度会把起点归零',
               style: TextStyle(
-                  fontSize: 9,
+                  fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
       ]),
