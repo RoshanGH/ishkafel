@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -41,6 +43,22 @@ class MediaKitPlaybackController implements MasterTrack {
         // 只设一次，之后区间播放只管改 `end`。
         await _setMpv('keep-open', 'yes');
       });
+
+  /// 等文件真正加载完（时长已知）再返回。[open] 返回时 mpv 可能还在
+  /// loadfile，这个当口发出的 seek 会被加载过程吞掉——参考弹窗
+  /// 「每个分镜都从头播」就是这么来的。超时不抛：播放继续尝试，
+  /// 大不了退回从头播，不能让弹窗卡死
+  Future<void> waitUntilLoaded(
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    if (player.state.duration > Duration.zero) return;
+    try {
+      await player.stream.duration
+          .firstWhere((d) => d > Duration.zero)
+          .timeout(timeout);
+    } on TimeoutException {
+      AppLog.warn('等待视频加载超时（${player.state.playlist.medias}）');
+    }
+  }
 
   /// 交给 mpv 自己在终点停：设 `end` 后播放器会正常播到该时间点前的最后
   /// 一帧然后暂停。在 Dart 层盯位置流判断「到点了没」做不到这一点——采样

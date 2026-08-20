@@ -10,6 +10,10 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 import 'package:ishkafel/core/audio/tts_client.dart';
 import 'package:ishkafel/core/script/line_voice_service.dart';
+import 'package:ishkafel/core/miaoa/candidate_probe.dart';
+import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
+import 'package:ishkafel/core/miaoa/miaoa_tag_service.dart';
 import 'package:ishkafel/core/script/script_transcriber.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/director/director_page.dart';
@@ -145,6 +149,43 @@ Future<void> pumpDirector(WidgetTester tester, Widget widget) async {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(widget);
+}
+
+
+/// 草片自动配镜用的假 miaoa（检索/词表/探测全假）
+class _DraftFakeCli {
+  final calls = <List<String>>[];
+
+  /// 每次检索发一条新素材：同一条会被防撞车（已占用）过滤掉，
+  /// 第二句就配不上镜头了——真实素材库不会两句搜出同一条 Top1
+  var _nextId = 500;
+
+  Future<ProcessResult> call(String exe, List<String> args) async {
+    calls.add(args);
+    if (args.contains('search')) {
+      final id = ++_nextId;
+      return ProcessResult(
+          1,
+          0,
+          '{"total":1,"records":[{"id":$id,"name":"自动镜头$id",'
+              '"sceneDescription":"画面","voiceover":"词",'
+              '"mediaFile":{"thumbnailUrl":"https://e.com/$id.jpg",'
+              '"previewUrl":"https://e.com/$id.mp4","fileKey":"oss/$id.mp4"}}]}',
+          '');
+    }
+    return ProcessResult(1, 0, '[]', '');
+  }
+}
+
+ShotSearchServices _draftFakeServices(_DraftFakeCli cli) {
+  final gateway = MiaoaGateway(run: cli.call, binary: 'miaoa');
+  return ShotSearchServices(
+    content: MiaoaContentService(gateway: gateway),
+    probe: CandidateProbe(
+        run: (_, _) async => ProcessResult(
+            1, 0, 'width=1080\nheight=1920\nduration=5.0\n', '')),
+    tags: MiaoaTagService(gateway: gateway),
+  );
 }
 
 void main() {
@@ -503,6 +544,100 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
       await tester.pumpAndSettle();
       expect(find.text('第 1 镜'), findsNothing, reason: '再点收起');
+    });
+  });
+  group('草片流水线（双8分 Loop 第 1 轮）', () {
+    testWidgets('顶栏「生成草片」：确认后自动配音+自动配镜，句句落盘',
+        (tester) async {
+      final repo = _MemoryRepo();
+      final cli = _DraftFakeCli();
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: docWith(['第一句台词', '第二句台词'])),
+              overrides: [
+                lineVoiceFactoryProvider
+                    .overrideWithValue((_) => _StubVoiceService()),
+                shotSearchServicesProvider
+                    .overrideWithValue(_draftFakeServices(cli)),
+              ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('director-draft')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('语音合成'), findsOneWidget,
+          reason: '花钱的事先说清再动手');
+      await tester.tap(find.byKey(const ValueKey('draft-confirm')));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('t1');
+      expect(cli.calls.where((a) => a.contains('search')).length, 2,
+          reason: '两句各检索一次');
+      for (final line in saved!.script!.lines) {
+        expect(line.voiceover, isNotNull, reason: '每句自动配上音');
+        expect(line.shots, isNotEmpty, reason: '每句自动配上镜头');
+        expect(line.shots.first.allocMs, isNotNull, reason: '时长自动分好');
+      }
+      // 完成后草片自动开播的 900ms 延时要跑完，别留挂起的 Timer
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('素材偏短没充满：警告旁给「放慢充满」，一点缺口清零',
+        (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['台词']);
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 6000,
+              sourceText: '台词',
+              voiceId: 'v',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id, [
+        const LineShot(
+            materialId: 9, name: 's', durationMs: 4000, allocMs: 4000),
+      ]);
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('没分出去'), findsOneWidget,
+          reason: '4s 素材配 6s 配音，缺口要如实说');
+      await tester.tap(find.byKey(const ValueKey('band-slowfill-0')));
+      await tester.pump(const Duration(milliseconds: 900)); // 过 800ms 自动保存
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('t1');
+      final shot = saved!.script!.lines.first.shots.single;
+      expect(shot.speed, lessThan(1.0), reason: '放慢吃掉缺口');
+      expect(shot.allocMs, 6000);
+      expect(find.textContaining('没分出去'), findsNothing);
+    });
+
+    testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['台词']);
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 3000,
+              sourceText: '台词',
+              voiceId: 'v',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id,
+          [const LineShot(materialId: 9, name: 's', durationMs: 8000, allocMs: 3000)]);
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService()),
+          ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('director-draft')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('直接按播放'), findsOneWidget);
     });
   });
 }

@@ -94,6 +94,38 @@ abstract final class ShotAllocation {
     return shot.copyWith(trimStartMs: trimStartMs.clamp(0, maxStart));
   }
 
+  /// 放慢的底线：低于 0.5x 画面明显拖沓（鬼畜慢放），宁可留缺口如实警告
+  static const double minFillSpeed = 0.5;
+
+  /// 素材偏短分不满根时，把镜头**放慢**吃掉缺口（分镜可加速可放慢，
+  /// 短了就慢放充满——比留一个「素材不够长」的警告有用得多）。
+  ///
+  /// 从最后一镜往前动：能吃下缺口就不惊动前面的镜头。只降速不升速；
+  /// 降到 [minFillSpeed] 还不够就留着剩余缺口继续警告。
+  /// 没缺口时原列表原样返回。
+  static List<LineShot> fillBySlowdown(List<LineShot> shots, int rootMs) {
+    var left = shortfallMs(shots, rootMs);
+    if (left <= 0 || shots.isEmpty) return shots;
+    final result = [...shots];
+    for (var i = result.length - 1; i >= 0 && left > 0; i--) {
+      final s = result[i];
+      final src = s.durationMs;
+      if (src == null) continue; // 时长未知的镜头不动
+      final usable = s.localSource != null ? src : src - s.trimStartMs;
+      if (usable <= 0) continue;
+      final need = (s.allocMs ?? 0) + left;
+      // 放慢到两位小数（界面显示 0.87x 这类干净数字），只降不升
+      var speed = (usable / need * 100).floor() / 100;
+      speed = speed.clamp(minFillSpeed, s.speed);
+      if (speed >= s.speed) continue;
+      final slowed = s.copyWith(speed: speed);
+      final alloc = need < slowed.availableMs ? need : slowed.availableMs;
+      result[i] = slowed.copyWith(allocMs: alloc);
+      left -= alloc - (s.allocMs ?? 0);
+    }
+    return result;
+  }
+
   /// 显式变速。**变速清框重选**（设计稿）：起点归零；可用量随之变化，
   /// 分配超出新可用量时压到可用量——差额由调用方走 [resize] 联动，
   /// 联动不了就留着缺口走警告

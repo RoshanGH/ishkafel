@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +9,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/audio/audio_preview.dart';
-import '../../core/audio/tts_client.dart';
+import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/script_doc.dart';
@@ -140,8 +141,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 配乐固定：选中即下到本地（与工作台同一份 bgm_cache）
   PickedMediaCache? _bgmCache;
 
-  /// 批量自动打标进度（提取脚本后跑）：(已完成, 总数)；null = 没在跑
-  (int, int)? _batchTagging;
+  /// 草片流水线进度：(阶段名, 当前句摘要, 已完成, 总数)；null = 没在跑。
+  /// 这是产品的魔法时刻——提取完一条参考片，几分钟后中央屏幕自动
+  /// 播出一版会说话的草片，人从此只做否决和替换
+  (String, String, int, int)? _draftProgress;
 
   @override
   void initState() {
@@ -513,7 +516,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       line = _doc.lines[index];
       if (line.voiceId == null) return;
     }
-    final lineId = line.id;
+    final ok = await _generateVoiceCore(line.id, line.voiceId!);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('配音生成失败，请稍后重试。')));
+    }
+  }
+
+  /// 配音生成内核（静默版）：草片流水线与单行按钮共用。
+  /// 成功返回 true；失败只留日志，由调用方决定怎么告知
+  Future<bool> _generateVoiceCore(String lineId, String voiceId) async {
+    final factory = ref.read(lineVoiceFactoryProvider);
+    if (factory == null) return false;
+    final line = _doc.lines.firstWhere((l) => l.id == lineId);
     final old = line.voiceover;
     setState(() => _generatingLineIds.add(lineId));
     try {
@@ -521,32 +536,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       final vo = await service.generate(
         lineId: lineId,
         text: line.text,
-        voiceId: line.voiceId!,
+        voiceId: voiceId,
         speechRate: line.speechRate,
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       _mutate((d) => d.setVoiceoverById(lineId, vo));
       // 配音时长是这一行时间轴的根：根变了，镜头的时长分配跟着重算
       final updated = _doc.lines.firstWhere((l) => l.id == lineId);
       if (updated.shots.isNotEmpty) {
         _mutate((d) => d.setShotsById(
-            lineId, ShotAllocation.distribute(updated.shots, vo.durationMs)));
+            lineId,
+            ShotAllocation.fillBySlowdown(
+                ShotAllocation.distribute(updated.shots, vo.durationMs),
+                vo.durationMs)));
       }
       _flushNow();
       // 新的落稳了才删旧的——失败时旧配音还能听
       if (old != null) service.deleteStale(old);
-    } on TtsException catch (e) {
-      AppLog.warn('配音生成失败（line=$lineId）：${e.message}');
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('配音生成失败：${e.message}')));
-      }
+      return true;
     } catch (e) {
       AppLog.warn('配音生成失败（line=$lineId）：$e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('配音生成失败，请稍后重试。')));
-      }
+      return false;
     } finally {
       if (mounted) setState(() => _generatingLineIds.remove(lineId));
     }
@@ -599,6 +609,23 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final root = ShotAllocation.rootMsOf(line);
     if (root == null) return;
     _updateShots(index, ShotAllocation.distribute(line.shots, root));
+  }
+
+  /// 素材偏短分不满行时长：放慢镜头把整行充满（分镜可加速可放慢，
+  /// 短了就慢放，别把「素材不够长」留给人发愁）
+  void _slowFill(int index) {
+    final line = _doc.lines[index];
+    final root = ShotAllocation.rootMsOf(line);
+    if (root == null) return;
+    final filled = ShotAllocation.fillBySlowdown(line.shots, root);
+    if (identical(filled, line.shots)) return;
+    _updateShots(index, filled);
+    final left = ShotAllocation.shortfallMs(filled, root);
+    if (left > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('放慢到 0.5x 还差 ${(left / 1000).toStringAsFixed(1)} 秒'
+              '——这条素材实在太短，换一条或再加一镜吧。')));
+    }
   }
 
   void _resizeShot(int index, int j, int newAllocMs) {
@@ -851,7 +878,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _guideDismissed = true;
       });
       _flushNow();
-      unawaited(_offerBatchTagging());
+      unawaited(_offerDraftAfterExtract());
     } on ScriptTranscribeException catch (e) {
       AppLog.warn('脚本提取失败（$path）：${e.cause ?? e.message}');
       if (mounted) setState(() => _extract = _ExtractFailed(e.message));
@@ -864,60 +891,274 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
   }
 
-  /// 提取完成后追问：要不要给全部台词自动打标（复刻链路的「两层自动
-  /// 打标」的行级版）。打标要花 AI 调用，必须显式确认，不许静默扣钱
-  Future<void> _offerBatchTagging() async {
+  /// 提取完成后追问一次「生成草片」：打标 → 配音 → 配镜 → 直接开播。
+  /// 一次确认把费用说清，之后人只做否决和替换——这是产品的北极星
+  Future<void> _offerDraftAfterExtract() async {
+    if (!mounted) return;
     final tagger = ref.read(lineTaggerProvider);
-    if (tagger == null || _task.unitTagGroups.isEmpty || !mounted) return;
+    final voiceFactory = ref.read(lineVoiceFactoryProvider);
     final voiced = [
       for (final l in _doc.lines)
-        if (l.type == ScriptLineType.voiced) l,
+        if (l.type == ScriptLineType.voiced) l.id,
     ];
     if (voiced.isEmpty) return;
+    final canTag = tagger != null && _task.unitTagGroups.isNotEmpty;
+    final canVoice = voiceFactory != null;
+    final defaultVoice = VoiceCatalog.all.first.ref.name;
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('顺手给台词打上标签？'),
-        content: Text('共 ${voiced.length} 句。标签来自任务选定的标签组，'
-            '找镜头时会自动按它检索（约 ${voiced.length} 次 AI 调用）。'),
+        title: const Text('直接生成一版草片？'),
+        content: Text([
+          '脚本已经就位（${voiced.length} 句）。接下来可以自动：',
+          if (canTag) '· 给每句打上标签（${voiced.length} 次 AI 调用）',
+          if (canVoice)
+            '· 用「$defaultVoice」配上声音（${voiced.length} 次语音合成，之后每句可换）',
+          '· 按标签或台词给每句配一个镜头',
+          '几分钟后草片会直接播出来，不满意的随手替换。',
+        ].join('\n')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('我自己一句句来')),
+          FilledButton(
+              key: const ValueKey('draft-after-extract'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('生成草片')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    // 阶段〇：打标（有词表才打；失败不挡路，退回按台词搜镜头）
+    if (canTag) {
+      for (var i = 0; i < voiced.length; i++) {
+        if (!mounted) return;
+        final line = _doc.lines.where((l) => l.id == voiced[i]).firstOrNull;
+        if (line == null) continue;
+        setState(() =>
+            _draftProgress = ('打标', line.text.trim(), i, voiced.length));
+        try {
+          final tags = await tagger.tag(
+            text: line.text,
+            groups: _task.unitTagGroups,
+            constraint: _task.unitTagPrompt,
+          );
+          if (!mounted) return;
+          if (tags.isNotEmpty) _mutate((d) => d.setTagsById(line.id, tags));
+        } catch (e) {
+          AppLog.warn('草片打标失败（第 ${i + 1} 句）：$e');
+        }
+      }
+    }
+    final needVoice = canVoice
+        ? [
+            for (final l in _doc.lines)
+              if (l.type == ScriptLineType.voiced &&
+                  l.voiceState != LineVoiceState.fresh)
+                l.id,
+          ]
+        : <String>[];
+    final needShots = [
+      for (final l in _doc.lines)
+        if (l.shots.isEmpty && l.type == ScriptLineType.voiced) l.id,
+    ];
+    await _runDraftPipeline(
+        needVoice: needVoice,
+        needShots: needShots,
+        defaultVoice: VoiceCatalog.all.first.ref.id);
+  }
+
+  // ---- 草片流水线（北极星：人是来看片子诞生的，不是来操作块的）----
+
+  /// 一键生成草片：给还没配音的句子配上音、还没镜头的句子自动配镜，
+  /// 全部完成后草片直接开播。花钱的事先说清再动手
+  Future<void> _generateDraft() async {
+    if (_draftProgress != null) return;
+    final voiceFactory = ref.read(lineVoiceFactoryProvider);
+    final needVoice = [
+      for (final l in _doc.lines)
+        if (l.type == ScriptLineType.voiced &&
+            l.voiceState != LineVoiceState.fresh)
+          l.id,
+    ];
+    final needShots = [
+      for (final l in _doc.lines)
+        if (l.shots.isEmpty && (l.type == ScriptLineType.voiced))
+          l.id,
+    ];
+    if (needVoice.isEmpty && needShots.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('每一句都已经就绪，直接按播放看草片。')));
+      return;
+    }
+    if (needVoice.isNotEmpty && voiceFactory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务（语音合成），生成不了草片。')));
+      return;
+    }
+    // 默认音色：全片最近用过的，其次目录第一个——批量时绝不弹 27 次选择器
+    final defaultVoice = _doc.lines
+            .lastWhere((l) => l.voiceId != null,
+                orElse: () => _doc.lines.first)
+            .voiceId ??
+        VoiceCatalog.all.first.ref.id;
+    final defaultVoiceName =
+        VoiceCatalog.byId(defaultVoice)?.ref.name ?? defaultVoice;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('生成草片？'),
+        content: Text([
+          if (needVoice.isNotEmpty)
+            '· 给 ${needVoice.length} 句配上「$defaultVoiceName」的声音'
+                '（${needVoice.length} 次语音合成，每句之后可单独换）',
+          if (needShots.isNotEmpty)
+            '· 给 ${needShots.length} 句自动配一个镜头（按标签或台词从素材库找）',
+          '完成后草片会直接播出来，不满意的镜头随手替换。',
+        ].join('\n')),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
               child: const Text('先不用')),
           FilledButton(
+              key: const ValueKey('draft-confirm'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('打标')),
+              child: const Text('生成草片')),
         ],
       ),
     );
     if (go != true || !mounted) return;
-    setState(() => _batchTagging = (0, voiced.length));
-    var failed = 0;
-    for (var i = 0; i < voiced.length; i++) {
+    await _runDraftPipeline(
+        needVoice: needVoice, needShots: needShots, defaultVoice: defaultVoice);
+  }
+
+  Future<void> _runDraftPipeline({
+    required List<String> needVoice,
+    required List<String> needShots,
+    required String defaultVoice,
+  }) async {
+    var voiceFailed = 0;
+    var shotFailed = 0;
+    // 一、配音
+    for (var i = 0; i < needVoice.length; i++) {
       if (!mounted) return;
-      try {
-        final tags = await tagger.tag(
-          text: voiced[i].text,
-          groups: _task.unitTagGroups,
-          constraint: _task.unitTagPrompt,
-        );
-        if (!mounted) return;
-        if (tags.isNotEmpty) {
-          _mutate((d) => d.setTagsById(voiced[i].id, tags));
-        }
-      } catch (e) {
-        failed++;
-        AppLog.warn('批量打标失败（第 ${i + 1} 句）：$e');
+      final line = _doc.lines.where((l) => l.id == needVoice[i]).firstOrNull;
+      if (line == null) continue; // 生成期间被删了
+      setState(() => _draftProgress =
+          ('配音', line.text.trim(), i, needVoice.length));
+      if (line.voiceId == null) {
+        _mutate((d) => d.setVoiceId(
+            _doc.lines.indexWhere((l) => l.id == line.id), defaultVoice));
       }
-      if (mounted) setState(() => _batchTagging = (i + 1, voiced.length));
+      final ok = await _generateVoiceCore(
+          line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
+      if (!ok) voiceFailed++;
+    }
+    // 二、配镜
+    final tagIds = needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
+    for (var i = 0; i < needShots.length; i++) {
+      if (!mounted) return;
+      final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
+      if (line == null) continue;
+      setState(() =>
+          _draftProgress = ('找镜头', line.text.trim(), i, needShots.length));
+      final ok = await _autoPickShot(line.id, tagIds);
+      if (!ok) shotFailed++;
     }
     if (!mounted) return;
-    setState(() => _batchTagging = null);
+    setState(() => _draftProgress = null);
     _flushNow();
+    _pinAllShots();
+    // 三、开播——魔法时刻。素材可能还在下载，重建后就绪的部分先播
+    _schedulePreviewRebuild();
+    unawaited(Future<void>.delayed(const Duration(milliseconds: 900), () async {
+      if (!mounted) return;
+      await _playback?.seekMs(0);
+      await _playback?.play();
+    }));
+    final problems = [
+      if (voiceFailed > 0) '$voiceFailed 句配音没成',
+      if (shotFailed > 0) '$shotFailed 句没找到合适的镜头',
+    ];
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(failed == 0
-            ? '打标完成：${voiced.length} 句台词的标签已挂上'
-            : '打标完成，但有 $failed 句失败（可在找镜头面板里单独重打）')));
+        content: Text(problems.isEmpty
+            ? '草片好了，正在播——不满意的镜头随手换。'
+            : '草片好了（${problems.join('、')}，对应句子可以手动补）。')));
+  }
+
+  /// 任务标签组的 标签名 → id 映射（自动配镜按标签检索用）。拉不到不挡路
+  Future<Map<String, int>> _loadTagIds() async {
+    try {
+      final services = ref.read(shotSearchServicesProvider);
+      final groups = await services.tags.listGroups();
+      final wanted = {for (final g in _task.unitTagGroups) g.id};
+      final ids = <String, int>{};
+      for (final g in groups) {
+        if (!wanted.contains(g.id)) continue;
+        for (final t in await services.tags.listTags(g.id)) {
+          ids.putIfAbsent(t.name, () => t.id);
+        }
+      }
+      return ids;
+    } catch (e) {
+      AppLog.warn('自动配镜拉标签词表失败（退回按台词搜）：$e');
+      return const {};
+    }
+  }
+
+  /// 给一句自动配一个镜头：按行标签检索（其次按台词的画面描述搜），
+  /// 取第一个没被别的句子占用的候选，探好时长落地并按行时长分配
+  Future<bool> _autoPickShot(String lineId, Map<String, int> tagIds) async {
+    try {
+      final services = ref.read(shotSearchServicesProvider);
+      final line = _doc.lines.firstWhere((l) => l.id == lineId);
+      final ids = [
+        for (final t in line.tags) ?tagIds[t],
+      ];
+      final page = ids.isNotEmpty
+          ? await services.content.searchByTags(
+              tagIds: ids,
+              projectIds: [if (_task.project != null) _task.project!.id],
+              pageSize: 10)
+          : await services.content.searchByDescription(
+              keyword: line.text.trim(),
+              projectIds: [if (_task.project != null) _task.project!.id],
+              pageSize: 10);
+      final used = <int>{
+        for (final l in _doc.lines)
+          for (final s in l.shots)
+            if (s.localSource == null) s.materialId,
+      };
+      final pick = page.items
+          .where((m) => !used.contains(m.id) && m.previewUrl != null)
+          .firstOrNull;
+      if (pick == null) return false;
+      final spec = await services.probe
+          .probe(materialId: pick.id, previewUrl: pick.previewUrl);
+      final shot = LineShot(
+        materialId: pick.id,
+        name: pick.name,
+        voiceover: pick.voiceover,
+        sceneDescription: pick.sceneDescription,
+        thumbnailUrl: pick.thumbnailUrl,
+        fileKey: pick.fileKey,
+        durationMs: spec?.durationMs,
+      );
+      final current = _doc.lines.firstWhere((l) => l.id == lineId);
+      final withShot = current.withShots([...current.shots, shot]);
+      final root = ShotAllocation.rootMsOf(withShot);
+      // 素材短于行时长就放慢充满——自动配的镜头不许留「没充满」的尾巴
+      _mutate((d) => d.setShotsById(
+          lineId,
+          root == null
+              ? withShot.shots
+              : ShotAllocation.fillBySlowdown(
+                  ShotAllocation.distribute(withShot.shots, root), root)));
+      return true;
+    } catch (e) {
+      AppLog.warn('自动配镜失败（line=$lineId）：$e');
+      return false;
+    }
   }
 
   @override
@@ -941,24 +1182,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               color: AppColors.surface,
               child: Column(children: [
                 if (_extract != null) _extractBanner(),
-                if (_batchTagging case (final done, final total))
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 0),
-                    child: Row(children: [
-                      const SizedBox(
-                          width: 11,
-                          height: 11,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 1.5,
-                              color: AppColors.accentBlue)),
-                      const SizedBox(width: AppSpacing.sm),
-                      Text('正在给台词打标（$done/$total）',
-                          style: const TextStyle(
-                              fontSize: AppFontSize.caption,
-                              color: AppColors.textSecondary)),
-                    ]),
-                  ),
                 Expanded(
                   child: IgnorePointer(
                     ignoring: extracting,
@@ -1037,6 +1260,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onTrimShot: _trimShot,
                       onSpeedShot: _speedShot,
                       onDistribute: _distribute,
+                      onSlowFill: _slowFill,
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,
@@ -1166,6 +1390,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           const SizedBox(width: AppSpacing.xs),
           _extractButton(),
           const SizedBox(width: AppSpacing.sm),
+          OutlinedButton.icon(
+            key: const ValueKey('director-draft'),
+            onPressed: _draftProgress != null ? null : _generateDraft,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textPrimary,
+              side: const BorderSide(color: AppColors.border),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md, vertical: 6),
+              textStyle: const TextStyle(fontSize: AppFontSize.body),
+            ),
+            icon: const Icon(Icons.auto_awesome, size: 14),
+            label: Text(_draftProgress != null ? '生成中…' : '生成草片'),
+          ),
+          const SizedBox(width: AppSpacing.sm),
           FilledButton.icon(
             key: const ValueKey('director-export'),
             onPressed: _exporting ? null : _exportScript,
@@ -1273,6 +1511,49 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 预览舞台：竖屏幕布居中、限高——播放器窄而居中，不做顶天立地的黑洞。
   /// 有可播内容时是真播放器 + 传输条；没有时占位说明「还差什么」
   Widget _previewStage() {
+    // 草片流水线进行中：舞台交给进度——用户看着自己的片子一句句长出来，
+    // 而不是对着死黑块等
+    if (_draftProgress case (final stage, final text, final done, final total)) {
+      return Container(
+        color: AppColors.background,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              SizedBox(
+                width: 44,
+                height: 44,
+                child: CircularProgressIndicator(
+                  value: total == 0 ? null : (done + 1) / total,
+                  strokeWidth: 3,
+                  color: AppColors.accentBlue,
+                  backgroundColor: AppColors.surfaceCard,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text('正在给第 ${done + 1} / $total 句$stage',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.sm),
+              Text('「${text.length > 24 ? '${text.substring(0, 24)}…' : text}」',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary,
+                      height: 1.5)),
+              const SizedBox(height: AppSpacing.md),
+              const Text('完成后草片会直接播出来',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+            ]),
+          ),
+        ),
+      );
+    }
     final playable = !_planResult.isEmpty && _videoWidget != null;
     return Container(
       color: AppColors.background,
@@ -1465,30 +1746,36 @@ class _RefClipDialog extends StatefulWidget {
 
 class _RefClipDialogState extends State<_RefClipDialog> {
   final MediaKitPlaybackController _player = MediaKitPlaybackController();
-  Timer? _looper;
+  StreamSubscription<bool>? _loop;
 
   @override
   void initState() {
     super.initState();
     unawaited(() async {
       await _player.open(widget.videoPath);
-      await _player.seekMs(widget.startMs);
-      await _player.play();
-      // 到区间尾绕回开头（循环看这一句的画面）
-      _looper = Timer.periodic(const Duration(milliseconds: 200), (_) async {
-        // positionMsStream 是流；轮询当前值最省事——弹窗生命周期很短
-      });
-      _player.positionMsStream.listen((ms) {
-        if (ms >= widget.endMs) {
-          unawaited(_player.seekMs(widget.startMs));
-        }
+      // 等 mpv 真正加载完再定位——加载中发出的 seek 会被吞掉，
+      // 结果就是「每个分镜都从头播」（真机反馈的 bug）
+      await _player.waitUntilLoaded();
+      await _playSegment();
+      // playRange 到区间尾会自然停住（mpv end 属性）：停了就绕回开头循环
+      _loop = _player.playingStream.listen((playing) {
+        if (!playing && mounted) unawaited(_playSegment());
       });
     }());
   }
 
+  Future<void> _playSegment() async {
+    final ok = await _player.playRange(widget.startMs, widget.endMs, 30);
+    if (!ok) {
+      // 区间播放不可用时退回普通播放，至少从这一镜的起点开始
+      await _player.seekMs(widget.startMs);
+      await _player.play();
+    }
+  }
+
   @override
   void dispose() {
-    _looper?.cancel();
+    unawaited(_loop?.cancel());
     _player.dispose();
     super.dispose();
   }

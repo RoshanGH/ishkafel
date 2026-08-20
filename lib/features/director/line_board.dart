@@ -24,6 +24,9 @@ class LineBoardHandlers {
   final void Function(int index, int shotIndex, int trimStartMs) onTrimShot;
   final void Function(int index, int shotIndex, double speed) onSpeedShot;
   final void Function(int index) onDistribute;
+
+  /// 素材偏短分不满时：放慢镜头把整行充满
+  final void Function(int index) onSlowFill;
   final void Function(int index, int? manualMs) onManualMs;
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
@@ -50,6 +53,7 @@ class LineBoardHandlers {
     required this.onTrimShot,
     required this.onSpeedShot,
     required this.onDistribute,
+    required this.onSlowFill,
     required this.onManualMs,
     required this.onPickVoice,
     required this.onSpeechRate,
@@ -257,6 +261,17 @@ class _LineBand extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: AppFontSize.micro, color: AppColors.orange)),
             ),
+            if (shortfall > 0) ...[
+              InkWell(
+                key: ValueKey('band-slowfill-$index'),
+                onTap: () => handlers.onSlowFill(index),
+                child: const Text('放慢充满',
+                    style: TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.accentBlueLight)),
+              ),
+              const SizedBox(width: AppSpacing.md),
+            ],
             InkWell(
               key: ValueKey('band-distribute-$index'),
               onTap: () => handlers.onDistribute(index),

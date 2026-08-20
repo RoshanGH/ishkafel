@@ -117,4 +117,47 @@ void main() {
       expect(s.allocMs, 2000, reason: '3s 素材 1.5x 只够 2s');
     });
   });
+
+  group('放慢充满（素材偏短时自动降速吃掉缺口）', () {
+    test('单镜素材短于根：放慢到刚好充满，缺口清零', () {
+      final distributed =
+          ShotAllocation.distribute([shot(1, srcMs: 4000)], 6000);
+      expect(ShotAllocation.shortfallMs(distributed, 6000), 2000);
+      final filled = ShotAllocation.fillBySlowdown(distributed, 6000);
+      expect(ShotAllocation.shortfallMs(filled, 6000), 0,
+          reason: '放慢后镜头充满整行');
+      expect(filled.single.speed, lessThan(1.0));
+      expect(filled.single.availableMs,
+          greaterThanOrEqualTo(filled.single.allocMs!));
+    });
+
+    test('多镜合计不够：从后往前放慢，先动最后一镜', () {
+      final distributed = ShotAllocation.distribute(
+          [shot(1, srcMs: 4000), shot(2, srcMs: 3000)], 9000);
+      expect(ShotAllocation.shortfallMs(distributed, 9000), 2000);
+      final filled = ShotAllocation.fillBySlowdown(distributed, 9000);
+      expect(ShotAllocation.shortfallMs(filled, 9000), 0);
+      expect(filled[0].speed, 1.0, reason: '最后一镜能吃下缺口就不动前面的');
+      expect(filled[1].speed, lessThan(1.0));
+    });
+
+    test('放慢有底线：0.5x 还不够就留缺口继续警告，不做鬼畜慢放', () {
+      final distributed =
+          ShotAllocation.distribute([shot(1, srcMs: 1000)], 6000);
+      final filled = ShotAllocation.fillBySlowdown(distributed, 6000);
+      expect(filled.single.speed, 0.5);
+      expect(ShotAllocation.shortfallMs(filled, 6000), 4000,
+          reason: '1s 素材 0.5x 只够 2s，剩 4s 缺口如实报');
+    });
+
+    test('本来就满的行原样返回，已手动加速的镜头只降不升', () {
+      final full = ShotAllocation.distribute([shot(1, srcMs: 8000)], 6000);
+      expect(ShotAllocation.fillBySlowdown(full, 6000), same(full));
+      // 手动 1.5x 的镜头缺口时往回降速也算「放慢」
+      final fast = [shot(1, srcMs: 6000, alloc: 4000, speed: 1.5)];
+      final filled = ShotAllocation.fillBySlowdown(fast, 6000);
+      expect(ShotAllocation.shortfallMs(filled, 6000), 0);
+      expect(filled.single.speed, lessThan(1.5));
+    });
+  });
 }
