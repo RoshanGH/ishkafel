@@ -113,22 +113,25 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         _showSnackBar(context, '没有这个任务：${wake.taskId}');
         return;
       }
+      // 人可能停在任意页面（编导台/工作台/审核页）：先收回列表再进目标。
+      // push 的 await 不能占着 _handlingWake——那会把后续唤醒永远锁在门外
+      // （真机撞到过：编导台开着时 `ishkafel open` 毫无反应）
       if (wake.review) {
         // 同一条任务的审核页已经开着时不再叠一层——Agent 重复跑 review
         // 只该把窗口带到前台
         if (_reviewOpenFor == task.id) return;
         _reviewOpenFor = task.id;
-        try {
-          // 审核是把关，不进能改一切的工作台
-          final outcome = await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
-          );
-          _showReviewOutcome(outcome);
-        } finally {
-          _reviewOpenFor = null;
-        }
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        // 审核是把关，不进能改一切的工作台
+        unawaited(Navigator.of(context)
+            .push(
+              MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
+            )
+            .then((outcome) => _showReviewOutcome(outcome))
+            .whenComplete(() => _reviewOpenFor = null));
       } else {
-        await _openTask(context, ref, task);
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        unawaited(_openTask(context, ref, task));
       }
     } finally {
       _handlingWake = false;

@@ -4,12 +4,15 @@ import 'package:path/path.dart' as p;
 
 import '../analysis/audio_extractor.dart';
 import '../analysis/providers.dart';
+import '../analysis/scene_detector.dart';
+import '../log/app_log.dart';
 import 'script_doc.dart';
 
 /// 提取进行到哪一步了——界面拿它给用户交代（等待必须有交代）
 enum ScriptTranscribeStage {
   extractingAudio('正在读取视频音频'),
-  transcribing('正在识别台词');
+  transcribing('正在识别台词'),
+  cuttingShots('正在切参考分镜');
 
   final String label;
   const ScriptTranscribeStage(this.label);
@@ -39,12 +42,17 @@ class ScriptTranscriber {
   final AudioExtractor audio;
   final AsrProvider asr;
 
+  /// 参考分镜切分（场景检测）。null = 不切（测试环境），
+  /// 行的参考段就是整句一镜
+  final SceneDetector? scenes;
+
   /// PCM 中间产物的落脚处（用完即删，不留孤儿数据）
   final Directory workDir;
 
   ScriptTranscriber({
     required this.audio,
     required this.asr,
+    this.scenes,
     required this.workDir,
   });
 
@@ -81,6 +89,17 @@ class ScriptTranscriber {
             '台词识别失败（语音服务不可用或网络异常），请稍后重试。',
             cause: e);
       }
+      // 参考分镜：整片跑一次场景检测，切点按句分配。检测失败不挡提取
+      // ——参考分镜是增强，行的参考段退回整句一镜
+      var cuts = const <int>[];
+      if (scenes != null) {
+        onStage?.call(ScriptTranscribeStage.cuttingShots);
+        try {
+          cuts = await scenes!.detect(videoPath);
+        } catch (e) {
+          AppLog.warn('参考分镜切分失败（不影响提取）：$e');
+        }
+      }
       final lines = [
         for (final s in sentences)
           if (s.text.trim().isNotEmpty)
@@ -88,7 +107,14 @@ class ScriptTranscriber {
               text: s.text.trim(),
               // 这一句在参考片里的区间：右栏「参考视频」列的数据根
               reference: s.endMs > s.startMs
-                  ? LineRef(startMs: s.startMs, endMs: s.endMs)
+                  ? LineRef(
+                      startMs: s.startMs,
+                      endMs: s.endMs,
+                      cuts: [
+                        for (final c in cuts)
+                          if (c > s.startMs && c < s.endMs) c,
+                      ],
+                    )
                   : null,
             ),
       ];

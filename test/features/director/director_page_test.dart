@@ -447,7 +447,7 @@ void main() {
         [
           ScriptLine.create(
               text: '再不买就恢复',
-              reference: const LineRef(startMs: 1000, endMs: 4200)),
+              reference: LineRef(startMs: 1000, endMs: 4200)),
         ],
         refVideoPath: '/v/参考片.mp4',
       );
@@ -462,11 +462,11 @@ void main() {
       await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('band-ref-0')), findsOneWidget,
+      expect(find.byKey(const ValueKey('band-ref-0-0')), findsOneWidget,
           reason: 'ASR 切出的原片区间要作为参考视频摆在块里');
       expect(find.text('参考'), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('band-use-ref-0')));
+      await tester.tap(find.byKey(const ValueKey('band-use-ref-0-0')));
       await tester.pump(const Duration(seconds: 1));
 
       final saved = await repo.findById('t1');

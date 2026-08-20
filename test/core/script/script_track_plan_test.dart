@@ -85,7 +85,7 @@ void main() {
         reason: '配音只铺到画面结束，不悬空');
   });
 
-  test('画面行（无台词）只有画面轨，没有配音段', () {
+  test('画面行（无台词）：画面轨 + 素材自己的原声，没有配音段', () {
     var doc = ScriptDoc.empty(); // 空行 = 画面行
     doc = doc.setManualMs(0, 3000);
     doc = doc.setShotsById(doc.lines[0].id, [shot(1, alloc: 3000)]);
@@ -94,6 +94,8 @@ void main() {
         buildScriptTrackPlan(doc, sourceOf: (_) => const ShotSource('/m.mp4'));
 
     expect(result.plan.video, hasLength(1));
-    expect(result.plan.voice, isEmpty);
+    expect(result.plan.voice, hasLength(1),
+        reason: '画面行用素材自己的声音（设计稿：或用分镜自己的声音）');
+    expect(result.plan.voice.single.source, '/m.mp4');
   });
 }

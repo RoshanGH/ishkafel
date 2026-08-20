@@ -29,18 +29,20 @@ class SubtitleRasterizer {
     if (lines.isEmpty) return const [];
     outDir.createSync(recursive: true);
 
-    final images = <SubtitleOverlayImage>[];
+    final blur = style.preset == SubtitlePreset.blurBox;
+    final entries = <({String out, SubtitleLine line})>[];
     final missing = <Map<String, String>>[];
     for (final line in lines) {
       final key = _fingerprint(line.text, width, height, style);
       final out = p.join(outDir.path, 'subimg_$key.png');
-      images.add(SubtitleOverlayImage(
-          pngPath: out, startMs: line.startMs, endMs: line.endMs));
-      if (!File(out).existsSync()) {
+      entries.add((out: out, line: line));
+      // 毛玻璃要 sidecar 文本框；两样缺一样都算没渲过
+      if (!File(out).existsSync() ||
+          (blur && !File('$out.box').existsSync())) {
         missing.add({'text': line.text, 'out': out});
       }
     }
-    if (missing.isEmpty) return List.unmodifiable(images);
+    if (missing.isEmpty) return _collect(entries, blur);
 
     final script = File(p.join(outDir.path, 'subrender.js'))
       ..writeAsStringSync(_jxaScript);
@@ -62,12 +64,18 @@ class SubtitleRasterizer {
         'fontSize': (height * style.fontRatio).round(),
         'marginV': (height * style.bottomRatio).round(),
         // 描边占字号的百分比。对标原片字幕的重描边（粗黑边 + 实心白字，
-        // 见 2026-08-18 用户给的样张）；底条预设描边收细
-        'strokePercent': style.preset == SubtitlePreset.whiteBox ? 3 : 9,
+        // 见 2026-08-18 用户给的样张）；底条/毛玻璃有衬底，描边收细
+        'strokePercent': style.preset == SubtitlePreset.whiteBox ||
+                style.preset == SubtitlePreset.blurBox
+            ? 3
+            : 9,
         'r': r,
         'g': g,
         'b': b,
         'box': style.preset == SubtitlePreset.whiteBox,
+        // 毛玻璃：不画底，把文本框写进 <out>.box（ffmpeg 顶部原点坐标），
+        // 模糊由滤镜对那块画面做
+        'emitBox': blur,
         'items': missing,
       }));
 
@@ -84,7 +92,33 @@ class SubtitleRasterizer {
     if (bad.isNotEmpty) {
       throw StateError('字幕渲染失败：「${bad.first}」等 ${bad.length} 句没有产出图片');
     }
-    return List.unmodifiable(images);
+    return _collect(entries, blur);
+  }
+
+  /// 组装结果；毛玻璃预设从 sidecar 读回文本框。sidecar 读不出时该句
+  /// 退化为无遮罩（字仍带细描边，可读）——不因一块框丢一句字幕
+  static List<SubtitleOverlayImage> _collect(
+      List<({String out, SubtitleLine line})> entries, bool blur) {
+    return List.unmodifiable([
+      for (final e in entries)
+        SubtitleOverlayImage(
+          pngPath: e.out,
+          startMs: e.line.startMs,
+          endMs: e.line.endMs,
+          blurBox: blur ? _readBox('${e.out}.box') : null,
+        ),
+    ]);
+  }
+
+  static SubtitleBlurBox? _readBox(String path) {
+    try {
+      final parts = File(path).readAsStringSync().trim().split(',');
+      if (parts.length != 4) return null;
+      final v = parts.map(int.parse).toList();
+      return SubtitleBlurBox(x: v[0], y: v[1], w: v[2], h: v[3]);
+    } catch (_) {
+      return null;
+    }
   }
 
   static String _fingerprint(
@@ -146,6 +180,17 @@ function run(argv) {
     $.NSGraphicsContext.restoreGraphicsState;
     rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $())
        .writeToFileAtomically($(it.out), true);
+    if (spec.emitBox) {
+      // 毛玻璃遮罩的文本框：AppKit 原点在左下，转成 ffmpeg 的左上原点。
+      // 框比文字四周各放一点 padding，磨砂边缘不贴字
+      const padB = Math.round(spec.fontSize * 0.35);
+      const bw = Math.min(w, Math.ceil(bounds.size.width) + padB * 2);
+      const bh = Math.ceil(bounds.size.height) + padB * 2;
+      const bx = Math.max(0, Math.round((w - bw) / 2));
+      const byTop = Math.max(0, h - (spec.marginV + Math.ceil(bounds.size.height)) - padB);
+      $(bx + ',' + byTop + ',' + bw + ',' + bh)
+        .writeToFileAtomicallyEncodingError($(it.out + '.box'), true, $.NSUTF8StringEncoding, $());
+    }
   }
   return 'ok:' + spec.items.length;
 }

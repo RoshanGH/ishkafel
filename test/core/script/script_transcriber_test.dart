@@ -49,8 +49,13 @@ void main() {
 
     expect(lines.map((l) => l.text), ['第一句', '第二句']);
     expect(lines.every((l) => l.type == ScriptLineType.voiced), isTrue);
-    expect(stages, ScriptTranscribeStage.values,
-        reason: '等待要有交代：每个阶段依次回报给界面');
+    expect(
+        stages,
+        [
+          ScriptTranscribeStage.extractingAudio,
+          ScriptTranscribeStage.transcribing,
+        ],
+        reason: '等待要有交代：每个阶段依次回报（未接场景检测时没有切分镜阶段）');
   });
 
   test('一句台词都没识别到 → 点名失败，不静默返回空脚本', () async {

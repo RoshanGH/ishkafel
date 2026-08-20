@@ -45,6 +45,7 @@ ScriptTranscriber? buildScriptTranscriber(
       appId: credentials.speechAppId,
       accessToken: credentials.speechAccessToken,
     ),
+    scenes: SceneDetector(),
     workDir: Directory(p.join(dataDir.path, 'analysis_work')),
   );
 }

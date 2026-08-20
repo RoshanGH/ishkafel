@@ -29,13 +29,14 @@ class LineBoardHandlers {
   final void Function(int index, int rate) onSpeechRate;
   final void Function(int index) onGenerateVoice;
   final void Function(int index) onTogglePlayVoice;
-  final void Function(int index) onPlayReference;
-  final void Function(int index) onUseReference;
+  final void Function(int index, int segIndex) onPlayReference;
+  final void Function(int index, int segIndex) onUseReference;
+  final void Function(int index) onUploadReference;
   final PickedMediaStatus? Function(int materialId) shotStatus;
   final void Function(int materialId) onRetryDownload;
 
-  /// 参考段的缩略图本地路径（抽帧后缓存）；null = 还没抽好
-  final String? Function(ScriptLine line) refThumbOf;
+  /// 参考分镜的缩略图本地路径（抽帧后缓存）；null = 还没抽好
+  final String? Function(ScriptLine line, int segIndex) refThumbOf;
 
   const LineBoardHandlers({
     required this.onFocusLine,
@@ -52,6 +53,7 @@ class LineBoardHandlers {
     required this.onTogglePlayVoice,
     required this.onPlayReference,
     required this.onUseReference,
+    required this.onUploadReference,
     required this.shotStatus,
     required this.onRetryDownload,
     required this.refThumbOf,
@@ -225,7 +227,10 @@ class _LineBand extends StatelessWidget {
         child: ListView(
           scrollDirection: Axis.horizontal,
           children: [
-            if (line.reference != null) _refCard(),
+            if (line.reference != null)
+              ..._refCards()
+            else
+              _uploadRefCard(),
             for (var j = 0; j < line.shots.length; j++) ...[
               _shotCard(j, line.shots[j]),
               const SizedBox(width: AppSpacing.sm),
@@ -259,11 +264,20 @@ class _LineBand extends StatelessWidget {
     ]);
   }
 
-  /// 参考段卡：这一句在参考片里的原始画面。虚线感用灰调+角标区分，
-  /// 不进成片；「用它」一键把该区间填为本行第一个镜头
-  Widget _refCard() {
+  /// 参考分镜卡：这一句在参考片里的原始画面，按视觉切点切成多镜
+  /// （一镜一卡）。灰调+角标区分，不进成片；「用它」一键把该镜区间
+  /// 填为本行镜头
+  List<Widget> _refCards() {
     final ref = line.reference!;
-    final thumb = handlers.refThumbOf(line);
+    final segments = ref.segments;
+    return [
+      for (var k = 0; k < segments.length; k++)
+        _refSegCard(k, segments[k], segments.length),
+    ];
+  }
+
+  Widget _refSegCard(int k, (int, int) seg, int total) {
+    final thumb = handlers.refThumbOf(line, k);
     return Padding(
       padding: const EdgeInsets.only(right: AppSpacing.sm),
       child: SizedBox(
@@ -271,8 +285,8 @@ class _LineBand extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             child: InkWell(
-              key: ValueKey('band-ref-$index'),
-              onTap: () => handlers.onPlayReference(index),
+              key: ValueKey('band-ref-$index-$k'),
+              onTap: () => handlers.onPlayReference(index, k),
               borderRadius: BorderRadius.circular(AppRadius.sm),
               child: Container(
                 decoration: BoxDecoration(
@@ -298,8 +312,8 @@ class _LineBand extends StatelessWidget {
                       decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.65),
                           borderRadius: BorderRadius.circular(3)),
-                      child: const Text('参考',
-                          style: TextStyle(
+                      child: Text(total > 1 ? '参考${k + 1}' : '参考',
+                          style: const TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w600,
                               color: Colors.white)),
@@ -314,9 +328,9 @@ class _LineBand extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           InkWell(
-            key: ValueKey('band-use-ref-$index'),
-            onTap: () => handlers.onUseReference(index),
-            child: Text('${_s(ref.durationMs)} · 用它',
+            key: ValueKey('band-use-ref-$index-$k'),
+            onTap: () => handlers.onUseReference(index, k),
+            child: Text('${_s(seg.$2 - seg.$1)} · 用它',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontSize: 9, color: AppColors.accentBlueLight)),
@@ -325,6 +339,35 @@ class _LineBand extends StatelessWidget {
       ),
     );
   }
+
+  /// 没参考的行给「传参考」入口：手写的行也能挂一段参考视频对照着配镜
+  Widget _uploadRefCard() => Padding(
+        padding: const EdgeInsets.only(right: AppSpacing.sm),
+        child: InkWell(
+          key: ValueKey('band-upload-ref-$index'),
+          onTap: () => handlers.onUploadReference(index),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          child: Container(
+            width: 62,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: Border.all(
+                  color: AppColors.textTertiary.withValues(alpha: 0.35)),
+            ),
+            child:
+                Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.video_call_outlined,
+                  size: 15,
+                  color: AppColors.textTertiary.withValues(alpha: 0.8)),
+              const SizedBox(height: 2),
+              Text('传参考',
+                  style: TextStyle(
+                      fontSize: 9,
+                      color: AppColors.textTertiary.withValues(alpha: 0.8))),
+            ]),
+          ),
+        ),
+      );
 
   Widget _shotCard(int j, LineShot shot) {
     final expanded = expandedShot == j;

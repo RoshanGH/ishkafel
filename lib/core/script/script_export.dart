@@ -134,7 +134,7 @@ class ScriptExportRunner {
         shotAtMs += allocMs;
         tick('渲染第 ${lineIndex + 1} 行第 ${j + 1} 镜');
       }
-      // 行音频：配音（截/补到行画面长），画面行为静音
+      // 行音频：配音行 = 配音（截/补到行画面长）；画面行 = 素材原声
       final lineSpanMs = shotAtMs;
       final audioOut = p.join(workDir.path, 'a_$lineIndex.wav');
       final vo = line.voiceover;
@@ -148,13 +148,46 @@ class ScriptExportRunner {
           audioOut,
         ], what: '第 ${lineIndex + 1} 行配音');
       } else {
+        // 画面行用素材自己的声音（设计稿：有画面有音乐或用分镜自己的
+        // 声音）：逐镜截取、变速跟 atempo；素材没有音轨时该镜垫静音
+        final segParts = <String>[];
+        for (var j = 0; j < line.shots.length; j++) {
+          final shot = line.shots[j];
+          final segOut = p.join(workDir.path, 'a_${lineIndex}_$j.wav');
+          final srcPath = shot.localSource ?? localPathOf(shot.materialId)!;
+          final tempo = shot.speed;
+          final r = await run('ffmpeg', [
+            '-y', '-v', 'error',
+            '-ss', _sec(shot.trimStartMs),
+            '-t', _sec((shot.allocMs! * tempo).round()),
+            '-i', srcPath,
+            '-vn',
+            '-af',
+            (tempo - 1).abs() > 1e-6 ? 'atempo=$tempo,apad' : 'apad',
+            '-t', _sec(shot.allocMs!),
+            '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+            segOut,
+          ]);
+          if (r.exitCode != 0 ||
+              !File(segOut).existsSync() ||
+              File(segOut).lengthSync() == 0) {
+            await _exec([
+              '-y', '-v', 'error',
+              '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+              '-t', _sec(shot.allocMs!),
+              '-c:a', 'pcm_s16le',
+              segOut,
+            ], what: '第 ${lineIndex + 1} 行第 ${j + 1} 镜静音垫');
+          }
+          segParts.add(segOut);
+        }
+        final segList = File(p.join(workDir.path, 'a_$lineIndex.txt'))
+          ..writeAsStringSync(ExportCommands.concatList(segParts));
         await _exec([
           '-y', '-v', 'error',
-          '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-          '-t', _sec(lineSpanMs),
-          '-c:a', 'pcm_s16le',
-          audioOut,
-        ], what: '第 ${lineIndex + 1} 行静音垫');
+          '-f', 'concat', '-safe', '0', '-i', segList.path,
+          '-c', 'copy', audioOut,
+        ], what: '第 ${lineIndex + 1} 行素材原声');
       }
       audioParts.add(audioOut);
       tick('铺第 ${lineIndex + 1} 行声音');

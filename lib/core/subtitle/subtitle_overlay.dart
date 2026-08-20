@@ -23,14 +23,31 @@ class SubtitleLine {
       {required this.startMs, required this.endMs, required this.text});
 }
 
+/// 毛玻璃遮罩的文本框（输出画面坐标，顶部原点）
+class SubtitleBlurBox {
+  final int x;
+  final int y;
+  final int w;
+  final int h;
+
+  const SubtitleBlurBox(
+      {required this.x, required this.y, required this.w, required this.h});
+}
+
 /// 一张渲染好的字幕图和它的显示区间（切片输出时间轴）
 class SubtitleOverlayImage {
   final String pngPath;
   final int startMs;
   final int endMs;
 
+  /// 毛玻璃预设时字幕背后要模糊的画面区域；其余预设为 null
+  final SubtitleBlurBox? blurBox;
+
   const SubtitleOverlayImage(
-      {required this.pngPath, required this.startMs, required this.endMs});
+      {required this.pngPath,
+      required this.startMs,
+      required this.endMs,
+      this.blurBox});
 }
 
 /// 一段字幕最多多少个字。超过就拆开先后出现——原片字幕的习惯是短句
@@ -198,8 +215,22 @@ String subtitleFilterComplex({
     final o = overlays[i];
     final from = _sec(o.startMs);
     final to = _sec(o.endMs);
-    parts.write(";[b$i][${i + 1}:v]overlay=0:0:"
-        "enable='between(t,$from,$to)'[b${i + 1}]");
+    final box = o.blurBox;
+    if (box != null && box.w > 0 && box.h > 0) {
+      // 毛玻璃：把文本框那块**画面**裁出来模糊，再按时间叠回原位——
+      // 不是黑条，是磨砂玻璃。模糊半径按框高比例走，大小字号观感一致
+      final radius = (box.h / 6).clamp(6, 24).round();
+      parts.write(';[b$i]split[s${i}a][s${i}b]'
+          ';[s${i}b]crop=${box.w}:${box.h}:${box.x}:${box.y},'
+          'boxblur=luma_radius=$radius:luma_power=2:chroma_radius=$radius[bl$i]'
+          ";[s${i}a][bl$i]overlay=${box.x}:${box.y}:"
+          "enable='between(t,$from,$to)'[g$i]"
+          ";[g$i][${i + 1}:v]overlay=0:0:"
+          "enable='between(t,$from,$to)'[b${i + 1}]");
+    } else {
+      parts.write(";[b$i][${i + 1}:v]overlay=0:0:"
+          "enable='between(t,$from,$to)'[b${i + 1}]");
+    }
   }
   return parts.toString();
 }

@@ -114,18 +114,67 @@ class LineRef {
   final int startMs;
   final int endMs;
 
-  const LineRef({required this.startMs, required this.endMs});
+  /// 行级参考视频（手动给某一行上传的参考）；null = 用文档级
+  /// ScriptDoc.refVideoPath（整片提取时的来源视频）
+  final String? videoPath;
+
+  /// 区间内的视觉切点（原片坐标，升序）：参考段按它切成多个「参考分镜」，
+  /// 每镜一张卡、各自可播放/用它。提取脚本时由场景检测得出
+  final List<int> cuts;
+
+  LineRef({
+    required this.startMs,
+    required this.endMs,
+    this.videoPath,
+    List<int> cuts = const [],
+  }) : cuts = List.unmodifiable(cuts);
 
   int get durationMs => endMs - startMs;
 
-  Map<String, dynamic> toJson() => {'startMs': startMs, 'endMs': endMs};
+  /// 参考分镜的区间序列（按切点拆；没有切点就是整段一镜）。
+  /// 短于 400ms 的碎段并回前一段——闪一下的卡没有参考价值
+  List<(int, int)> get segments {
+    final points = [
+      startMs,
+      ...cuts.where((c) => c > startMs && c < endMs),
+      endMs,
+    ];
+    final out = <(int, int)>[];
+    for (var i = 0; i < points.length - 1; i++) {
+      final s0 = points[i];
+      final e0 = points[i + 1];
+      if (e0 - s0 < 400 && out.isNotEmpty) {
+        final last = out.removeLast();
+        out.add((last.$1, e0));
+      } else {
+        out.add((s0, e0));
+      }
+    }
+    return out;
+  }
+
+  Map<String, dynamic> toJson() => {
+        'startMs': startMs,
+        'endMs': endMs,
+        if (videoPath != null) 'videoPath': videoPath,
+        if (cuts.isNotEmpty) 'cuts': cuts,
+      };
 
   static LineRef? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
     final start = raw['startMs'];
     final end = raw['endMs'];
     if (start is! int || end is! int || end <= start) return null;
-    return LineRef(startMs: start, endMs: end);
+    return LineRef(
+      startMs: start,
+      endMs: end,
+      videoPath: raw['videoPath'] is String ? raw['videoPath'] as String : null,
+      cuts: [
+        if (raw['cuts'] is List)
+          for (final c in raw['cuts'] as List)
+            if (c is int) c,
+      ],
+    );
   }
 }
 
@@ -360,6 +409,20 @@ class ScriptLine {
 
   ScriptLine withShots(List<LineShot> next) => _copy(shots: next);
 
+  /// 换参考段（行级上传参考视频用）。_copy 不动 reference（它跟行身份走），
+  /// 这里显式重建
+  ScriptLine withReference(LineRef? next) => ScriptLine(
+        id: id,
+        text: text,
+        manualMs: manualMs,
+        tags: tags,
+        voiceId: voiceId,
+        speechRate: speechRate,
+        voiceover: voiceover,
+        shots: shots,
+        reference: next,
+      );
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'text': text,
@@ -499,6 +562,12 @@ class ScriptDoc {
   ScriptDoc setTagsById(String lineId, List<String> tags) {
     final index = lines.indexWhere((l) => l.id == lineId);
     return _update(index, (line) => line.withTags(tags));
+  }
+
+  /// 按行 id 换参考段（行级参考视频上传）
+  ScriptDoc setReferenceById(String lineId, LineRef? reference) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withReference(reference));
   }
 
   ScriptDoc _update(int index, ScriptLine Function(ScriptLine) f) {

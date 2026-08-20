@@ -36,13 +36,17 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
   late double _bottomRatio = widget.initial.bottomRatio;
   late double _fontRatio = widget.initial.fontRatio;
   late String _colorHex = widget.initial.colorHex ?? 'FFFFFF';
-  late bool _box = widget.initial.preset == SubtitlePreset.whiteBox;
+  late SubtitlePreset _mask = switch (widget.initial.preset) {
+    SubtitlePreset.whiteBox => SubtitlePreset.whiteBox,
+    SubtitlePreset.blurBox => SubtitlePreset.blurBox,
+    _ => SubtitlePreset.whiteOutline,
+  };
 
   SubtitleStyle get _style => SubtitleStyle(
         bottomRatio: _bottomRatio,
         fontRatio: _fontRatio,
         colorHex: _colorHex == 'FFFFFF' ? null : _colorHex,
-        preset: _box ? SubtitlePreset.whiteBox : SubtitlePreset.whiteOutline,
+        preset: _mask,
       );
 
   @override
@@ -112,14 +116,31 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                   ),
               ])),
           _row(
-              '底条',
-              Switch(
-                key: const ValueKey('subtitle-box'),
-                value: _box,
-                activeThumbColor: AppColors.accentBlue,
-                onChanged: (v) => setState(() => _box = v),
-              ),
-              trailing: _box ? '半透明底条' : '描边无底'),
+              '遮罩',
+              Row(children: [
+                for (final (preset, label) in const [
+                  (SubtitlePreset.whiteOutline, '无'),
+                  (SubtitlePreset.blurBox, '毛玻璃'),
+                  (SubtitlePreset.whiteBox, '黑底条'),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.xs),
+                    child: ChoiceChip(
+                      key: ValueKey('subtitle-mask-${preset.name}'),
+                      label: Text(label,
+                          style:
+                              const TextStyle(fontSize: AppFontSize.caption)),
+                      selected: _mask == preset,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => setState(() => _mask = preset),
+                    ),
+                  ),
+              ]),
+              trailing: switch (_mask) {
+                SubtitlePreset.blurBox => '字幕背后磨砂',
+                SubtitlePreset.whiteBox => '半透明黑底',
+                _ => '描边无底',
+              }),
         ]),
       ),
       actions: [

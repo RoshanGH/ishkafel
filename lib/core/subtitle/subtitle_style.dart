@@ -14,6 +14,11 @@ enum SubtitlePreset {
 
   /// 黄字黑描边
   yellowOutline,
+
+  /// 毛玻璃遮罩：字幕背后的一块**画面**被局部模糊——不是黑条，
+  /// 是磨砂玻璃（用户点名要的形态）。模糊发生在 ffmpeg 侧
+  /// （对文本框区域 boxblur），渲染层只负责给出文本框
+  blurBox,
 }
 
 class SubtitleStyle {
@@ -76,5 +81,5 @@ class SubtitleStyle {
   /// 两遍画）参数却没变时，靠它把旧图旧切片一并作废
   String get fingerprint =>
       'sub:${bottomRatio.toStringAsFixed(3)}:${fontRatio.toStringAsFixed(3)}'
-      ':${preset.name}:${colorHex ?? '-'}:v3';
+      ':${preset.name}:${colorHex ?? '-'}:v4';
 }

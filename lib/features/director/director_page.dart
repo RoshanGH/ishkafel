@@ -643,26 +643,33 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   // ---- 参考段（这一句在参考片里的原始画面）----
 
-  /// 参考缩略图：取区间中点帧（两端常踩转场），按行缓存、抽过即用
-  void _ensureRefThumb(ScriptLine line) {
+  /// 这一行的参考视频路径：行级上传的优先，其次整片提取的来源
+  String? _refVideoOf(ScriptLine line) =>
+      line.reference?.videoPath ?? _doc.refVideoPath;
+
+  /// 参考分镜缩略图：取该镜中点帧（两端常踩转场），按 (行,镜) 缓存
+  void _ensureRefThumb(ScriptLine line, int segIndex) {
     final ref = line.reference;
-    final video = _doc.refVideoPath;
+    final video = _refVideoOf(line);
     final dataDir = this.ref.read(dataDirProvider);
     if (ref == null || video == null || dataDir == null) return;
-    if (_refThumbs.containsKey(line.id) ||
-        _refThumbsRendering.contains(line.id)) {
+    final segments = ref.segments;
+    if (segIndex < 0 || segIndex >= segments.length) return;
+    final key = '${line.id}_$segIndex';
+    if (_refThumbs.containsKey(key) || _refThumbsRendering.contains(key)) {
       return;
     }
-    final out = p.join(dataDir.path, 'script_refs', _task.id, '${line.id}.jpg');
+    final out = p.join(dataDir.path, 'script_refs', _task.id, '$key.jpg');
     if (File(out).existsSync()) {
-      _refThumbs[line.id] = out;
+      _refThumbs[key] = out;
       return;
     }
-    _refThumbsRendering.add(line.id);
+    _refThumbsRendering.add(key);
+    final seg = segments[segIndex];
     unawaited(() async {
       try {
         await Directory(p.dirname(out)).create(recursive: true);
-        final mid = (ref.startMs + ref.endMs) / 2000;
+        final mid = (seg.$1 + seg.$2) / 2000;
         final r = await const ResolvingProcessRunner().call('ffmpeg', [
           '-y', '-v', 'error',
           '-ss', mid.toStringAsFixed(3),
@@ -672,65 +679,98 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           out,
         ]);
         if (r.exitCode == 0 && mounted) {
-          setState(() => _refThumbs[line.id] = out);
+          setState(() => _refThumbs[key] = out);
         }
       } catch (e) {
-        AppLog.warn('参考缩略图抽帧失败（${line.id}）：$e');
+        AppLog.warn('参考缩略图抽帧失败（$key）：$e');
       } finally {
-        _refThumbsRendering.remove(line.id);
+        _refThumbsRendering.remove(key);
       }
     }());
   }
 
-  /// 播放参考段：小窗循环播这一句在参考片里的区间
-  Future<void> _playReference(int index) async {
+  /// 播放参考分镜：小窗循环播该镜区间
+  Future<void> _playReference(int index, int segIndex) async {
     final line = _doc.lines[index];
     final ref = line.reference;
-    final video = _doc.refVideoPath;
+    final video = _refVideoOf(line);
     if (ref == null || video == null) return;
+    final segments = ref.segments;
+    if (segIndex < 0 || segIndex >= segments.length) return;
     if (!File(video).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('参考视频已不在原位，放回后才能播放。')));
       return;
     }
+    final seg = segments[segIndex];
     await showDialog<void>(
       context: context,
       builder: (_) => _RefClipDialog(
-          videoPath: video, startMs: ref.startMs, endMs: ref.endMs),
+          videoPath: video, startMs: seg.$1, endMs: seg.$2),
     );
   }
 
-  /// 参考段一键作镜头：原片本地文件直接当第一个镜头用
-  void _useReference(int index) {
+  /// 参考分镜一键作镜头：原片本地文件直接当镜头用
+  void _useReference(int index, int segIndex) {
     final line = _doc.lines[index];
     final ref = line.reference;
-    final video = _doc.refVideoPath;
+    final video = _refVideoOf(line);
     if (ref == null || video == null) return;
-    if (line.shots.any((s) => s.localSource == video &&
-        s.trimStartMs == ref.startMs)) {
+    final segments = ref.segments;
+    if (segIndex < 0 || segIndex >= segments.length) return;
+    final seg = segments[segIndex];
+    if (line.shots
+        .any((s) => s.localSource == video && s.trimStartMs == seg.$1)) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('参考画面已经在这一行的镜头里了。')));
+          const SnackBar(content: Text('这段参考画面已经在这一行的镜头里了。')));
       return;
     }
     final shot = LineShot(
       // 负数占位：本地源不参与下载与防撞车，行内按区间起点保证唯一
-      materialId: -(ref.startMs + 1),
+      materialId: -(seg.$1 + 1),
       name: '参考画面',
-      sceneDescription: '参考片 ${_fmtRange(ref)}',
-      durationMs: ref.durationMs,
+      sceneDescription: '参考片 ${(seg.$1 / 1000).toStringAsFixed(1)}s'
+          '~${(seg.$2 / 1000).toStringAsFixed(1)}s',
+      durationMs: seg.$2 - seg.$1,
       localSource: video,
-      trimStartMs: ref.startMs,
+      trimStartMs: seg.$1,
     );
-    final next = [shot, ...line.shots];
+    final next = [...line.shots, shot];
     final root = ShotAllocation.rootMsOf(line);
     _updateShots(
         index, root == null ? next : ShotAllocation.distribute(next, root));
     _flushNow();
   }
 
-  static String _fmtRange(LineRef ref) =>
-      '${(ref.startMs / 1000).toStringAsFixed(1)}s'
-      '~${(ref.endMs / 1000).toStringAsFixed(1)}s';
+  /// 给某一行上传参考视频（手写的行也能对照参考配镜）。
+  /// 整段视频作为该行的参考区间；时长用 ffprobe 实探，不猜
+  Future<void> _uploadReference(int index) async {
+    final line = _doc.lines[index];
+    final path = await ref.read(videoFilePickerProvider)();
+    if (path == null || !mounted) return;
+    int durationMs;
+    try {
+      final r = await const ResolvingProcessRunner().call('ffprobe', [
+        '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0',
+        path,
+      ]);
+      final seconds = double.tryParse('${r.stdout}'.trim());
+      if (seconds == null || seconds <= 0) {
+        throw StateError('时长读不出来');
+      }
+      durationMs = (seconds * 1000).round();
+    } catch (e) {
+      AppLog.warn('参考视频探测失败（$path）：$e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('读不出这条视频的时长，确认它是完整的视频文件。')));
+      }
+      return;
+    }
+    _mutate((d) => d.setReferenceById(
+        line.id, LineRef(startMs: 0, endMs: durationMs, videoPath: path)));
+    _flushNow();
+  }
 
   Future<void> _togglePlayVoice(int index) async {
     final line = _doc.lines[index];
@@ -1022,11 +1062,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onTogglePlayVoice: _togglePlayVoice,
                       onPlayReference: _playReference,
                       onUseReference: _useReference,
+                      onUploadReference: _uploadReference,
                       shotStatus: (id) => _mediaCache?.statusOf(id),
                       onRetryDownload: (id) => _mediaCache?.retry(id),
-                      refThumbOf: (line) {
-                        _ensureRefThumb(line);
-                        return _refThumbs[line.id];
+                      refThumbOf: (line, segIndex) {
+                        _ensureRefThumb(line, segIndex);
+                        return _refThumbs['${line.id}_$segIndex'];
                       },
                     ),
                   ),
@@ -1296,17 +1337,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       fontFeatures: const [FontFeature.tabularFigures()])),
             ),
           ]),
-          // 预览可以少几行——人还在编排——但少了哪几行必须点名
+          // 预览可以少几行——人还在编排——但少了哪几行必须点名。
+          // 行多时按原因分组汇总，不拿一面墙的橙字糊满中栏
           if (_planResult.skippedLines.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: AppSpacing.sm),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 340),
                 child: Text(
-                  [
-                    for (final e in _planResult.skippedLines.entries)
-                      '第 ${e.key + 1} 行未进预览：${e.value}',
-                  ].join('\n'),
+                  _skippedSummary(),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                       fontSize: AppFontSize.micro,
@@ -1318,6 +1357,31 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ]),
       ),
     );
+  }
+
+  /// 未进预览的交代：≤4 行逐条点名；再多按原因分组（「第 3~29 行还没
+  /// 生成配音」比二十七行橙字有用得多）
+  String _skippedSummary() {
+    final skipped = _planResult.skippedLines;
+    if (skipped.length <= 4) {
+      return [
+        for (final e in skipped.entries) '第 ${e.key + 1} 行未进预览：${e.value}',
+      ].join('\n');
+    }
+    final byReason = <String, List<int>>{};
+    for (final e in skipped.entries) {
+      (byReason[e.value] ??= []).add(e.key + 1);
+    }
+    return [
+      for (final e in byReason.entries)
+        '${_lineNumbers(e.value)} 未进预览：${e.key}',
+    ].join('\n');
+  }
+
+  static String _lineNumbers(List<int> nums) {
+    nums.sort();
+    if (nums.length <= 3) return '第 ${nums.join('、')} 行';
+    return '第 ${nums.first}~${nums.last} 行等 ${nums.length} 行';
   }
 
   static String _mmss(int ms) {

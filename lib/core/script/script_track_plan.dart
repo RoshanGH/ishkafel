@@ -96,6 +96,16 @@ ScriptPlanResult buildScriptTrackPlan(
         source: sources[j].path,
         inMs: sources[j].inMs,
       ));
+      // 画面行没有配音，用素材自己的声音（设计稿：画面行有画面有音乐
+      // 或用分镜自己的声音）；配音行的声音轨在下面统一铺配音
+      if (line.type == ScriptLineType.visual) {
+        voice.add(TrackSegment(
+          atMs: shotAt,
+          durationMs: shot.allocMs!,
+          source: sources[j].path,
+          inMs: sources[j].inMs,
+        ));
+      }
       shotAt += shot.allocMs!;
     }
     // 行区间跟**实际分配**走：画面轨必须连续（EDL 是顺序相接的，留洞会让
