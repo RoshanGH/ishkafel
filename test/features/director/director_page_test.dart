@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
@@ -646,6 +647,44 @@ void main() {
 
       final saved = await repo.findById('t1');
       expect(saved!.script!.lines.first.tags, ['促单']);
+    });
+
+    testWidgets('⌘Z 撤销、⇧⌘Z 重做：删镜头一撤就回来', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['台词']);
+      doc = doc.setShotsById(doc.lines.first.id, [
+        const LineShot(
+            materialId: 9, name: 's', durationMs: 8000, allocMs: 3000),
+      ]);
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('band-remove-shot-0-0')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('band-shot-0-0')), findsNothing,
+          reason: '镜头删掉了');
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('band-shot-0-0')), findsOneWidget,
+          reason: '⌘Z 把删掉的镜头撤回来');
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('band-shot-0-0')), findsNothing,
+          reason: '⇧⌘Z 重做刚才的删除');
+
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.shots, isEmpty,
+          reason: '重做后的状态落盘');
     });
 
     testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {

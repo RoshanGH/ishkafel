@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -866,14 +867,39 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
   }
 
-  /// 改动随手落库（800ms 防抖）——写作软件没有「保存」这回事
+  /// 撤销/重做栈：ScriptDoc 不可变，存引用零拷贝。上限防内存无限涨
+  final List<ScriptDoc> _undoStack = [];
+  final List<ScriptDoc> _redoStack = [];
+  static const _undoLimit = 100;
+
+  /// 改动随手落库（800ms 防抖）——写作软件没有「保存」这回事。
+  /// 每次改动前把旧文档压进撤销栈（新改动作废重做栈）
   void _mutate(ScriptDoc Function(ScriptDoc) f) {
+    _undoStack.add(_doc);
+    if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
+    _redoStack.clear();
     setState(() {
       _doc = f(_doc);
       _saving = true;
     });
     _autosave?.cancel();
     _autosave = Timer(const Duration(milliseconds: 800), _flushNow);
+    _schedulePreviewRebuild();
+  }
+
+  void _undo() {
+    if (_undoStack.isEmpty) return;
+    _redoStack.add(_doc);
+    setState(() => _doc = _undoStack.removeLast());
+    _flushNow();
+    _schedulePreviewRebuild();
+  }
+
+  void _redo() {
+    if (_redoStack.isEmpty) return;
+    _undoStack.add(_doc);
+    setState(() => _doc = _redoStack.removeLast());
+    _flushNow();
     _schedulePreviewRebuild();
   }
 
@@ -1232,7 +1258,28 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 两套话语打架（真机截图核对时发现）
     final showGuide =
         _scriptIsPristine && !_guideDismissed && _extract == null;
-    return Scaffold(
+    // 全页快捷键：空格播放/暂停、←→ 秒跳、⌘Z 撤销、⇧⌘Z 重做。
+    // 文本框有焦点时这些键先被输入框消费，不会打架
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.space): () {
+          if (!_planResult.isEmpty && _videoWidget != null) {
+            unawaited(_togglePreviewPlay());
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            unawaited(_seekPreview((_positionMs.value - 1000).clamp(
+                0, _planResult.plan.totalMs))),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            unawaited(_seekPreview((_positionMs.value + 1000).clamp(
+                0, _planResult.plan.totalMs))),
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
+        const SingleActivator(LogicalKeyboardKey.keyZ,
+            meta: true, shift: true): _redo,
+      },
+      child: FocusScope(
+        autofocus: true,
+        child: Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
         _topBar(),
@@ -1364,6 +1411,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           ]),
         ),
       ]),
+        ),
+      ),
     );
   }
 
