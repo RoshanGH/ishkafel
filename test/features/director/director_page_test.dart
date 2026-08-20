@@ -513,23 +513,29 @@ void main() {
               sourceText: '再不买就恢复',
               voiceId: 'v',
               speechRate: 0));
-      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      final cli = _DraftFakeCli();
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            shotSearchServicesProvider
+                .overrideWithValue(_draftFakeServices(cli)),
+          ]));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('band-ref-0-0')), findsOneWidget,
-          reason: 'ASR 切出的原片区间要作为参考胶片条摆在块里');
-      expect(find.text('参\n考'), findsOneWidget,
-          reason: '胶片条的竖排身份标签——参考是一个整体，不是散卡');
+          reason: '块级只保留分子粒度：一张整段参考卡（点击播放对照）');
+      expect(find.text('参考'), findsOneWidget,
+          reason: '左侧参考卡的身份角标');
+      expect(find.text('3.2s'), findsWidgets, reason: '参考时长在卡底衬条');
 
-      // 「用它」悬停才出现：把鼠标挪到格上再点
-      final gesture =
-          await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await gesture.addPointer(location: Offset.zero);
-      addTearDown(gesture.removePointer);
-      await gesture.moveTo(
-          tester.getCenter(find.byKey(const ValueKey('band-ref-0-0'))));
+      // 原子在找镜头面板里：点开面板 → 原子条 → 「直接用原片这段」
+      await tester.tap(find.byKey(const ValueKey('band-find-shots-0')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('band-use-ref-0-0')));
+      expect(find.byKey(const ValueKey('shots-ref-atom-0')), findsOneWidget,
+          reason: '参考原子（分镜）在搜索界面里当检索条件');
+      await tester.tap(find.byKey(const ValueKey('shots-use-ref-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('用这些镜头'));
       await tester.pump(const Duration(seconds: 1));
 
       final saved = await repo.findById('t1');

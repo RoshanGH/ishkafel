@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -37,6 +39,12 @@ Future<FindShotsResult?> showFindShotsSheet(
 
   /// materialId → 用在第几行（0 起，含本行；本行的用于回显已选）
   required Map<int, int> usedBy,
+
+  /// 参考分镜（原子）的首帧缩略图路径；null = 还没抽出来
+  String? Function(int segIndex)? refThumbOf,
+
+  /// 参考视频的本地路径（原子「直接用原片这段」要它）
+  String? refVideoPath,
 }) =>
     showDialog<FindShotsResult>(
       context: context,
@@ -47,6 +55,8 @@ Future<FindShotsResult?> showFindShotsSheet(
         lineIndex: lineIndex,
         line: line,
         usedBy: usedBy,
+        refThumbOf: refThumbOf,
+        refVideoPath: refVideoPath,
       ),
     );
 
@@ -57,6 +67,8 @@ class _FindShotsSheet extends StatefulWidget {
   final int lineIndex;
   final ScriptLine line;
   final Map<int, int> usedBy;
+  final String? Function(int segIndex)? refThumbOf;
+  final String? refVideoPath;
 
   const _FindShotsSheet({
     required this.services,
@@ -65,6 +77,8 @@ class _FindShotsSheet extends StatefulWidget {
     required this.lineIndex,
     required this.line,
     required this.usedBy,
+    this.refThumbOf,
+    this.refVideoPath,
   });
 
   @override
@@ -102,6 +116,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   /// 找相似的查询帧（候选卡「找相似」发起）；null = 还没有目标
   String? _similarToName;
   String? _similarFileKey;
+
+  /// 当前选中的参考原子（参考分镜下标）；null = 整句。
+  /// 点选哪个原子，检索条件就切到那个原子——它那个时段说的话当检索词
+  int? _refSeg;
 
   /// 已选镜头（保持加入顺序；预填本行已有的）
   late final List<LineShot> _picked = [...widget.line.shots];
@@ -291,6 +309,13 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             ]),
           ),
           const SizedBox(height: AppSpacing.md),
+          if ((widget.line.reference?.segments.length ?? 0) > 0) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
+              child: _refAtomBar(),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+          ],
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
             child: _searchBar(),
@@ -304,6 +329,144 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       ),
     );
   }
+
+  /// 参考原子条：这一句在原片里的各个参考分镜（原子）。
+  /// 点选一个原子 → 检索词切成「这个原子时段说的话」，一个原子一个
+  /// 原子地找替代品；再点一下取消回到整句。原子上还能「直接用原片」
+  Widget _refAtomBar() {
+    final ref = widget.line.reference!;
+    final segments = ref.segments;
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.only(top: 20),
+        child: Text('参考',
+            style: const TextStyle(
+                fontSize: AppFontSize.caption,
+                color: AppColors.textTertiary)),
+      ),
+      const SizedBox(width: AppSpacing.sm),
+      Expanded(
+        child: SizedBox(
+          height: 96,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: segments.length,
+            separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.xs),
+            itemBuilder: (context, k) => _refAtomCard(k, segments[k]),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _refAtomCard(int k, (int, int) seg) {
+    final selected = _refSeg == k;
+    final thumb = widget.refThumbOf?.call(k);
+    final text = widget.line.reference!
+        .segmentText(k, widget.line.text.trim());
+    return InkWell(
+      key: ValueKey('shots-ref-atom-$k'),
+      onTap: () {
+        setState(() {
+          if (selected) {
+            _refSeg = null;
+            _voiceoverKw.text = widget.line.text.trim();
+          } else {
+            _refSeg = k;
+            _dim = _SearchDim.voiceover;
+            _voiceoverKw.text = text;
+          }
+        });
+        _runSearch();
+      },
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      hoverColor: AppColors.hover,
+      child: Container(
+        width: 168,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(
+              color: selected ? AppColors.accentBlue : AppColors.border,
+              width: selected ? 1.4 : 1),
+          color: selected
+              ? AppColors.accentBlue.withValues(alpha: 0.08)
+              : Colors.transparent,
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(3),
+            child: SizedBox(
+              width: 48,
+              child: thumb != null
+                  ? Image.file(File(thumb), fit: BoxFit.cover)
+                  : Container(
+                      color: Colors.black,
+                      child: const Icon(Icons.hourglass_empty,
+                          size: 11, color: AppColors.textTertiary)),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('第 ${k + 1} 镜 · ${_fmtS(seg.$2 - seg.$1)}',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          fontWeight: FontWeight.w600,
+                          color: selected
+                              ? AppColors.accentBlueLight
+                              : AppColors.textSecondary)),
+                  const SizedBox(height: 2),
+                  Expanded(
+                    child: Text(text,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            fontSize: AppFontSize.micro,
+                            height: 1.35,
+                            color: AppColors.textTertiary)),
+                  ),
+                  InkWell(
+                    key: ValueKey('shots-use-ref-$k'),
+                    onTap: widget.refVideoPath == null
+                        ? null
+                        : () => _useRefAtom(k, seg),
+                    child: const Text('直接用原片这段',
+                        style: TextStyle(
+                            fontSize: AppFontSize.micro,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.accentBlueLight)),
+                  ),
+                ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  /// 原子「直接用原片这段」：本地源镜头加入已选序列（负数占位 id，
+  /// 不参与下载与防撞车——与行带上的老「用它」同一套规矩）
+  void _useRefAtom(int k, (int, int) seg) {
+    final video = widget.refVideoPath!;
+    if (_picked.any(
+        (s) => s.localSource == video && s.trimStartMs == seg.$1)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('这段原片画面已经在已选里了。')));
+      return;
+    }
+    setState(() => _picked.add(LineShot(
+          materialId: -(seg.$1 + 1),
+          name: '参考画面',
+          sceneDescription: '参考片 ${_fmtS(seg.$1)}~${_fmtS(seg.$2)} 处',
+          durationMs: seg.$2 - seg.$1,
+          localSource: video,
+          trimStartMs: seg.$1,
+        )));
+  }
+
+  static String _fmtS(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
 
   Widget _searchBar() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

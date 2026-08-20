@@ -65,6 +65,33 @@ void main() {
     });
   });
 
+  group('参考原子（LineRef）', () {
+    test('词级时间戳 json 往返；原子文本按词中点归属裁出', () {
+      final ref = LineRef(
+        startMs: 1000,
+        endMs: 4000,
+        cuts: const [2000],
+        words: const [
+          VoiceWord(text: '家', startMs: 1000, endMs: 1300),
+          VoiceWord(text: '人', startMs: 1300, endMs: 1600),
+          VoiceWord(text: '们', startMs: 1600, endMs: 1900),
+          VoiceWord(text: '看', startMs: 2200, endMs: 2500),
+          VoiceWord(text: '这', startMs: 2500, endMs: 2800),
+        ],
+      );
+      final back = LineRef.tryFromJson(ref.toJson())!;
+      expect(back.words.length, 5, reason: '词级时间戳随 json 往返');
+      expect(back.segmentText(0, '整句'), '家人们',
+          reason: '第一个原子（1000~2000）只说了「家人们」');
+      expect(back.segmentText(1, '整句'), '看这');
+    });
+
+    test('老档没有词级数据：原子文本退回整句', () {
+      final ref = LineRef(startMs: 0, endMs: 3000, cuts: const [1500]);
+      expect(ref.segmentText(0, '整句台词'), '整句台词');
+    });
+  });
+
   group('序列化', () {
     test('json 往返一字不差', () {
       var doc = ScriptDoc.empty();

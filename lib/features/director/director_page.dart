@@ -126,6 +126,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   final Map<String, String> _refThumbs = {};
   final Set<String> _refThumbsRendering = {};
 
+  /// 抽帧失败过的 key：记账后不再重试。没有这本账，build 每帧都会
+  /// 重新起一个 ffmpeg（真实发生过：源文件不在时无限重试，测试挂死）
+  final Set<String> _refThumbFailed = {};
+
   /// 右板滚动控制（左栏点行 → 滚到对应块）
   final ScrollController _boardScroll = ScrollController();
 
@@ -662,6 +666,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       lineIndex: index,
       line: line,
       usedBy: usedBy,
+      // 参考原子条的数据：原子首帧缩略图 + 原片路径（直接用原片这段）
+      refThumbOf: (segIndex) {
+        _ensureRefThumb(line, segIndex);
+        return _refThumbs['${line.id}_$segIndex'];
+      },
+      refVideoPath: _refVideoOf(line),
     );
     if (picked == null) return;
     // 挑完就把时长按行的根均分好（默认全自动预填，人只做否决）；
@@ -761,7 +771,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final segments = ref.segments;
     if (segIndex < 0 || segIndex >= segments.length) return;
     final key = '${line.id}_$segIndex';
-    if (_refThumbs.containsKey(key) || _refThumbsRendering.contains(key)) {
+    if (_refThumbs.containsKey(key) ||
+        _refThumbsRendering.contains(key) ||
+        _refThumbFailed.contains(key)) {
       return;
     }
     final out = p.join(dataDir.path, 'script_refs', _task.id, '$key.jpg');
@@ -785,8 +797,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ]);
         if (r.exitCode == 0 && mounted) {
           setState(() => _refThumbs[key] = out);
+        } else {
+          _refThumbFailed.add(key);
         }
       } catch (e) {
+        _refThumbFailed.add(key);
         AppLog.warn('参考缩略图抽帧失败（$key）：$e');
       } finally {
         _refThumbsRendering.remove(key);
@@ -794,24 +809,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }());
   }
 
-  /// 播放参考分镜：小窗循环播该镜区间
+  /// 播放参考：小窗循环。[segIndex] >=0 播该参考分镜（原子）区间，
+  /// 传负数播整段（分子）
   Future<void> _playReference(int index, int segIndex) async {
     final line = _doc.lines[index];
     final ref = line.reference;
     final video = _refVideoOf(line);
     if (ref == null || video == null) return;
-    final segments = ref.segments;
-    if (segIndex < 0 || segIndex >= segments.length) return;
     if (!File(video).existsSync()) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('参考视频已不在原位，放回后才能播放。')));
       return;
     }
-    final seg = segments[segIndex];
+    final segments = ref.segments;
+    final (startMs, endMs) = segIndex >= 0 && segIndex < segments.length
+        ? segments[segIndex]
+        : (ref.startMs, ref.endMs);
     await showDialog<void>(
       context: context,
-      builder: (_) => _RefClipDialog(
-          videoPath: video, startMs: seg.$1, endMs: seg.$2),
+      builder: (_) =>
+          _RefClipDialog(videoPath: video, startMs: startMs, endMs: endMs),
     );
   }
 

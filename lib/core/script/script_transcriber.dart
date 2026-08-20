@@ -114,6 +114,15 @@ class ScriptTranscriber {
                         for (final c in cuts)
                           if (c > s.startMs && c < s.endMs) c,
                       ],
+                      // 词级时间戳留下来：找镜头面板按参考分镜（原子）
+                      // 检索时，要裁出「这个原子时段说了哪几个字」当检索词
+                      words: [
+                        for (final w in s.words)
+                          VoiceWord(
+                              text: w.text,
+                              startMs: w.startMs,
+                              endMs: w.endMs),
+                      ],
                     )
                   : null,
             ),

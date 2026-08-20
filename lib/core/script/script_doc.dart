@@ -122,14 +122,36 @@ class LineRef {
   /// 每镜一张卡、各自可播放/用它。提取脚本时由场景检测得出
   final List<int> cuts;
 
+  /// 这一句在原片里的词级时间戳（**原片坐标**）。找镜头面板按参考
+  /// 分镜（原子）检索时，用它裁出「这个原子时段说了哪几个字」当检索词
+  final List<VoiceWord> words;
+
   LineRef({
     required this.startMs,
     required this.endMs,
     this.videoPath,
     List<int> cuts = const [],
-  }) : cuts = List.unmodifiable(cuts);
+    List<VoiceWord> words = const [],
+  })  : cuts = List.unmodifiable(cuts),
+        words = List.unmodifiable(words);
 
   int get durationMs => endMs - startMs;
+
+  /// 第 [segIndex] 个参考分镜（原子）时段内说的话：词的时间中点归属。
+  /// 没有词级数据（老档）或裁不出来时退回 [fallback]（整句）
+  String segmentText(int segIndex, String fallback) {
+    final segs = segments;
+    if (segIndex < 0 || segIndex >= segs.length || words.isEmpty) {
+      return fallback;
+    }
+    final (s0, e0) = segs[segIndex];
+    final text = [
+      for (final w in words)
+        if ((w.startMs + w.endMs) / 2 >= s0 && (w.startMs + w.endMs) / 2 < e0)
+          w.text,
+    ].join();
+    return text.isEmpty ? fallback : text;
+  }
 
   /// 参考分镜的区间序列（按切点拆；没有切点就是整段一镜）。
   /// 短于 400ms 的碎段并回前一段——闪一下的卡没有参考价值
@@ -158,6 +180,7 @@ class LineRef {
         'endMs': endMs,
         if (videoPath != null) 'videoPath': videoPath,
         if (cuts.isNotEmpty) 'cuts': cuts,
+        if (words.isNotEmpty) 'words': [for (final w in words) w.toJson()],
       };
 
   static LineRef? tryFromJson(Object? raw) {
@@ -173,6 +196,10 @@ class LineRef {
         if (raw['cuts'] is List)
           for (final c in raw['cuts'] as List)
             if (c is int) c,
+      ],
+      words: [
+        if (raw['words'] is List)
+          for (final w in raw['words'] as List) ?VoiceWord.tryFromJson(w),
       ],
     );
   }
