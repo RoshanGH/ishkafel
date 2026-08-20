@@ -548,10 +548,29 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final fallback = _doc.lines
         .lastWhere((l) => l.voiceId != null, orElse: () => line)
         .voiceId;
+    final voicedCount =
+        _doc.lines.where((l) => l.type == ScriptLineType.voiced).length;
     final picked = await showVoiceSelectDialog(context,
-        selected: line.voiceId ?? fallback);
-    if (picked == null) return;
-    _mutate((d) => d.setVoiceId(index, picked));
+        selected: line.voiceId ?? fallback, allowApplyAll: voicedCount > 1);
+    if (picked == null || !mounted) return;
+    final (voiceId, applyAll) = picked;
+    if (!applyAll) {
+      _mutate((d) => d.setVoiceId(index, voiceId));
+      return;
+    }
+    // 整片换声：一次改完；旧配音自然标黄，「生成草片」一键全部重配
+    _mutate((d) {
+      var next = d;
+      for (var i = 0; i < next.lines.length; i++) {
+        if (next.lines[i].type == ScriptLineType.voiced) {
+          next = next.setVoiceId(i, voiceId);
+        }
+      }
+      return next;
+    });
+    final name = VoiceCatalog.byId(voiceId)?.ref.name ?? voiceId;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('整片音色换成「$name」了——点「生成草片」一键全部重新配音。')));
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API

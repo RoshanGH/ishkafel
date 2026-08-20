@@ -10,6 +10,7 @@ import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 import 'package:ishkafel/core/audio/tts_client.dart';
+import 'package:ishkafel/core/audio/voice_catalog.dart';
 import 'package:ishkafel/core/script/line_voice_service.dart';
 import 'package:ishkafel/core/miaoa/candidate_probe.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
@@ -685,6 +686,31 @@ void main() {
       final saved = await repo.findById('t1');
       expect(saved!.script!.lines.first.shots, isEmpty,
           reason: '重做后的状态落盘');
+    });
+
+    testWidgets('换音色可一键应用到整片：句句换新声、旧配音标黄', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['第一句', '第二句', '第三句']);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('band-voice-menu-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('更换音色'));
+      await tester.pumpAndSettle();
+      await tester.tap(find
+          .byKey(ValueKey('voice-option-${VoiceCatalog.all.first.ref.id}')));
+      await tester.tap(find.byKey(const ValueKey('voice-apply-all')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('就用这个'));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('t1');
+      final ids = saved!.script!.lines.map((l) => l.voiceId).toSet();
+      expect(ids, {VoiceCatalog.all.first.ref.id},
+          reason: '勾了「应用到整片」，三句音色一致');
     });
 
     testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {

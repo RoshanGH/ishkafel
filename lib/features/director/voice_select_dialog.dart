@@ -7,18 +7,21 @@ import '../../core/audio/voice_catalog.dart';
 
 /// 编导台的音色选择器：单选一个音色（音色粒度 = 行，设计稿问题①）。
 ///
-/// 与工作台的换音色面板不同：那边要同时勾选「应用到哪几句」，
-/// 这边就是给当前行挑一个声音，保持轻。
-Future<String?> showVoiceSelectDialog(BuildContext context,
-        {String? selected}) =>
-    showDialog<String>(
+/// 保持轻：给当前行挑一个声音；整片统一音色是常态，所以多一个
+/// 「同时应用到整片」勾选（[allowApplyAll]），不用一行行换 27 次。
+/// 返回 (音色 id, 是否应用到整片)；取消返回 null。
+Future<(String, bool)?> showVoiceSelectDialog(BuildContext context,
+        {String? selected, bool allowApplyAll = false}) =>
+    showDialog<(String, bool)>(
       context: context,
-      builder: (_) => _VoiceSelectDialog(selected: selected),
+      builder: (_) => _VoiceSelectDialog(
+          selected: selected, allowApplyAll: allowApplyAll),
     );
 
 class _VoiceSelectDialog extends StatefulWidget {
   final String? selected;
-  const _VoiceSelectDialog({this.selected});
+  final bool allowApplyAll;
+  const _VoiceSelectDialog({this.selected, this.allowApplyAll = false});
 
   @override
   State<_VoiceSelectDialog> createState() => _VoiceSelectDialogState();
@@ -27,6 +30,7 @@ class _VoiceSelectDialog extends StatefulWidget {
 class _VoiceSelectDialogState extends State<_VoiceSelectDialog> {
   final _keyword = TextEditingController();
   late String? _picked = widget.selected;
+  bool _applyAll = false;
 
   @override
   void dispose() {
@@ -84,12 +88,37 @@ class _VoiceSelectDialogState extends State<_VoiceSelectDialog> {
         ]),
       ),
       actions: [
+        if (widget.allowApplyAll)
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            child: InkWell(
+              key: const ValueKey('voice-apply-all'),
+              onTap: () => setState(() => _applyAll = !_applyAll),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                    _applyAll
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    size: 15,
+                    color: _applyAll
+                        ? AppColors.accentBlue
+                        : AppColors.textTertiary),
+                const SizedBox(width: 4),
+                const Text('同时应用到整片',
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textSecondary)),
+              ]),
+            ),
+          ),
         TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('取消')),
         FilledButton(
-          onPressed:
-              _picked == null ? null : () => Navigator.of(context).pop(_picked),
+          onPressed: _picked == null
+              ? null
+              : () => Navigator.of(context).pop((_picked!, _applyAll)),
           child: const Text('就用这个'),
         ),
       ],
