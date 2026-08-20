@@ -20,7 +20,14 @@ class ScriptPlanResult {
   /// 但少了哪行、为什么少，必须点名
   final Map<int, String> skippedLines;
 
-  const ScriptPlanResult({required this.plan, required this.skippedLines});
+  /// 进了预览的行 → 它在预览轴上的起点（「点句子跳播」靠它）
+  final Map<int, int> lineStarts;
+
+  const ScriptPlanResult({
+    required this.plan,
+    required this.skippedLines,
+    this.lineStarts = const {},
+  });
 
   bool get isEmpty => plan.isEmpty;
 }
@@ -40,6 +47,7 @@ ScriptPlanResult buildScriptTrackPlan(
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
   final skipped = <int, String>{};
+  final lineStarts = <int, int>{};
   var cursorMs = 0;
 
   for (var i = 0; i < doc.lines.length; i++) {
@@ -78,6 +86,7 @@ ScriptPlanResult buildScriptTrackPlan(
       continue;
     }
 
+    lineStarts[i] = cursorMs;
     var shotAt = cursorMs;
     for (var j = 0; j < line.shots.length; j++) {
       final shot = line.shots[j];
@@ -116,5 +125,6 @@ ScriptPlanResult buildScriptTrackPlan(
   return ScriptPlanResult(
     plan: TrackPlan(video: video, voice: voice, bgm: bgm),
     skippedLines: skipped,
+    lineStarts: lineStarts,
   );
 }

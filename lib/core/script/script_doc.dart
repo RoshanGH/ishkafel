@@ -106,6 +106,29 @@ class LineVoiceover {
   }
 }
 
+/// 这一句在参考片里的区间（「参考视频」列的数据根）。
+///
+/// 上传成片提取脚本时，ASR 给出的每句时间戳直接落在行上；视频路径
+/// 跟文档走（ScriptDoc.refVideoPath）——同一条参考片切出全部行。
+class LineRef {
+  final int startMs;
+  final int endMs;
+
+  const LineRef({required this.startMs, required this.endMs});
+
+  int get durationMs => endMs - startMs;
+
+  Map<String, dynamic> toJson() => {'startMs': startMs, 'endMs': endMs};
+
+  static LineRef? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final start = raw['startMs'];
+    final end = raw['endMs'];
+    if (start is! int || end is! int || end <= start) return null;
+    return LineRef(startMs: start, endMs: end);
+  }
+}
+
 /// 一行里的一个镜头位：从 miaoa 挑中的一条分镜素材。
 ///
 /// 存的是素材的**身份与元信息快照**（名字/台词/画面描述/缩略图），不存
@@ -131,6 +154,10 @@ class LineShot {
   /// 行内所有镜头的 allocMs 之和 = 行时长（总长锁死）
   final int? allocMs;
 
+  /// 本地视频源（非 miaoa 素材）：参考片「用它」一键作镜头时走这里。
+  /// 非空时 materialId 只是行内唯一的负数占位，不参与下载/防撞车
+  final String? localSource;
+
   const LineShot({
     required this.materialId,
     required this.name,
@@ -142,13 +169,20 @@ class LineShot {
     this.trimStartMs = 0,
     this.speed = 1.0,
     this.allocMs,
+    this.localSource,
   });
 
   /// 从 [trimStartMs] 起、按 [speed] 播，这条素材最多还能出多少**成片时长**。
-  /// 素材时长未知时给一个「足够大」——探测失败不该把镜头卡死
-  int get availableMs => durationMs == null
-      ? 1 << 30
-      : ((durationMs! - trimStartMs) / speed).floor().clamp(0, 1 << 30);
+  /// 素材时长未知时给一个「足够大」——探测失败不该把镜头卡死。
+  /// 本地源（参考段）的 trimStartMs 是**原片坐标**、durationMs 是区间长，
+  /// 可用量就是整个区间
+  int get availableMs {
+    if (durationMs == null) return 1 << 30;
+    if (localSource != null) {
+      return (durationMs! / speed).floor().clamp(0, 1 << 30);
+    }
+    return ((durationMs! - trimStartMs) / speed).floor().clamp(0, 1 << 30);
+  }
 
   /// 这一镜按当前分配要消耗素材多长（素材内坐标）
   int get consumedSourceMs => ((allocMs ?? 0) * speed).round();
@@ -169,6 +203,7 @@ class LineShot {
         trimStartMs: trimStartMs ?? this.trimStartMs,
         speed: speed ?? this.speed,
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
+        localSource: localSource,
       );
 
   static const _unsetAlloc = Object();
@@ -189,6 +224,7 @@ class LineShot {
         if (trimStartMs != 0) 'trimStartMs': trimStartMs,
         if (speed != 1.0) 'speed': speed,
         if (allocMs != null) 'allocMs': allocMs,
+        if (localSource != null) 'localSource': localSource,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -210,6 +246,8 @@ class LineShot {
           raw['trimStartMs'] is int ? raw['trimStartMs'] as int : 0,
       speed: raw['speed'] is num ? (raw['speed'] as num).toDouble() : 1.0,
       allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
+      localSource:
+          raw['localSource'] is String ? raw['localSource'] as String : null,
     );
   }
 }
@@ -240,6 +278,9 @@ class ScriptLine {
   /// 这一行的镜头序列（挑中的 miaoa 分镜，按播放顺序排）
   final List<LineShot> shots;
 
+  /// 这一句在参考片里的区间（提取脚本时自动落；手写的行没有）
+  final LineRef? reference;
+
   ScriptLine({
     required this.id,
     required this.text,
@@ -249,16 +290,19 @@ class ScriptLine {
     this.speechRate = 0,
     this.voiceover,
     List<LineShot> shots = const [],
+    this.reference,
   })  : tags = List.unmodifiable(tags),
         shots = List.unmodifiable(shots);
 
   static int _seq = 0;
 
   /// 新行。id 用时间戳+序号，进程内唯一且落盘后稳定
-  factory ScriptLine.create({String text = ''}) => ScriptLine(
+  factory ScriptLine.create({String text = '', LineRef? reference}) =>
+      ScriptLine(
         id: 'l${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}'
             '${(_seq++).toRadixString(36)}',
         text: text,
+        reference: reference,
       );
 
   /// 有字就是配音行，没字就是画面行——由内容派生，不由用户选择
@@ -295,6 +339,7 @@ class ScriptLine {
         voiceover:
             voiceover == _unset ? this.voiceover : voiceover as LineVoiceover?,
         shots: shots ?? this.shots,
+        reference: reference,
       );
 
   static const _unset = Object();
@@ -324,6 +369,7 @@ class ScriptLine {
         if (speechRate != 0) 'speechRate': speechRate,
         if (voiceover != null) 'voiceover': voiceover!.toJson(),
         if (shots.isNotEmpty) 'shots': [for (final s in shots) s.toJson()],
+        if (reference != null) 'reference': reference!.toJson(),
       };
 
   /// 宽松解析：一条坏行只丢它自己，不牵连整份脚本
@@ -348,6 +394,7 @@ class ScriptLine {
         if (raw['shots'] is List)
           for (final s in raw['shots'] as List) ?LineShot.tryFromJson(s),
       ],
+      reference: LineRef.tryFromJson(raw['reference']),
     );
   }
 }
@@ -364,28 +411,39 @@ class ScriptDoc {
   final BgmMaterial? bgm;
   final double bgmVolume;
 
+  /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
+  final String? refVideoPath;
+
   ScriptDoc(
     List<ScriptLine> lines, {
     this.subtitle = SubtitleStyle.standard,
     this.bgm,
     this.bgmVolume = BgmSegment.defaultVolume,
+    this.refVideoPath,
   }) : lines = List.unmodifiable(lines);
 
   /// 新脚本自带一个空行：编导打开就能写，不用先学会「加行」
   factory ScriptDoc.empty() => ScriptDoc([ScriptLine.create()]);
 
-  /// 换行列表、保留全局设置（字幕/配乐跟文档走，不跟某次行操作走）
-  ScriptDoc _withLines(List<ScriptLine> next) =>
-      ScriptDoc(next, subtitle: subtitle, bgm: bgm, bgmVolume: bgmVolume);
+  /// 换行列表、保留全局设置（字幕/配乐/参考片跟文档走，不跟行操作走）
+  ScriptDoc _withLines(List<ScriptLine> next) => ScriptDoc(next,
+      subtitle: subtitle,
+      bgm: bgm,
+      bgmVolume: bgmVolume,
+      refVideoPath: refVideoPath);
 
-  ScriptDoc withSubtitle(SubtitleStyle next) =>
-      ScriptDoc(lines, subtitle: next, bgm: bgm, bgmVolume: bgmVolume);
+  ScriptDoc withSubtitle(SubtitleStyle next) => ScriptDoc(lines,
+      subtitle: next,
+      bgm: bgm,
+      bgmVolume: bgmVolume,
+      refVideoPath: refVideoPath);
 
   ScriptDoc withBgm(BgmMaterial? material, {double? volume}) => ScriptDoc(
         lines,
         subtitle: subtitle,
         bgm: material,
         bgmVolume: volume ?? bgmVolume,
+        refVideoPath: refVideoPath,
       );
 
   ScriptDoc insertAfter(int index, {String text = ''}) {
@@ -455,6 +513,7 @@ class ScriptDoc {
         'subtitle': subtitle.toJson(),
         if (bgm != null) 'bgm': bgm!.toJson(),
         if (bgmVolume != BgmSegment.defaultVolume) 'bgmVolume': bgmVolume,
+        if (refVideoPath != null) 'refVideoPath': refVideoPath,
       };
 
   /// 宽松解析；整体坏掉退回空脚本（打不开任务比丢一份草稿更糟）
@@ -473,6 +532,9 @@ class ScriptDoc {
       bgmVolume: raw['bgmVolume'] is num
           ? (raw['bgmVolume'] as num).toDouble().clamp(0.0, 1.0)
           : BgmSegment.defaultVolume,
+      refVideoPath: raw['refVideoPath'] is String
+          ? raw['refVideoPath'] as String
+          : null,
     );
   }
 }

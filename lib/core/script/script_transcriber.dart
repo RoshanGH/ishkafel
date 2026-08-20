@@ -83,7 +83,14 @@ class ScriptTranscriber {
       }
       final lines = [
         for (final s in sentences)
-          if (s.text.trim().isNotEmpty) ScriptLine.create(text: s.text.trim()),
+          if (s.text.trim().isNotEmpty)
+            ScriptLine.create(
+              text: s.text.trim(),
+              // 这一句在参考片里的区间：右栏「参考视频」列的数据根
+              reference: s.endMs > s.startMs
+                  ? LineRef(startMs: s.startMs, endMs: s.endMs)
+                  : null,
+            ),
       ];
       if (lines.isEmpty) {
         throw const ScriptTranscribeException(

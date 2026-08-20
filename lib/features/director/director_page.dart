@@ -38,7 +38,7 @@ import '../tasks/task_list_controller.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
-import 'line_inspector.dart';
+import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
 import 'subtitle_style_sheet.dart';
@@ -105,8 +105,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// initState 里取好：dispose 阶段还要落一次盘，那时不能再碰 ref
   late final TaskRepository _repo;
 
-  /// 展开详情的镜头（右栏镜头节；随选中行切换而复位）
-  int? _expandedShot;
+  /// 展开详情的镜头：(行下标, 镜头下标)。展开发生在块内，一次一个
+  (int, int)? _expandedShot;
+
+  /// 参考段缩略图：行 id → 本地 jpg（抽一帧缓存一帧）
+  final Map<String, String> _refThumbs = {};
+  final Set<String> _refThumbsRendering = {};
+
+  /// 右板滚动控制（左栏点行 → 滚到对应块）
+  final ScrollController _boardScroll = ScrollController();
 
   /// 素材固定：挑中的镜头视频下到本地（与工作台/导出同一份缓存目录）。
   /// 下载器未接（测试环境/凭据不全）时为 null，卡片不显示下载状态
@@ -266,7 +273,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             _clipRenderer == null) {
           continue;
         }
-        final src = _mediaCache?.localPathOf(shot.materialId);
+        final src =
+            shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
         if (src == null) continue;
         _renderingClips.add(key);
         unawaited(_clipRenderer!
@@ -290,7 +298,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         final clip = _speedClips[_clipKey(shot)];
         return clip == null ? null : ShotSource(clip);
       }
-      final local = _mediaCache?.localPathOf(shot.materialId);
+      final local = shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
       return local == null
           ? null
           : ShotSource(local, inMs: shot.trimStartMs);
@@ -338,6 +346,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final runner = ScriptExportRunner(
       workDir: Directory(p.join(dataDir.path, 'script_export', _task.id)),
       localPathOf: cache.localPathOf,
+      localSourceOk: (path) => File(path).existsSync(),
       run: const ResolvingProcessRunner().call,
     );
     final stamp = DateTime.now();
@@ -491,9 +500,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   // ---- 配音 ----
 
-  /// 给当前行挑音色。选完只是记下——生成才花钱
-  Future<void> _pickVoice() async {
-    final line = _doc.lines[_selected];
+  /// 给某行挑音色。选完只是记下——生成才花钱
+  Future<void> _pickVoice(int index) async {
+    final line = _doc.lines[index];
     // 预填：本行已选的，其次全文档最近一次用过的（连着几行同一个声音是常态）
     final fallback = _doc.lines
         .lastWhere((l) => l.voiceId != null, orElse: () => line)
@@ -501,22 +510,22 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final picked = await showVoiceSelectDialog(context,
         selected: line.voiceId ?? fallback);
     if (picked == null) return;
-    _mutate((d) => d.setVoiceId(_selected, picked));
+    _mutate((d) => d.setVoiceId(index, picked));
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
-  Future<void> _generateVoice() async {
+  Future<void> _generateVoice(int index) async {
     final factory = ref.read(lineVoiceFactoryProvider);
     if (factory == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('尚未配置 AI 服务（语音合成），无法生成配音。')));
       return;
     }
-    var line = _doc.lines[_selected];
+    var line = _doc.lines[index];
     if (line.voiceId == null) {
       // 还没选音色：先弹选择器，选完直接接着生成——别让用户点两遍
-      await _pickVoice();
-      line = _doc.lines[_selected];
+      await _pickVoice(index);
+      line = _doc.lines[index];
       if (line.voiceId == null) return;
     }
     final lineId = line.id;
@@ -561,12 +570,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   // ---- 找镜头 ----
 
   /// 打开找镜头面板；确认后整组落回行上（按行 id，面板期间行可能被移动）
-  Future<void> _findShots() async {
-    final line = _doc.lines[_selected];
+  Future<void> _findShots(int index) async {
+    final line = _doc.lines[index];
     // 防撞车：同任务其他行已用的素材要在面板里标出来
     final usedBy = <int, int>{};
     for (var i = 0; i < _doc.lines.length; i++) {
       for (final shot in _doc.lines[i].shots) {
+        if (shot.localSource != null) continue; // 参考段不参与防撞车
         usedBy.putIfAbsent(shot.materialId, () => i);
       }
     }
@@ -575,7 +585,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       services: ref.read(shotSearchServicesProvider),
       tagger: ref.read(lineTaggerProvider),
       task: _task,
-      lineIndex: _selected,
+      lineIndex: index,
       line: line,
       usedBy: usedBy,
     );
@@ -594,45 +604,136 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   // ---- 时长分配 ----
 
-  void _updateShots(List<LineShot> shots) {
-    final line = _doc.lines[_selected];
+  void _updateShots(int index, List<LineShot> shots) {
+    final line = _doc.lines[index];
     _mutate((d) => d.setShotsById(line.id, shots));
   }
 
-  void _distribute() {
-    final line = _doc.lines[_selected];
+  void _distribute(int index) {
+    final line = _doc.lines[index];
     final root = ShotAllocation.rootMsOf(line);
     if (root == null) return;
-    _updateShots(ShotAllocation.distribute(line.shots, root));
+    _updateShots(index, ShotAllocation.distribute(line.shots, root));
   }
 
-  void _resizeShot(int i, int newAllocMs) {
-    final line = _doc.lines[_selected];
-    final next = ShotAllocation.resize(line.shots, i, newAllocMs);
+  void _resizeShot(int index, int j, int newAllocMs) {
+    final line = _doc.lines[index];
+    final next = ShotAllocation.resize(line.shots, j, newAllocMs);
     if (next == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('调不动了：相邻镜头已经到底线（每镜最少 0.5 秒）。')));
       return;
     }
-    _updateShots(next);
+    _updateShots(index, next);
   }
 
-  void _trimShot(int i, int trimStartMs) {
-    final line = _doc.lines[_selected];
+  void _trimShot(int index, int j, int trimStartMs) {
+    final line = _doc.lines[index];
     final next = [...line.shots];
-    next[i] = ShotAllocation.setTrimStart(next[i], trimStartMs);
-    _updateShots(next);
+    next[j] = ShotAllocation.setTrimStart(next[j], trimStartMs);
+    _updateShots(index, next);
   }
 
-  void _speedShot(int i, double speed) {
-    final line = _doc.lines[_selected];
+  void _speedShot(int index, int j, double speed) {
+    final line = _doc.lines[index];
     final next = [...line.shots];
-    next[i] = ShotAllocation.setSpeed(next[i], speed);
-    _updateShots(next);
+    next[j] = ShotAllocation.setSpeed(next[j], speed);
+    _updateShots(index, next);
   }
 
-  Future<void> _togglePlayVoice() async {
-    final line = _doc.lines[_selected];
+  // ---- 参考段（这一句在参考片里的原始画面）----
+
+  /// 参考缩略图：取区间中点帧（两端常踩转场），按行缓存、抽过即用
+  void _ensureRefThumb(ScriptLine line) {
+    final ref = line.reference;
+    final video = _doc.refVideoPath;
+    final dataDir = this.ref.read(dataDirProvider);
+    if (ref == null || video == null || dataDir == null) return;
+    if (_refThumbs.containsKey(line.id) ||
+        _refThumbsRendering.contains(line.id)) {
+      return;
+    }
+    final out = p.join(dataDir.path, 'script_refs', _task.id, '${line.id}.jpg');
+    if (File(out).existsSync()) {
+      _refThumbs[line.id] = out;
+      return;
+    }
+    _refThumbsRendering.add(line.id);
+    unawaited(() async {
+      try {
+        await Directory(p.dirname(out)).create(recursive: true);
+        final mid = (ref.startMs + ref.endMs) / 2000;
+        final r = await const ResolvingProcessRunner().call('ffmpeg', [
+          '-y', '-v', 'error',
+          '-ss', mid.toStringAsFixed(3),
+          '-i', video,
+          '-frames:v', '1',
+          '-vf', 'scale=-2:240',
+          out,
+        ]);
+        if (r.exitCode == 0 && mounted) {
+          setState(() => _refThumbs[line.id] = out);
+        }
+      } catch (e) {
+        AppLog.warn('参考缩略图抽帧失败（${line.id}）：$e');
+      } finally {
+        _refThumbsRendering.remove(line.id);
+      }
+    }());
+  }
+
+  /// 播放参考段：小窗循环播这一句在参考片里的区间
+  Future<void> _playReference(int index) async {
+    final line = _doc.lines[index];
+    final ref = line.reference;
+    final video = _doc.refVideoPath;
+    if (ref == null || video == null) return;
+    if (!File(video).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('参考视频已不在原位，放回后才能播放。')));
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _RefClipDialog(
+          videoPath: video, startMs: ref.startMs, endMs: ref.endMs),
+    );
+  }
+
+  /// 参考段一键作镜头：原片本地文件直接当第一个镜头用
+  void _useReference(int index) {
+    final line = _doc.lines[index];
+    final ref = line.reference;
+    final video = _doc.refVideoPath;
+    if (ref == null || video == null) return;
+    if (line.shots.any((s) => s.localSource == video &&
+        s.trimStartMs == ref.startMs)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('参考画面已经在这一行的镜头里了。')));
+      return;
+    }
+    final shot = LineShot(
+      // 负数占位：本地源不参与下载与防撞车，行内按区间起点保证唯一
+      materialId: -(ref.startMs + 1),
+      name: '参考画面',
+      sceneDescription: '参考片 ${_fmtRange(ref)}',
+      durationMs: ref.durationMs,
+      localSource: video,
+      trimStartMs: ref.startMs,
+    );
+    final next = [shot, ...line.shots];
+    final root = ShotAllocation.rootMsOf(line);
+    _updateShots(
+        index, root == null ? next : ShotAllocation.distribute(next, root));
+    _flushNow();
+  }
+
+  static String _fmtRange(LineRef ref) =>
+      '${(ref.startMs / 1000).toStringAsFixed(1)}s'
+      '~${(ref.endMs / 1000).toStringAsFixed(1)}s';
+
+  Future<void> _togglePlayVoice(int index) async {
+    final line = _doc.lines[index];
     final vo = line.voiceover;
     if (vo == null) return;
     if (_playingLineId == line.id) {
@@ -715,8 +816,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       });
       if (!mounted) return;
       setState(() {
+        // 来源视频跟文档走：行上的 reference 区间都指向它（参考视频列）
         _doc = ScriptDoc(lines,
-            subtitle: _doc.subtitle, bgm: _doc.bgm, bgmVolume: _doc.bgmVolume);
+            subtitle: _doc.subtitle,
+            bgm: _doc.bgm,
+            bgmVolume: _doc.bgmVolume,
+            refVideoPath: path);
         _selected = 0;
         _extract = null;
         _guideDismissed = true;
@@ -869,39 +974,33 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             ),
             const VerticalDivider(
                 width: 1, thickness: 1, color: AppColors.border),
-            // 中：预览（M4 点亮）；空脚本时先当起步引导的舞台
-            Expanded(
-              child: showGuide ? _startGuide() : _previewStage(),
-            ),
-            const VerticalDivider(
-                width: 1, thickness: 1, color: AppColors.border),
-            // 右：当前行工作台（M2 配音 / M3 镜头逐步点亮）
-            Container(
-              width: 340,
-              color: AppColors.surface,
-              child: (!showGuide &&
-                      _selected >= 0 &&
-                      _selected < _doc.lines.length)
-                  ? LineInspector(
-                      index: _selected,
-                      line: _doc.lines[_selected],
-                      onManualMsChanged: (ms) =>
-                          _mutate((d) => d.setManualMs(_selected, ms)),
-                      voiceAvailable:
-                          ref.watch(lineVoiceFactoryProvider) != null,
-                      generating: _generatingLineIds
-                          .contains(_doc.lines[_selected].id),
-                      playing: _playingLineId == _doc.lines[_selected].id,
-                      onPickVoice: _pickVoice,
-                      onSpeechRateChanged: (rate) =>
-                          _mutate((d) => d.setSpeechRate(_selected, rate)),
-                      onGenerate: _generateVoice,
-                      onTogglePlay: _togglePlayVoice,
+            // 中：预览（定宽，播放器窄而居中）；空脚本时让位给起步引导
+            if (showGuide)
+              Expanded(child: _startGuide())
+            else ...[
+              SizedBox(width: 400, child: _previewStage()),
+              const VerticalDivider(
+                  width: 1, thickness: 1, color: AppColors.border),
+              // 右：分镜编辑板——所有行的工作块从上到下铺开（行带式，
+              // 见 2026-08-20 设计推演；检查器范式已废）
+              Expanded(
+                child: Container(
+                  color: AppColors.surface,
+                  child: LineBoard(
+                    doc: _doc,
+                    selected: _selected,
+                    expandedShot: _expandedShot,
+                    onExpandShot: (v) => setState(() => _expandedShot = v),
+                    generatingLineIds: _generatingLineIds,
+                    playingLineId: _playingLineId,
+                    controller: _boardScroll,
+                    handlers: LineBoardHandlers(
+                      onFocusLine: _focusLine,
                       onFindShots: _findShots,
-                      onRemoveShot: (i) {
-                        final line = _doc.lines[_selected];
-                        final next = [...line.shots]..removeAt(i);
-                        // 删镜后剩下的镜头按根重新均分——空出的时长不能凭空消失
+                      onRemoveShot: (index, j) {
+                        final line = _doc.lines[index];
+                        final next = [...line.shots]..removeAt(j);
+                        // 删镜后剩下的按根重新均分——空出的时长不能凭空消失
                         final root = ShotAllocation.rootMsOf(line);
                         _mutate((d) => d.setShotsById(
                             line.id,
@@ -910,28 +1009,46 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                                 : ShotAllocation.distribute(next, root)));
                         setState(() => _expandedShot = null);
                       },
-                      onRemoveTag: (tag) {
-                        final line = _doc.lines[_selected];
-                        final next =
-                            line.tags.where((t) => t != tag).toList();
-                        _mutate((d) => d.setTagsById(line.id, next));
-                      },
-                      expandedShot: _expandedShot,
-                      onExpandShot: (i) =>
-                          setState(() => _expandedShot = i),
-                      onDistribute: _distribute,
                       onResizeShot: _resizeShot,
-                      onTrimStart: _trimShot,
-                      onShotSpeed: _speedShot,
+                      onTrimShot: _trimShot,
+                      onSpeedShot: _speedShot,
+                      onDistribute: _distribute,
+                      onManualMs: (index, ms) =>
+                          _mutate((d) => d.setManualMs(index, ms)),
+                      onPickVoice: _pickVoice,
+                      onSpeechRate: (index, rate) =>
+                          _mutate((d) => d.setSpeechRate(index, rate)),
+                      onGenerateVoice: _generateVoice,
+                      onTogglePlayVoice: _togglePlayVoice,
+                      onPlayReference: _playReference,
+                      onUseReference: _useReference,
                       shotStatus: (id) => _mediaCache?.statusOf(id),
                       onRetryDownload: (id) => _mediaCache?.retry(id),
-                    )
-                  : const SizedBox.shrink(),
-            ),
+                      refThumbOf: (line) {
+                        _ensureRefThumb(line);
+                        return _refThumbs[line.id];
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ]),
         ),
       ]),
     );
+  }
+
+  /// 点块 = 「你正看着这一行」：左栏行选中 + 预览跳播到该行起点
+  void _focusLine(int index) {
+    setState(() {
+      _selected = index;
+      _expandedShot = null;
+    });
+    final start = _planResult.lineStarts[index];
+    if (start != null) {
+      unawaited(_playback?.seekMs(start));
+    }
   }
 
   /// 顶栏：返回 + 身份（#编号 · 名字 · 模块徽标）+ 保存状态。
@@ -1263,6 +1380,79 @@ class _ExportProgressDialog extends StatelessWidget {
               ),
             ]),
           ),
+        ),
+      );
+}
+
+
+/// 参考段小窗：循环播这一句在参考片里的区间。
+/// 用独立的 mpv 实例——试听不该动主预览的位置
+class _RefClipDialog extends StatefulWidget {
+  final String videoPath;
+  final int startMs;
+  final int endMs;
+
+  const _RefClipDialog(
+      {required this.videoPath, required this.startMs, required this.endMs});
+
+  @override
+  State<_RefClipDialog> createState() => _RefClipDialogState();
+}
+
+class _RefClipDialogState extends State<_RefClipDialog> {
+  final MediaKitPlaybackController _player = MediaKitPlaybackController();
+  Timer? _looper;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(() async {
+      await _player.open(widget.videoPath);
+      await _player.seekMs(widget.startMs);
+      await _player.play();
+      // 到区间尾绕回开头（循环看这一句的画面）
+      _looper = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+        // positionMsStream 是流；轮询当前值最省事——弹窗生命周期很短
+      });
+      _player.positionMsStream.listen((ms) {
+        if (ms >= widget.endMs) {
+          unawaited(_player.seekMs(widget.startMs));
+        }
+      });
+    }());
+  }
+
+  @override
+  void dispose() {
+    _looper?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Dialog(
+        backgroundColor: AppColors.stageBackground,
+        child: SizedBox(
+          width: 300,
+          height: 560,
+          child: Column(children: [
+            Expanded(child: _player.buildVideoWidget()),
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              child: Row(children: [
+                Text(
+                    '参考 ${(widget.startMs / 1000).toStringAsFixed(1)}s'
+                    ' ~ ${(widget.endMs / 1000).toStringAsFixed(1)}s（循环）',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textSecondary)),
+                const Spacer(),
+                TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('关闭')),
+              ]),
+            ),
+          ]),
         ),
       );
 }

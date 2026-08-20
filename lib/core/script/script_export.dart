@@ -44,12 +44,17 @@ class ScriptExportRunner {
   /// 已固定素材的本地路径（materialId → path）；null = 不在本地
   final String? Function(int materialId) localPathOf;
 
+  /// 本地源镜头（参考段）的文件是否仍然存在
+  final bool Function(String path) localSourceOk;
+
   ScriptExportRunner({
     required this.workDir,
     required this.localPathOf,
+    bool Function(String path)? localSourceOk,
     this.run = systemProcessRunner,
     SubtitleRasterizer? rasterizer,
-  }) : rasterizer = rasterizer ?? SubtitleRasterizer(run: run);
+  })  : localSourceOk = localSourceOk ?? ((path) => File(path).existsSync()),
+        rasterizer = rasterizer ?? SubtitleRasterizer(run: run);
 
   /// 导出一条成片到 [outPath]。返回实际输出路径。
   Future<String> export({
@@ -90,10 +95,19 @@ class ScriptExportRunner {
       var shotAtMs = 0;
       for (var j = 0; j < line.shots.length; j++) {
         final shot = line.shots[j];
-        final src = localPathOf(shot.materialId);
-        if (src == null) {
-          throw ScriptExportException(
-              '第 ${lineIndex + 1} 行第 ${j + 1} 镜的素材还没下载到本地，导出被拦下。');
+        final String? src;
+        if (shot.localSource != null) {
+          src = localSourceOk(shot.localSource!) ? shot.localSource : null;
+          if (src == null) {
+            throw ScriptExportException(
+                '第 ${lineIndex + 1} 行第 ${j + 1} 镜引用的参考视频已不在原位，导出被拦下。');
+          }
+        } else {
+          src = localPathOf(shot.materialId);
+          if (src == null) {
+            throw ScriptExportException(
+                '第 ${lineIndex + 1} 行第 ${j + 1} 镜的素材还没下载到本地，导出被拦下。');
+          }
         }
         final allocMs = shot.allocMs!;
         final overlays = await _overlaysFor(

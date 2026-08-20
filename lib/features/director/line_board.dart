@@ -1,0 +1,746 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+
+import '../../app/theme/app_colors.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
+import '../../core/audio/voice_catalog.dart';
+import '../../core/script/script_doc.dart';
+import '../../core/script/shot_allocation.dart';
+import '../picking/picked_media_cache.dart';
+
+/// 分镜编辑板（右栏）：**所有行的工作块从上到下铺开**，一块对应一行台词。
+///
+/// 设计推演见 docs/2026-08-20-编导台行带式布局-设计推演.md——视频是序列，
+/// 人从上往下扫一遍就是扫完整条片子；「点一行右边切换」的检查器范式已废。
+/// 块内容：台词（只读，编辑在左栏）· 参考段卡 · 镜头序列 · 配音行。
+/// 内容切换只发生在**块内**（镜头详情展开/收起）。
+class LineBoardHandlers {
+  final void Function(int index) onFocusLine;
+  final void Function(int index) onFindShots;
+  final void Function(int index, int shotIndex) onRemoveShot;
+  final void Function(int index, int shotIndex, int newAllocMs) onResizeShot;
+  final void Function(int index, int shotIndex, int trimStartMs) onTrimShot;
+  final void Function(int index, int shotIndex, double speed) onSpeedShot;
+  final void Function(int index) onDistribute;
+  final void Function(int index, int? manualMs) onManualMs;
+  final void Function(int index) onPickVoice;
+  final void Function(int index, int rate) onSpeechRate;
+  final void Function(int index) onGenerateVoice;
+  final void Function(int index) onTogglePlayVoice;
+  final void Function(int index) onPlayReference;
+  final void Function(int index) onUseReference;
+  final PickedMediaStatus? Function(int materialId) shotStatus;
+  final void Function(int materialId) onRetryDownload;
+
+  /// 参考段的缩略图本地路径（抽帧后缓存）；null = 还没抽好
+  final String? Function(ScriptLine line) refThumbOf;
+
+  const LineBoardHandlers({
+    required this.onFocusLine,
+    required this.onFindShots,
+    required this.onRemoveShot,
+    required this.onResizeShot,
+    required this.onTrimShot,
+    required this.onSpeedShot,
+    required this.onDistribute,
+    required this.onManualMs,
+    required this.onPickVoice,
+    required this.onSpeechRate,
+    required this.onGenerateVoice,
+    required this.onTogglePlayVoice,
+    required this.onPlayReference,
+    required this.onUseReference,
+    required this.shotStatus,
+    required this.onRetryDownload,
+    required this.refThumbOf,
+  });
+}
+
+class LineBoard extends StatelessWidget {
+  final ScriptDoc doc;
+  final int selected;
+
+  /// 展开镜头详情的位置：(行下标, 镜头下标)；null = 都收着
+  final (int, int)? expandedShot;
+  final ValueChanged<(int, int)?> onExpandShot;
+  final Set<String> generatingLineIds;
+  final String? playingLineId;
+  final LineBoardHandlers handlers;
+  final ScrollController? controller;
+
+  const LineBoard({
+    super.key,
+    required this.doc,
+    required this.selected,
+    required this.expandedShot,
+    required this.onExpandShot,
+    required this.generatingLineIds,
+    required this.playingLineId,
+    required this.handlers,
+    this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      controller: controller,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      itemCount: doc.lines.length,
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, i) => _LineBand(
+        key: ValueKey('band-${doc.lines[i].id}'),
+        index: i,
+        line: doc.lines[i],
+        selected: i == selected,
+        expandedShot:
+            expandedShot != null && expandedShot!.$1 == i ? expandedShot!.$2 : null,
+        onExpandShot: (shot) => onExpandShot(shot == null ? null : (i, shot)),
+        generating: generatingLineIds.contains(doc.lines[i].id),
+        playing: playingLineId == doc.lines[i].id,
+        handlers: handlers,
+      ),
+    );
+  }
+}
+
+class _LineBand extends StatelessWidget {
+  final int index;
+  final ScriptLine line;
+  final bool selected;
+  final int? expandedShot;
+  final ValueChanged<int?> onExpandShot;
+  final bool generating;
+  final bool playing;
+  final LineBoardHandlers handlers;
+
+  const _LineBand({
+    super.key,
+    required this.index,
+    required this.line,
+    required this.selected,
+    required this.expandedShot,
+    required this.onExpandShot,
+    required this.generating,
+    required this.playing,
+    required this.handlers,
+  });
+
+  bool get voiced => line.type == ScriptLineType.voiced;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => handlers.onFocusLine(index),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceRaised,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+              color: selected ? AppColors.accentBlue : AppColors.border,
+              width: selected ? 1.2 : 1),
+        ),
+        padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _header(),
+          const SizedBox(height: AppSpacing.sm),
+          _shotStrip(),
+          if (expandedShot != null &&
+              expandedShot! >= 0 &&
+              expandedShot! < line.shots.length) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _shotDetail(expandedShot!, line.shots[expandedShot!]),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          if (voiced) _voiceRow() else _visualRow(),
+        ]),
+      ),
+    );
+  }
+
+  // ---- 块头：行号 · 状态点 · 台词（只读，编辑在左栏）----
+
+  Widget _header() {
+    final state = line.voiceState;
+    return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Container(
+        margin: const EdgeInsets.only(top: 3),
+        width: 20,
+        child: Text('${index + 1}',
+            style: const TextStyle(
+                fontSize: AppFontSize.caption,
+                color: AppColors.textTertiary,
+                fontFeatures: [FontFeature.tabularFigures()])),
+      ),
+      Container(
+        margin: const EdgeInsets.only(top: 7, right: AppSpacing.sm),
+        width: 6,
+        height: 6,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: !voiced
+              ? Colors.transparent
+              : switch (state) {
+                  LineVoiceState.none => AppColors.textSecondary,
+                  LineVoiceState.fresh => AppColors.green,
+                  LineVoiceState.stale => AppColors.orange,
+                },
+          border: Border.all(
+              color: voiced ? Colors.transparent : AppColors.textTertiary),
+        ),
+      ),
+      Expanded(
+        child: Text(
+          voiced ? line.text.trim() : '画面行（无台词，只有画面）',
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+              fontSize: AppFontSize.body,
+              height: 1.4,
+              color: voiced ? AppColors.textPrimary : AppColors.textTertiary),
+        ),
+      ),
+      if (line.tags.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(left: AppSpacing.sm),
+          child: Text(line.tags.take(2).join(' · '),
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+        ),
+    ]);
+  }
+
+  // ---- 卡片行：参考卡 + 镜头卡 + 找镜头 ----
+
+  Widget _shotStrip() {
+    final root = ShotAllocation.rootMsOf(line);
+    final shortfall =
+        root == null ? 0 : ShotAllocation.shortfallMs(line.shots, root);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(
+        height: 108,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          children: [
+            if (line.reference != null) _refCard(),
+            for (var j = 0; j < line.shots.length; j++) ...[
+              _shotCard(j, line.shots[j]),
+              const SizedBox(width: AppSpacing.sm),
+            ],
+            _addCard(),
+          ],
+        ),
+      ),
+      if (line.shots.isNotEmpty && root != null && shortfall != 0)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: [
+            Expanded(
+              child: Text(
+                  shortfall > 0
+                      ? '还有 ${_s(shortfall)} 没分出去（素材可能不够长）'
+                      : '超分了 ${_s(-shortfall)}',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro, color: AppColors.orange)),
+            ),
+            InkWell(
+              key: ValueKey('band-distribute-$index'),
+              onTap: () => handlers.onDistribute(index),
+              child: const Text('重新均分',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.accentBlueLight)),
+            ),
+          ]),
+        ),
+    ]);
+  }
+
+  /// 参考段卡：这一句在参考片里的原始画面。虚线感用灰调+角标区分，
+  /// 不进成片；「用它」一键把该区间填为本行第一个镜头
+  Widget _refCard() {
+    final ref = line.reference!;
+    final thumb = handlers.refThumbOf(line);
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.sm),
+      child: SizedBox(
+        width: 62,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(
+            child: InkWell(
+              key: ValueKey('band-ref-$index'),
+              onTap: () => handlers.onPlayReference(index),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  border: Border.all(
+                      color: AppColors.textTertiary.withValues(alpha: 0.55)),
+                  color: Colors.black,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Stack(fit: StackFit.expand, children: [
+                  if (thumb != null)
+                    Image.file(File(thumb), fit: BoxFit.cover)
+                  else
+                    const Center(
+                        child: Icon(Icons.hourglass_empty,
+                            size: 12, color: AppColors.textTertiary)),
+                  Positioned(
+                    left: 3,
+                    top: 3,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          borderRadius: BorderRadius.circular(3)),
+                      child: const Text('参考',
+                          style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white)),
+                    ),
+                  ),
+                  const Center(
+                      child: Icon(Icons.play_arrow,
+                          size: 16, color: Colors.white70)),
+                ]),
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          InkWell(
+            key: ValueKey('band-use-ref-$index'),
+            onTap: () => handlers.onUseReference(index),
+            child: Text('${_s(ref.durationMs)} · 用它',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 9, color: AppColors.accentBlueLight)),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _shotCard(int j, LineShot shot) {
+    final expanded = expandedShot == j;
+    final status = shot.localSource != null
+        ? PickedMediaStatus.ready
+        : handlers.shotStatus(shot.materialId);
+    return InkWell(
+      key: ValueKey('band-shot-$index-$j'),
+      onTap: () => onExpandShot(expanded ? null : j),
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: Container(
+        width: 62,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(
+              color: expanded ? AppColors.accentBlue : AppColors.border,
+              width: expanded ? 1.5 : 1),
+          color: AppColors.surfaceCard,
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(
+            child: Stack(fit: StackFit.expand, children: [
+              shot.thumbnailUrl != null
+                  ? Image.network(shot.thumbnailUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(color: Colors.black))
+                  : Container(
+                      color: Colors.black,
+                      child: shot.localSource != null
+                          ? const Icon(Icons.movie_outlined,
+                              size: 14, color: AppColors.textTertiary)
+                          : null),
+              Positioned(
+                left: 3,
+                top: 3,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                  decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.6),
+                      borderRadius: BorderRadius.circular(3)),
+                  child: Text('${j + 1}',
+                      style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white)),
+                ),
+              ),
+              Positioned(
+                right: 1,
+                top: 1,
+                child: InkWell(
+                  key: ValueKey('band-remove-shot-$index-$j'),
+                  onTap: () => handlers.onRemoveShot(index, j),
+                  child: Container(
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(3)),
+                    child:
+                        const Icon(Icons.close, size: 10, color: Colors.white),
+                  ),
+                ),
+              ),
+              if (status == PickedMediaStatus.downloading)
+                const Positioned(
+                  left: 3,
+                  bottom: 3,
+                  child: SizedBox(
+                      width: 9,
+                      height: 9,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.2, color: Colors.white)),
+                )
+              else if (status == PickedMediaStatus.failed)
+                Positioned(
+                  left: 1,
+                  bottom: 1,
+                  child: InkWell(
+                    key: ValueKey('band-retry-$index-$j'),
+                    onTap: () => handlers.onRetryDownload(shot.materialId),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                          color: AppColors.red.withValues(alpha: 0.85),
+                          borderRadius: BorderRadius.circular(3)),
+                      child: const Icon(Icons.refresh,
+                          size: 10, color: Colors.white),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(2),
+            child: Text(
+                shot.allocMs != null
+                    ? _s(shot.allocMs!)
+                    : (shot.durationMs == null ? '?' : _s(shot.durationMs!)),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 9,
+                    color: shot.allocMs != null
+                        ? AppColors.textSecondary
+                        : AppColors.textTertiary,
+                    fontFeatures: const [FontFeature.tabularFigures()])),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _addCard() => InkWell(
+        key: ValueKey('band-find-shots-$index'),
+        onTap: () => handlers.onFindShots(index),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: Container(
+          width: 62,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+            const Icon(Icons.add, size: 16, color: AppColors.textSecondary),
+            const SizedBox(height: 2),
+            Text(line.shots.isEmpty ? '找镜头' : '增删',
+                style: const TextStyle(
+                    fontSize: 9, color: AppColors.textSecondary)),
+          ]),
+        ),
+      );
+
+  // ---- 展开的镜头详情（块内切换，不跳页面）----
+
+  Widget _shotDetail(int j, LineShot shot) {
+    final alloc = shot.allocMs;
+    final src = shot.durationMs;
+    final maxStart =
+        src == null ? 0 : (src - shot.consumedSourceMs).clamp(0, src);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceCard,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('第 ${j + 1} 镜',
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          const Spacer(),
+          Text(src == null ? '素材时长未知' : '素材 ${_s(src)}',
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+        ]),
+        Row(children: [
+          const SizedBox(
+              width: 30,
+              child: Text('时长',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textSecondary))),
+          IconButton(
+            key: ValueKey('band-alloc-minus-$index-$j'),
+            visualDensity: VisualDensity.compact,
+            iconSize: 13,
+            onPressed: alloc == null
+                ? null
+                : () => handlers.onResizeShot(index, j, alloc - 500),
+            icon: const Icon(Icons.remove, color: AppColors.textSecondary),
+          ),
+          Text(alloc == null ? '未分配' : _s(alloc),
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textPrimary,
+                  fontFeatures: [FontFeature.tabularFigures()])),
+          IconButton(
+            key: ValueKey('band-alloc-plus-$index-$j'),
+            visualDensity: VisualDensity.compact,
+            iconSize: 13,
+            onPressed: alloc == null
+                ? null
+                : () => handlers.onResizeShot(index, j, alloc + 500),
+            icon: const Icon(Icons.add, color: AppColors.textSecondary),
+          ),
+          const Spacer(),
+          Text('相邻镜头自动让出/补上',
+              style: TextStyle(
+                  fontSize: 9,
+                  color: AppColors.textTertiary.withValues(alpha: 0.8))),
+        ]),
+        if (src != null && maxStart > 0)
+          Row(children: [
+            const SizedBox(
+                width: 30,
+                child: Text('起点',
+                    style: TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textSecondary))),
+            Expanded(
+              child: SliderTheme(
+                data: const SliderThemeData(
+                    trackHeight: 2,
+                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5)),
+                child: Slider(
+                  key: ValueKey('band-trim-$index-$j'),
+                  value: shot.trimStartMs.clamp(0, maxStart).toDouble(),
+                  max: maxStart.toDouble(),
+                  activeColor: AppColors.accentBlue,
+                  onChanged: (v) => handlers.onTrimShot(index, j, v.round()),
+                ),
+              ),
+            ),
+            SizedBox(
+                width: 38,
+                child: Text(_s(shot.trimStartMs),
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textSecondary,
+                        fontFeatures: [FontFeature.tabularFigures()]))),
+          ]),
+        Row(children: [
+          const SizedBox(
+              width: 30,
+              child: Text('速度',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textSecondary))),
+          for (final v in const [0.75, 1.0, 1.25, 1.5])
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.xs),
+              child: InkWell(
+                key: ValueKey('band-speed-$index-$j-$v'),
+                onTap: () => handlers.onSpeedShot(index, j, v),
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: shot.speed == v
+                        ? AppColors.accentBlue.withValues(alpha: 0.16)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: shot.speed == v
+                            ? AppColors.accentBlue
+                            : AppColors.border),
+                  ),
+                  child: Text('${v}x',
+                      style: TextStyle(
+                          fontSize: 9,
+                          fontWeight:
+                              shot.speed == v ? FontWeight.w600 : FontWeight.w400,
+                          color: shot.speed == v
+                              ? AppColors.accentBlueLight
+                              : AppColors.textSecondary)),
+                ),
+              ),
+            ),
+          const Spacer(),
+          Text('变速后重新框选',
+              style: TextStyle(
+                  fontSize: 9,
+                  color: AppColors.textTertiary.withValues(alpha: 0.8))),
+        ]),
+      ]),
+    );
+  }
+
+  // ---- 配音行（紧凑）：状态 · 音色 · 时长 · 生成 · 试听 ----
+
+  Widget _voiceRow() {
+    final vo = line.voiceover;
+    final state = line.voiceState;
+    final voiceName = line.voiceId == null
+        ? null
+        : (VoiceCatalog.byId(line.voiceId!)?.ref.name ?? line.voiceId);
+    return Row(children: [
+      const Icon(Icons.graphic_eq, size: 12, color: AppColors.textTertiary),
+      const SizedBox(width: AppSpacing.xs),
+      // 音色（点击弹菜单：换音色 / 语速）
+      PopupMenuButton<String>(
+        key: ValueKey('band-voice-menu-$index'),
+        tooltip: '音色与语速',
+        onSelected: (v) {
+          if (v == 'pick') {
+            handlers.onPickVoice(index);
+          } else {
+            handlers.onSpeechRate(index, int.parse(v));
+          }
+        },
+        itemBuilder: (_) => [
+          const PopupMenuItem(value: 'pick', height: 32, child: Text('更换音色')),
+          const PopupMenuDivider(height: 8),
+          for (final (rate, label) in const [
+            (-25, '语速 0.75x'),
+            (0, '语速 1x'),
+            (25, '语速 1.25x'),
+            (50, '语速 1.5x'),
+          ])
+            PopupMenuItem(
+              value: '$rate',
+              height: 32,
+              child: Row(children: [
+                if (line.speechRate == rate)
+                  const Icon(Icons.check, size: 12, color: AppColors.accentBlue)
+                else
+                  const SizedBox(width: 12),
+                const SizedBox(width: 6),
+                Text(label),
+              ]),
+            ),
+        ],
+        child: Text(
+            '${voiceName ?? '选择音色'}'
+            '${line.speechRate != 0 ? ' · ${1 + line.speechRate / 100}x' : ''}',
+            style: TextStyle(
+                fontSize: AppFontSize.caption,
+                color: voiceName == null
+                    ? AppColors.accentBlueLight
+                    : AppColors.textSecondary)),
+      ),
+      const SizedBox(width: AppSpacing.md),
+      if (vo != null) ...[
+        InkWell(
+          key: ValueKey('band-play-voice-$index'),
+          onTap: () => handlers.onTogglePlayVoice(index),
+          child: Row(children: [
+            Icon(playing ? Icons.stop : Icons.play_arrow,
+                size: 14, color: AppColors.textPrimary),
+            const SizedBox(width: 2),
+            Text(_s(vo.durationMs),
+                style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textPrimary,
+                    fontFeatures: [FontFeature.tabularFigures()])),
+          ]),
+        ),
+        const SizedBox(width: AppSpacing.md),
+      ],
+      if (state == LineVoiceState.stale)
+        const Text('内容已改，配音是旧的',
+            style:
+                TextStyle(fontSize: AppFontSize.micro, color: AppColors.orange)),
+      const Spacer(),
+      SizedBox(
+        height: 24,
+        child: TextButton.icon(
+          key: ValueKey('band-generate-$index'),
+          onPressed: generating ? null : () => handlers.onGenerateVoice(index),
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+            textStyle: const TextStyle(
+                fontSize: AppFontSize.micro, fontWeight: FontWeight.w600),
+          ),
+          icon: generating
+              ? const SizedBox(
+                  width: 9,
+                  height: 9,
+                  child: CircularProgressIndicator(strokeWidth: 1.2))
+              : Icon(vo == null ? Icons.mic : Icons.refresh, size: 11),
+          label: Text(generating
+              ? '生成中…'
+              : (vo == null
+                  ? '生成配音'
+                  : (state == LineVoiceState.stale ? '重新生成' : '重配'))),
+        ),
+      ),
+    ]);
+  }
+
+  // ---- 画面行（紧凑）：手填时长 / 随素材 ----
+
+  Widget _visualRow() {
+    final seconds =
+        line.manualMs == null ? '' : (line.manualMs! / 1000).toStringAsFixed(1);
+    return Row(children: [
+      const Icon(Icons.timer_outlined, size: 12, color: AppColors.textTertiary),
+      const SizedBox(width: AppSpacing.xs),
+      const Text('时长',
+          style: TextStyle(
+              fontSize: AppFontSize.caption, color: AppColors.textSecondary)),
+      const SizedBox(width: AppSpacing.sm),
+      SizedBox(
+        width: 76,
+        height: 26,
+        child: TextFormField(
+          key: ValueKey('band-manual-ms-${line.id}'),
+          initialValue: seconds,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(
+              fontSize: AppFontSize.caption, color: AppColors.textPrimary),
+          decoration: const InputDecoration(
+            isDense: true,
+            suffixText: '秒',
+            hintText: '随素材',
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          ),
+          onChanged: (v) {
+            final parsed = double.tryParse(v.trim());
+            handlers.onManualMs(index,
+                parsed == null || parsed <= 0 ? null : (parsed * 1000).round());
+          },
+        ),
+      ),
+      const SizedBox(width: AppSpacing.sm),
+      const Text('不填则跟随所选素材',
+          style: TextStyle(
+              fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+    ]);
+  }
+
+  static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
+}

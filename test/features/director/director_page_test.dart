@@ -187,21 +187,39 @@ void main() {
     expect(find.text('编导台'), findsOneWidget);
     expect(find.textContaining('自动保存'), findsOneWidget,
         reason: '自动保存要说出来，用户才不会找「保存」按钮');
-    expect(find.text('配音行'), findsOneWidget, reason: '右栏行工作台联动当前行');
+    // 行带式：右板的块与左栏台词一一对应、全部铺开（不随选中切换）
+    expect(find.byKey(const ValueKey('band-generate-0')), findsOneWidget,
+        reason: '配音行的块自带生成入口');
+    expect(find.byKey(const ValueKey('band-find-shots-0')), findsOneWidget,
+        reason: '每块自带找镜头入口');
   });
 
-  testWidgets('写字自动变配音行，右栏徽标跟着变', (tester) async {
+  testWidgets('行带板：所有行的块同时铺开，不随选中切换', (tester) async {
+    await pumpDirector(tester,
+        wrap(_MemoryRepo(), scriptTask(doc: docWith(['第一句', '第二句', '第三句']))));
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < 3; i++) {
+      expect(find.byKey(ValueKey('band-find-shots-$i')), findsOneWidget,
+          reason: '视频是序列，人从上往下扫——块不许藏在选中背后');
+    }
+    expect(find.text('第一句'), findsNWidgets(2),
+        reason: '左栏可编辑 + 右板块头只读，各一份');
+  });
+
+  testWidgets('写字自动变配音行，右板块跟着变', (tester) async {
     await pumpDirector(tester, wrap(_MemoryRepo(), scriptTask()));
     await tester.pumpAndSettle();
     // 空脚本先是引导态，选「直接写」进入写作台
     await tester.tap(find.byKey(const ValueKey('director-guide-write')));
     await tester.pumpAndSettle();
 
-    expect(find.text('画面行'), findsOneWidget);
+    expect(find.textContaining('画面行（无台词'), findsWidgets);
     await tester.enterText(find.byType(TextField).first, '世界上只有两种人');
     await tester.pumpAndSettle();
 
-    expect(find.text('配音行'), findsOneWidget);
+    expect(find.byKey(const ValueKey('band-generate-0')), findsOneWidget,
+        reason: '有字了就是配音行，块底出现配音行控件');
   });
 
   testWidgets('回车在当前行后插入新行，选中跳到新行', (tester) async {
@@ -213,8 +231,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('script-line-1')), findsOneWidget);
-    expect(find.textContaining('第 2 行'), findsOneWidget,
-        reason: '回车后选中应落在新行，右栏跟着切换');
+    expect(find.byKey(const ValueKey('band-find-shots-1')), findsOneWidget,
+        reason: '新行的工作块立刻出现在右板');
   });
 
   testWidgets('改动自动落盘（防抖后），不存在「保存」按钮', (tester) async {
@@ -235,8 +253,9 @@ void main() {
         _MemoryRepo(), scriptTask(doc: docWith(['上次写的', '还有这句']))));
     await tester.pumpAndSettle();
 
-    expect(find.text('上次写的'), findsOneWidget);
-    expect(find.text('还有这句'), findsOneWidget);
+    expect(find.text('上次写的'), findsNWidgets(2),
+        reason: '左栏可编辑一份 + 右板块头只读一份');
+    expect(find.text('还有这句'), findsNWidgets(2));
   });
 
   testWidgets('删除藏在 hover 里；最后一行不许删', (tester) async {
@@ -261,18 +280,15 @@ void main() {
     expect(find.byKey(const ValueKey('script-line-remove-0')), findsNothing);
   });
 
-  testWidgets('画面行可手填时长，落到 manualMs', (tester) async {
+  testWidgets('画面行可手填时长，落到 manualMs（块内直填，无需选中）', (tester) async {
     final repo = _MemoryRepo();
-    // 两行：一行台词一行空（画面行），选中画面行
     await pumpDirector(
         tester, wrap(repo, scriptTask(doc: docWith(['台词', '']))));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('script-line-1')));
-    await tester.pumpAndSettle();
 
     final field = find.byWidgetPredicate((w) =>
-        w is TextFormField && w.key.toString().contains('manual-ms'));
-    expect(field, findsOneWidget, reason: '画面行右栏要给手填时长入口');
+        w is TextFormField && w.key.toString().contains('band-manual-ms'));
+    expect(field, findsOneWidget, reason: '画面行的块自带手填时长入口');
     await tester.enterText(field, '3.5');
     await tester.pump(const Duration(seconds: 1));
 
@@ -292,8 +308,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('director-guide-extract')));
     await tester.pumpAndSettle();
 
-    expect(find.text('你好呀'), findsOneWidget);
-    expect(find.text('再见啦'), findsOneWidget);
+    expect(find.text('你好呀'), findsNWidgets(2));
+    expect(find.text('再见啦'), findsNWidgets(2));
     final saved = await repo.findById('t1');
     expect(saved?.script?.lines.map((l) => l.text), ['你好呀', '再见啦'],
         reason: '提取结果要立刻落盘');
@@ -316,7 +332,7 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
 
-    expect(find.text('辛苦写的'), findsOneWidget);
+    expect(find.text('辛苦写的'), findsNWidgets(2));
   });
 
   testWidgets('提取失败给原因和重试入口，不静默', (tester) async {
@@ -342,9 +358,11 @@ void main() {
           tester, wrap(repo, scriptTask(doc: docWith(['你好呀']))));
       await tester.pumpAndSettle();
 
-      // 默认没有 factory：按钮禁用（点了不该有任何反应）
-      final btn = find.byKey(const ValueKey('inspector-generate-voice'));
-      expect(tester.widget<FilledButton>(btn).onPressed, isNull);
+      // 未接语音服务时点生成会得到明确提示（handlers 在页面层拦截）
+      await tester.tap(find.byKey(const ValueKey('band-generate-0')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('尚未配置 AI 服务'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
     });
 
     testWidgets('生成一路走通：先弹音色选择，选完直接生成，状态点变绿',
@@ -358,8 +376,7 @@ void main() {
           ]));
       await tester.pumpAndSettle();
 
-      await tester
-          .tap(find.byKey(const ValueKey('inspector-generate-voice')));
+      await tester.tap(find.byKey(const ValueKey('band-generate-0')));
       await tester.pumpAndSettle();
       // 没选过音色：先弹选择器
       expect(find.text('选择音色'), findsWidgets);
@@ -369,8 +386,7 @@ void main() {
       await tester.tap(find.text('就用这个'));
       await tester.pumpAndSettle();
 
-      expect(find.text('3.2 秒'), findsOneWidget, reason: '试听条显示实际时长');
-      expect(find.text('已生成'), findsOneWidget);
+      expect(find.text('3.2s'), findsOneWidget, reason: '块底显示实际时长');
       final saved = await repo.findById('t1');
       expect(saved?.script?.lines.first.voiceover?.durationMs, 3200,
           reason: '配音产物要落盘');
@@ -395,15 +411,13 @@ void main() {
                 .overrideWithValue((_) => _StubVoiceService()),
           ]));
       await tester.pumpAndSettle();
-      expect(find.text('已生成'), findsOneWidget);
 
       await tester.enterText(find.byType(TextField).first, '你好呀改了');
       await tester.pumpAndSettle();
 
-      expect(find.text('已过期'), findsOneWidget);
-      expect(find.textContaining('这是旧配音'), findsOneWidget);
+      expect(find.textContaining('配音是旧的'), findsOneWidget);
       expect(find.text('重新生成'), findsOneWidget);
-      expect(find.text('2.0 秒'), findsOneWidget, reason: '旧配音仍可试听');
+      expect(find.text('2.0s'), findsOneWidget, reason: '旧配音仍可试听');
     });
 
     testWidgets('生成失败给中文原因，不静默', (tester) async {
@@ -418,12 +432,77 @@ void main() {
           ]));
       await tester.pumpAndSettle();
 
-      await tester
-          .tap(find.byKey(const ValueKey('inspector-generate-voice')));
+      await tester.tap(find.byKey(const ValueKey('band-generate-0')));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('配音生成失败'), findsOneWidget);
       await tester.pump(const Duration(seconds: 5)); // 等 SnackBar 收场
+    });
+  });
+  group('行带板（2026-08-20 布局重构）', () {
+    testWidgets('提取的行带参考段：参考卡在块内、可「用它」一键作首镜',
+        (tester) async {
+      final repo = _MemoryRepo();
+      var doc = ScriptDoc(
+        [
+          ScriptLine.create(
+              text: '再不买就恢复',
+              reference: const LineRef(startMs: 1000, endMs: 4200)),
+        ],
+        refVideoPath: '/v/参考片.mp4',
+      );
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 3200,
+              sourceText: '再不买就恢复',
+              voiceId: 'v',
+              speechRate: 0));
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('band-ref-0')), findsOneWidget,
+          reason: 'ASR 切出的原片区间要作为参考视频摆在块里');
+      expect(find.text('参考'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('band-use-ref-0')));
+      await tester.pump(const Duration(seconds: 1));
+
+      final saved = await repo.findById('t1');
+      final shot = saved!.script!.lines.first.shots.first;
+      expect(shot.localSource, '/v/参考片.mp4',
+          reason: '参考段一键作镜头：本地源直接引用原片');
+      expect(shot.trimStartMs, 1000);
+      expect(shot.allocMs, 3200, reason: '按行根（配音时长）分配');
+    });
+
+    testWidgets('镜头详情在块内展开/收起（内容切换只发生在块内）', (tester) async {
+      var doc = docWith(['台词']);
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 4000,
+              sourceText: '台词',
+              voiceId: 'v',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id, [
+        const LineShot(
+            materialId: 9, name: 's', durationMs: 8000, allocMs: 4000),
+      ]);
+      await pumpDirector(tester, wrap(_MemoryRepo(), scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('第 1 镜'), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
+      await tester.pumpAndSettle();
+      expect(find.text('第 1 镜'), findsOneWidget, reason: '详情在块内展开');
+      expect(find.byKey(const ValueKey('band-speed-0-0-1.25')), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
+      await tester.pumpAndSettle();
+      expect(find.text('第 1 镜'), findsNothing, reason: '再点收起');
     });
   });
 }
