@@ -150,6 +150,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 配乐固定：选中即下到本地（与工作台同一份 bgm_cache）
   PickedMediaCache? _bgmCache;
 
+  /// 草片刚做完的庆祝一拍（对勾动效那 1.1 秒），结束即开播
+  bool _draftCelebrating = false;
+
   /// 草片流水线进度：(阶段名, 当前句摘要, 已完成, 总数)；null = 没在跑。
   /// 这是产品的魔法时刻——提取完一条参考片，几分钟后中央屏幕自动
   /// 播出一版会说话的草片，人从此只做否决和替换
@@ -1155,13 +1158,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (!ok) shotFailed++;
     }
     if (!mounted) return;
-    setState(() => _draftProgress = null);
+    // 三、完成一拍 + 开播——魔法时刻要有个 crescendo：进度收束成
+    // 「草片好了」的对勾一拍（1.1s），然后播放器入场直接开播
+    setState(() {
+      _draftProgress = null;
+      _draftCelebrating = true;
+    });
     _flushNow();
     _pinAllShots();
-    // 三、开播——魔法时刻。素材可能还在下载，重建后就绪的部分先播
     _schedulePreviewRebuild();
-    unawaited(Future<void>.delayed(const Duration(milliseconds: 900), () async {
+    unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 1100), () async {
       if (!mounted) return;
+      setState(() => _draftCelebrating = false);
       await _playback?.seekMs(0);
       await _playback?.play();
     }));
@@ -1504,36 +1513,90 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           const SizedBox(width: AppSpacing.xs),
           _extractButton(),
           const SizedBox(width: AppSpacing.sm),
-          OutlinedButton.icon(
-            key: const ValueKey('director-draft'),
-            onPressed: _draftProgress != null ? null : _generateDraft,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.textPrimary,
-              side: const BorderSide(color: AppColors.border),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md, vertical: 6),
-              textStyle: const TextStyle(fontSize: AppFontSize.body),
-            ),
-            icon: const Icon(Icons.auto_awesome, size: 14),
-            label: Text(_draftProgress != null ? '生成中…' : '生成草片'),
-          ),
+          _draftButton(),
           const SizedBox(width: AppSpacing.sm),
-          FilledButton.icon(
-            key: const ValueKey('director-export'),
-            onPressed: _exporting ? null : _exportScript,
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.accentBlue,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.md, vertical: 6),
-              textStyle: const TextStyle(
-                  fontSize: AppFontSize.body, fontWeight: FontWeight.w600),
-            ),
-            icon: const Icon(Icons.ios_share, size: 14),
-            label: Text(_exporting ? '导出中…' : '导出成片'),
-          ),
+          _exportButton(),
           const SizedBox(width: AppSpacing.xs),
         ]),
       );
+
+  /// 还有句子没配好吗——顶栏主次按它定
+  bool get _draftHasWork => _doc.lines.any((l) =>
+      l.type == ScriptLineType.voiced &&
+      (l.voiceState != LineVoiceState.fresh || l.shots.isEmpty));
+
+  /// 「生成草片」的主次是动态的：还有句子没配好时它才是这一屏的主动作
+  /// （实心蓝），全就绪后让位给「导出成片」——一屏只有一个主角，
+  /// 所以两个按钮的实心/描边永远互补（见 [_exportButton]）
+  Widget _draftButton() {
+    final label = Text(_draftProgress != null ? '生成中…' : '生成草片');
+    const icon = Icon(Icons.auto_awesome, size: 14);
+    final onPressed = _draftProgress != null ? null : _generateDraft;
+    if (_draftHasWork) {
+      return FilledButton.icon(
+        key: const ValueKey('director-draft'),
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.accentBlue,
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: 6),
+          textStyle: const TextStyle(
+              fontSize: AppFontSize.body, fontWeight: FontWeight.w600),
+        ),
+        icon: icon,
+        label: label,
+      );
+    }
+    return OutlinedButton.icon(
+      key: const ValueKey('director-draft'),
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary,
+        side: const BorderSide(color: AppColors.border),
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+        textStyle: const TextStyle(fontSize: AppFontSize.body),
+      ),
+      icon: icon,
+      label: label,
+    );
+  }
+
+  /// 「导出成片」与「生成草片」互补：草片还有活时退居描边，
+  /// 全就绪后成为唯一的实心主角
+  Widget _exportButton() {
+    final label = Text(_exporting ? '导出中…' : '导出成片');
+    const icon = Icon(Icons.ios_share, size: 14);
+    final onPressed = _exporting ? null : _exportScript;
+    if (_draftHasWork) {
+      return OutlinedButton.icon(
+        key: const ValueKey('director-export'),
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textPrimary,
+          side: const BorderSide(color: AppColors.border),
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md, vertical: 6),
+          textStyle: const TextStyle(fontSize: AppFontSize.body),
+        ),
+        icon: icon,
+        label: label,
+      );
+    }
+    return FilledButton.icon(
+      key: const ValueKey('director-export'),
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        backgroundColor: AppColors.accentBlue,
+        padding:
+            const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+        textStyle: const TextStyle(
+            fontSize: AppFontSize.body, fontWeight: FontWeight.w600),
+      ),
+      icon: icon,
+      label: label,
+    );
+  }
 
   Widget _extractButton() {
     final available = ref.watch(scriptTranscriberProvider) != null;
@@ -1625,6 +1688,41 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 预览舞台：竖屏幕布居中、限高——播放器窄而居中，不做顶天立地的黑洞。
   /// 有可播内容时是真播放器 + 传输条；没有时占位说明「还差什么」
   Widget _previewStage() {
+    // 草片刚做完：对勾一拍（elasticOut 弹入），紧接着开播
+    if (_draftCelebrating) {
+      return Container(
+        color: AppColors.background,
+        child: Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.elasticOut,
+              builder: (_, v, child) => Transform.scale(scale: v, child: child),
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(
+                    shape: BoxShape.circle, color: AppColors.green),
+                child: const Icon(Icons.check_rounded,
+                    size: 34, color: Colors.white),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            const Text('草片好了',
+                style: TextStyle(
+                    fontSize: AppFontSize.title,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: AppSpacing.xs),
+            const Text('这就播给你看',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary)),
+          ]),
+        ),
+      );
+    }
     // 草片流水线进行中：舞台交给进度——用户看着自己的片子一句句长出来，
     // 而不是对着死黑块等
     if (_draftProgress case (final stage, final text, final done, final total)) {
