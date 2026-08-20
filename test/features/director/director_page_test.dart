@@ -546,6 +546,59 @@ void main() {
       expect(shot.allocMs, 3200, reason: '按行根（配音时长）分配');
     });
 
+    testWidgets('台词语义单元内分小行：「家人们」指定给第一镜，段文字上墙',
+        (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['家人们这是我们的最新产品']);
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 5000,
+              sourceText: '家人们这是我们的最新产品',
+              voiceId: 'v',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id, const [
+        LineShot(materialId: 1, name: 'a', durationMs: 8000, allocMs: 2000),
+        LineShot(materialId: 2, name: 'b', durationMs: 8000, allocMs: 3000),
+      ]);
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      // 展开第 2 镜详情 → 从这一镜分小行
+      await tester.tap(find.byKey(const ValueKey('band-shot-0-1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('band-split-subline-0-1')));
+      await tester.pumpAndSettle();
+      // 切点选择器：点「这」字 = 从它前面切开（家人们 | 这是我们的最新产品）
+      await tester.tap(find.byKey(const ValueKey('subline-char-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('subline-cut-ok')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+
+      expect(find.text('「家人们」'), findsOneWidget,
+          reason: '第一小行的段文字：家人们归第一镜');
+      expect(find.text('「这是我们的最新产品」'), findsOneWidget);
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.sublineCuts, const [(3, 1)]);
+
+      // 并回上行：切点删除，段文字消失
+      final gesture =
+          await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: Offset.zero);
+      addTearDown(gesture.removePointer);
+      await gesture.moveTo(
+          tester.getCenter(find.text('「这是我们的最新产品」')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('band-merge-subline-0-1')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      expect(find.text('「家人们」'), findsNothing);
+      final merged = await repo.findById('t1');
+      expect(merged!.script!.lines.first.sublineCuts, isEmpty);
+    });
+
     testWidgets('镜头详情在块内展开/收起（内容切换只发生在块内）', (tester) async {
       var doc = docWith(['台词']);
       doc = doc.setVoiceoverById(

@@ -296,10 +296,20 @@ class ScriptExportRunner {
     return ready;
   }
 
-  /// 行配音的词级时间戳 → 字幕句（行文本兜底整句显示）
+  /// 行配音的词级时间戳 → 字幕句（行文本兜底整句显示）。
+  /// 行内有手动小行切分时人说了算：每小行一句、区间 = 组内镜头累计，
+  /// 不带词级（整段文本横跨组内镜头连续显示）
   List<AsrSentence> _sentenceOf(ScriptLine line) {
     final vo = line.voiceover;
     if (line.type != ScriptLineType.voiced || vo == null) return const [];
+    if (line.sublineCuts.isNotEmpty) {
+      return [
+        for (final span in line.sublineSpans)
+          if (span.endMs > span.startMs && span.text.trim().isNotEmpty)
+            AsrSentence(
+                startMs: span.startMs, endMs: span.endMs, text: span.text),
+      ];
+    }
     return [
       AsrSentence(
         startMs: 0,

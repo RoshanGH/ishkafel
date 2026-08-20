@@ -360,6 +360,12 @@ class ScriptLine {
   /// 行级字幕样式覆盖；null = 跟随全局（素材自带字幕位置不同时按行改）
   final SubtitleStyle? subtitleOverride;
 
+  /// 台词语义单元内的**小行切分**：把台词文本与镜头序列同步分组——
+  /// 「家人们」指定给前两个镜头、后半句归其余镜头。每个切点是
+  /// (文本字符索引, 镜头下标)，两轴都升序；空 = 不分组（整句一组）。
+  /// 字幕的显示区间跟组走：这段字横跨组内所有镜头
+  final List<(int, int)> sublineCuts;
+
   ScriptLine({
     required this.id,
     required this.text,
@@ -371,8 +377,10 @@ class ScriptLine {
     List<LineShot> shots = const [],
     this.reference,
     this.subtitleOverride,
+    List<(int, int)> sublineCuts = const [],
   })  : tags = List.unmodifiable(tags),
-        shots = List.unmodifiable(shots);
+        shots = List.unmodifiable(shots),
+        sublineCuts = List.unmodifiable(sublineCuts);
 
   static int _seq = 0;
 
@@ -409,6 +417,7 @@ class ScriptLine {
     Object? voiceover = _unset,
     List<LineShot>? shots,
     Object? subtitleOverride = _unset,
+    List<(int, int)>? sublineCuts,
   }) =>
       ScriptLine(
         id: id,
@@ -424,6 +433,7 @@ class ScriptLine {
         subtitleOverride: subtitleOverride == _unset
             ? this.subtitleOverride
             : subtitleOverride as SubtitleStyle?,
+        sublineCuts: sublineCuts ?? this.sublineCuts,
       );
 
   static const _unset = Object();
@@ -446,6 +456,60 @@ class ScriptLine {
 
   ScriptLine withSubtitleOverride(SubtitleStyle? next) =>
       _copy(subtitleOverride: next);
+
+  ScriptLine withSublineCuts(List<(int, int)> next) =>
+      _copy(sublineCuts: next);
+
+  /// 有效切点：文本与镜头两轴都在界内且严格递增——镜头删了、台词改了
+  /// 之后越界的切点自动失效（宽容派生，不炸也不静默保留错数据）
+  List<(int, int)> get _validCuts {
+    final out = <(int, int)>[];
+    var lastChar = 0;
+    var lastShot = 0;
+    for (final (c, s) in sublineCuts) {
+      if (c <= lastChar || c >= text.length) continue;
+      if (s <= lastShot || s >= shots.length) continue;
+      out.add((c, s));
+      lastChar = c;
+      lastShot = s;
+    }
+    return out;
+  }
+
+  /// 小行序列：每个小行 = 一段台词文本 + 它对应的镜头范围
+  /// [shotStart, shotEnd)。没有切点（或切点全失效）= 整句一组
+  List<({String text, int shotStart, int shotEnd})> get sublines {
+    final cuts = _validCuts;
+    final out = <({String text, int shotStart, int shotEnd})>[];
+    var charFrom = 0;
+    var shotFrom = 0;
+    for (final (c, s) in [...cuts, (text.length, shots.length)]) {
+      out.add((
+        text: text.substring(charFrom, c),
+        shotStart: shotFrom,
+        shotEnd: s,
+      ));
+      charFrom = c;
+      shotFrom = s;
+    }
+    return out;
+  }
+
+  /// 各小行的时间区间（行时间轴）：组内镜头 allocMs 累计。
+  /// 字幕的显示区间用它——这段字横跨组内所有镜头
+  List<({int startMs, int endMs, String text})> get sublineSpans {
+    final out = <({int startMs, int endMs, String text})>[];
+    var cursor = 0;
+    for (final sub in sublines) {
+      var span = 0;
+      for (var i = sub.shotStart; i < sub.shotEnd && i < shots.length; i++) {
+        span += shots[i].allocMs ?? 0;
+      }
+      out.add((startMs: cursor, endMs: cursor + span, text: sub.text));
+      cursor += span;
+    }
+    return out;
+  }
 
   /// 换参考段（行级上传参考视频用）。_copy 不动 reference（它跟行身份走），
   /// 这里显式重建
@@ -474,6 +538,10 @@ class ScriptLine {
         if (reference != null) 'reference': reference!.toJson(),
         if (subtitleOverride != null)
           'subtitleOverride': subtitleOverride!.toJson(),
+        if (sublineCuts.isNotEmpty)
+          'sublineCuts': [
+            for (final (c, sh) in sublineCuts) {'char': c, 'shot': sh},
+          ],
       };
 
   /// 宽松解析：一条坏行只丢它自己，不牵连整份脚本
@@ -502,6 +570,12 @@ class ScriptLine {
       subtitleOverride: raw['subtitleOverride'] is Map
           ? SubtitleStyle.fromJson(raw['subtitleOverride'])
           : null,
+      sublineCuts: [
+        if (raw['sublineCuts'] is List)
+          for (final c in raw['sublineCuts'] as List)
+            if (c is Map && c['char'] is int && c['shot'] is int)
+              (c['char'] as int, c['shot'] as int),
+      ],
     );
   }
 }
@@ -641,6 +715,12 @@ class ScriptDoc {
   ScriptDoc setTagsById(String lineId, List<String> tags) {
     final index = lines.indexWhere((l) => l.id == lineId);
     return _update(index, (line) => line.withTags(tags));
+  }
+
+  /// 按行 id 设小行切分（台词段 ↔ 镜头组的指定）
+  ScriptDoc setSublineCutsById(String lineId, List<(int, int)> cuts) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withSublineCuts(cuts));
   }
 
   /// 按行 id 换参考段（行级参考视频上传）

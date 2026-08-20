@@ -92,6 +92,55 @@ void main() {
     });
   });
 
+  group('台词语义单元内的小行切分（sublineCuts）', () {
+    // 「家人们，这是我们的最新产品」3 镜：「家人们」给前 2 镜、
+    // 后半句给第 3 镜——用户定的分组模型
+    ScriptLine line3shots() =>
+        ScriptLine.create(text: '家人们，这是我们的最新产品').withShots(const [
+          LineShot(materialId: 1, name: 'a', durationMs: 4000, allocMs: 2000),
+          LineShot(materialId: 2, name: 'b', durationMs: 4000, allocMs: 1000),
+          LineShot(materialId: 3, name: 'c', durationMs: 4000, allocMs: 2000),
+        ]);
+
+    test('设切点后 sublines 给出各小行的文本段与镜头范围', () {
+      final line = line3shots().withSublineCuts(const [(4, 2)]);
+      final subs = line.sublines;
+      expect(subs, hasLength(2));
+      expect(subs[0].text, '家人们，');
+      expect(subs[0].shotStart, 0);
+      expect(subs[0].shotEnd, 2, reason: '「家人们」占前两镜');
+      expect(subs[1].text, '这是我们的最新产品');
+      expect(subs[1].shotStart, 2);
+      expect(subs[1].shotEnd, 3);
+    });
+
+    test('没有切点 = 整句一组；json 往返不丢', () {
+      final line = line3shots();
+      expect(line.sublines.single.text, '家人们，这是我们的最新产品');
+      final cut = line.withSublineCuts(const [(4, 2)]);
+      final back = ScriptLine.tryFromJson(cut.toJson())!;
+      expect(back.sublineCuts, const [(4, 2)]);
+    });
+
+    test('镜头删得只剩 1 个后越界切点自动失效，不炸', () {
+      final line = line3shots()
+          .withSublineCuts(const [(4, 2)])
+          .withShots(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 4000, allocMs: 2000),
+      ]);
+      expect(line.sublines, hasLength(1), reason: '切点越界即整句一组');
+    });
+
+    test('小行的时间区间 = 组内镜头 allocMs 累计（字幕显示用）', () {
+      final line = line3shots().withSublineCuts(const [(4, 2)]);
+      final spans = line.sublineSpans;
+      expect(spans[0].startMs, 0);
+      expect(spans[0].endMs, 3000, reason: '前两镜 2000+1000');
+      expect(spans[1].startMs, 3000);
+      expect(spans[1].endMs, 5000);
+    });
+  });
+
   group('序列化', () {
     test('json 往返一字不差', () {
       var doc = ScriptDoc.empty();

@@ -30,6 +30,12 @@ class LineBoardHandlers {
 
   /// 改这一行的标签（从妙啊标签体系里搜索/点选/替换）
   final void Function(int index) onEditTags;
+
+  /// 从第 [shotIndex] 镜起分小行（弹台词切点选择器，把这段字指到镜头组）
+  final void Function(int index, int shotIndex) onSplitSubline;
+
+  /// 把第 [sublineIndex] 小行并回上一行（删掉那个切点）
+  final void Function(int index, int sublineIndex) onMergeSubline;
   final void Function(int index, int? manualMs) onManualMs;
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
@@ -58,6 +64,8 @@ class LineBoardHandlers {
     required this.onDistribute,
     required this.onSlowFill,
     required this.onEditTags,
+    required this.onSplitSubline,
+    required this.onMergeSubline,
     required this.onManualMs,
     required this.onPickVoice,
     required this.onSpeechRate,
@@ -128,6 +136,107 @@ class LineBoard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 素材取段条：底条 = 素材全长，蓝色窗口 = 这一镜实际用的那一段。
+/// **拖窗口整体平移** = 换起点（在素材上滑动裁切）；**拖右缘把手** =
+/// 改时长（多退少补由邻镜配合）。剪辑软件的直接操纵，替代抽象滑杆
+class _TrimBar extends StatelessWidget {
+  final LineShot shot;
+  final ValueChanged<int> onTrim;
+  final ValueChanged<int> onResize;
+
+  const _TrimBar({
+    super.key,
+    required this.shot,
+    required this.onTrim,
+    required this.onResize,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final src = shot.durationMs!;
+    final alloc = shot.allocMs ?? 0;
+    return LayoutBuilder(builder: (context, constraints) {
+      final w = constraints.maxWidth;
+      // 素材源坐标 → 像素：窗口宽按素材消耗量（变速时窗口 = alloc×speed）
+      final pxPerMs = w / src;
+      final winLeft = (shot.trimStartMs * pxPerMs).clamp(0.0, w);
+      final winWidth =
+          (shot.consumedSourceMs * pxPerMs).clamp(8.0, w - winLeft);
+      return SizedBox(
+        height: 26,
+        child: Stack(children: [
+          // 底条：素材全长
+          Positioned.fill(
+            top: 6,
+            bottom: 6,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.surfaceCard,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+          ),
+          // 选段窗口：拖体平移（换起点）
+          Positioned(
+            left: winLeft,
+            width: winWidth,
+            top: 0,
+            bottom: 0,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.grab,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (d) => onTrim(
+                    (shot.trimStartMs + d.delta.dx / pxPerMs).round()),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppColors.accentBlue.withValues(alpha: 0.28),
+                    border: Border.all(color: AppColors.accentBlue, width: 1.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Center(
+                    child: Text(_s(alloc),
+                        style: const TextStyle(
+                            fontSize: AppFontSize.micro,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            fontFeatures: [FontFeature.tabularFigures()])),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          // 右缘把手：拖改时长（素材坐标 → 输出时长除以速度）
+          Positioned(
+            left: (winLeft + winWidth - 5).clamp(0.0, w - 10),
+            width: 10,
+            top: 0,
+            bottom: 0,
+            child: MouseRegion(
+              cursor: SystemMouseCursors.resizeLeftRight,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onHorizontalDragUpdate: (d) => onResize(
+                    (alloc + d.delta.dx / pxPerMs / shot.speed).round()),
+                child: Center(
+                  child: Container(
+                    width: 3,
+                    decoration: BoxDecoration(
+                        color: AppColors.accentBlueLight,
+                        borderRadius: BorderRadius.circular(2)),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+    });
+  }
+
+  static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
 }
 
 /// 悬停时露出遮罩动作（胶片格的播放/用它）：平时画面干净，
@@ -348,27 +457,13 @@ class _LineBand extends StatelessWidget {
     final shortfall =
         root == null ? 0 : ShotAllocation.shortfallMs(line.shots, root);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SizedBox(
-        height: 132,
-        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          // 左：分子级参考卡（与镜头卡同规格），右侧留白比卡间距宽——
-          // 原文与译文之间要有一条看得见的呼吸缝（用户定的左右结构）
-          _referenceStrip(),
-          const SizedBox(width: AppSpacing.xl),
-          Expanded(
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                for (var j = 0; j < line.shots.length; j++) ...[
-                  _shotCard(j, line.shots[j]),
-                  const SizedBox(width: AppSpacing.sm),
-                ],
-                _addCard(),
-              ],
-            ),
-          ),
-        ]),
-      ),
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // 左：分子级参考卡（与镜头卡同规格），右侧留白比卡间距宽——
+        // 原文与译文之间要有一条看得见的呼吸缝（用户定的左右结构）
+        SizedBox(height: 132, child: _referenceStrip()),
+        const SizedBox(width: AppSpacing.xl),
+        Expanded(child: _sublineRows()),
+      ]),
       if (line.shots.isNotEmpty && root != null && shortfall != 0)
         Padding(
           padding: const EdgeInsets.only(top: 4),
@@ -406,6 +501,69 @@ class _LineBand extends StatelessWidget {
   }
 
   /// 参考分镜卡：这一句在参考片里的原始画面，按视觉切点切成多镜
+  /// 我的镜头区：按小行分组渲染。没分组 = 一行铺开（现状）；
+  /// 分了组 = 每小行「这段台词文字 + 它对应的镜头」——「家人们」
+  /// 指定给前两镜，一眼看清哪段字落在哪些镜头上
+  Widget _sublineRows() {
+    final subs = line.sublines;
+    final grouped = subs.length > 1;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      for (var g = 0; g < subs.length; g++) ...[
+        if (g > 0) const SizedBox(height: AppSpacing.xs),
+        SizedBox(
+          height: 132,
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            if (grouped)
+              SizedBox(
+                width: 76,
+                height: 132,
+                child: _HoverReveal(
+                  builder: (hovering) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text('「${subs[g].text.trim()}」',
+                            maxLines: 5,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: AppFontSize.caption,
+                                height: 1.4,
+                                color: AppColors.accentBlueLight)),
+                        if (hovering && g > 0)
+                          InkWell(
+                            key: ValueKey('band-merge-subline-$index-$g'),
+                            onTap: () => handlers.onMergeSubline(index, g),
+                            child: const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: Text('并回上行',
+                                  style: TextStyle(
+                                      fontSize: AppFontSize.micro,
+                                      color: AppColors.textTertiary)),
+                            ),
+                          ),
+                      ]),
+                ),
+              ),
+            Expanded(
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (var j = subs[g].shotStart;
+                      j < subs[g].shotEnd && j < line.shots.length;
+                      j++) ...[
+                    _shotCard(j, line.shots[j]),
+                    const SizedBox(width: AppSpacing.sm),
+                  ],
+                  if (g == subs.length - 1) _addCard(),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      ],
+    ]);
+  }
+
   /// 左侧参考卡：块级只保留**分子粒度**——这一句在原片里的完整片段，
   /// 与镜头卡同规格竖屏摆放（原文｜译文左右对照），点击播放。
   /// 原子（参考分镜）不在这里铺开：它们的主战场在找镜头面板——
@@ -646,8 +804,6 @@ class _LineBand extends StatelessWidget {
   Widget _shotDetail(int j, LineShot shot) {
     final alloc = shot.allocMs;
     final src = shot.durationMs;
-    final maxStart =
-        src == null ? 0 : (src - shot.consumedSourceMs).clamp(0, src);
     return Container(
       padding: const EdgeInsets.all(AppSpacing.sm),
       decoration: BoxDecoration(
@@ -703,37 +859,27 @@ class _LineBand extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
-        if (src != null && maxStart > 0)
-          Row(children: [
-            const SizedBox(
-                width: 30,
-                child: Text('起点',
-                    style: TextStyle(
-                        fontSize: AppFontSize.micro,
-                        color: AppColors.textSecondary))),
-            Expanded(
-              child: SliderTheme(
-                data: const SliderThemeData(
-                    trackHeight: 2,
-                    thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5)),
-                child: Slider(
-                  key: ValueKey('band-trim-$index-$j'),
-                  value: shot.trimStartMs.clamp(0, maxStart).toDouble(),
-                  max: maxStart.toDouble(),
-                  activeColor: AppColors.accentBlue,
-                  onChanged: (v) => handlers.onTrimShot(index, j, v.round()),
-                ),
-              ),
-            ),
-            SizedBox(
-                width: 38,
-                child: Text(_s(shot.trimStartMs),
-                    textAlign: TextAlign.right,
-                    style: const TextStyle(
-                        fontSize: AppFontSize.micro,
-                        color: AppColors.textSecondary,
-                        fontFeatures: [FontFeature.tabularFigures()]))),
-          ]),
+        if (src != null && shot.allocMs != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                      width: 30,
+                      child: Text('取段',
+                          style: TextStyle(
+                              fontSize: AppFontSize.micro,
+                              color: AppColors.textSecondary))),
+                  Expanded(
+                    child: _TrimBar(
+                      key: ValueKey('band-trim-$index-$j'),
+                      shot: shot,
+                      onTrim: (ms) => handlers.onTrimShot(index, j, ms),
+                      onResize: (ms) => handlers.onResizeShot(index, j, ms),
+                    ),
+                  ),
+                ]),
+          ),
         Row(children: [
           const SizedBox(
               width: 30,
@@ -798,6 +944,22 @@ class _LineBand extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
+        // 小行切分：把台词的某一段指定给从这一镜起的镜头组
+        if (voiced && j > 0)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: InkWell(
+              key: ValueKey('band-split-subline-$index-$j'),
+              onTap: () => handlers.onSplitSubline(index, j),
+              child: Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('✂ 从这一镜分小行（指定这段台词落在哪几镜）',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.accentBlueLight)),
+              ),
+            ),
+          ),
       ]),
     );
   }

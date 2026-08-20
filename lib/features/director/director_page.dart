@@ -700,6 +700,53 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         (d) => d.setTagsById(line.id, [for (final t in picked) t.name]));
   }
 
+  /// 从第 [shotIndex] 镜起分小行：弹台词切点选择器（自动按配音词时间戳
+  /// 建议切在哪个字），确认后落盘——这段字从此指定横跨该镜头组
+  Future<void> _splitSubline(int index, int shotIndex) async {
+    final line = _doc.lines[index];
+    final text = line.text;
+    if (text.trim().length < 2 || shotIndex <= 0) return;
+    // 自动建议：该镜头边界时刻（组内 alloc 累计）说到第几个字；
+    // 没有词级时间戳按镜头数比例估
+    var boundaryMs = 0;
+    for (var i = 0; i < shotIndex && i < line.shots.length; i++) {
+      boundaryMs += line.shots[i].allocMs ?? 0;
+    }
+    var suggest = (text.length * shotIndex / line.shots.length).round();
+    final words = line.voiceover?.words ?? const [];
+    if (words.isNotEmpty) {
+      var chars = 0;
+      for (final w in words) {
+        if ((w.startMs + w.endMs) / 2 >= boundaryMs) break;
+        chars += w.text.length;
+      }
+      if (chars > 0 && chars < text.length) suggest = chars;
+    }
+    final picked = await showDialog<int>(
+      context: context,
+      builder: (_) => _SublineCutDialog(text: text, suggest: suggest),
+    );
+    if (picked == null || !mounted) return;
+    // 新切点并入既有切点（同镜头位置的替换）
+    final cuts = [
+      for (final c in line.sublineCuts)
+        if (c.$2 != shotIndex) c,
+      (picked, shotIndex),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    _mutate((d) => d.setSublineCutsById(line.id, cuts));
+  }
+
+  /// 把第 [sublineIndex] 小行并回上一行：删掉它前面那个切点
+  void _mergeSubline(int index, int sublineIndex) {
+    final line = _doc.lines[index];
+    final cuts = line.sublineCuts;
+    if (sublineIndex <= 0 || sublineIndex > cuts.length) return;
+    _mutate((d) => d.setSublineCutsById(line.id, [
+          for (var i = 0; i < cuts.length; i++)
+            if (i != sublineIndex - 1) cuts[i],
+        ]));
+  }
+
   // ---- 时长分配 ----
 
   void _updateShots(int index, List<LineShot> shots) {
@@ -1425,6 +1472,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onDistribute: _distribute,
                       onSlowFill: _slowFill,
                       onEditTags: _editTags,
+                      onSplitSubline: _splitSubline,
+                      onMergeSubline: _mergeSubline,
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,
@@ -1956,7 +2005,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final lineStart = _planResult.lineStarts[index] ?? 0;
     final relMs = _positionMs.value - lineStart;
     String text;
-    if (vo == null) {
+    if (line.sublineCuts.isNotEmpty) {
+      // 手动小行优先：人指定了「这段字归哪几个镜头」，字幕就跟组走
+      final span = line.sublineSpans
+          .where((s) => relMs >= s.startMs && relMs < s.endMs)
+          .firstOrNull;
+      text = span?.text.trim() ?? '';
+    } else if (vo == null) {
       text = line.text.trim();
     } else {
       // 行内镜头累计边界；无镜头则整行一个坑
@@ -2100,6 +2155,77 @@ class _ExportProgressDialog extends StatelessWidget {
 
 /// 参考段小窗：循环播这一句在参考片里的区间。
 /// 用独立的 mpv 实例——试听不该动主预览的位置
+/// 台词切点选择器：整句逐字排开，点某个字 = 从它前面切开。
+/// 自动建议的位置（按配音说到哪个字）预先高亮，多数时候直接「就这样」
+class _SublineCutDialog extends StatefulWidget {
+  final String text;
+  final int suggest;
+
+  const _SublineCutDialog({required this.text, required this.suggest});
+
+  @override
+  State<_SublineCutDialog> createState() => _SublineCutDialogState();
+}
+
+class _SublineCutDialogState extends State<_SublineCutDialog> {
+  late int _cut = widget.suggest.clamp(1, widget.text.length - 1);
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: const Text('这段台词从哪里分开？',
+            style: TextStyle(fontSize: AppFontSize.title)),
+        content: SizedBox(
+          width: 420,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const Text('点一个字，从它前面切开——前半段归上面的镜头组，'
+                '后半段归下面的',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textSecondary)),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(spacing: 0, runSpacing: 4, children: [
+              for (var i = 0; i < widget.text.length; i++)
+                InkWell(
+                  key: ValueKey('subline-char-$i'),
+                  onTap: i == 0 ? null : () => setState(() => _cut = i),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 1, vertical: 2),
+                    decoration: BoxDecoration(
+                      border: Border(
+                          left: BorderSide(
+                              color: i == _cut
+                                  ? AppColors.accentBlue
+                                  : Colors.transparent,
+                              width: 2)),
+                      color: i >= _cut
+                          ? AppColors.accentBlue.withValues(alpha: 0.10)
+                          : Colors.transparent,
+                    ),
+                    child: Text(widget.text[i],
+                        style: const TextStyle(
+                            fontSize: AppFontSize.emphasis,
+                            height: 1.5,
+                            color: AppColors.textPrimary)),
+                  ),
+                ),
+            ]),
+          ]),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('取消')),
+          FilledButton(
+            key: const ValueKey('subline-cut-ok'),
+            onPressed: () => Navigator.of(context).pop(_cut),
+            child: const Text('就这样分'),
+          ),
+        ],
+      );
+}
+
 class _RefClipDialog extends StatefulWidget {
   final String videoPath;
   final int startMs;
