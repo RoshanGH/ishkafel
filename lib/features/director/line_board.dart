@@ -83,6 +83,9 @@ class LineBoard extends StatelessWidget {
   final ValueChanged<(int, int)?> onExpandShot;
   final Set<String> generatingLineIds;
   final String? playingLineId;
+
+  /// 预览播放位置当前落在的行：块点亮并自动滚到可见（预览是主角）
+  final int? previewLineIndex;
   final LineBoardHandlers handlers;
   final ScrollController? controller;
 
@@ -94,6 +97,7 @@ class LineBoard extends StatelessWidget {
     required this.onExpandShot,
     required this.generatingLineIds,
     required this.playingLineId,
+    this.previewLineIndex,
     required this.handlers,
     this.controller,
   });
@@ -105,20 +109,56 @@ class LineBoard extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       itemCount: doc.lines.length,
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-      itemBuilder: (context, i) => _LineBand(
+      itemBuilder: (context, i) => _ScrollIntoView(
         key: ValueKey('band-${doc.lines[i].id}'),
-        index: i,
-        line: doc.lines[i],
-        selected: i == selected,
-        expandedShot:
-            expandedShot != null && expandedShot!.$1 == i ? expandedShot!.$2 : null,
-        onExpandShot: (shot) => onExpandShot(shot == null ? null : (i, shot)),
-        generating: generatingLineIds.contains(doc.lines[i].id),
-        playing: playingLineId == doc.lines[i].id,
-        handlers: handlers,
+        active: i == previewLineIndex,
+        child: _LineBand(
+          index: i,
+          line: doc.lines[i],
+          selected: i == selected,
+          expandedShot: expandedShot != null && expandedShot!.$1 == i
+              ? expandedShot!.$2
+              : null,
+          onExpandShot: (shot) => onExpandShot(shot == null ? null : (i, shot)),
+          generating: generatingLineIds.contains(doc.lines[i].id),
+          playing: playingLineId == doc.lines[i].id,
+          previewing: i == previewLineIndex,
+          handlers: handlers,
+        ),
       ),
     );
   }
+}
+
+/// 播放跟到哪一行，就把那一行块滚到可见——人看着自己的片子走，
+/// 不用自己追着滚
+class _ScrollIntoView extends StatefulWidget {
+  final bool active;
+  final Widget child;
+
+  const _ScrollIntoView({super.key, required this.active, required this.child});
+
+  @override
+  State<_ScrollIntoView> createState() => _ScrollIntoViewState();
+}
+
+class _ScrollIntoViewState extends State<_ScrollIntoView> {
+  @override
+  void didUpdateWidget(_ScrollIntoView old) {
+    super.didUpdateWidget(old);
+    if (widget.active && !old.active) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !widget.active) return;
+        Scrollable.ensureVisible(context,
+            alignment: 0.25,
+            duration: const Duration(milliseconds: 320),
+            curve: Curves.easeOutCubic);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 class _LineBand extends StatelessWidget {
@@ -129,10 +169,12 @@ class _LineBand extends StatelessWidget {
   final ValueChanged<int?> onExpandShot;
   final bool generating;
   final bool playing;
+
+  /// 预览播放位置正落在这一行
+  final bool previewing;
   final LineBoardHandlers handlers;
 
   const _LineBand({
-    super.key,
     required this.index,
     required this.line,
     required this.selected,
@@ -140,6 +182,7 @@ class _LineBand extends StatelessWidget {
     required this.onExpandShot,
     required this.generating,
     required this.playing,
+    required this.previewing,
     required this.handlers,
   });
 
@@ -152,11 +195,24 @@ class _LineBand extends StatelessWidget {
       borderRadius: BorderRadius.circular(AppRadius.md),
       child: Container(
         decoration: BoxDecoration(
-          color: AppColors.surfaceRaised,
+          // 播放到这一行时块底色微亮 + 左缘播放条：预览走到哪，块亮到哪
+          color: previewing
+              ? Color.lerp(
+                  AppColors.surfaceRaised, AppColors.accentBlue, 0.06)!
+              : AppColors.surfaceRaised,
           borderRadius: BorderRadius.circular(AppRadius.md),
           border: Border.all(
               color: selected ? AppColors.accentBlue : AppColors.border,
               width: selected ? 1.2 : 1),
+          boxShadow: previewing
+              ? const [
+                  BoxShadow(
+                      color: AppColors.accentBlue,
+                      blurRadius: 0,
+                      spreadRadius: 0,
+                      offset: Offset(-2.5, 0)),
+                ]
+              : null,
         ),
         padding: const EdgeInsets.fromLTRB(
             AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
@@ -580,7 +636,7 @@ class _LineBand extends StatelessWidget {
                 : () => handlers.onResizeShot(index, j, alloc - 500),
             icon: const Icon(Icons.remove, color: AppColors.textSecondary),
           ),
-          Text(alloc == null ? '未分配' : _s(alloc),
+          Text(alloc == null ? '还没分' : _s(alloc),
               style: const TextStyle(
                   fontSize: AppFontSize.caption,
                   color: AppColors.textPrimary,
@@ -595,7 +651,7 @@ class _LineBand extends StatelessWidget {
             icon: const Icon(Icons.add, color: AppColors.textSecondary),
           ),
           const Spacer(),
-          Text('相邻镜头自动让出/补上',
+          Text('多退少补，旁边的镜头自动配合',
               style: TextStyle(
                   fontSize: 9,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
@@ -638,6 +694,26 @@ class _LineBand extends StatelessWidget {
                   style: TextStyle(
                       fontSize: AppFontSize.micro,
                       color: AppColors.textSecondary))),
+          // 放慢充满会产生 0.68x 这类速度：不在预设里就单独亮出来，
+          // 不能让四个灰档骗人说「没变速」
+          if (!const [0.75, 1.0, 1.25, 1.5].contains(shot.speed))
+            Padding(
+              padding: const EdgeInsets.only(right: AppSpacing.xs),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.accentBlue.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.accentBlue),
+                ),
+                child: Text('${shot.speed}x',
+                    style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.accentBlueLight)),
+              ),
+            ),
           for (final v in const [0.75, 1.0, 1.25, 1.5])
             Padding(
               padding: const EdgeInsets.only(right: AppSpacing.xs),
@@ -670,7 +746,7 @@ class _LineBand extends StatelessWidget {
               ),
             ),
           const Spacer(),
-          Text('变速后重新框选',
+          Text('换速度会把起点归零',
               style: TextStyle(
                   fontSize: 9,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),

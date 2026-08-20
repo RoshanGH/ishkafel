@@ -103,6 +103,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 正在试听配音的行 id；试听播放器整页共用一个
   String? _playingLineId;
+
+  /// 预览播放位置当前落在的行（右栏跟随高亮）；null = 位置不在任何行里
+  int? _previewLineIndex;
+
+  /// 传输条拖动中的位置（ms）；null = 没在拖。拖动中进度以它为准，
+  /// 松手才 seek——不然位置流每帧把滑块拽回去
+  int? _dragMs;
   final AudioPreview _voicePreview = AudioPreview();
 
   /// initState 里取好：dispose 阶段还要落一次盘，那时不能再碰 ref
@@ -218,7 +225,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _ => null,
     };
     _positionSub = playback.positionMsStream.listen((ms) {
-      if (mounted) _positionMs.value = ms;
+      if (!mounted) return;
+      _positionMs.value = ms;
+      _syncPreviewLine(ms);
     });
     _playingSub = playback.playingStream.listen((playing) {
       if (mounted && _previewPlaying != playing) {
@@ -308,6 +317,45 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     } else {
       await playback.play();
     }
+  }
+
+  /// 播放位置落在哪一行，右栏就点亮哪一行（预览是主角，行块跟着它走）。
+  /// 只在换行时 setState——位置流每帧都来，不能每帧重建行带板
+  void _syncPreviewLine(int ms) {
+    int? current;
+    var bestStart = -1;
+    for (final e in _planResult.lineStarts.entries) {
+      if (e.value <= ms && e.value > bestStart) {
+        bestStart = e.value;
+        current = e.key;
+      }
+    }
+    if (current == _previewLineIndex) return;
+    final previous = _previewLineIndex;
+    setState(() => _previewLineIndex = current);
+    // 渐进换行由行块自己 ensureVisible；大跳（拖进度条）时目标行块
+    // 可能还没被列表构建出来，先按比例粗滚过去让它构建
+    if (current != null && (previous == null || (current - previous).abs() > 2)) {
+      _scrollBoardNear(current);
+    }
+  }
+
+  void _scrollBoardNear(int index) {
+    if (!_boardScroll.hasClients || _doc.lines.isEmpty) return;
+    final pos = _boardScroll.position;
+    final target = ((index / _doc.lines.length) * pos.maxScrollExtent)
+        .clamp(pos.minScrollExtent, pos.maxScrollExtent);
+    unawaited(_boardScroll.animateTo(target,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOutCubic));
+  }
+
+  /// 传输条拖动定位：拖到哪就从哪继续（拖动中不被位置流打架，
+  /// 见 _transportBar 的本地拖动态）
+  Future<void> _seekPreview(int ms) async {
+    await _playback?.seekMs(ms);
+    _positionMs.value = ms;
+    _syncPreviewLine(ms);
   }
 
   // ---- 导出 ----
@@ -1255,6 +1303,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     onExpandShot: (v) => setState(() => _expandedShot = v),
                     generatingLineIds: _generatingLineIds,
                     playingLineId: _playingLineId,
+                    previewLineIndex: _previewLineIndex,
                     controller: _boardScroll,
                     handlers: LineBoardHandlers(
                       onFocusLine: _focusLine,
@@ -1609,8 +1658,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             ),
           ),
           const SizedBox(height: AppSpacing.md),
-          // 传输条：可播时活的，不可播时禁用态骨架
-          Row(mainAxisSize: MainAxisSize.min, children: [
+          // 传输条：可播时活的（进度条可拖动定位），不可播时禁用态骨架
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
             IconButton(
               key: const ValueKey('director-preview-play'),
               visualDensity: VisualDensity.compact,
@@ -1622,10 +1673,47 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       : AppColors.textTertiary.withValues(alpha: 0.4)),
             ),
             const SizedBox(width: AppSpacing.xs),
+            Flexible(
+              child: ValueListenableBuilder<int>(
+                valueListenable: _positionMs,
+                builder: (_, ms, _) {
+                  final total = _planResult.plan.totalMs;
+                  final shown = (_dragMs ?? (playable ? ms : 0))
+                      .clamp(0, total > 0 ? total : 1);
+                  return SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 3,
+                      thumbShape: const RoundSliderThumbShape(
+                          enabledThumbRadius: 5),
+                      overlayShape: const RoundSliderOverlayShape(
+                          overlayRadius: 11),
+                      activeTrackColor: AppColors.accentBlue,
+                      inactiveTrackColor: AppColors.surfaceCard,
+                      thumbColor: AppColors.accentBlueLight,
+                    ),
+                    child: Slider(
+                      key: const ValueKey('director-preview-seek'),
+                      value: shown.toDouble(),
+                      max: (total > 0 ? total : 1).toDouble(),
+                      onChanged: playable
+                          ? (v) => setState(() => _dragMs = v.round())
+                          : null,
+                      onChangeEnd: playable
+                          ? (v) {
+                              setState(() => _dragMs = null);
+                              unawaited(_seekPreview(v.round()));
+                            }
+                          : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
             ValueListenableBuilder<int>(
               valueListenable: _positionMs,
               builder: (_, ms, _) => Text(
-                  '${_mmss(playable ? ms : 0)} / ${_mmss(_planResult.plan.totalMs)}',
+                  '${_mmss(_dragMs ?? (playable ? ms : 0))} / ${_mmss(_planResult.plan.totalMs)}',
                   style: TextStyle(
                       fontSize: AppFontSize.caption,
                       color: playable
@@ -1633,7 +1721,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                           : AppColors.textTertiary.withValues(alpha: 0.5),
                       fontFeatures: const [FontFeature.tabularFigures()])),
             ),
-          ]),
+          ])),
           // 预览可以少几行——人还在编排——但少了哪几行必须点名。
           // 行多时按原因分组汇总，不拿一面墙的橙字糊满中栏
           if (_planResult.skippedLines.isNotEmpty)
