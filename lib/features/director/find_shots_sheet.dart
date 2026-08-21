@@ -45,6 +45,10 @@ Future<FindShotsResult?> showFindShotsSheet(
 
   /// 参考视频的本地路径（原子「直接用原片这段」要它）
   String? refVideoPath,
+
+  /// 给某个参考视觉镜头按需打标（标签 + 画面描述），返回结果；
+  /// null = 没配置 AI 或打标失败（面板据此说明原因，不静默）
+  Future<RefShotMeta?> Function(int segIndex)? tagRefShot,
 }) =>
     showDialog<FindShotsResult>(
       context: context,
@@ -57,6 +61,7 @@ Future<FindShotsResult?> showFindShotsSheet(
         usedBy: usedBy,
         refThumbOf: refThumbOf,
         refVideoPath: refVideoPath,
+        tagRefShot: tagRefShot,
       ),
     );
 
@@ -69,6 +74,7 @@ class _FindShotsSheet extends StatefulWidget {
   final Map<int, int> usedBy;
   final String? Function(int segIndex)? refThumbOf;
   final String? refVideoPath;
+  final Future<RefShotMeta?> Function(int segIndex)? tagRefShot;
 
   const _FindShotsSheet({
     required this.services,
@@ -79,6 +85,7 @@ class _FindShotsSheet extends StatefulWidget {
     required this.usedBy,
     this.refThumbOf,
     this.refVideoPath,
+    this.tagRefShot,
   });
 
   @override
@@ -117,9 +124,15 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   String? _similarToName;
   String? _similarFileKey;
 
-  /// 当前选中的参考原子（参考分镜下标）；null = 整句。
-  /// 点选哪个原子，检索条件就切到那个原子——它那个时段说的话当检索词
+  /// 当前选中的参考视觉镜头（下标）；null = 用台词语义单元的条件。
+  ///
+  /// **两层各有各的检索键**（用户定的模型）：选中某个参考视觉镜头 →
+  /// 用**它的标签 + 它的画面描述**（这一层找的是画面）；一个都不选 →
+  /// 用**这句的标签 + 脚本里的台词**。参考里的 ASR 只展示、不参与检索
   int? _refSeg;
+
+  /// 参考镜头打标中（按需打，打完缓存）
+  bool _refTagging = false;
 
   /// 已选镜头（保持加入顺序；预填本行已有的）
   late final List<LineShot> _picked = [...widget.line.shots];
@@ -362,23 +375,19 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   Widget _refAtomCard(int k, (int, int) seg) {
     final selected = _refSeg == k;
     final thumb = widget.refThumbOf?.call(k);
-    final text = widget.line.reference!
-        .segmentText(k, widget.line.text.trim());
+    final meta = widget.line.reference!.metaAt(seg.$1);
+    // 卡上显示两样东西：这一镜的**画面属性**（打过标就是描述+标签，
+    // 没打过提示点一下就打）与它的 ASR 台词（**只展示**，不参与检索）
+    final asr = widget.line.reference!.segmentText(k, '');
+    final text = meta != null
+        ? [
+            if (meta.description.isNotEmpty) meta.description,
+            if (meta.tags.isNotEmpty) meta.tags.take(4).join(' · '),
+          ].join('\n')
+        : (selected && _refTagging ? '正在读这一镜的画面…' : '点一下用这一镜的画面找');
     return InkWell(
       key: ValueKey('shots-ref-atom-$k'),
-      onTap: () {
-        setState(() {
-          if (selected) {
-            _refSeg = null;
-            _voiceoverKw.text = widget.line.text.trim();
-          } else {
-            _refSeg = k;
-            _dim = _SearchDim.voiceover;
-            _voiceoverKw.text = text;
-          }
-        });
-        _runSearch();
-      },
+      onTap: () => _selectRefShot(k),
       borderRadius: BorderRadius.circular(AppRadius.sm),
       hoverColor: AppColors.hover,
       child: Container(
@@ -423,11 +432,25 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                     child: Text(text,
                         maxLines: 3,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: AppFontSize.micro,
                             height: 1.35,
-                            color: AppColors.textTertiary)),
+                            color: meta != null
+                                ? AppColors.textSecondary
+                                : AppColors.textTertiary)),
                   ),
+                  if (asr.isNotEmpty)
+                    Tooltip(
+                      message: '参考里说的话（只展示，不参与检索；'
+                          '要用它搜就复制到检索框）',
+                      child: Text('“$asr”',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 9,
+                              color: AppColors.textTertiary
+                                  .withValues(alpha: 0.8))),
+                    ),
                   InkWell(
                     key: ValueKey('shots-use-ref-$k'),
                     onTap: widget.refVideoPath == null
@@ -444,6 +467,81 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         ]),
       ),
     );
+  }
+
+  /// 点选一个参考视觉镜头：用**它的视觉条件**去搜（标签 + 画面描述）。
+  /// 没打过标就按需打一次（多帧 vision，打完缓存在行上，下次免费）；
+  /// 再点一次取消，回到「这句的标签 + 脚本台词」
+  Future<void> _selectRefShot(int k) async {
+    if (_refSeg == k) {
+      setState(() {
+        _refSeg = null;
+        _dim = _SearchDim.voiceover;
+        _voiceoverKw.text = widget.line.text.trim();
+        _enabledTags
+          ..clear()
+          ..addAll(widget.line.tags);
+        _tags
+          ..clear()
+          ..addAll(widget.line.tags);
+      });
+      await _runSearch();
+      return;
+    }
+    setState(() => _refSeg = k);
+    var meta = widget.line.reference?.metaAt(
+        widget.line.reference!.segments[k].$1);
+    if (meta == null && widget.tagRefShot != null) {
+      setState(() => _refTagging = true);
+      try {
+        meta = await widget.tagRefShot!(k);
+      } finally {
+        if (mounted) setState(() => _refTagging = false);
+      }
+      if (!mounted || _refSeg != k) return;
+      if (meta == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('这一镜没打上标（AI 服务不可用或画面读不出来），'
+                '可以直接用画面描述搜。')));
+      }
+    }
+    if (!mounted || _refSeg != k) return;
+    // 检索键换成这一镜的视觉属性：标签作约束、画面描述作检索词
+    setState(() {
+      _dim = _SearchDim.description;
+      _descKw.text = meta?.description ?? '';
+      final refTags = meta?.tags ?? const <String>[];
+      _tags
+        ..clear()
+        ..addAll(refTags);
+      _enabledTags
+        ..clear()
+        ..addAll(refTags);
+    });
+    await _loadRefTagIds();
+    await _runSearch();
+  }
+
+  /// 参考镜头的标签走**视觉镜头标签组**的词表（与单元层不同一套）
+  Future<void> _loadRefTagIds() async {
+    if (_tags.isEmpty) return;
+    try {
+      final groups = await widget.services.tags.listGroups();
+      final wanted = {
+        for (final g in widget.task.shotTagGroups) g.id,
+        for (final g in widget.task.unitTagGroups) g.id,
+      };
+      final ids = <String, int>{..._tagIds ?? {}};
+      for (final g in groups) {
+        if (!wanted.contains(g.id)) continue;
+        for (final t in await widget.services.tags.listTags(g.id)) {
+          ids.putIfAbsent(t.name, () => t.id);
+        }
+      }
+      if (mounted) setState(() => _tagIds = ids);
+    } catch (e) {
+      AppLog.warn('参考镜头标签词表拉取失败：$e');
+    }
   }
 
   /// 原子「直接用原片这段」：本地源镜头加入已选序列（负数占位 id，

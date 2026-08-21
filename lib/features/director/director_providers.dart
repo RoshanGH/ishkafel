@@ -1,9 +1,13 @@
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/ai/ai_credentials.dart';
+import '../../core/ai/ark_chat_client.dart';
+import '../../core/ai/taggers.dart';
 import '../../core/ai/volcano_asr_provider.dart';
 import '../../core/audio/tts_client.dart';
 import '../../core/ffmpeg/process_runner.dart';
@@ -25,6 +29,29 @@ final scriptTranscriberProvider = Provider<ScriptTranscriber?>((ref) => null);
 /// 行台词打标（复用 U 层打标管线）。null = 方舟凭据缺失，
 /// 「自动打标」禁用并说明原因。真实实例在 main.dart 注入
 final lineTaggerProvider = Provider<LineTagger?>((ref) => null);
+
+/// 参考素材选择器：视频或图片都收（手动传参考时用）。
+/// 单测 override 成假实现，不弹真实系统文件框
+typedef RefFilePicker = Future<String?> Function();
+
+final refFilePickerProvider = Provider<RefFilePicker>((ref) => pickRefFile);
+
+Future<String?> pickRefFile() async {
+  const video = XTypeGroup(label: '参考视频', extensions: ['mp4', 'mov']);
+  const image =
+      XTypeGroup(label: '参考图', extensions: ['jpg', 'jpeg', 'png', 'webp']);
+  final file = await openFile(acceptedTypeGroups: const [video, image]);
+  return file?.path;
+}
+
+/// 参考视觉镜头打标（多帧 vision，一次给标签 + 画面描述——与 U 层
+/// 视觉镜头打标同一个 ShotTagger）。null = 方舟凭据缺失
+final refShotTaggerProvider = Provider<ShotTagger?>((ref) => null);
+
+ShotTagger? buildRefShotTagger(AiCredentials credentials) {
+  if (credentials.arkApiKey.isEmpty) return null;
+  return ShotTagger(chat: ArkChatClient(apiKey: credentials.arkApiKey));
+}
 
 /// 找镜头面板的三件套：内容检索、规格探测、标签体系。
 /// 默认真实实例（构造不起子进程，真正调用才 exec）；单测 override

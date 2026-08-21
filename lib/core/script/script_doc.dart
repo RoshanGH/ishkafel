@@ -106,6 +106,52 @@ class LineVoiceover {
   }
 }
 
+/// 一个**参考视觉镜头**的理解结果（按需打标后缓存在行上）。
+///
+/// 视觉镜头层的检索键是**视觉的**：标签、画面描述、首帧图——不是台词
+/// （台词是台词语义单元层的键）。[startMs] 是这一镜在原片里的起点，
+/// 切点变了就对不上、自动失效，不会拿旧结论去搜新画面。
+class RefShotMeta {
+  final int startMs;
+  final String description;
+  final List<String> tags;
+
+  /// 这一镜的首帧图（本地路径）——「找相似」的查询帧
+  final String? framePath;
+
+  RefShotMeta({
+    required this.startMs,
+    this.description = '',
+    List<String> tags = const [],
+    this.framePath,
+  }) : tags = List.unmodifiable(tags);
+
+  Map<String, dynamic> toJson() => {
+        'startMs': startMs,
+        if (description.isNotEmpty) 'description': description,
+        if (tags.isNotEmpty) 'tags': tags,
+        if (framePath != null) 'framePath': framePath,
+      };
+
+  static RefShotMeta? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final start = raw['startMs'];
+    if (start is! int) return null;
+    return RefShotMeta(
+      startMs: start,
+      description:
+          raw['description'] is String ? raw['description'] as String : '',
+      tags: [
+        if (raw['tags'] is List)
+          for (final t in raw['tags'] as List)
+            if (t is String) t,
+      ],
+      framePath:
+          raw['framePath'] is String ? raw['framePath'] as String : null,
+    );
+  }
+}
+
 /// 这一句在参考片里的区间（「参考视频」列的数据根）。
 ///
 /// 上传成片提取脚本时，ASR 给出的每句时间戳直接落在行上；视频路径
@@ -122,18 +168,62 @@ class LineRef {
   /// 每镜一张卡、各自可播放/用它。提取脚本时由场景检测得出
   final List<int> cuts;
 
-  /// 这一句在原片里的词级时间戳（**原片坐标**）。找镜头面板按参考
-  /// 分镜（原子）检索时，用它裁出「这个原子时段说了哪几个字」当检索词
+  /// 这一句在原片里的词级时间戳（**原片坐标**）。
+  /// **只用于展示**「参考这一段说了什么」——不回填脚本、不参与检索
+  /// （单元层的检索台词永远是脚本里的那句）
   final List<VoiceWord> words;
+
+  /// 参考图（手动传的一张图；与 [videoPath] 二选一）。
+  /// 图没有时长与台词，它天然就是「首帧」，只给视觉镜头层当查询帧
+  final String? imagePath;
+
+  /// 各参考视觉镜头的打标结果（按需打、缓存复用）
+  final List<RefShotMeta> shotMeta;
 
   LineRef({
     required this.startMs,
     required this.endMs,
     this.videoPath,
+    this.imagePath,
     List<int> cuts = const [],
     List<VoiceWord> words = const [],
+    List<RefShotMeta> shotMeta = const [],
   })  : cuts = List.unmodifiable(cuts),
-        words = List.unmodifiable(words);
+        words = List.unmodifiable(words),
+        shotMeta = List.unmodifiable(shotMeta);
+
+  /// 起点为 [startMs] 的那一镜的打标结果；没打过或切点变了返回 null
+  RefShotMeta? metaAt(int startMs) {
+    for (final m in shotMeta) {
+      if (m.startMs == startMs) return m;
+    }
+    return null;
+  }
+
+  /// 换掉（或新增）某一镜的打标结果——不可变，返回新 LineRef
+  LineRef withShotMeta(RefShotMeta meta) => LineRef(
+        startMs: startMs,
+        endMs: endMs,
+        videoPath: videoPath,
+        imagePath: imagePath,
+        cuts: cuts,
+        words: words,
+        shotMeta: [
+          for (final m in shotMeta)
+            if (m.startMs != meta.startMs) m,
+          meta,
+        ]..sort((a, b) => a.startMs.compareTo(b.startMs)),
+      );
+
+  /// 换切点（就地重新做视觉切分后）——切点一变，旧的镜头打标全部作废
+  LineRef withCuts(List<int> next) => LineRef(
+        startMs: startMs,
+        endMs: endMs,
+        videoPath: videoPath,
+        imagePath: imagePath,
+        cuts: next,
+        words: words,
+      );
 
   int get durationMs => endMs - startMs;
 
@@ -179,8 +269,11 @@ class LineRef {
         'startMs': startMs,
         'endMs': endMs,
         if (videoPath != null) 'videoPath': videoPath,
+        if (imagePath != null) 'imagePath': imagePath,
         if (cuts.isNotEmpty) 'cuts': cuts,
         if (words.isNotEmpty) 'words': [for (final w in words) w.toJson()],
+        if (shotMeta.isNotEmpty)
+          'shotMeta': [for (final m in shotMeta) m.toJson()],
       };
 
   static LineRef? tryFromJson(Object? raw) {
@@ -197,9 +290,15 @@ class LineRef {
           for (final c in raw['cuts'] as List)
             if (c is int) c,
       ],
+      imagePath:
+          raw['imagePath'] is String ? raw['imagePath'] as String : null,
       words: [
         if (raw['words'] is List)
           for (final w in raw['words'] as List) ?VoiceWord.tryFromJson(w),
+      ],
+      shotMeta: [
+        if (raw['shotMeta'] is List)
+          for (final m in raw['shotMeta'] as List) ?RefShotMeta.tryFromJson(m),
       ],
     );
   }

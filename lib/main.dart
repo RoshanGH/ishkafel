@@ -102,6 +102,9 @@ Future<void> main(List<String> args) async {
           .overrideWithValue(defaultLineVoiceFactory(credentials, dataDir)),
       // 编导台「自动打标」：方舟凭据齐了才有
       lineTaggerProvider.overrideWithValue(buildLineTagger(credentials)),
+      // 参考视觉镜头打标（多帧 vision：标签 + 画面描述）
+      refShotTaggerProvider
+          .overrideWithValue(buildRefShotTagger(credentials)),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里

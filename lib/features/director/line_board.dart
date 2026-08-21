@@ -1008,7 +1008,7 @@ class _LineBand extends StatelessWidget {
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
             const Icon(Icons.add, size: 16, color: AppColors.textSecondary),
             const SizedBox(height: 2),
-            Text(line.shots.isEmpty ? '找镜头' : '增删',
+            Text(line.shots.isEmpty ? '找镜头' : '添加分镜',
                 style: const TextStyle(
                     fontSize: AppFontSize.micro, color: AppColors.textSecondary)),
           ]),

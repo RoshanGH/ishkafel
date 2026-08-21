@@ -9,6 +9,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/ai/tag_dimension.dart';
+import '../../core/analysis/scene_detector.dart';
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
@@ -787,6 +789,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         usedBy.putIfAbsent(shot.materialId, () => i);
       }
     }
+    // 参考没切过视觉镜头就先就地切一次——弹窗里那一排就是这句在原片
+    // 里的各个视觉镜头
+    unawaited(_ensureRefCuts(line.id));
     final picked = await showFindShotsSheet(
       context,
       services: ref.read(shotSearchServicesProvider),
@@ -801,6 +806,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         return _refThumbs['${line.id}_$segIndex'];
       },
       refVideoPath: _refVideoOf(line),
+      tagRefShot: (segIndex) => _tagRefShot(line.id, segIndex),
     );
     if (picked == null) return;
     // 挑完就把时长按行的根均分好（默认全自动预填，人只做否决）；
@@ -813,6 +819,136 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         d.setShotsById(line.id, shots).setTagsById(line.id, picked.tags));
     _flushNow();
     _pinAllShots();
+  }
+
+  /// 这一句的参考还没切过视觉镜头时，**就地切一次**（只切这句的区间，
+  /// 几秒；老任务提取时没切出切点，不必为此重新提取整片）。
+  /// 切点存回行上，之后即开即用；切失败不挡路——退回整段一镜
+  Future<void> _ensureRefCuts(String lineId) async {
+    final line = _doc.lines.where((l) => l.id == lineId).firstOrNull;
+    final ref = line?.reference;
+    final video = line == null ? null : _refVideoOf(line);
+    if (line == null || ref == null || video == null) return;
+    if (ref.cuts.isNotEmpty || _refCutting.contains(lineId)) return;
+    if (!File(video).existsSync()) return;
+    _refCutting.add(lineId);
+    try {
+      // 只切这一句的区间：先裁一段临时片再检测，比整片检测快得多
+      final dataDir = this.ref.read(dataDirProvider);
+      final tmp = File(p.join(
+          dataDir?.path ?? Directory.systemTemp.path,
+          'script_refs',
+          _task.id,
+          'cut_${line.id}.mp4'));
+      await tmp.parent.create(recursive: true);
+      final cut = await const ResolvingProcessRunner().call('ffmpeg', [
+        '-y', '-v', 'error',
+        '-ss', (ref.startMs / 1000).toStringAsFixed(3),
+        '-t', (ref.durationMs / 1000).toStringAsFixed(3),
+        '-i', video,
+        '-an', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '28',
+        tmp.path,
+      ]);
+      if (cut.exitCode != 0) throw StateError('裁参考段失败');
+      final rel = await SceneDetector(run: const ResolvingProcessRunner().call)
+          .detect(tmp.path);
+      try {
+        tmp.deleteSync();
+      } catch (_) {}
+      // 相对坐标 → 原片坐标；丢掉太靠边的切点（<400ms 的碎段没价值）
+      final abs = [
+        for (final ms in rel)
+          if (ms > 400 && ms < ref.durationMs - 400) ref.startMs + ms,
+      ];
+      if (abs.isEmpty || !mounted) return;
+      _mutate((d) => d.setReferenceById(line.id, ref.withCuts(abs)));
+      AppLog.info('参考就地切分（line=$lineId）：${abs.length} 个切点');
+    } catch (e) {
+      AppLog.warn('参考就地切分失败（line=$lineId，退回整段一镜）：$e');
+    } finally {
+      _refCutting.remove(lineId);
+    }
+  }
+
+  final Set<String> _refCutting = {};
+
+  /// 给参考视觉镜头按需打标：抽三帧（头/中/尾）→ ShotTagger 一次出
+  /// 标签 + 画面描述 → 缓存回行上（切点变了自动失效）。
+  /// 打标是花钱的一步，所以**只在点选那一镜时打这一镜**，不整片预打
+  Future<RefShotMeta?> _tagRefShot(String lineId, int segIndex) async {
+    final line = _doc.lines.where((l) => l.id == lineId).firstOrNull;
+    final ref = line?.reference;
+    final video = line == null ? null : _refVideoOf(line);
+    final tagger = ref == null ? null : this.ref.read(refShotTaggerProvider);
+    final dataDir = this.ref.read(dataDirProvider);
+    if (line == null || ref == null || video == null || tagger == null ||
+        dataDir == null) {
+      return null;
+    }
+    final segs = ref.segments;
+    if (segIndex < 0 || segIndex >= segs.length) return null;
+    final (segStart, segEnd) = segs[segIndex];
+    try {
+      // 三帧：头/中/尾——单帧看不出镜头里在发生什么（U 层实测）
+      final dir = Directory(
+          p.join(dataDir.path, 'script_refs', _task.id, 'tag_${line.id}_$segIndex'));
+      await dir.create(recursive: true);
+      final frames = <List<int>>[];
+      String? firstFrame;
+      for (final (i, at) in [
+        (0, segStart + 120),
+        (1, (segStart + segEnd) ~/ 2),
+        (2, segEnd - 120),
+      ]) {
+        final out = p.join(dir.path, 'f$i.jpg');
+        final r = await const ResolvingProcessRunner().call('ffmpeg', [
+          '-y', '-v', 'error',
+          '-ss', (at / 1000).toStringAsFixed(3),
+          '-i', video,
+          '-frames:v', '1',
+          '-vf', 'scale=-2:480',
+          out,
+        ]);
+        if (r.exitCode == 0 && File(out).existsSync()) {
+          frames.add(File(out).readAsBytesSync());
+          firstFrame ??= out;
+        }
+      }
+      if (frames.isEmpty) return null;
+      // 视觉镜头层用**视觉镜头标签组**的词表（与单元层的话术标签不同）
+      final groups = _task.shotTagGroups.isNotEmpty
+          ? _task.shotTagGroups
+          : _task.unitTagGroups;
+      final vocab = <TagDimension>[];
+      try {
+        final all = await this.ref.read(shotSearchServicesProvider).tags.listGroups();
+        for (final g in groups) {
+          final hit = all.where((x) => x.id == g.id).firstOrNull;
+          if (hit != null && hit.tags.isNotEmpty) {
+            vocab.add(TagDimension(name: hit.name, vocabulary: hit.tags));
+          }
+        }
+      } catch (e) {
+        AppLog.warn('参考镜头打标拉词表失败（只出画面描述）：$e');
+      }
+      final understanding = await tagger.understand(
+        frames: frames,
+        dimensions: vocab,
+        constraint: _task.shotTagPrompt.isEmpty ? null : _task.shotTagPrompt,
+      );
+      final meta = RefShotMeta(
+        startMs: segStart,
+        description: understanding.description ?? '',
+        tags: understanding.tags,
+        framePath: firstFrame,
+      );
+      if (!mounted) return meta;
+      _mutate((d) => d.setReferenceById(line.id, ref.withShotMeta(meta)));
+      return meta;
+    } catch (e) {
+      AppLog.warn('参考镜头打标失败（line=$lineId seg=$segIndex）：$e');
+      return null;
+    }
   }
 
   /// 改行标签：从妙啊标签体系里搜索、点选、替换（不只是删）
@@ -1167,10 +1303,45 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 给某一行上传参考视频（手写的行也能对照参考配镜）。
   /// 整段视频作为该行的参考区间；时长用 ffprobe 实探，不猜
+  /// 给这一句传参考：**视频或图片都行，只能有一个**（再传就是替换）。
+  ///
+  /// 视频：≤15 秒（一个台词语义单元本来就不该更长），传完把它当这一句的
+  /// 参考做该做的事——跑 ASR（**只用于展示**这段说了什么，不回填脚本、
+  /// 不参与检索）+ 视觉切分（切成 N 个视觉镜头，供添加分镜时按画面找）。
+  /// 图片：它天然就是「首帧」，只给视觉镜头层当查询帧
   Future<void> _uploadReference(int index) async {
     final line = _doc.lines[index];
-    final path = await ref.read(videoFilePickerProvider)();
+    final path = await ref.read(refFilePickerProvider)();
     if (path == null || !mounted) return;
+    if (line.reference != null) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('换掉这一句的参考？'),
+          content: const Text('旧参考的切分与画面标注会一起作废；'
+              '已经用参考画面做成的镜头保留不动。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('算了')),
+            FilledButton(
+                key: const ValueKey('ref-replace-ok'),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('换')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    final isImage = const ['.jpg', '.jpeg', '.png', '.webp']
+        .any((e) => path.toLowerCase().endsWith(e));
+    if (isImage) {
+      // 参考图：没有时长与台词，用一个象征性的区间占位
+      _mutate((d) => d.setReferenceById(
+          line.id, LineRef(startMs: 0, endMs: 1, imagePath: path)));
+      _flushNow();
+      return;
+    }
     int durationMs;
     try {
       final r = await const ResolvingProcessRunner().call('ffprobe', [
@@ -1190,9 +1361,63 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       }
       return;
     }
+    if (durationMs > _maxRefMs) {
+      // 不静默截断——截了用户会以为软件吃了他的东西
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('这段有 ${(durationMs / 1000).toStringAsFixed(1)} 秒，'
+                '一个台词语义单元的参考不该超过 ${_maxRefMs ~/ 1000} 秒——'
+                '裁一下再传。')));
+      }
+      return;
+    }
     _mutate((d) => d.setReferenceById(
         line.id, LineRef(startMs: 0, endMs: durationMs, videoPath: path)));
     _flushNow();
+    // 后台把该做的事做掉：ASR（只展示）+ 视觉切分（供按画面找镜头）
+    unawaited(_prepareUploadedRef(line.id));
+  }
+
+  /// 手动传的参考视频上限：一个台词语义单元本来就不该超过 15 秒
+  static const int _maxRefMs = 15000;
+
+  /// 手动传的参考视频跑一遍它该做的事：ASR（展示用）+ 视觉切分
+  Future<void> _prepareUploadedRef(String lineId) async {
+    await _ensureRefCuts(lineId);
+    if (!mounted) return;
+    final line = _doc.lines.where((l) => l.id == lineId).firstOrNull;
+    final ref0 = line?.reference;
+    final video = line == null ? null : _refVideoOf(line);
+    final transcriber = ref.read(scriptTranscriberProvider);
+    if (line == null || ref0 == null || video == null || transcriber == null) {
+      return;
+    }
+    if (ref0.words.isNotEmpty) return;
+    try {
+      final sentences = await transcriber.transcribeOnly(video);
+      if (!mounted) return;
+      final words = [
+        for (final s in sentences)
+          for (final w in s.words)
+            VoiceWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
+      ];
+      if (words.isEmpty) return;
+      final cur = _doc.lines.where((l) => l.id == lineId).firstOrNull?.reference;
+      if (cur == null) return;
+      _mutate((d) => d.setReferenceById(
+          lineId,
+          LineRef(
+            startMs: cur.startMs,
+            endMs: cur.endMs,
+            videoPath: cur.videoPath,
+            imagePath: cur.imagePath,
+            cuts: cur.cuts,
+            words: words,
+            shotMeta: cur.shotMeta,
+          )));
+    } catch (e) {
+      AppLog.warn('参考视频 ASR 失败（只影响展示，$lineId）：$e');
+    }
   }
 
   Future<void> _togglePlayVoice(int index) async {

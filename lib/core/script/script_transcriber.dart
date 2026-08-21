@@ -60,6 +60,27 @@ class ScriptTranscriber {
   ///
   /// 一句都识别不出来时抛 [ScriptTranscribeException]——静默返回空脚本
   /// 会让用户以为软件坏了。
+  /// 只转写、不分行：手动传的参考视频用它拿「这段说了什么」
+  /// （**只用于展示**——不回填脚本、不参与检索）
+  Future<List<AsrSentence>> transcribeOnly(String videoPath) async {
+    if (!File(videoPath).existsSync()) {
+      throw ScriptTranscribeException('找不到这个视频文件：$videoPath');
+    }
+    await workDir.create(recursive: true);
+    final pcmPath = p.join(workDir.path,
+        'ref_asr_${DateTime.now().microsecondsSinceEpoch}.pcm');
+    try {
+      await audio.extractSamples(videoPath: videoPath, outPcmPath: pcmPath);
+      return await asr.transcribe(pcmPath);
+    } catch (e) {
+      throw ScriptTranscribeException('参考视频的台词识别失败。', cause: e);
+    } finally {
+      try {
+        File(pcmPath).deleteSync();
+      } catch (_) {}
+    }
+  }
+
   Future<List<ScriptLine>> extract(
     String videoPath, {
     void Function(ScriptTranscribeStage stage)? onStage,
