@@ -191,11 +191,13 @@ class _TrimBar extends StatelessWidget {
     final alloc = shot.allocMs ?? 0;
     return LayoutBuilder(builder: (context, constraints) {
       final w = constraints.maxWidth;
-      // 素材源坐标 → 像素：窗口宽按素材消耗量（变速时窗口 = alloc×speed）
-      final pxPerMs = w / src;
-      final winLeft = (shot.trimStartMs * pxPerMs).clamp(0.0, w);
-      final winWidth =
-          (shot.consumedSourceMs * pxPerMs).clamp(8.0, w - winLeft);
+      // **整条是成片时间轴**（用户定的口径）：这条素材按当前倍速最多能
+      // 出多长（素材长 ÷ 倍速）。1.5 秒就是成片里的 1.5 秒，与倍速无关；
+      // 倍速只改变「这条素材能出多长」
+      final outTotal = src / shot.speed;
+      final pxPerMs = w / outTotal;
+      final winLeft = (shot.trimStartMs / shot.speed * pxPerMs).clamp(0.0, w);
+      final winWidth = (alloc * pxPerMs).clamp(8.0, w - winLeft);
       final fs = frames;
       const barH = 64.0;
       // 格数随条宽自适应：格宽 = 条高 × 素材宽高比（比例锁定，
@@ -259,7 +261,8 @@ class _TrimBar extends StatelessWidget {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragUpdate: (d) => onTrim(
-                    (shot.trimStartMs + d.delta.dx / pxPerMs).round()),
+                    (shot.trimStartMs + d.delta.dx / pxPerMs * shot.speed)
+                        .round()),
                 onHorizontalDragEnd: (_) => onDone(),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -301,8 +304,8 @@ class _TrimBar extends StatelessWidget {
               cursor: SystemMouseCursors.resizeLeftRight,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                onHorizontalDragUpdate: (d) => onResize(
-                    (alloc + d.delta.dx / pxPerMs / shot.speed).round()),
+                onHorizontalDragUpdate: (d) =>
+                    onResize((alloc + d.delta.dx / pxPerMs).round()),
                 onHorizontalDragEnd: (_) => onDone(),
                 child: Center(
                   child: Container(
@@ -320,11 +323,12 @@ class _TrimBar extends StatelessWidget {
     });
   }
 
-  /// 取段的数字口径（参考图样式）：左「0.8s ~ 1.5s」（素材内起止）、
-  /// 右「素材可用 3.5s」
+  /// 取段的数字口径——**全是成片时间**：左「0.0s ~ 2.5s」（这一镜在
+  /// 成片里从素材的哪一刻起、用多长），右「这条素材可出 6.4s」
+  /// （素材长 ÷ 倍速）
   Widget rangeCaption() {
-    final from = shot.trimStartMs;
-    final to = shot.trimStartMs + shot.consumedSourceMs;
+    final from = (shot.trimStartMs / shot.speed).round();
+    final to = from + (shot.allocMs ?? 0);
     return Padding(
       padding: const EdgeInsets.only(top: 2),
       child: Row(children: [
@@ -334,7 +338,7 @@ class _TrimBar extends StatelessWidget {
                 color: AppColors.textSecondary,
                 fontFeatures: [FontFeature.tabularFigures()])),
         const Spacer(),
-        Text('素材可用 ${_s(shot.durationMs!)}',
+        Text('这条素材可出 ${_s((shot.durationMs! / shot.speed).round())}',
             style: const TextStyle(
                 fontSize: AppFontSize.micro,
                 color: AppColors.textTertiary,

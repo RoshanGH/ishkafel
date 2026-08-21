@@ -1119,8 +1119,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           (shot.consumedSourceMs > 0
               ? shot.consumedSourceMs
               : (shot.durationMs ?? 3000));
-      // 没配音的画面行：素材原声按倍率播（成片里就是变速原声）
-      if (vo == null) rate = shot.speed;
+      // **画面永远按这一镜自己的倍速播**：0.5x 就慢放，1.25 秒素材
+      // 正好铺满 2.5 秒——与配音天然对齐，不需要任何补偿
+      rate = shot.speed;
     }
     await _playInline('shot_${line.id}_$j', path, start, end,
         rate: rate,
