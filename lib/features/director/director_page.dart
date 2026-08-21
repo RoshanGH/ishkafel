@@ -135,7 +135,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   final Map<int, List<String>> _shotFrames = {};
   final Set<int> _shotFramesBusy = {};
   final Set<int> _shotFramesFailed = {};
-  static const _filmstripFrameCount = 8;
+
+  /// 抽 24 帧、160px 高：显示端按条宽自适应取 N 帧（格子比例锁素材
+  /// 原比例、永不拉伸），24 帧足够覆盖全屏宽度。一条 ffmpeg 命令抽完，
+  /// 比逐帧 seek 快数倍
+  static const _filmstripFrameCount = 24;
+
+  /// 素材帧的宽高比（宽/高），随帧缓存落盘（meta.txt）；
+  /// 取段条按它定格宽，竖屏素材就是竖格
+  final Map<int, double> _shotFrameAspect = {};
 
   /// 确保素材的胶片帧就绪（本地文件在才抽；异步落盘后刷新）
   void _ensureShotFrames(LineShot shot) {
@@ -149,13 +157,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = ref.read(dataDirProvider);
     final durMs = shot.durationMs;
     if (src == null || dataDir == null || durMs == null || durMs <= 0) return;
+    // v3：24 帧一条命令抽完 + meta 记素材宽高比——目录带版本号，
+    // 旧版帧整目录作废（TaskArtifacts 收编按任务清理）
     final dir = Directory(
-        p.join(dataDir.path, 'shot_frames', _task.id, '${id}_$durMs'));
+        p.join(dataDir.path, 'shot_frames', _task.id, '${id}_${durMs}_v3'));
     final expect = [
-      for (var i = 0; i < _filmstripFrameCount; i++)
-        p.join(dir.path, 'f$i.jpg'),
+      for (var i = 1; i <= _filmstripFrameCount; i++)
+        p.join(dir.path, 'f${i.toString().padLeft(2, '0')}.jpg'),
     ];
-    if (expect.every((f) => File(f).existsSync())) {
+    final metaFile = File(p.join(dir.path, 'meta.txt'));
+    if (expect.every((f) => File(f).existsSync()) && metaFile.existsSync()) {
+      final aspect = double.tryParse(metaFile.readAsStringSync().trim());
+      if (aspect != null && aspect > 0) _shotFrameAspect[id] = aspect;
       _shotFrames[id] = expect;
       return;
     }
@@ -163,21 +176,51 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     unawaited(() async {
       try {
         await dir.create(recursive: true);
-        // 均匀取 8 帧：第 i 帧取素材 (i+0.5)/8 处（本地源用区间内坐标）
+        // 一条命令均匀抽 N 帧（fps 滤镜），比逐帧 seek 快数倍；
+        // 本地源（参考段）先 -ss 切到区间
         final baseMs = shot.localSource != null ? shot.trimStartMs : 0;
-        for (var i = 0; i < _filmstripFrameCount; i++) {
-          final at = baseMs + durMs * (i + 0.5) / _filmstripFrameCount;
-          final r = await const ResolvingProcessRunner().call('ffmpeg', [
-            '-y', '-v', 'error',
-            '-ss', (at / 1000).toStringAsFixed(3),
-            '-i', src,
-            '-frames:v', '1',
-            '-vf', 'scale=-2:72',
-            expect[i],
-          ]);
-          if (r.exitCode != 0) throw StateError('ffmpeg exit=${r.exitCode}');
+        final r = await const ResolvingProcessRunner().call('ffmpeg', [
+          '-y', '-v', 'error',
+          if (baseMs > 0) ...['-ss', (baseMs / 1000).toStringAsFixed(3)],
+          '-t', (durMs / 1000).toStringAsFixed(3),
+          '-i', src,
+          '-vf',
+          'fps=$_filmstripFrameCount/${(durMs / 1000).toStringAsFixed(3)},'
+              'scale=-2:160',
+          '-frames:v', '$_filmstripFrameCount',
+          p.join(dir.path, 'f%02d.jpg'),
+        ]);
+        if (r.exitCode != 0) throw StateError('ffmpeg exit=${r.exitCode}');
+        // fps 滤镜可能少产最后一两帧：缺的用最后一帧补位，别让格子开天窗
+        String? last;
+        for (final fpath in expect) {
+          if (File(fpath).existsSync()) {
+            last = fpath;
+          } else if (last != null) {
+            File(fpath).writeAsBytesSync(File(last).readAsBytesSync());
+          }
         }
-        if (mounted) setState(() => _shotFrames[id] = expect);
+        if (last == null) throw StateError('一帧都没抽出来');
+        // 素材宽高比从 ffprobe 拿，随缓存落盘
+        final probe = await const ResolvingProcessRunner().call('ffprobe', [
+          '-v', 'error', '-select_streams', 'v:0',
+          '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x',
+          src,
+        ]);
+        final parts = '${probe.stdout}'.trim().split('x');
+        final aspect = parts.length == 2
+            ? (double.tryParse(parts[0]) ?? 9) /
+                ((double.tryParse(parts[1]) ?? 16) == 0
+                    ? 16
+                    : double.tryParse(parts[1])!)
+            : 9 / 16;
+        metaFile.writeAsStringSync(aspect.toStringAsFixed(4));
+        if (mounted) {
+          setState(() {
+            _shotFrameAspect[id] = aspect;
+            _shotFrames[id] = expect;
+          });
+        }
       } catch (e) {
         _shotFramesFailed.add(id);
         AppLog.warn('取段胶片帧抽取失败（素材 $id）：$e');
@@ -1531,7 +1574,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onEditTags: _editTags,
                       shotFramesOf: (shot) {
                         _ensureShotFrames(shot);
-                        return _shotFrames[shot.materialId];
+                        final frames = _shotFrames[shot.materialId];
+                        if (frames == null) return null;
+                        return (
+                          frames: frames,
+                          aspect:
+                              _shotFrameAspect[shot.materialId] ?? 9 / 16,
+                        );
                       },
                       onSplitSubline: _splitSubline,
                       onMergeSubline: _mergeSubline,

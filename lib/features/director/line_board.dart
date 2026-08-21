@@ -31,8 +31,10 @@ class LineBoardHandlers {
   /// 改这一行的标签（从妙啊标签体系里搜索/点选/替换）
   final void Function(int index) onEditTags;
 
-  /// 取段胶片条的素材帧（没抽好返回 null，条退回纯色）
-  final List<String>? Function(LineShot shot) shotFramesOf;
+  /// 取段胶片条的素材帧与宽高比（没抽好返回 null，条退回纯色）。
+  /// 帧格比例锁素材原比例——竖屏素材就是竖格，窗口多宽都不拉伸
+  final ({List<String> frames, double aspect})? Function(LineShot shot)
+      shotFramesOf;
 
   /// 从第 [shotIndex] 镜起分小行（弹台词切点选择器，把这段字指到镜头组）
   final void Function(int index, int shotIndex) onSplitSubline;
@@ -149,7 +151,7 @@ class LineBoard extends StatelessWidget {
 /// 帧还没抽好时退回纯色条，功能不等待
 class _TrimBar extends StatelessWidget {
   final LineShot shot;
-  final List<String>? frames;
+  final ({List<String> frames, double aspect})? frames;
   final ValueChanged<int> onTrim;
   final ValueChanged<int> onResize;
 
@@ -173,17 +175,30 @@ class _TrimBar extends StatelessWidget {
       final winWidth =
           (shot.consumedSourceMs * pxPerMs).clamp(8.0, w - winLeft);
       final fs = frames;
+      const barH = 64.0;
+      // 格数随条宽自适应：格宽 = 条高 × 素材宽高比（比例锁定，
+      // 窗口多宽格子只会变多，永远不拉伸）；从缓存帧里按时间均匀取
+      final cells = <String>[];
+      if (fs != null && fs.frames.isNotEmpty) {
+        final cellW = barH * fs.aspect;
+        final n = (w / cellW).ceil().clamp(1, 64);
+        for (var i = 0; i < n; i++) {
+          final idx =
+              ((i + 0.5) / n * fs.frames.length).floor().clamp(0, fs.frames.length - 1);
+          cells.add(fs.frames[idx]);
+        }
+      }
       return SizedBox(
-        height: 44,
+        height: barH,
         child: Stack(children: [
           // 底条：素材全长——有帧铺帧（看得见画面），没帧退纯色
           Positioned.fill(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(4),
-              child: fs == null || fs.isEmpty
+              child: cells.isEmpty
                   ? const ColoredBox(color: AppColors.surfaceCard)
                   : Row(children: [
-                      for (final f in fs)
+                      for (final f in cells)
                         Expanded(
                           child: Image.file(File(f),
                               fit: BoxFit.cover,
@@ -195,7 +210,7 @@ class _TrimBar extends StatelessWidget {
             ),
           ),
           // 窗口外的画面压暗：选中的那段自然亮起来
-          if (fs != null && fs.isNotEmpty) ...[
+          if (cells.isNotEmpty) ...[
             Positioned(
               left: 0,
               width: winLeft,
@@ -227,7 +242,7 @@ class _TrimBar extends StatelessWidget {
                   decoration: BoxDecoration(
                     // 有帧时窗口只描边不盖色——里面就是选中的画面本身；
                     // 纯色条才需要填充示意
-                    color: fs == null || fs.isEmpty
+                    color: cells.isEmpty
                         ? AppColors.accentBlue.withValues(alpha: 0.28)
                         : Colors.transparent,
                     border: Border.all(color: AppColors.accentBlue, width: 1.6),
@@ -756,16 +771,29 @@ class _LineBand extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
-              shot.thumbnailUrl != null
-                  ? Image.network(shot.thumbnailUrl!,
+              // 缩略图**本地帧优先**：miaoa 的 thumbnailUrl 是签名地址，
+              // 过期就黑卡（真机发生过）。素材本体已固定到本地，
+              // 封面直接用本地抽帧——凡是进入方案的都不依赖会过期的外链
+              Builder(builder: (context) {
+                final local = handlers.shotFramesOf(shot);
+                if (local != null && local.frames.isNotEmpty) {
+                  return Image.file(File(local.frames.first),
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(color: Colors.black))
-                  : Container(
-                      color: Colors.black,
-                      child: shot.localSource != null
-                          ? const Icon(Icons.movie_outlined,
-                              size: 14, color: AppColors.textTertiary)
-                          : null),
+                      errorBuilder: (_, _, _) =>
+                          Container(color: Colors.black));
+                }
+                return shot.thumbnailUrl != null
+                    ? Image.network(shot.thumbnailUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) =>
+                            Container(color: Colors.black))
+                    : Container(
+                        color: Colors.black,
+                        child: shot.localSource != null
+                            ? const Icon(Icons.movie_outlined,
+                                size: 14, color: AppColors.textTertiary)
+                            : null);
+              }),
               Positioned(
                 left: 3,
                 top: 3,
