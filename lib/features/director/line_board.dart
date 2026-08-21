@@ -61,9 +61,6 @@ class LineBoardHandlers {
   final void Function(int index, int segIndex) onUseReference;
   final void Function(int index) onUploadReference;
 
-  /// 行级字幕：自定义这一行 / 恢复跟随全局
-  final void Function(int index) onEditLineSubtitle;
-  final void Function(int index) onClearLineSubtitle;
   final PickedMediaStatus? Function(int materialId) shotStatus;
   final void Function(int materialId) onRetryDownload;
 
@@ -94,8 +91,6 @@ class LineBoardHandlers {
     required this.onPlayReference,
     required this.onUseReference,
     required this.onUploadReference,
-    required this.onEditLineSubtitle,
-    required this.onClearLineSubtitle,
     required this.shotStatus,
     required this.onRetryDownload,
     required this.refThumbOf,
@@ -1383,28 +1378,6 @@ class _LineBand extends StatelessWidget {
             style:
                 TextStyle(fontSize: AppFontSize.micro, color: AppColors.orange)),
       const Spacer(),
-      // 行级字幕覆盖：素材自带字幕位置不同时按行改
-      PopupMenuButton<String>(
-        key: ValueKey('band-subtitle-$index'),
-        tooltip: line.subtitleOverride == null
-            ? '这一行的字幕（跟随全局）'
-            : '这一行的字幕（已自定义）',
-        onSelected: (v) => v == 'edit'
-            ? handlers.onEditLineSubtitle(index)
-            : handlers.onClearLineSubtitle(index),
-        itemBuilder: (_) => [
-          const PopupMenuItem(
-              value: 'edit', height: 32, child: Text('自定义这一行的字幕…')),
-          if (line.subtitleOverride != null)
-            const PopupMenuItem(
-                value: 'clear', height: 32, child: Text('恢复跟随全局')),
-        ],
-        child: Icon(Icons.subtitles_outlined,
-            size: 13,
-            color: line.subtitleOverride == null
-                ? AppColors.textTertiary
-                : AppColors.accentBlueLight),
-      ),
       const SizedBox(width: AppSpacing.sm),
       SizedBox(
         height: 24,

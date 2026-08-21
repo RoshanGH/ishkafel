@@ -343,24 +343,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _mutate((d) => d.withSubtitle(picked.$1));
   }
 
-  /// 改**这一句**的字幕样式（样式粒度 = 句）：预览点字幕、行块字幕
-  /// 图标都走这里；「应用到整片」把这句的样式提升为全局默认并清掉
-  /// 本句覆盖（不然全局改完这句还压着旧覆盖）
-  Future<void> _editLineSubtitleStyle(int index) async {
-    final line = _doc.lines[index];
-    final picked = await showSubtitleStyleSheet(context,
-        initial: line.subtitleOverride ?? _doc.subtitle,
-        allowApplyAll: true);
-    if (picked == null || !mounted) return;
-    final (style, applyAll) = picked;
-    if (applyAll) {
-      _mutate((d) =>
-          d.withSubtitle(style).setSubtitleOverrideById(line.id, null));
-    } else {
-      _mutate((d) => d.setSubtitleOverrideById(line.id, style));
-    }
-  }
-
   void _setupPreview() {
     final playback = widget.playbackFactory != null
         ? widget.playbackFactory!()
@@ -1796,12 +1778,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onPlayReference: _playReference,
                       onUseReference: _useReference,
                       onUploadReference: _uploadReference,
-                      onEditLineSubtitle: _editLineSubtitleStyle,
-                      onClearLineSubtitle: (index) {
-                        final line = _doc.lines[index];
-                        _mutate((d) =>
-                            d.setSubtitleOverrideById(line.id, null));
-                      },
                       shotStatus: (id) => _mediaCache?.statusOf(id),
                       onRetryDownload: (id) => _mediaCache?.retry(id),
                       refThumbOf: (line, segIndex) {
