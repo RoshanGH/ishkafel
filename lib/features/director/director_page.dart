@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
-import '../../core/analysis/providers.dart' show AsrSentence, AsrWord;
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
@@ -47,7 +46,6 @@ import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
-import '../../core/subtitle/subtitle_overlay.dart' show lineSubtitleSegments;
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
@@ -317,11 +315,30 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _pinBgm();
   }
 
+  /// 顶栏入口：改**整片**的字幕基调
   Future<void> _editSubtitleStyle() async {
-    final style =
+    final picked =
         await showSubtitleStyleSheet(context, initial: _doc.subtitle);
-    if (style == null) return;
-    _mutate((d) => d.withSubtitle(style));
+    if (picked == null) return;
+    _mutate((d) => d.withSubtitle(picked.$1));
+  }
+
+  /// 改**这一句**的字幕样式（样式粒度 = 句）：预览点字幕、行块字幕
+  /// 图标都走这里；「应用到整片」把这句的样式提升为全局默认并清掉
+  /// 本句覆盖（不然全局改完这句还压着旧覆盖）
+  Future<void> _editLineSubtitleStyle(int index) async {
+    final line = _doc.lines[index];
+    final picked = await showSubtitleStyleSheet(context,
+        initial: line.subtitleOverride ?? _doc.subtitle,
+        allowApplyAll: true);
+    if (picked == null || !mounted) return;
+    final (style, applyAll) = picked;
+    if (applyAll) {
+      _mutate((d) =>
+          d.withSubtitle(style).setSubtitleOverrideById(line.id, null));
+    } else {
+      _mutate((d) => d.setSubtitleOverrideById(line.id, style));
+    }
   }
 
   void _setupPreview() {
@@ -802,53 +819,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         (d) => d.setTagsById(line.id, [for (final t in picked) t.name]));
   }
 
-  /// 从第 [shotIndex] 镜起分小行：弹台词切点选择器（自动按配音词时间戳
-  /// 建议切在哪个字），确认后落盘——这段字从此指定横跨该镜头组
-  Future<void> _splitSubline(int index, int shotIndex) async {
-    final line = _doc.lines[index];
-    final text = line.text;
-    if (text.trim().length < 2 || shotIndex <= 0) return;
-    // 自动建议：该镜头边界时刻（组内 alloc 累计）说到第几个字；
-    // 没有词级时间戳按镜头数比例估
-    var boundaryMs = 0;
-    for (var i = 0; i < shotIndex && i < line.shots.length; i++) {
-      boundaryMs += line.shots[i].allocMs ?? 0;
-    }
-    var suggest = (text.length * shotIndex / line.shots.length).round();
-    final words = line.voiceover?.words ?? const [];
-    if (words.isNotEmpty) {
-      var chars = 0;
-      for (final w in words) {
-        if ((w.startMs + w.endMs) / 2 >= boundaryMs) break;
-        chars += w.text.length;
-      }
-      if (chars > 0 && chars < text.length) suggest = chars;
-    }
-    final picked = await showDialog<int>(
-      context: context,
-      builder: (_) => _SublineCutDialog(text: text, suggest: suggest),
-    );
-    if (picked == null || !mounted) return;
-    // 新切点并入既有切点（同镜头位置的替换）
-    final cuts = [
-      for (final c in line.sublineCuts)
-        if (c.$2 != shotIndex) c,
-      (picked, shotIndex),
-    ]..sort((a, b) => a.$2.compareTo(b.$2));
-    _mutate((d) => d.setSublineCutsById(line.id, cuts));
-  }
-
-  /// 把第 [sublineIndex] 小行并回上一行：删掉它前面那个切点
-  void _mergeSubline(int index, int sublineIndex) {
-    final line = _doc.lines[index];
-    final cuts = line.sublineCuts;
-    if (sublineIndex <= 0 || sublineIndex > cuts.length) return;
-    _mutate((d) => d.setSublineCutsById(line.id, [
-          for (var i = 0; i < cuts.length; i++)
-            if (i != sublineIndex - 1) cuts[i],
-        ]));
-  }
-
   // ---- 时长分配 ----
 
   void _updateShots(int index, List<LineShot> shots) {
@@ -880,12 +850,23 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
   }
 
+  /// 上次弹「到底线」提示的时刻：拖拽每帧都会触发失败，提示要节流
+  /// ——不然一次拖拽攒下一队列 SnackBar，松手后还在连环弹（真机反馈）
+  DateTime _lastResizeHint = DateTime.fromMillisecondsSinceEpoch(0);
+
   void _resizeShot(int index, int j, int newAllocMs) {
     final line = _doc.lines[index];
     final next = ShotAllocation.resize(line.shots, j, newAllocMs);
     if (next == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('调不动了：相邻镜头已经到底线（每镜最少 0.5 秒）。')));
+      final now = DateTime.now();
+      if (now.difference(_lastResizeHint) > const Duration(seconds: 3)) {
+        _lastResizeHint = now;
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(const SnackBar(
+              duration: Duration(seconds: 2),
+              content: Text('调不动了：相邻镜头已经到底线（每镜最少 0.5 秒）。')));
+      }
       return;
     }
     _updateShots(index, next);
@@ -1696,8 +1677,30 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         );
                       },
                       onPlayShot: _playShotInline,
-                      onSplitSubline: _splitSubline,
-                      onMergeSubline: _mergeSubline,
+                      onShotSubtitle: (index, j, text) {
+                        final line = _doc.lines[index];
+                        _mutate((d) =>
+                            d.setShotSubtitleById(line.id, j, text));
+                      },
+                      onShotSubtitleSameAsPrev: (index, j) {
+                        final line = _doc.lines[index];
+                        if (j <= 0 || j >= line.shots.length) return;
+                        // 上一镜的字幕（人写的或自动的）写给这一镜——
+                        // 两镜同句，播放时连成一条不闪断
+                        final segs = line.shotSubtitleSegments;
+                        var start = 0;
+                        for (var i = 0; i < j; i++) {
+                          start += line.shots[i].allocMs ?? 0;
+                        }
+                        final prev = segs
+                            .where((s) => s.startMs < start && s.endMs >= start)
+                            .firstOrNull;
+                        final text = prev?.text ??
+                            line.shots[j - 1].subtitleText;
+                        if (text == null || text.isEmpty) return;
+                        _mutate((d) =>
+                            d.setShotSubtitleById(line.id, j, text));
+                      },
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,
@@ -1708,15 +1711,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onPlayReference: _playReference,
                       onUseReference: _useReference,
                       onUploadReference: _uploadReference,
-                      onEditLineSubtitle: (index) async {
-                        final line = _doc.lines[index];
-                        final style = await showSubtitleStyleSheet(context,
-                            initial:
-                                line.subtitleOverride ?? _doc.subtitle);
-                        if (style == null) return;
-                        _mutate((d) =>
-                            d.setSubtitleOverrideById(line.id, style));
-                      },
+                      onEditLineSubtitle: _editLineSubtitleStyle,
                       onClearLineSubtitle: (index) {
                         final line = _doc.lines[index];
                         _mutate((d) =>
@@ -2225,52 +2220,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
     final line = _doc.lines[index];
     if (line.type != ScriptLineType.voiced) return const SizedBox.shrink();
-    final vo = line.voiceover;
     final lineStart = _planResult.lineStarts[index] ?? 0;
     final relMs = _positionMs.value - lineStart;
-    String text;
-    if (line.sublineCuts.isNotEmpty) {
-      // 手动小行优先：人指定了「这段字归哪几个镜头」，字幕就跟组走
-      final span = line.sublineSpans
-          .where((s) => relMs >= s.startMs && relMs < s.endMs)
-          .firstOrNull;
-      text = span?.text.trim() ?? '';
-    } else if (vo == null) {
-      text = line.text.trim();
-    } else {
-      // 行内镜头累计边界；无镜头则整行一个坑
-      final boundaries = <int>[0];
-      for (final s in line.shots) {
-        boundaries.add(boundaries.last + (s.allocMs ?? 0));
-      }
-      if (boundaries.length == 1 || boundaries.last == 0) {
-        boundaries
-          ..clear()
-          ..addAll([0, vo.durationMs]);
-      }
-      final segs = lineSubtitleSegments(
-        sentence: AsrSentence(
-          startMs: 0,
-          endMs: vo.durationMs,
-          text: vo.sourceText,
-          words: [
-            for (final w in vo.words)
-              AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
-          ],
-        ),
-        shotBoundaries: boundaries,
-      );
-      final current = segs
-          .where((s) => relMs >= s.startMs && relMs < s.endMs)
-          .firstOrNull;
-      text = current?.text ?? '';
-    }
+    // 字幕写在镜头上：人写的优先、没写的按词时间戳自动预填、
+    // 相邻同文本连成一条（shotSubtitleSegments，与导出同一份派生）
+    final seg = line.shotSubtitleSegments
+        .where((s) => relMs >= s.startMs && relMs < s.endMs)
+        .firstOrNull;
+    final text = seg?.text ?? '';
     if (text.isEmpty) return const SizedBox.shrink();
     final style = line.subtitleOverride ?? _doc.subtitle;
     return PreviewSubtitle(
       text: text,
       style: style,
-      onTap: _editSubtitleStyle,
+      // 所见即所改：点的是正在播的这一句，改的就是这一句的样式
+      onTap: () => _editLineSubtitleStyle(index),
       onDragRatio: (ratio) =>
           setState(() => _subtitleDragRatio = ratio),
       onDragEnd: (ratio) {
@@ -2379,8 +2343,6 @@ class _ExportProgressDialog extends StatelessWidget {
 
 /// 参考段小窗：循环播这一句在参考片里的区间。
 /// 用独立的 mpv 实例——试听不该动主预览的位置
-/// 台词切点选择器：整句逐字排开，点某个字 = 从它前面切开。
-/// 自动建议的位置（按配音说到哪个字）预先高亮，多数时候直接「就这样」
 class _SublineCutDialog extends StatefulWidget {
   final String text;
   final int suggest;

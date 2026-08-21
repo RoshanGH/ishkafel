@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import '../analysis/providers.dart' show AsrSentence, AsrWord;
+import '../analysis/providers.dart' show AsrSentence;
 import '../export/export_commands.dart';
 import '../export/export_spec.dart';
 import '../ffmpeg/process_runner.dart';
@@ -296,30 +296,16 @@ class ScriptExportRunner {
     return ready;
   }
 
-  /// 行配音的词级时间戳 → 字幕句（行文本兜底整句显示）。
-  /// 行内有手动小行切分时人说了算：每小行一句、区间 = 组内镜头累计，
-  /// 不带词级（整段文本横跨组内镜头连续显示）
+  /// 镜头级字幕段 → 字幕句：**字幕写在镜头上**（人写的优先、没写的
+  /// 按词时间戳自动、相邻同文本连成一条）。预览用同一份派生，
+  /// 成片和预览看到的字幕一字不差
   List<AsrSentence> _sentenceOf(ScriptLine line) {
-    final vo = line.voiceover;
-    if (line.type != ScriptLineType.voiced || vo == null) return const [];
-    if (line.sublineCuts.isNotEmpty) {
-      return [
-        for (final span in line.sublineSpans)
-          if (span.endMs > span.startMs && span.text.trim().isNotEmpty)
-            AsrSentence(
-                startMs: span.startMs, endMs: span.endMs, text: span.text),
-      ];
+    if (line.type != ScriptLineType.voiced || line.voiceover == null) {
+      return const [];
     }
     return [
-      AsrSentence(
-        startMs: 0,
-        endMs: vo.durationMs,
-        text: vo.sourceText,
-        words: [
-          for (final w in vo.words)
-            AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
-        ],
-      ),
+      for (final seg in line.shotSubtitleSegments)
+        AsrSentence(startMs: seg.startMs, endMs: seg.endMs, text: seg.text),
     ];
   }
 

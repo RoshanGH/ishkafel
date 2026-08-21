@@ -234,6 +234,11 @@ class LineShot {
   /// 非空时 materialId 只是行内唯一的负数占位，不参与下载/防撞车
   final String? localSource;
 
+  /// 这一镜的字幕文本（**字幕写在镜头上**——用户定的模型）。
+  /// null = 自动跟随配音词时间戳（这镜时段内说出口的字）；
+  /// 空串 = 显式不要字幕；多镜共用一句 = 几个镜头写同一句
+  final String? subtitleText;
+
   const LineShot({
     required this.materialId,
     required this.name,
@@ -246,6 +251,7 @@ class LineShot {
     this.speed = 1.0,
     this.allocMs,
     this.localSource,
+    this.subtitleText,
   });
 
   /// 从 [trimStartMs] 起、按 [speed] 播，这条素材最多还能出多少**成片时长**。
@@ -267,6 +273,7 @@ class LineShot {
     int? trimStartMs,
     double? speed,
     Object? allocMs = _unsetAlloc,
+    Object? subtitleText = _unsetAlloc,
   }) =>
       LineShot(
         materialId: materialId,
@@ -280,6 +287,9 @@ class LineShot {
         speed: speed ?? this.speed,
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
         localSource: localSource,
+        subtitleText: subtitleText == _unsetAlloc
+            ? this.subtitleText
+            : subtitleText as String?,
       );
 
   static const _unsetAlloc = Object();
@@ -301,6 +311,7 @@ class LineShot {
         if (speed != 1.0) 'speed': speed,
         if (allocMs != null) 'allocMs': allocMs,
         if (localSource != null) 'localSource': localSource,
+        if (subtitleText != null) 'subtitleText': subtitleText,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -324,6 +335,8 @@ class LineShot {
       allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
       localSource:
           raw['localSource'] is String ? raw['localSource'] as String : null,
+      subtitleText:
+          raw['subtitleText'] is String ? raw['subtitleText'] as String : null,
     );
   }
 }
@@ -459,6 +472,49 @@ class ScriptLine {
 
   ScriptLine withSublineCuts(List<(int, int)> next) =>
       _copy(sublineCuts: next);
+
+  /// 镜头级字幕段（行时间轴）：**字幕写在镜头上**。
+  ///
+  /// 每镜的文本 = 人写的 [LineShot.subtitleText]（空串 = 不要字幕），
+  /// 没写则自动预填「这镜时段内说出口的字」（配音词时间戳，词的时间
+  /// 中点归属）。相邻镜头文本相同合并为一条连续段——多镜共用一句时
+  /// 字幕不闪断。预览与导出都用这一份
+  List<({int startMs, int endMs, String text})> get shotSubtitleSegments {
+    final vo = voiceover;
+    final out = <({int startMs, int endMs, String text})>[];
+    var cursor = 0;
+    for (final shot in shots) {
+      final alloc = shot.allocMs ?? 0;
+      if (alloc <= 0) continue;
+      final start = cursor;
+      final end = cursor + alloc;
+      cursor = end;
+      String segText;
+      if (shot.subtitleText != null) {
+        segText = shot.subtitleText!.trim();
+      } else if (vo != null && vo.words.isNotEmpty) {
+        segText = [
+          for (final w in vo.words)
+            if ((w.startMs + w.endMs) / 2 >= start &&
+                (w.startMs + w.endMs) / 2 < end)
+              w.text,
+        ].join();
+      } else {
+        // 老配音没有词级时间戳：整句兜底
+        segText = text.trim();
+      }
+      if (segText.isEmpty) continue;
+      if (out.isNotEmpty &&
+          out.last.text == segText &&
+          out.last.endMs == start) {
+        final last = out.removeLast();
+        out.add((startMs: last.startMs, endMs: end, text: segText));
+      } else {
+        out.add((startMs: start, endMs: end, text: segText));
+      }
+    }
+    return out;
+  }
 
   /// 有效切点：文本与镜头两轴都在界内且严格递增——镜头删了、台词改了
   /// 之后越界的切点自动失效（宽容派生，不炸也不静默保留错数据）
@@ -715,6 +771,17 @@ class ScriptDoc {
   ScriptDoc setTagsById(String lineId, List<String> tags) {
     final index = lines.indexWhere((l) => l.id == lineId);
     return _update(index, (line) => line.withTags(tags));
+  }
+
+  /// 按行 id 给某一镜写字幕（null = 恢复自动跟随词时间戳）
+  ScriptDoc setShotSubtitleById(String lineId, int shotIndex, String? text) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) {
+      if (shotIndex < 0 || shotIndex >= line.shots.length) return line;
+      final shots = [...line.shots];
+      shots[shotIndex] = shots[shotIndex].copyWith(subtitleText: text);
+      return line.withShots(shots);
+    });
   }
 
   /// 按行 id 设小行切分（台词段 ↔ 镜头组的指定）

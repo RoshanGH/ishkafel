@@ -5,13 +5,16 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/subtitle/subtitle_style.dart';
 
-/// 全局字幕样式（设计稿：位置 / 字号 / 六色 / 形态；行级覆盖后续版本）。
-/// 改完即生效——样式跟文档走，导出与之后的预览都用它
-Future<SubtitleStyle?> showSubtitleStyleSheet(BuildContext context,
-        {required SubtitleStyle initial}) =>
-    showDialog<SubtitleStyle>(
+/// 字幕样式面板（位置 / 字号 / 六色 / 遮罩）。
+/// 样式粒度是**句**：全局一套基调，个别句子需要时行级覆盖。
+/// [allowApplyAll] 打开时多一个「应用到整片」——调好一句觉得整片都
+/// 该这样，一键提升为全局默认。返回 (样式, 是否应用到整片)
+Future<(SubtitleStyle, bool)?> showSubtitleStyleSheet(BuildContext context,
+        {required SubtitleStyle initial, bool allowApplyAll = false}) =>
+    showDialog<(SubtitleStyle, bool)>(
       context: context,
-      builder: (_) => _SubtitleStyleDialog(initial: initial),
+      builder: (_) =>
+          _SubtitleStyleDialog(initial: initial, allowApplyAll: allowApplyAll),
     );
 
 /// 六色（白/黄/橙/绿/蓝/粉），hex 不带 #
@@ -26,7 +29,9 @@ const subtitleColors = <(String, String)>[
 
 class _SubtitleStyleDialog extends StatefulWidget {
   final SubtitleStyle initial;
-  const _SubtitleStyleDialog({required this.initial});
+  final bool allowApplyAll;
+  const _SubtitleStyleDialog(
+      {required this.initial, this.allowApplyAll = false});
 
   @override
   State<_SubtitleStyleDialog> createState() => _SubtitleStyleDialogState();
@@ -144,12 +149,18 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
         ]),
       ),
       actions: [
+        if (widget.allowApplyAll)
+          TextButton(
+            key: const ValueKey('subtitle-apply-all'),
+            onPressed: () => Navigator.of(context).pop((_style, true)),
+            child: const Text('应用到整片'),
+          ),
         TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('取消')),
         FilledButton(
           key: const ValueKey('subtitle-confirm'),
-          onPressed: () => Navigator.of(context).pop(_style),
+          onPressed: () => Navigator.of(context).pop((_style, false)),
           child: const Text('就这样'),
         ),
       ],

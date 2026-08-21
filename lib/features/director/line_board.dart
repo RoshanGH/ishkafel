@@ -39,11 +39,11 @@ class LineBoardHandlers {
   /// 原位播放一个镜头的选用段（在卡上播，不弹窗）；再点一次停
   final void Function(int index, int shotIndex) onPlayShot;
 
-  /// 从第 [shotIndex] 镜起分小行（弹台词切点选择器，把这段字指到镜头组）
-  final void Function(int index, int shotIndex) onSplitSubline;
+  /// 给某一镜写字幕（null = 恢复自动跟随词时间戳，空串 = 不要字幕）
+  final void Function(int index, int shotIndex, String? text) onShotSubtitle;
 
-  /// 把第 [sublineIndex] 小行并回上一行（删掉那个切点）
-  final void Function(int index, int sublineIndex) onMergeSubline;
+  /// 这一镜与上一镜共用同一句字幕（多镜共用一句的快捷）
+  final void Function(int index, int shotIndex) onShotSubtitleSameAsPrev;
   final void Function(int index, int? manualMs) onManualMs;
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
@@ -74,8 +74,8 @@ class LineBoardHandlers {
     required this.onEditTags,
     required this.shotFramesOf,
     required this.onPlayShot,
-    required this.onSplitSubline,
-    required this.onMergeSubline,
+    required this.onShotSubtitle,
+    required this.onShotSubtitleSameAsPrev,
     required this.onManualMs,
     required this.onPickVoice,
     required this.onSpeechRate,
@@ -333,6 +333,78 @@ class _TrimBar extends StatelessWidget {
   }
 
   static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
+}
+
+/// 这一镜的字幕输入框：预填自动结果（灰提示），写了就以人写的为准，
+/// 清空 = 恢复自动。失焦才落盘，避免每敲一个字都触发保存与预览重建
+class _ShotSubtitleField extends StatefulWidget {
+  final String auto;
+  final String? written;
+  final ValueChanged<String?> onChanged;
+
+  const _ShotSubtitleField({
+    super.key,
+    required this.auto,
+    required this.written,
+    required this.onChanged,
+  });
+
+  @override
+  State<_ShotSubtitleField> createState() => _ShotSubtitleFieldState();
+}
+
+class _ShotSubtitleFieldState extends State<_ShotSubtitleField> {
+  late final TextEditingController _text =
+      TextEditingController(text: widget.written ?? '');
+  final FocusNode _focus = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _commit();
+    });
+  }
+
+  @override
+  void didUpdateWidget(_ShotSubtitleField old) {
+    super.didUpdateWidget(old);
+    // 外部改动（同上一镜、撤销）同步进输入框；正在编辑时不动光标
+    if (!_focus.hasFocus && (widget.written ?? '') != _text.text) {
+      _text.text = widget.written ?? '';
+    }
+  }
+
+  void _commit() {
+    final t = _text.text.trim();
+    // 空 = 恢复自动（null）；与自动结果一字不差也存 null（别把自动值
+    // 固化成手写，镜头时长再调时它还能跟着走）
+    widget.onChanged(t.isEmpty || t == widget.auto ? null : t);
+  }
+
+  @override
+  void dispose() {
+    _text.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => TextField(
+        controller: _text,
+        focusNode: _focus,
+        style: const TextStyle(fontSize: AppFontSize.caption),
+        decoration: InputDecoration(
+          isDense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          hintText: widget.auto.isEmpty ? '这一镜显示的字' : widget.auto,
+          hintStyle: TextStyle(
+              fontSize: AppFontSize.caption,
+              color: AppColors.textTertiary.withValues(alpha: 0.9)),
+        ),
+        onSubmitted: (_) => _commit(),
+      );
 }
 
 /// 悬停时露出遮罩动作（胶片格的播放/用它）：平时画面干净，
@@ -601,67 +673,22 @@ class _LineBand extends StatelessWidget {
   }
 
   /// 参考分镜卡：这一句在参考片里的原始画面，按视觉切点切成多镜
-  /// 我的镜头区：按小行分组渲染。没分组 = 一行铺开（现状）；
-  /// 分了组 = 每小行「这段台词文字 + 它对应的镜头」——「家人们」
-  /// 指定给前两镜，一眼看清哪段字落在哪些镜头上
+  /// 我的镜头区：一行铺开（字幕归属在镜头上，由详情里的字幕框表达，
+  /// 不再用小行分组）
   Widget _sublineRows() {
-    final subs = line.sublines;
-    final grouped = subs.length > 1;
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      for (var g = 0; g < subs.length; g++) ...[
-        if (g > 0) const SizedBox(height: AppSpacing.xs),
-        SizedBox(
-          height: 132,
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (grouped)
-              SizedBox(
-                width: 76,
-                height: 132,
-                child: _HoverReveal(
-                  builder: (hovering) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text('「${subs[g].text.trim()}」',
-                            maxLines: 5,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                                fontSize: AppFontSize.caption,
-                                height: 1.4,
-                                color: AppColors.accentBlueLight)),
-                        if (hovering && g > 0)
-                          InkWell(
-                            key: ValueKey('band-merge-subline-$index-$g'),
-                            onTap: () => handlers.onMergeSubline(index, g),
-                            child: const Padding(
-                              padding: EdgeInsets.only(top: 2),
-                              child: Text('并回上行',
-                                  style: TextStyle(
-                                      fontSize: AppFontSize.micro,
-                                      color: AppColors.textTertiary)),
-                            ),
-                          ),
-                      ]),
-                ),
-              ),
-            Expanded(
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  for (var j = subs[g].shotStart;
-                      j < subs[g].shotEnd && j < line.shots.length;
-                      j++) ...[
-                    _shotCard(j, line.shots[j]),
-                    const SizedBox(width: AppSpacing.sm),
-                  ],
-                  if (g == subs.length - 1) _addCard(),
-                ],
-              ),
-            ),
-          ]),
-        ),
-      ],
-    ]);
+    return SizedBox(
+      height: 132,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (var j = 0; j < line.shots.length; j++) ...[
+            _shotCard(j, line.shots[j]),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+          _addCard(),
+        ],
+      ),
+    );
   }
 
   /// 左侧参考卡：块级只保留**分子粒度**——这一句在原片里的完整片段，
@@ -1096,24 +1123,61 @@ class _LineBand extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
-        // 小行切分：把台词的某一段指定给从这一镜起的镜头组
-        if (voiced && j > 0)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: InkWell(
-              key: ValueKey('band-split-subline-$index-$j'),
-              onTap: () => handlers.onSplitSubline(index, j),
-              child: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('✂ 从这一镜分小行（指定这段台词落在哪几镜）',
-                    style: const TextStyle(
-                        fontSize: AppFontSize.micro,
-                        color: AppColors.accentBlueLight)),
+        // 这一镜的字幕（字幕写在镜头上）：预填自动结果（这镜时段说的
+        // 字），改了就以你写的为准；清空文本框 = 恢复自动。
+        // 多镜共用一句：把同一句写给几个镜头（或点「同上一镜」）
+        if (voiced)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child:
+                Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              const SizedBox(
+                  width: 30,
+                  child: Text('字幕',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.textSecondary))),
+              Expanded(
+                child: _ShotSubtitleField(
+                  key: ValueKey('band-shot-subtitle-$index-$j'),
+                  auto: _autoSubtitleOf(j),
+                  written: shot.subtitleText,
+                  onChanged: (text) =>
+                      handlers.onShotSubtitle(index, j, text),
+                ),
               ),
-            ),
+              if (j > 0) ...[
+                const SizedBox(width: AppSpacing.sm),
+                InkWell(
+                  key: ValueKey('band-subtitle-same-$index-$j'),
+                  onTap: () => handlers.onShotSubtitleSameAsPrev(index, j),
+                  child: const Text('同上一镜',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.accentBlueLight)),
+                ),
+              ],
+            ]),
           ),
       ]),
     );
+  }
+
+  /// 第 [j] 镜的自动字幕（这镜时段内说出口的字）——文本框的预填值
+  String _autoSubtitleOf(int j) {
+    final vo = line.voiceover;
+    if (vo == null || vo.words.isEmpty) return '';
+    var start = 0;
+    for (var i = 0; i < j && i < line.shots.length; i++) {
+      start += line.shots[i].allocMs ?? 0;
+    }
+    final end = start + (line.shots[j].allocMs ?? 0);
+    return [
+      for (final w in vo.words)
+        if ((w.startMs + w.endMs) / 2 >= start &&
+            (w.startMs + w.endMs) / 2 < end)
+          w.text,
+    ].join();
   }
 
   // ---- 配音行（紧凑）：状态 · 音色 · 时长 · 生成 · 试听 ----

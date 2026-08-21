@@ -92,6 +92,90 @@ void main() {
     });
   });
 
+  group('镜头级字幕（字幕写在镜头上）', () {
+    ScriptLine lineWith(List<LineShot> shots, {List<VoiceWord>? words}) {
+      var l = ScriptLine.create(text: '家人们这是我们的最新产品')
+          .withShots(shots)
+          .withVoiceover(LineVoiceover(
+            audioPath: '/vo.mp3',
+            durationMs: 5000,
+            sourceText: '家人们这是我们的最新产品',
+            voiceId: 'v',
+            speechRate: 0,
+            words: words ??
+                [
+                  for (var i = 0; i < 12; i++)
+                    VoiceWord(
+                        text: '家人们这是我们的最新产品'[i],
+                        startMs: i * 400,
+                        endMs: i * 400 + 380),
+                ],
+          ));
+      return l;
+    }
+
+    test('默认自动预填：每镜的字幕 = 这镜时段内说出口的字', () {
+      final line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 1200),
+        LineShot(materialId: 2, name: 'b', durationMs: 9000, allocMs: 3800),
+      ]);
+      final segs = line.shotSubtitleSegments;
+      expect(segs, hasLength(2));
+      expect(segs[0].text, '家人们');
+      expect(segs[0].startMs, 0);
+      expect(segs[0].endMs, 1200);
+      expect(segs[1].text, '这是我们的最新产品');
+    });
+
+    test('人写的字幕优先；相邻镜头同文本合并成一条连续段（不闪断）', () {
+      final line = lineWith(const [
+        LineShot(
+            materialId: 1,
+            name: 'a',
+            durationMs: 9000,
+            allocMs: 1700,
+            subtitleText: '那就趁现在赶紧买'),
+        LineShot(
+            materialId: 2,
+            name: 'b',
+            durationMs: 9000,
+            allocMs: 1400,
+            subtitleText: '那就趁现在赶紧买'),
+        LineShot(
+            materialId: 3,
+            name: 'c',
+            durationMs: 9000,
+            allocMs: 1900,
+            subtitleText: '那就趁现在赶紧买'),
+      ]);
+      final segs = line.shotSubtitleSegments;
+      expect(segs, hasLength(1), reason: '三镜同句 = 一条连续字幕');
+      expect(segs.single.text, '那就趁现在赶紧买');
+      expect(segs.single.startMs, 0);
+      expect(segs.single.endMs, 5000);
+    });
+
+    test('subtitleText json 往返；空串表示「这镜不要字幕」', () {
+      const shot = LineShot(
+          materialId: 1,
+          name: 'a',
+          durationMs: 9000,
+          allocMs: 1000,
+          subtitleText: '家人们');
+      expect(LineShot.tryFromJson(shot.toJson())!.subtitleText, '家人们');
+      final line = lineWith(const [
+        LineShot(
+            materialId: 1,
+            name: 'a',
+            durationMs: 9000,
+            allocMs: 5000,
+            subtitleText: ''),
+      ]);
+      expect(line.shotSubtitleSegments, isEmpty,
+          reason: '写空串 = 显式不要字幕，与「没写」（自动）区分');
+    });
+  });
+
   group('台词语义单元内的小行切分（sublineCuts）', () {
     // 「家人们，这是我们的最新产品」3 镜：「家人们」给前 2 镜、
     // 后半句给第 3 镜——用户定的分组模型
