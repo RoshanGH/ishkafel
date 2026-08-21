@@ -337,14 +337,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _pinBgm();
   }
 
-  /// 顶栏入口：改**整片**的字幕基调
-  Future<void> _editSubtitleStyle() async {
-    final picked =
-        await showSubtitleStyleSheet(context, initial: _doc.subtitle);
-    if (picked == null) return;
-    _mutate((d) => d.withSubtitle(picked.$1));
-  }
-
   void _setupPreview() {
     final playback = widget.playbackFactory != null
         ? widget.playbackFactory!()
@@ -2101,18 +2093,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                 ? '配乐'
                 : '配乐：${_doc.bgmSegments.length} 段',
           ),
-          IconButton(
-            key: const ValueKey('director-subtitle'),
-            visualDensity: VisualDensity.compact,
-            onPressed: _editSubtitleStyle,
-            iconSize: 16,
-            icon: const Icon(Icons.subtitles_outlined,
-                color: AppColors.textSecondary),
-            tooltip: '字幕样式',
-          ),
+          // 顶栏只留可重复、非破坏的动作：配乐 · 生成草片 · 导出成片。
+          // 「字幕样式」由预览下方的工具条 +「应用到整片」接管；
+          // 「从视频提取脚本」是空脚本时的一次性起步动作（会覆盖整份
+          // 脚本、把配音镜头字幕全作废），只留在起步引导里
           const SizedBox(width: AppSpacing.xs),
-          _extractButton(),
-          const SizedBox(width: AppSpacing.sm),
           _draftButton(),
           const SizedBox(width: AppSpacing.sm),
           _exportButton(),
@@ -2198,30 +2183,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
   }
 
-  Widget _extractButton() {
-    final available = ref.watch(scriptTranscriberProvider) != null;
-    final running = _extract is _ExtractRunning;
-    final button = OutlinedButton.icon(
-      key: const ValueKey('director-extract-script'),
-      onPressed: available && !running ? _extractFromVideo : null,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textPrimary,
-        side: const BorderSide(color: AppColors.border),
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md, vertical: 6),
-        textStyle: const TextStyle(fontSize: AppFontSize.body),
-      ),
-      icon: const Icon(Icons.subtitles_outlined, size: 14),
-      label: const Text('从视频提取脚本'),
-    );
-    if (available) return button;
-    // 禁用要说明原因——点不动又不解释的按钮等于坏了
-    return Tooltip(
-        message: '尚未配置 AI 服务（语音识别与语义分行），无法提取',
-        child: button);
-  }
-
-  /// 提取进行中/失败的交代条：等待有进度，失败有原因和重试
   Widget _extractBanner() {
     final state = _extract;
     if (state is _ExtractRunning) {

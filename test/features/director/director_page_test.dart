@@ -369,7 +369,8 @@ void main() {
         reason: '提取结果要立刻落盘');
   });
 
-  testWidgets('脚本非空时提取先确认覆盖，取消则原样保留', (tester) async {
+  testWidgets('脚本非空时顶栏没有提取入口——覆盖式提取只属于空态起步',
+      (tester) async {
     final repo = _MemoryRepo();
     await pumpDirector(
         tester, wrap(repo, scriptTask(doc: docWith(['辛苦写的'])), overrides: [
@@ -378,14 +379,11 @@ void main() {
     ]));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('director-extract-script')));
-    await tester.pumpAndSettle();
-
-    expect(find.textContaining('整体替换'), findsOneWidget,
-        reason: '覆盖手写内容是破坏性操作，必须确认');
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-
+    expect(find.byKey(const ValueKey('director-extract-script')), findsNothing,
+        reason: '提取会把整份脚本连同配音/镜头/字幕一起作废——'
+            '这种一次性破坏动作不该常驻顶栏');
+    expect(find.byKey(const ValueKey('director-subtitle')), findsNothing,
+        reason: '字幕样式由预览下方的工具条接管，一个功能只留一个入口');
     expect(find.text('辛苦写的'), findsNWidgets(2));
   });
 
