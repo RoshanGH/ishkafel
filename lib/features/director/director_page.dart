@@ -46,6 +46,7 @@ import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
+import '../../core/subtitle/subtitle_style.dart';
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
@@ -261,6 +262,25 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 字幕拖动中的临时位置（bottomRatio）；null = 没在拖。
   /// 拖动实时预览、松手才落盘
   double? _subtitleDragRatio;
+
+  /// 字幕工具条的草稿样式：拖滑杆时实时预览用，松手才 _mutate 落盘
+  /// （否则每帧一次撤销记录，⌘Z 要按上百次）
+  SubtitleStyle? _styleDraft;
+  String? _styleDraftLineId;
+
+  /// 这一行当下生效的字幕样式：草稿 > 行级覆盖 > 全局
+  SubtitleStyle _styleOf(ScriptLine line) {
+    if (_styleDraftLineId == line.id && _styleDraft != null) {
+      return _styleDraft!;
+    }
+    return line.subtitleOverride ?? _doc.subtitle;
+  }
+
+  /// 工具条针对的那一句：正在播的那句优先，否则是选中的那句
+  int get _subtitleTargetIndex {
+    final i = _previewLineIndex ?? _selected;
+    return (i >= 0 && i < _doc.lines.length) ? i : 0;
+  }
 
   /// 草片流水线进度：(阶段名, 当前句摘要, 已完成, 总数)；null = 没在跑。
   /// 这是产品的魔法时刻——提取完一条参考片，几分钟后中央屏幕自动
@@ -1741,6 +1761,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       },
                       onPlayShot: _playShotInline,
                       onTrimDone: _scheduleReplayShot,
+                      subtitleStyleOf: _styleOf,
                       onShotSubtitle: (index, j, text) {
                         final line = _doc.lines[index];
                         _mutate((d) =>
@@ -2252,6 +2273,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       fontFeatures: const [FontFeature.tabularFigures()])),
             ),
           ])),
+          if (playable) _subtitleToolbar(),
           // 预览可以少几行——人还在编排——但少了哪几行必须点名。
           // 行多时按原因分组汇总，不拿一面墙的橙字糊满中栏
           if (_planResult.skippedLines.isNotEmpty)
@@ -2274,6 +2296,192 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
   }
 
+  /// 字幕工具条（常驻在预览正下方，用户定的 A 方案）：调什么、看什么
+  /// 在同一视线里——不再用弹窗盖住唯一能看出效果的地方。
+  /// 跟着**当前这一句**走（播到哪句就是哪句，否则是选中的那句）；
+  /// 样式粒度 = 句，右端「整片」把这套提升为全局基调
+  Widget _subtitleToolbar() {
+    final index = _subtitleTargetIndex;
+    if (_doc.lines.isEmpty) return const SizedBox.shrink();
+    final line = _doc.lines[index];
+    if (line.type != ScriptLineType.voiced) return const SizedBox.shrink();
+    final style = _styleOf(line);
+
+    void draft(SubtitleStyle next) {
+      setState(() {
+        _styleDraft = next;
+        _styleDraftLineId = line.id;
+      });
+    }
+
+    void commit(SubtitleStyle next) {
+      setState(() {
+        _styleDraft = null;
+        _styleDraftLineId = null;
+      });
+      _mutate((d) => d.setSubtitleOverrideById(line.id, next));
+    }
+
+    Widget slider({
+      required String label,
+      required Key key,
+      required double value,
+      required double min,
+      required double max,
+      required String trailing,
+      required SubtitleStyle Function(double v) build,
+    }) =>
+        Row(children: [
+          SizedBox(
+              width: 28,
+              child: Text(label,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textSecondary))),
+          Expanded(
+            child: SliderTheme(
+              data: const SliderThemeData(
+                trackHeight: 2,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
+                overlayShape: RoundSliderOverlayShape(overlayRadius: 10),
+              ),
+              child: Slider(
+                key: key,
+                value: value.clamp(min, max),
+                min: min,
+                max: max,
+                activeColor: AppColors.accentBlue,
+                onChanged: (v) => draft(build(v)),
+                onChangeEnd: (v) => commit(build(v)),
+              ),
+            ),
+          ),
+          SizedBox(
+              width: 42,
+              child: Text(trailing,
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary,
+                      fontFeatures: [FontFeature.tabularFigures()]))),
+        ]);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Row(children: [
+          Text('第 ${index + 1} 句的字幕',
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary)),
+          const Spacer(),
+          if (line.subtitleOverride != null) ...[
+            InkWell(
+              key: const ValueKey('subtitle-bar-reset'),
+              onTap: () =>
+                  _mutate((d) => d.setSubtitleOverrideById(line.id, null)),
+              child: const Text('跟随整片',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+          InkWell(
+            key: const ValueKey('subtitle-bar-apply-all'),
+            onTap: () => _mutate((d) =>
+                d.withSubtitle(style).setSubtitleOverrideById(line.id, null)),
+            child: const Text('应用到整片',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.accentBlueLight)),
+          ),
+        ]),
+        slider(
+          label: '位置',
+          key: const ValueKey('subtitle-bar-bottom'),
+          value: style.bottomRatio,
+          min: 0.03,
+          max: 0.6,
+          trailing: '${(style.bottomRatio * 100).round()}%',
+          build: (v) => style.copyWith(bottomRatio: v),
+        ),
+        slider(
+          label: '字号',
+          key: const ValueKey('subtitle-bar-font'),
+          value: style.fontRatio,
+          min: 0.018,
+          max: 0.065,
+          trailing: '${(style.fontRatio * 1000).round()}‰',
+          build: (v) => style.copyWith(fontRatio: v),
+        ),
+        Row(children: [
+          for (final (hex, name) in subtitleColors)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Tooltip(
+                message: name,
+                child: InkWell(
+                  key: ValueKey('subtitle-bar-color-$hex'),
+                  onTap: () => commit(style.copyWith(
+                      colorHex: hex == 'FFFFFF' ? null : hex)),
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(int.parse('FF$hex', radix: 16)),
+                      border: Border.all(
+                          color: (style.colorHex ?? 'FFFFFF') == hex
+                              ? AppColors.accentBlue
+                              : AppColors.border,
+                          width: (style.colorHex ?? 'FFFFFF') == hex ? 2 : 1),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(width: AppSpacing.xs),
+          for (final (preset, label) in const [
+            (SubtitlePreset.whiteOutline, '无底'),
+            (SubtitlePreset.blurBox, '毛玻璃'),
+            (SubtitlePreset.whiteBox, '黑条'),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: InkWell(
+                key: ValueKey('subtitle-bar-mask-${preset.name}'),
+                onTap: () => commit(style.copyWith(preset: preset)),
+                borderRadius: BorderRadius.circular(999),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: style.preset == preset
+                        ? AppColors.accentBlue.withValues(alpha: 0.16)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: style.preset == preset
+                            ? AppColors.accentBlue
+                            : AppColors.border),
+                  ),
+                  child: Text(label,
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: style.preset == preset
+                              ? AppColors.accentBlueLight
+                              : AppColors.textSecondary)),
+                ),
+              ),
+            ),
+        ]),
+      ]),
+    );
+  }
+
   /// 当前播放行的字幕：按镜头边界与词级时间戳切段（与导出同一套规则）
   /// ——「家人们」只在第一镜出现，后半句归后面的镜头。画面行没台词不出。
   /// 字幕本身可操作：点一下改样式，上下拖直接调位置
@@ -2293,23 +2501,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         .firstOrNull;
     final text = seg?.text ?? '';
     if (text.isEmpty) return const SizedBox.shrink();
-    final style = line.subtitleOverride ?? _doc.subtitle;
+    final style = _styleOf(line);
     return PreviewSubtitle(
       text: text,
       style: style,
-      // 所见即所改：点的是正在播的这一句，改的就是这一句的样式
-      onTap: () => _editLineSubtitleStyle(index),
+      // 点字幕 = 选中这一句（样式调整在预览正下方的工具条里，
+      // 不再用弹窗盖住预览）
+      onTap: () => _focusLine(index),
       onDragRatio: (ratio) =>
           setState(() => _subtitleDragRatio = ratio),
       onDragEnd: (ratio) {
         _subtitleDragRatio = null;
-        // 拖的是谁就落谁：行级覆盖在改行级，否则改全局
-        if (line.subtitleOverride != null) {
-          _mutate((d) => d.setSubtitleOverrideById(
-              line.id, style.copyWith(bottomRatio: ratio)));
-        } else {
-          _mutate((d) => d.withSubtitle(style.copyWith(bottomRatio: ratio)));
-        }
+        // 样式粒度 = 句：拖字幕改的就是这一句
+        _mutate((d) => d.setSubtitleOverrideById(
+            line.id, style.copyWith(bottomRatio: ratio)));
       },
       dragRatio: _subtitleDragRatio,
     );

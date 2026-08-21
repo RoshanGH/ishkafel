@@ -8,6 +8,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
+import '../../core/subtitle/subtitle_style.dart';
 import '../picking/picked_media_cache.dart';
 
 /// 分镜编辑板（右栏）：**所有行的工作块从上到下铺开**，一块对应一行台词。
@@ -41,6 +42,10 @@ class LineBoardHandlers {
 
   /// 取段条拖拽松手：重播这一镜听调整后的效果
   final void Function(int index, int shotIndex) onTrimDone;
+
+  /// 这一行当下生效的字幕样式（草稿 > 行级覆盖 > 全局）——
+  /// 镜头卡上按它画字幕缩略，改样式时几张卡同时变
+  final SubtitleStyle Function(ScriptLine line) subtitleStyleOf;
 
   /// 给某一镜写字幕（null = 恢复自动跟随词时间戳，空串 = 不要字幕）
   final void Function(int index, int shotIndex, String? text) onShotSubtitle;
@@ -78,6 +83,7 @@ class LineBoardHandlers {
     required this.shotFramesOf,
     required this.onPlayShot,
     required this.onTrimDone,
+    required this.subtitleStyleOf,
     required this.onShotSubtitle,
     required this.onShotSubtitleSameAsPrev,
     required this.onManualMs,
@@ -909,6 +915,10 @@ class _LineBand extends StatelessWidget {
                           )
                         : const SizedBox.expand(),
               ),
+              // 卡上直接看到这一镜的字幕（位置/颜色/遮罩按真实样式缩放）
+              // ——不打开任何面板就能一眼扫完整句每镜显示什么字
+              if (voiced && inlineKey != 'shot_${line.id}_$j')
+                Positioned.fill(child: _cardSubtitle(j)),
               Positioned(
                 left: 3,
                 top: 3,
@@ -1217,6 +1227,67 @@ class _LineBand extends StatelessWidget {
           ),
       ]),
     );
+  }
+
+  /// 镜头卡上的字幕缩略：位置按 bottomRatio、颜色/遮罩照真实样式，
+  /// 字号按比例缩放后夹在可读区间（卡片只有几十像素宽，严格等比会
+  /// 糊成一条；真实字号以中栏预览与成片为准）
+  Widget _cardSubtitle(int j) {
+    final text = (line.shots[j].subtitleText ?? _autoSubtitleOf(j)).trim();
+    if (text.isEmpty) return const SizedBox.shrink();
+    final style = handlers.subtitleStyleOf(line);
+    return LayoutBuilder(builder: (context, c) {
+      final h = c.maxHeight;
+      final fontSize = (h * style.fontRatio * 2.0).clamp(7.0, 13.0);
+      final color = style.colorHex != null
+          ? Color(int.parse('FF${style.colorHex}', radix: 16))
+          : (style.preset == SubtitlePreset.yellowOutline
+              ? const Color(0xFFFFD900)
+              : Colors.white);
+      final hasBacking = style.preset == SubtitlePreset.whiteBox ||
+          style.preset == SubtitlePreset.blurBox;
+      return IgnorePointer(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: h * style.bottomRatio, left: 2, right: 2),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              padding: hasBacking
+                  ? const EdgeInsets.symmetric(horizontal: 2, vertical: 1)
+                  : EdgeInsets.zero,
+              decoration: hasBacking
+                  ? BoxDecoration(
+                      // 黑条按真实半透明黑；毛玻璃在卡上用浅色示意
+                      // （真磨砂在预览与成片里）
+                      color: style.preset == SubtitlePreset.whiteBox
+                          ? Colors.black.withValues(alpha: 0.55)
+                          : Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(2),
+                    )
+                  : null,
+              child: Text(
+                text,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: fontSize,
+                  height: 1.15,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                  shadows: hasBacking
+                      ? null
+                      : const [
+                          Shadow(color: Colors.black, blurRadius: 2),
+                          Shadow(color: Colors.black, blurRadius: 2),
+                        ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
   }
 
   /// 第 [j] 镜的自动字幕（这镜时段内说出口的字）——文本框的预填值

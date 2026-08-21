@@ -62,7 +62,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
       content: SizedBox(
         width: 360,
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('对整条片子生效（每一行的字幕都按这套画）',
+          const Text('整片的字幕基调（没有单独调过的句子都按这套画）',
               style: TextStyle(
                   fontSize: AppFontSize.caption,
                   color: AppColors.textTertiary)),
@@ -75,22 +75,15 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
             activeColor: AppColors.accentBlue,
             onChanged: (v) => setState(() => _bottomRatio = v),
           ), trailing: '距底 ${(_bottomRatio * 100).round()}%'),
-          _row(
-              '字号',
-              Row(children: [
-                for (final (label, v) in const [('小', 0.028), ('标准', 0.034), ('大', 0.042)])
-                  Padding(
-                    padding: const EdgeInsets.only(right: AppSpacing.xs),
-                    child: ChoiceChip(
-                      key: ValueKey('subtitle-font-$label'),
-                      label: Text(label,
-                          style: const TextStyle(fontSize: AppFontSize.caption)),
-                      selected: (_fontRatio - v).abs() < 0.002,
-                      visualDensity: VisualDensity.compact,
-                      onSelected: (_) => setState(() => _fontRatio = v),
-                    ),
-                  ),
-              ])),
+          // 字号连续可调（用户定的：横轴滑杆，平滑）
+          _row('字号', Slider(
+            key: const ValueKey('subtitle-font'),
+            value: _fontRatio.clamp(0.018, 0.065),
+            min: 0.018,
+            max: 0.065,
+            activeColor: AppColors.accentBlue,
+            onChanged: (v) => setState(() => _fontRatio = v),
+          ), trailing: '${(_fontRatio * 1000).round()}‰'),
           _row(
               '颜色',
               Row(children: [
