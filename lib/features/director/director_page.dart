@@ -1013,12 +1013,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
 
     await playSeg();
-    // 到段尾自然停住（mpv end 属性）：停了就绕回开头一起重来
+    // 播一次就停（用户定的：不要循环）——段尾自然停住后清态，
+    // 按钮从 ⏹ 复位回 ▶
     _inlineLoop = player.playingStream.listen((playing) {
       if (!playing && mounted && _inlineKey == key) {
-        unawaited(playSeg());
+        _stopInline();
       }
     });
+  }
+
+  /// 重播某一镜（取段/时长刚调完，立即听调整后的效果）——
+  /// 与点 ▶ 的 toggle 不同，这里无论在不在播都重新来一遍
+  Future<void> _replayShotInline(int index, int j) async {
+    _stopInline();
+    await _playShotInline(index, j);
   }
 
   void _stopInline() {
@@ -1713,6 +1721,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         );
                       },
                       onPlayShot: _playShotInline,
+                      onTrimDone: (index, j) =>
+                          unawaited(_replayShotInline(index, j)),
                       onShotSubtitle: (index, j, text) {
                         final line = _doc.lines[index];
                         _mutate((d) =>

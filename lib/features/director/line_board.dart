@@ -39,6 +39,9 @@ class LineBoardHandlers {
   /// 原位播放一个镜头的选用段（在卡上播，不弹窗）；再点一次停
   final void Function(int index, int shotIndex) onPlayShot;
 
+  /// 取段条拖拽松手：重播这一镜听调整后的效果
+  final void Function(int index, int shotIndex) onTrimDone;
+
   /// 给某一镜写字幕（null = 恢复自动跟随词时间戳，空串 = 不要字幕）
   final void Function(int index, int shotIndex, String? text) onShotSubtitle;
 
@@ -74,6 +77,7 @@ class LineBoardHandlers {
     required this.onEditTags,
     required this.shotFramesOf,
     required this.onPlayShot,
+    required this.onTrimDone,
     required this.onShotSubtitle,
     required this.onShotSubtitleSameAsPrev,
     required this.onManualMs,
@@ -168,12 +172,17 @@ class _TrimBar extends StatelessWidget {
   final ValueChanged<int> onTrim;
   final ValueChanged<int> onResize;
 
+  /// 拖拽松手：调完取段立即重播这一镜听效果（用户的工作流——
+  /// 调时长把字幕对到分镜上，每次调完听一遍确认）
+  final VoidCallback onDone;
+
   const _TrimBar({
     super.key,
     required this.shot,
     required this.frames,
     required this.onTrim,
     required this.onResize,
+    required this.onDone,
   });
 
   @override
@@ -251,6 +260,7 @@ class _TrimBar extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragUpdate: (d) => onTrim(
                     (shot.trimStartMs + d.delta.dx / pxPerMs).round()),
+                onHorizontalDragEnd: (_) => onDone(),
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     // 有帧时窗口只描边不盖色——里面就是选中的画面本身；
@@ -293,6 +303,7 @@ class _TrimBar extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragUpdate: (d) => onResize(
                     (alloc + d.delta.dx / pxPerMs / shot.speed).round()),
+                onHorizontalDragEnd: (_) => onDone(),
                 child: Center(
                   child: Container(
                     width: 4,
@@ -1063,6 +1074,7 @@ class _LineBand extends StatelessWidget {
               frames: handlers.shotFramesOf(shot),
               onTrim: (ms) => handlers.onTrimShot(index, j, ms),
               onResize: (ms) => handlers.onResizeShot(index, j, ms),
+              onDone: () => handlers.onTrimDone(index, j),
             );
             return Padding(
               padding: const EdgeInsets.symmetric(vertical: 4),
