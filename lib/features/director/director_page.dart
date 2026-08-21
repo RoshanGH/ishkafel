@@ -447,6 +447,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (_previewPlaying) {
       await playback.pause();
     } else {
+      // 开播前停掉分镜卡/配音试听——同时只有一个东西在响
+      _stopInline();
+      await _voicePreview.stop();
+      if (_playingLineId != null) setState(() => _playingLineId = null);
       await playback.play();
     }
   }
@@ -663,6 +667,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     unawaited(_playingSub?.cancel());
     unawaited(_inlineLoop?.cancel());
     unawaited(_inlinePlayer?.dispose());
+    unawaited(_inlineAudio?.dispose());
     _playback?.dispose();
     _positionMs.dispose();
     unawaited(_voicePreview.dispose());
@@ -943,17 +948,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 共享的原位播放器：同时只有一张卡在播，谁在播就挂到谁的卡上
   MediaKitPlaybackController? _inlinePlayer;
+
+  /// 原位播放的配音伴奏（独立实例同步播配音段——外挂音轨那条 API
+  /// 在 macOS 上不工作，主预览的口播轨也是独立实例，照抄已验证模式）
+  MediaKitPlaybackController? _inlineAudio;
   Widget? _inlineVideo;
 
   /// 正在原位播放的卡：'ref_行id' 或 'shot_行id_镜下标'；null = 没在播
   String? _inlineKey;
   StreamSubscription<bool>? _inlineLoop;
 
-  /// 原位播放一段：再点同一张卡 = 停。播放期间暂停主预览（防串音）。
-  /// [rate] 按镜头的变速倍率播——预览听到看到的就是成片里的样子
+  /// 原位播放一段：再点同一张卡 = 停。开播前停掉其他一切声源
+  /// （主预览、配音试听）——同时只有一个东西在响。
+  /// [audioPath] 非空时用独立实例同步播配音的 [audioStartMs, audioEndMs)
+  /// 段（分镜素材多为无声，成片里这一镜配的就是这段配音）
   Future<void> _playInline(
       String key, String path, int startMs, int endMs,
-      {double rate = 1.0, String? audioPath, int audioDelayMs = 0}) async {
+      {double rate = 1.0,
+      String? audioPath,
+      int audioStartMs = 0,
+      int audioEndMs = 0}) async {
     if (_inlineKey == key) {
       _stopInline();
       return;
@@ -963,30 +977,32 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           content: Text('这段视频已不在本地，回来后才能播放。')));
       return;
     }
-    await _playback?.pause();
+    await _stopAllPlayback(exceptInline: true);
     await _inlineLoop?.cancel();
     _inlineLoop = null;
     final player = _inlinePlayer ??= MediaKitPlaybackController();
     _inlineVideo ??= player.buildVideoWidget();
     setState(() => _inlineKey = key);
     await player.open(path);
-    // **先等加载完再动音轨**：loadfile 进行中设置的外挂音轨会被加载
-    // 过程吞掉（与「seek 被吞」同一类坑，真机复现为播放无声）
     await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
     await player.setMuted(false);
-    if (audioPath != null) {
-      // 外挂这一句的配音，audio-delay 把整条配音对齐到该镜的段上——
-      // 分镜素材本身多是无声的，成片里这一镜配的就是这段配音
-      await player.setExternalAudio(audioPath);
-      await player.setAudioDelayMs(audioDelayMs);
-    } else {
-      await player.clearExternalAudio();
-      await player.setAudioDelayMs(0);
-    }
     await player.player.setRate(rate);
-    if (!mounted || _inlineKey != key) return;
+    final withVoice =
+        audioPath != null && File(audioPath).existsSync() && audioEndMs > 0;
+    if (withVoice) {
+      final audio = _inlineAudio ??= MediaKitPlaybackController();
+      await audio.open(audioPath);
+      await audio.waitUntilLoaded();
+      if (!mounted || _inlineKey != key) return;
+      await audio.setMuted(false);
+    }
     Future<void> playSeg() async {
+      // 画面与配音各自 playRange，同时起跑（几十毫秒内的相差
+      // 预览无感；主预览的多轨同样是双实例同步）
+      if (withVoice) {
+        unawaited(_inlineAudio!.playRange(audioStartMs, audioEndMs, 30));
+      }
       final ok = await player.playRange(startMs, endMs, 30);
       if (!ok) {
         await player.seekMs(startMs);
@@ -995,7 +1011,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
 
     await playSeg();
-    // 到段尾自然停住（mpv end 属性）：停了就绕回开头循环
+    // 到段尾自然停住（mpv end 属性）：停了就绕回开头一起重来
     _inlineLoop = player.playingStream.listen((playing) {
       if (!playing && mounted && _inlineKey == key) {
         unawaited(playSeg());
@@ -1007,7 +1023,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     unawaited(_inlineLoop?.cancel());
     _inlineLoop = null;
     unawaited(_inlinePlayer?.pause());
+    unawaited(_inlineAudio?.pause());
     if (mounted && _inlineKey != null) setState(() => _inlineKey = null);
+  }
+
+  /// 停掉一切声源（互斥的地基）：任何播放动作开始前先调它——
+  /// 分镜在播时点主预览、点配音试听，前面的必须停
+  Future<void> _stopAllPlayback({bool exceptInline = false}) async {
+    await _playback?.pause();
+    await _voicePreview.stop();
+    if (_playingLineId != null && mounted) {
+      setState(() => _playingLineId = null);
+    }
+    if (!exceptInline) _stopInline();
   }
 
   /// 播放参考：**原位**循环播（在参考卡自己的位置上，不弹窗）。
@@ -1069,8 +1097,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     await _playInline('shot_${line.id}_$j', path, start, end,
         rate: rate,
         audioPath: vo?.audioPath,
-        // audio-delay：显示视频 t 时播音频 (t - delay)
-        audioDelayMs: vo == null ? 0 : start - segStartMs);
+        // 配音段 = 该镜在行时间轴上的区间（配音与行同轴）
+        audioStartMs: segStartMs,
+        audioEndMs: segStartMs + alloc);
   }
 
   /// 参考分镜一键作镜头：原片本地文件直接当镜头用
@@ -1144,6 +1173,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       await _voicePreview.stop();
       return;
     }
+    // 试听开始前停掉分镜卡/主预览——同时只有一个东西在响
+    _stopInline();
+    await _playback?.pause();
     setState(() => _playingLineId = line.id);
     await _voicePreview.play(vo.audioPath);
     // 简单起见按时长收尾：播完把按钮复位（期间切行/重播由上面的分支处理）
