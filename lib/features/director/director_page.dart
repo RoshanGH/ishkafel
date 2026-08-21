@@ -968,9 +968,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   String? _inlineKey;
   StreamSubscription<bool>? _inlineLoop;
 
-  /// 原位播放一段：再点同一张卡 = 停。播放期间暂停主预览（防串音）
+  /// 原位播放一段：再点同一张卡 = 停。播放期间暂停主预览（防串音）。
+  /// [rate] 按镜头的变速倍率播——预览听到看到的就是成片里的样子
   Future<void> _playInline(
-      String key, String path, int startMs, int endMs) async {
+      String key, String path, int startMs, int endMs,
+      {double rate = 1.0}) async {
     if (_inlineKey == key) {
       _stopInline();
       return;
@@ -987,6 +989,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _inlineVideo ??= player.buildVideoWidget();
     setState(() => _inlineKey = key);
     await player.open(path);
+    // 声音要显式打开：实例可能带着上一次的静音/无音轨状态
+    await player.setMuted(false);
+    await player.player.setRate(rate);
     await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
     Future<void> playSeg() async {
@@ -1044,7 +1049,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         (shot.consumedSourceMs > 0
             ? shot.consumedSourceMs
             : (shot.durationMs ?? 3000));
-    await _playInline('shot_${line.id}_$j', path, start, end);
+    // 按该镜的变速倍率播：卡上看到听到的就是成片里的节奏
+    await _playInline('shot_${line.id}_$j', path, start, end,
+        rate: shot.speed);
   }
 
   /// 参考分镜一键作镜头：原片本地文件直接当镜头用
