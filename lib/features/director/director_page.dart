@@ -13,6 +13,7 @@ import '../../core/ai/tag_dimension.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/export/export_spec.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
@@ -50,6 +51,7 @@ import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
 import '../../core/subtitle/subtitle_style.dart';
+import 'script_export_dialog.dart';
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
@@ -485,6 +487,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   // ---- 导出 ----
 
   bool _exporting = false;
+
+  /// 上次用的导出规格（同一个任务里连着导几版时不用重选）
+  ExportSpec _exportSpec = ExportSpec.standard;
   final ValueNotifier<ScriptExportProgress?> _exportProgress =
       ValueNotifier(null);
 
@@ -497,7 +502,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       return;
     }
     _flushNow();
-    setState(() => _exporting = true);
+    // 规格该选还得选（与其他模块同一套面板）；记住上次的选择
+    final spec = await showScriptExportDialog(
+      context,
+      initial: _exportSpec,
+      durationMs: _planResult.plan.totalMs,
+      lineCount: _doc.lines.where((l) => l.shots.isNotEmpty).length,
+    );
+    if (spec == null || !mounted) return;
+    setState(() {
+      _exportSpec = spec;
+      _exporting = true;
+    });
     _exportProgress.value = const ScriptExportProgress('准备中', 0);
     // 模态进度：导出中不许再改内容，改了也不会进这一版成片
     unawaited(showDialog<void>(
@@ -518,11 +534,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         '${stamp.month.toString().padLeft(2, '0')}'
         '${stamp.day.toString().padLeft(2, '0')}_'
         '${stamp.hour.toString().padLeft(2, '0')}'
-        '${stamp.minute.toString().padLeft(2, '0')}.mp4';
+        '${stamp.minute.toString().padLeft(2, '0')}.${spec.format.name}';
     try {
       final out = await runner.export(
         doc: _doc,
         outPath: p.join(outDir, name),
+        spec: spec,
         bgmPathOf: (id) => _bgmCache?.localPathOf(id),
         onProgress: (progress) => _exportProgress.value = progress,
       );
