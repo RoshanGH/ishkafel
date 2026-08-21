@@ -970,7 +970,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _inlineVideo ??= player.buildVideoWidget();
     setState(() => _inlineKey = key);
     await player.open(path);
-    // 声音要显式打开：实例可能带着上一次的静音/外挂/延迟状态
+    // **先等加载完再动音轨**：loadfile 进行中设置的外挂音轨会被加载
+    // 过程吞掉（与「seek 被吞」同一类坑，真机复现为播放无声）
+    await player.waitUntilLoaded();
+    if (!mounted || _inlineKey != key) return;
     await player.setMuted(false);
     if (audioPath != null) {
       // 外挂这一句的配音，audio-delay 把整条配音对齐到该镜的段上——
@@ -982,7 +985,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       await player.setAudioDelayMs(0);
     }
     await player.player.setRate(rate);
-    await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
     Future<void> playSeg() async {
       final ok = await player.playRange(startMs, endMs, 30);

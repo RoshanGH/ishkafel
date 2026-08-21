@@ -822,7 +822,30 @@ class _LineBand extends StatelessWidget {
               // 过期就黑卡（真机发生过）。素材本体已固定到本地，
               // 封面直接用本地抽帧——凡是进入方案的都不依赖会过期的外链
               if (inlineKey == 'shot_${line.id}_$j' && inlineVideo != null)
-                inlineVideo!
+                Stack(fit: StackFit.expand, children: [
+                  inlineVideo!,
+                  // 播这一镜时把它的字幕叠上：听到的话和看到的字对上
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 14,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 3, vertical: 2),
+                      color: Colors.black.withValues(alpha: 0.55),
+                      child: Text(
+                        line.shots[j].subtitleText ?? _autoSubtitleOf(j),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: AppFontSize.micro,
+                            height: 1.3,
+                            color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ])
               else
               Builder(builder: (context) {
                 final local = handlers.shotFramesOf(shot);
