@@ -667,6 +667,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _previewRebuild?.cancel();
     unawaited(_positionSub?.cancel());
     unawaited(_playingSub?.cancel());
+    _replayDebounce?.cancel();
     unawaited(_inlineLoop?.cancel());
     unawaited(_inlinePlayer?.dispose());
     unawaited(_inlineAudio?.dispose());
@@ -1014,19 +1015,36 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
     await playSeg();
     // 播一次就停（用户定的：不要循环）——段尾自然停住后清态，
-    // 按钮从 ⏹ 复位回 ▶
+    // 按钮从 ⏹ 复位回 ▶。**只认段尾**：中途因落盘/重建产生的瞬时
+    // 暂停不该把播放判成结束
     _inlineLoop = player.playingStream.listen((playing) {
-      if (!playing && mounted && _inlineKey == key) {
-        _stopInline();
-      }
+      if (playing || !mounted || _inlineKey != key) return;
+      if (player.positionMs >= endMs - 250) _stopInline();
     });
   }
 
-  /// 重播某一镜（取段/时长刚调完，立即听调整后的效果）——
+  /// 重播某一镜（取段/时长刚调完，听调整后的效果）——
   /// 与点 ▶ 的 toggle 不同，这里无论在不在播都重新来一遍
   Future<void> _replayShotInline(int index, int j) async {
     _stopInline();
     await _playShotInline(index, j);
+  }
+
+  /// 取段调整后的重播防抖。
+  ///
+  /// **松手先别播**：立刻播放的是改动落定前的旧区间，紧接着落盘与
+  /// 预览重建又把它打断——「播一下就停」的顿挫（真机反馈）。
+  /// 这里等改动落定（预览重建防抖 600ms + 余量）再播一次新区间；
+  /// 期间继续拖就重新计时，只在最后一次调整后播一遍
+  Timer? _replayDebounce;
+
+  void _scheduleReplayShot(int index, int j) {
+    _replayDebounce?.cancel();
+    _stopInline();
+    _replayDebounce = Timer(const Duration(milliseconds: 780), () {
+      if (!mounted) return;
+      unawaited(_replayShotInline(index, j));
+    });
   }
 
   void _stopInline() {
@@ -1721,8 +1739,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         );
                       },
                       onPlayShot: _playShotInline,
-                      onTrimDone: (index, j) =>
-                          unawaited(_replayShotInline(index, j)),
+                      onTrimDone: _scheduleReplayShot,
                       onShotSubtitle: (index, j, text) {
                         final line = _doc.lines[index];
                         _mutate((d) =>
