@@ -433,7 +433,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       return local == null
           ? null
           : ShotSource(local, inMs: shot.trimStartMs);
-    }, bgmPathOf: (id) => _bgmCache?.localPathOf(id));
+    },
+        bgmPathOf: (id) => _bgmCache?.localPathOf(id),
+        voiceOk: (path) => File(path).existsSync());
     if (!mounted) return;
     setState(() => _planResult = result);
     if (playback is MultitrackPlayback) {
@@ -736,7 +738,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final factory = ref.read(lineVoiceFactoryProvider);
     if (factory == null) return false;
     final line = _doc.lines.firstWhere((l) => l.id == lineId);
-    final old = line.voiceover;
     setState(() => _generatingLineIds.add(lineId));
     try {
       final service = factory(_task);
@@ -758,8 +759,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                 vo.durationMs)));
       }
       _flushNow();
-      // 新的落稳了才删旧的——失败时旧配音还能听
-      if (old != null) service.deleteStale(old);
+      // 旧配音**不再立即删**：⌘Z 撤销可能把数据回滚到旧文件上，
+      // 立即删就撤成死链（真机发生过：行 2 台词整段无声）。
+      // 不被任何行引用的旧 mp3 由任务清理兜底回收
       return true;
     } catch (e) {
       AppLog.warn('配音生成失败（line=$lineId）：$e');

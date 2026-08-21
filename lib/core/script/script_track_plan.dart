@@ -44,6 +44,10 @@ ScriptPlanResult buildScriptTrackPlan(
   /// 配乐曲子的本地路径（materialId → path）；null = 还没下载好，
   /// 该段先不铺（由调用方交代下载状态）
   String? Function(int materialId)? bgmPathOf,
+
+  /// 配音文件是否还在（撤销可能把数据回滚到已被清理的旧文件上）。
+  /// null = 不检查（纯函数场景）；页面注入 File.existsSync
+  bool Function(String path)? voiceOk,
 }) {
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
@@ -62,6 +66,15 @@ ScriptPlanResult buildScriptTrackPlan(
       skipped[i] = line.type == ScriptLineType.voiced
           ? '还没生成配音（配音时长是这一行的根）'
           : '还没确定时长';
+      continue;
+    }
+    final lineVo = line.voiceover;
+    if (line.type == ScriptLineType.voiced &&
+        lineVo != null &&
+        voiceOk != null &&
+        !voiceOk(lineVo.audioPath)) {
+      // 死链配音不进 EDL——那会静默播出一段没有声音的台词
+      skipped[i] = '配音文件丢失（点「重配」重新生成即可）';
       continue;
     }
     if (line.shots.isEmpty) {
