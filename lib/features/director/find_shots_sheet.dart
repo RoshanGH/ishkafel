@@ -49,6 +49,10 @@ Future<FindShotsResult?> showFindShotsSheet(
   /// 给某个参考视觉镜头按需打标（标签 + 画面描述），返回结果；
   /// null = 没配置 AI 或打标失败（面板据此说明原因，不静默）
   Future<RefShotMeta?> Function(int segIndex)? tagRefShot,
+
+  /// 参考还没切过视觉镜头时，**在面板里**切一次并返回切好的行——
+  /// 面板开着 loading 等它，而不是先展示旧数据、关掉重开才对
+  Future<ScriptLine?> Function()? prepareRef,
 }) =>
     showDialog<FindShotsResult>(
       context: context,
@@ -62,6 +66,7 @@ Future<FindShotsResult?> showFindShotsSheet(
         refThumbOf: refThumbOf,
         refVideoPath: refVideoPath,
         tagRefShot: tagRefShot,
+        prepareRef: prepareRef,
       ),
     );
 
@@ -75,6 +80,7 @@ class _FindShotsSheet extends StatefulWidget {
   final String? Function(int segIndex)? refThumbOf;
   final String? refVideoPath;
   final Future<RefShotMeta?> Function(int segIndex)? tagRefShot;
+  final Future<ScriptLine?> Function()? prepareRef;
 
   const _FindShotsSheet({
     required this.services,
@@ -86,6 +92,7 @@ class _FindShotsSheet extends StatefulWidget {
     this.refThumbOf,
     this.refVideoPath,
     this.tagRefShot,
+    this.prepareRef,
   });
 
   @override
@@ -101,15 +108,15 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
 
   /// 台词维度的检索词（预填本行台词——参考片这一句在说什么）
   late final TextEditingController _voiceoverKw =
-      TextEditingController(text: widget.line.text.trim());
+      TextEditingController(text: _line.text.trim());
 
   /// 画面描述维度的检索词（人来描述想要的画面）
   final TextEditingController _descKw = TextEditingController();
 
   /// 检索用的标签（预填行标签；勾选状态就在这里维护）。
   /// 标签不是一个独立维度，是**所有维度共用的外部约束**
-  late final List<String> _tags = [...widget.line.tags];
-  late final Set<String> _enabledTags = {...widget.line.tags};
+  late final List<String> _tags = [..._line.tags];
+  late final Set<String> _enabledTags = {..._line.tags};
 
   /// 标签名 → miaoa 标签 id。打开面板时按任务的分子标签组拉一次；
   /// 从标签选择器新加的标签会把解析好的 id 补进来
@@ -137,6 +144,14 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   /// 已选镜头（保持加入顺序；预填本行已有的）
   late final List<LineShot> _picked = [...widget.line.shots];
 
+  /// 面板内的行快照：参考切分/打标的结果直接更新它，界面立刻正确
+  /// （此前结果只落在页面的 _doc 上，面板拿的是打开那一刻的旧快照——
+  /// 必须关掉重开才看得到，真机反馈）
+  late ScriptLine _line = widget.line;
+
+  /// 正在切参考的视觉镜头
+  bool _preparingRef = false;
+
   @override
   void initState() {
     super.initState();
@@ -147,6 +162,21 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   void _onSearch() => setState(() {});
 
   Future<void> _bootstrap() async {
+    // 参考还没切过视觉镜头：面板里 loading 等它切完，切完直接显示
+    // 正确的一排镜头（不让人看旧数据）
+    if ((_line.reference?.cuts.isEmpty ?? false) &&
+        _line.reference?.videoPath != null ||
+        (_line.reference != null && _line.reference!.cuts.isEmpty)) {
+      if (widget.prepareRef != null) {
+        setState(() => _preparingRef = true);
+        try {
+          final fresh = await widget.prepareRef!();
+          if (mounted && fresh != null) setState(() => _line = fresh);
+        } finally {
+          if (mounted) setState(() => _preparingRef = false);
+        }
+      }
+    }
     await _loadTagIds();
     if (!mounted) return;
     // 自动预搜（设计稿：默认全自动预填，人只做否决）：
@@ -254,7 +284,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
     setState(() => _tagging = true);
     try {
       final tags = await tagger.tag(
-        text: widget.line.text,
+        text: _line.text,
         groups: widget.task.unitTagGroups,
         constraint: widget.task.unitTagPrompt,
       );
@@ -312,7 +342,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                       color: AppColors.textPrimary)),
               const SizedBox(width: AppSpacing.md),
               Expanded(
-                child: Text(widget.line.text.trim(),
+                child: Text(_line.text.trim(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
@@ -322,7 +352,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             ]),
           ),
           const SizedBox(height: AppSpacing.md),
-          if ((widget.line.reference?.segments.length ?? 0) > 0) ...[
+          if ((_line.reference?.segments.length ?? 0) > 0) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xl),
               child: _refAtomBar(),
@@ -347,7 +377,20 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   /// 点选一个原子 → 检索词切成「这个原子时段说的话」，一个原子一个
   /// 原子地找替代品；再点一下取消回到整句。原子上还能「直接用原片」
   Widget _refAtomBar() {
-    final ref = widget.line.reference!;
+    final ref = _line.reference!;
+    if (_preparingRef) {
+      return Row(children: [
+        const SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 1.6)),
+        const SizedBox(width: AppSpacing.sm),
+        Text('正在把这一句的参考切成视觉镜头…',
+            style: const TextStyle(
+                fontSize: AppFontSize.caption,
+                color: AppColors.textSecondary)),
+      ]);
+    }
     final segments = ref.segments;
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
@@ -375,10 +418,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   Widget _refAtomCard(int k, (int, int) seg) {
     final selected = _refSeg == k;
     final thumb = widget.refThumbOf?.call(k);
-    final meta = widget.line.reference!.metaAt(seg.$1);
+    final meta = _line.reference!.metaAt(seg.$1);
     // 卡上显示两样东西：这一镜的**画面属性**（打过标就是描述+标签，
     // 没打过提示点一下就打）与它的 ASR 台词（**只展示**，不参与检索）
-    final asr = widget.line.reference!.segmentText(k, '');
+    final asr = _line.reference!.segmentText(k, '');
     final text = meta != null
         ? [
             if (meta.description.isNotEmpty) meta.description,
@@ -477,20 +520,20 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       setState(() {
         _refSeg = null;
         _dim = _SearchDim.voiceover;
-        _voiceoverKw.text = widget.line.text.trim();
+        _voiceoverKw.text = _line.text.trim();
         _enabledTags
           ..clear()
-          ..addAll(widget.line.tags);
+          ..addAll(_line.tags);
         _tags
           ..clear()
-          ..addAll(widget.line.tags);
+          ..addAll(_line.tags);
       });
       await _runSearch();
       return;
     }
     setState(() => _refSeg = k);
-    var meta = widget.line.reference?.metaAt(
-        widget.line.reference!.segments[k].$1);
+    var meta = _line.reference?.metaAt(
+        _line.reference!.segments[k].$1);
     if (meta == null && widget.tagRefShot != null) {
       setState(() => _refTagging = true);
       try {
@@ -499,6 +542,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         if (mounted) setState(() => _refTagging = false);
       }
       if (!mounted || _refSeg != k) return;
+      if (meta != null && _line.reference != null) {
+        setState(() =>
+            _line = _line.withReference(_line.reference!.withShotMeta(meta!)));
+      }
       if (meta == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
             content: Text('这一镜没打上标（AI 服务不可用或画面读不出来），'

@@ -789,9 +789,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         usedBy.putIfAbsent(shot.materialId, () => i);
       }
     }
-    // 参考没切过视觉镜头就先就地切一次——弹窗里那一排就是这句在原片
-    // 里的各个视觉镜头
-    unawaited(_ensureRefCuts(line.id));
     final picked = await showFindShotsSheet(
       context,
       services: ref.read(shotSearchServicesProvider),
@@ -807,6 +804,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       },
       refVideoPath: _refVideoOf(line),
       tagRefShot: (segIndex) => _tagRefShot(line.id, segIndex),
+      // 参考没切过视觉镜头：在面板里切（面板开着 loading），切完把
+      // 新的行回给面板——不让人看旧数据、也不必关掉重开
+      prepareRef: () async {
+        await _ensureRefCuts(line.id);
+        return _doc.lines.where((l) => l.id == line.id).firstOrNull;
+      },
     );
     if (picked == null) return;
     // 挑完就把时长按行的根均分好（默认全自动预填，人只做否决）；
