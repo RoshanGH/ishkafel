@@ -6,6 +6,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/audio/voice_catalog.dart';
+import '../../core/script/bgm_rail.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/subtitle/subtitle_style.dart';
@@ -67,6 +68,19 @@ class LineBoardHandlers {
   /// 参考分镜的缩略图本地路径（抽帧后缓存）；null = 还没抽好
   final String? Function(ScriptLine line, int segIndex) refThumbOf;
 
+  /// 这一句所属的配乐段（轨段下标, 段本身, 是不是段首）
+  final ({int index, BgmRailSegment seg, bool isHead}) Function(int lineIndex)
+      bgmOf;
+
+  /// 从这一句开始换一首（切一刀）
+  final void Function(int lineIndex) onBgmSplit;
+
+  /// 点段首色带：换曲 / 音量 / 与上一段合并
+  final void Function(int segIndex) onBgmEdit;
+
+  /// 分界上下挪一句（-1 上移、+1 下移）
+  final void Function(int segIndex, int delta) onBgmMoveBoundary;
+
   const LineBoardHandlers({
     required this.onFocusLine,
     required this.onFindShots,
@@ -94,6 +108,10 @@ class LineBoardHandlers {
     required this.shotStatus,
     required this.onRetryDownload,
     required this.refThumbOf,
+    required this.bgmOf,
+    required this.onBgmSplit,
+    required this.onBgmEdit,
+    required this.onBgmMoveBoundary,
   });
 }
 
@@ -532,7 +550,7 @@ class _LineBand extends StatelessWidget {
         child: Stack(children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md + 3, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+                AppSpacing.md + 13, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -569,10 +587,66 @@ class _LineBand extends StatelessWidget {
               child: const ColoredBox(color: AppColors.accentBlue),
             ),
           ),
+          // 配乐轨：块左缘的一条色带，段首挂曲名。整片被若干刀切成
+          // 连续段——「从这一句开始换一首」而不是「第几行到第几行」
+          Positioned(left: 3, top: 0, bottom: 0, width: 10, child: _bgmRail()),
         ]),
       ),
     );
   }
+
+  /// 配乐色带（块左缘）：同一段同一个颜色，段首显示曲名。
+  /// 悬停：段首出「换曲」，其余出「从这句换一首」
+  Widget _bgmRail() {
+    final info = handlers.bgmOf(index);
+    final seg = info.seg;
+    final color = seg.silent
+        ? AppColors.textTertiary.withValues(alpha: 0.22)
+        : _bgmColors[info.index % _bgmColors.length];
+    return _HoverReveal(
+      builder: (hovering) => Stack(children: [
+        Positioned.fill(
+          child: Padding(
+            padding: EdgeInsets.only(
+                top: info.isHead ? 3 : 0,
+                bottom: seg.endLine == index ? 3 : 0),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: color,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+        if (hovering)
+          Positioned.fill(
+            child: InkWell(
+              key: ValueKey(info.isHead
+                  ? 'band-bgm-edit-$index'
+                  : 'band-bgm-split-$index'),
+              onTap: () => info.isHead
+                  ? handlers.onBgmEdit(info.index)
+                  : handlers.onBgmSplit(index),
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.35),
+                alignment: Alignment.center,
+                child: Icon(info.isHead ? Icons.music_note : Icons.content_cut,
+                    size: 9, color: Colors.white),
+              ),
+            ),
+          ),
+      ]),
+    );
+  }
+
+  /// 段的配色（轮转）：相邻段颜色不同，一眼看出「这里换歌了」
+  static const _bgmColors = <Color>[
+    Color(0xFF7C5CFF),
+    Color(0xFF00B8A9),
+    Color(0xFFFF7A45),
+    Color(0xFF3DA5FF),
+    Color(0xFFE05FA6),
+  ];
 
   // ---- 块头：行号 · 状态点 · 台词（只读，编辑在左栏）----
 

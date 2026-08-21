@@ -12,9 +12,11 @@ import '../../app/theme/app_typography.dart';
 import '../../core/ai/tag_dimension.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/audio/audio_preview.dart';
+import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/script/bgm_rail.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/task_lock.dart';
@@ -40,7 +42,6 @@ import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_list_controller.dart';
 import '../workbench/bgm_picker_sheet.dart';
-import 'bgm_segments_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
 import 'preview_subtitle.dart';
@@ -324,18 +325,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (ids.isNotEmpty) _bgmCache?.pinAll(ids);
   }
 
-  // ---- 配乐 / 字幕 ----
-
-  Future<void> _pickBgm() async {
-    final segments = await showBgmSegmentsSheet(
-      context,
-      doc: _doc,
-      projectIds: [if (_task.project != null) _task.project!.id],
-    );
-    if (segments == null || !mounted) return;
-    _mutate((d) => d.withBgmSegments(segments));
-    _pinBgm();
-  }
+  // ---- 配乐（分段在右栏色带上切；这里只有换曲/音量的动作）----
 
   void _setupPreview() {
     final playback = widget.playbackFactory != null
@@ -944,6 +934,51 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       AppLog.warn('参考镜头打标失败（line=$lineId seg=$segIndex）：$e');
       return null;
     }
+  }
+
+  /// 从这一句开始换一首（在轨上切一刀）：切开后先继承上一段的曲子，
+  /// 紧接着弹选曲——多数时候你就是要给后半段换个曲子
+  Future<void> _bgmSplitAt(int lineIndex) async {
+    final rail = bgmRail(_doc.bgmSegments, _doc.lines.length);
+    final next = splitRailAt(rail, lineIndex);
+    if (identical(next, rail)) return;
+    _mutate((d) => d.withBgmSegments(railToSegments(next)));
+    final segIndex = next.indexWhere((s) => s.startLine == lineIndex);
+    if (segIndex >= 0) await _bgmEditSegment(segIndex);
+  }
+
+  /// 点段首色带：给这一段换曲 / 调音量 / 设为不要配乐 / 与上一段合并
+  Future<void> _bgmEditSegment(int segIndex) async {
+    final rail = bgmRail(_doc.bgmSegments, _doc.lines.length);
+    if (segIndex < 0 || segIndex >= rail.length) return;
+    final seg = rail[segIndex];
+    // 这一段有多长：按已就绪行的时长累加（说清「这段要放多久的曲子」）
+    var rangeMs = 0;
+    for (var i = seg.startLine; i <= seg.endLine && i < _doc.lines.length; i++) {
+      final root = ShotAllocation.rootMsOf(_doc.lines[i]);
+      rangeMs += root ?? 0;
+    }
+    final choice = await showBgmPicker(
+      context,
+      rangeMs: rangeMs,
+      rangeLabel: '第 ${seg.startLine + 1}~${seg.endLine + 1} 句',
+      canClear: true,
+      projectIds: [if (_task.project != null) _task.project!.id],
+      initialVolume: seg.volume,
+      initialMaterials: [if (seg.material != null) seg.material!],
+    );
+    if (choice == null || !mounted) return;
+    final updated = switch (choice) {
+      BgmPicked(materials: final ms, volume: final v) => seg.copyWith(
+          material: ms.isEmpty ? null : ms.first, volume: v),
+      _ => seg.copyWith(material: null),
+    };
+    final next = [
+      for (var i = 0; i < rail.length; i++)
+        if (i == segIndex) updated else rail[i],
+    ];
+    _mutate((d) => d.withBgmSegments(railToSegments(next)));
+    _pinBgm();
   }
 
   /// 改行标签：从妙啊标签体系里搜索、点选、替换（不只是删）
@@ -2000,6 +2035,38 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onUploadReference: _uploadReference,
                       shotStatus: (id) => _mediaCache?.statusOf(id),
                       onRetryDownload: (id) => _mediaCache?.retry(id),
+                      bgmOf: (lineIndex) {
+                        final rail = bgmRail(_doc.bgmSegments, _doc.lines.length);
+                        for (var i = 0; i < rail.length; i++) {
+                          if (lineIndex >= rail[i].startLine &&
+                              lineIndex <= rail[i].endLine) {
+                            return (
+                              index: i,
+                              seg: rail[i],
+                              isHead: lineIndex == rail[i].startLine
+                            );
+                          }
+                        }
+                        return (
+                          index: 0,
+                          seg: BgmRailSegment(
+                              startLine: 0,
+                              endLine: 0,
+                              material: null,
+                              volume: BgmSegment.defaultVolume),
+                          isHead: true
+                        );
+                      },
+                      onBgmSplit: _bgmSplitAt,
+                      onBgmEdit: _bgmEditSegment,
+                      onBgmMoveBoundary: (segIndex, delta) {
+                        final rail =
+                            bgmRail(_doc.bgmSegments, _doc.lines.length);
+                        if (segIndex <= 0 || segIndex >= rail.length) return;
+                        final next = moveRailBoundary(rail, segIndex,
+                            rail[segIndex].startLine + delta);
+                        _mutate((d) => d.withBgmSegments(railToSegments(next)));
+                      },
                       refThumbOf: (line, segIndex) {
                         _ensureRefThumb(line, segIndex);
                         return _refThumbs['${line.id}_$segIndex'];
@@ -2083,14 +2150,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           IconButton(
             key: const ValueKey('director-bgm'),
             visualDensity: VisualDensity.compact,
-            onPressed: _pickBgm,
+            // 还没配乐时：一键给整片配一首（整片就是一段）。
+            // 分段在右栏色带上做——「从这一句开始换一首」
+            onPressed: () => _bgmEditSegment(0),
             iconSize: 16,
-            icon: Icon(Icons.music_note_outlined,
-                color: _doc.bgmSegments.isNotEmpty
-                    ? AppColors.accentBlueLight
-                    : AppColors.textSecondary),
+            icon: Icon(Icons.music_note,
+                color: _doc.bgmSegments.isEmpty
+                    ? AppColors.textSecondary
+                    : AppColors.accentBlueLight),
             tooltip: _doc.bgmSegments.isEmpty
-                ? '配乐'
+                ? '给整片配一首（分段在右栏色带上切）'
                 : '配乐：${_doc.bgmSegments.length} 段',
           ),
           // 顶栏只留可重复、非破坏的动作：配乐 · 生成草片 · 导出成片。
