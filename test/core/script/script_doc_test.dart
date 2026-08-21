@@ -155,7 +155,7 @@ void main() {
       expect(segs.single.endMs, 5000);
     });
 
-    test('subtitleText json 往返；空串表示「这镜不要字幕」', () {
+    test('subtitleText json 往返；清空回到自动匹配', () {
       const shot = LineShot(
           materialId: 1,
           name: 'a',
@@ -163,16 +163,12 @@ void main() {
           allocMs: 1000,
           subtitleText: '家人们');
       expect(LineShot.tryFromJson(shot.toJson())!.subtitleText, '家人们');
+      // 清空 = subtitleText 回到 null = 重新跟随自动匹配
       final line = lineWith(const [
-        LineShot(
-            materialId: 1,
-            name: 'a',
-            durationMs: 9000,
-            allocMs: 5000,
-            subtitleText: ''),
+        LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
       ]);
-      expect(line.shotSubtitleSegments, isEmpty,
-          reason: '写空串 = 显式不要字幕，与「没写」（自动）区分');
+      expect(line.shotSubtitleSegments.single.text, '家人们这是我们的最新产品',
+          reason: '没有手改就按词时间戳自动算这一镜的字');
     });
   });
 

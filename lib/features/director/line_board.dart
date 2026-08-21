@@ -392,9 +392,9 @@ class _ShotSubtitleFieldState extends State<_ShotSubtitleField> {
 
   void _commit() {
     final t = _text.text.trim();
-    // 空 = 恢复自动（null）；与自动结果一字不差也存 null（别把自动值
-    // 固化成手写，镜头时长再调时它还能跟着走）
-    widget.onChanged(t.isEmpty || t == widget.auto ? null : t);
+    // 用户定的规则：**只要写了就算手改**（哪怕内容与自动一致）——
+    // 从此不再跟自动走；**清空就回到自动匹配**
+    widget.onChanged(t.isEmpty ? null : t);
   }
 
   @override
@@ -1185,6 +1185,23 @@ class _LineBand extends StatelessWidget {
                       handlers.onShotSubtitle(index, j, text),
                 ),
               ),
+              // 手改过的镜头脱离自动匹配——标出来并给一键回到自动
+              if (shot.subtitleText != null) ...[
+                const SizedBox(width: AppSpacing.sm),
+                const Text('已手改',
+                    style: TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.orange)),
+                const SizedBox(width: 6),
+                InkWell(
+                  key: ValueKey('band-subtitle-auto-$index-$j'),
+                  onTap: () => handlers.onShotSubtitle(index, j, null),
+                  child: const Text('恢复自动',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          color: AppColors.accentBlueLight)),
+                ),
+              ],
               if (j > 0) ...[
                 const SizedBox(width: AppSpacing.sm),
                 InkWell(
