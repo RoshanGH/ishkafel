@@ -192,6 +192,12 @@ class MediaKitPlaybackController implements MasterTrack {
   @override
   bool get isPlaying => player.state.playing;
 
+  /// 外挂音轨相对视频的偏移：显示视频 t 时播音频 (t - delay)。
+  /// 原位预览一个镜头时用它把「整条配音」对齐到该镜的段上，零转码
+  Future<void> setAudioDelayMs(int ms) => _gate.run(() async {
+        await _setMpv('audio-delay', (ms / 1000).toStringAsFixed(3));
+      });
+
   /// media_kit 原生支持外挂音轨（`AudioTrack.uri`），所以预览不必另起一个
   /// 播放器去追同步——画面与声音由同一个 mpv 对齐。
   @override

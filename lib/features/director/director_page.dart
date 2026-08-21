@@ -972,7 +972,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// [rate] 按镜头的变速倍率播——预览听到看到的就是成片里的样子
   Future<void> _playInline(
       String key, String path, int startMs, int endMs,
-      {double rate = 1.0}) async {
+      {double rate = 1.0, String? audioPath, int audioDelayMs = 0}) async {
     if (_inlineKey == key) {
       _stopInline();
       return;
@@ -989,8 +989,17 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _inlineVideo ??= player.buildVideoWidget();
     setState(() => _inlineKey = key);
     await player.open(path);
-    // 声音要显式打开：实例可能带着上一次的静音/无音轨状态
+    // 声音要显式打开：实例可能带着上一次的静音/外挂/延迟状态
     await player.setMuted(false);
+    if (audioPath != null) {
+      // 外挂这一句的配音，audio-delay 把整条配音对齐到该镜的段上——
+      // 分镜素材本身多是无声的，成片里这一镜配的就是这段配音
+      await player.setExternalAudio(audioPath);
+      await player.setAudioDelayMs(audioDelayMs);
+    } else {
+      await player.clearExternalAudio();
+      await player.setAudioDelayMs(0);
+    }
     await player.player.setRate(rate);
     await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
@@ -1032,26 +1041,53 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     await _playInline('ref_${line.id}', video, startMs, endMs);
   }
 
-  /// 原位播放一个镜头的**选用段**——确认选的是哪段画面
+  /// 原位播放一个镜头——**成片里这一镜的样子**：画面（变速镜头优先用
+  /// 渲好的对齐切片）+ 这一句配音的对应段（外挂对齐；分镜素材本身
+  /// 多是无声的）。没配音的行退回素材原声按倍率播
   Future<void> _playShotInline(int index, int j) async {
     final line = _doc.lines[index];
     if (j < 0 || j >= line.shots.length) return;
     final shot = line.shots[j];
-    final path =
+    final src =
         shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
-    if (path == null) {
+    if (src == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('素材还没下载好，稍等一下再播。')));
       return;
     }
-    final start = shot.trimStartMs;
-    final end = start +
-        (shot.consumedSourceMs > 0
-            ? shot.consumedSourceMs
-            : (shot.durationMs ?? 3000));
-    // 按该镜的变速倍率播：卡上看到听到的就是成片里的节奏
+    // 该镜在行时间轴上的起点 = 前面镜头的 alloc 累计（配音同轴）
+    var segStartMs = 0;
+    for (var i = 0; i < j; i++) {
+      segStartMs += line.shots[i].allocMs ?? 0;
+    }
+    final vo = line.voiceover;
+    final alloc = shot.allocMs ?? shot.durationMs ?? 3000;
+    // 变速镜头优先播渲好的对齐切片（时长 = alloc、配音同速）；
+    // 切片还没渲好就退素材原速近似
+    final clip = shot.speed != 1.0 ? _speedClips[_clipKey(shot)] : null;
+    final String path;
+    final int start;
+    final int end;
+    double rate = 1.0;
+    if (clip != null) {
+      path = clip;
+      start = 0;
+      end = alloc;
+    } else {
+      path = src;
+      start = shot.trimStartMs;
+      end = start +
+          (shot.consumedSourceMs > 0
+              ? shot.consumedSourceMs
+              : (shot.durationMs ?? 3000));
+      // 没配音的画面行：素材原声按倍率播（成片里就是变速原声）
+      if (vo == null) rate = shot.speed;
+    }
     await _playInline('shot_${line.id}_$j', path, start, end,
-        rate: shot.speed);
+        rate: rate,
+        audioPath: vo?.audioPath,
+        // audio-delay：显示视频 t 时播音频 (t - delay)
+        audioDelayMs: vo == null ? 0 : start - segStartMs);
   }
 
   /// 参考分镜一键作镜头：原片本地文件直接当镜头用
