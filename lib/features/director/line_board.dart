@@ -36,6 +36,9 @@ class LineBoardHandlers {
   final ({List<String> frames, double aspect})? Function(LineShot shot)
       shotFramesOf;
 
+  /// 原位播放一个镜头的选用段（在卡上播，不弹窗）；再点一次停
+  final void Function(int index, int shotIndex) onPlayShot;
+
   /// 从第 [shotIndex] 镜起分小行（弹台词切点选择器，把这段字指到镜头组）
   final void Function(int index, int shotIndex) onSplitSubline;
 
@@ -70,6 +73,7 @@ class LineBoardHandlers {
     required this.onSlowFill,
     required this.onEditTags,
     required this.shotFramesOf,
+    required this.onPlayShot,
     required this.onSplitSubline,
     required this.onMergeSubline,
     required this.onManualMs,
@@ -100,6 +104,11 @@ class LineBoard extends StatelessWidget {
 
   /// 预览播放位置当前落在的行：块点亮并自动滚到可见（预览是主角）
   final int? previewLineIndex;
+
+  /// 正在原位播放的卡（'ref_行id' / 'shot_行id_镜下标'）与共享播放器
+  /// 画面——谁在播，画面就挂到谁的卡上
+  final String? inlineKey;
+  final Widget? inlineVideo;
   final LineBoardHandlers handlers;
   final ScrollController? controller;
 
@@ -112,6 +121,8 @@ class LineBoard extends StatelessWidget {
     required this.generatingLineIds,
     required this.playingLineId,
     this.previewLineIndex,
+    this.inlineKey,
+    this.inlineVideo,
     required this.handlers,
     this.controller,
   });
@@ -137,6 +148,8 @@ class LineBoard extends StatelessWidget {
           generating: generatingLineIds.contains(doc.lines[i].id),
           playing: playingLineId == doc.lines[i].id,
           previewing: i == previewLineIndex,
+          inlineKey: inlineKey,
+          inlineVideo: inlineVideo,
           handlers: handlers,
         ),
       ),
@@ -386,6 +399,8 @@ class _LineBand extends StatelessWidget {
 
   /// 预览播放位置正落在这一行
   final bool previewing;
+  final String? inlineKey;
+  final Widget? inlineVideo;
   final LineBoardHandlers handlers;
 
   const _LineBand({
@@ -397,6 +412,8 @@ class _LineBand extends StatelessWidget {
     required this.generating,
     required this.playing,
     required this.previewing,
+    this.inlineKey,
+    this.inlineVideo,
     required this.handlers,
   });
 
@@ -699,12 +716,15 @@ class _LineBand extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: Stack(fit: StackFit.expand, children: [
-            if (thumb != null)
+            if (inlineKey == 'ref_${line.id}' && inlineVideo != null)
+              inlineVideo!
+            else if (thumb != null)
               Image.file(File(thumb), fit: BoxFit.cover)
             else
               Container(color: Colors.black),
-            // 灰调蒙层：参考是原文引用，不与右侧彩色镜头抢
-            Container(color: Colors.black.withValues(alpha: 0.22)),
+            // 灰调蒙层：参考是原文引用，不与右侧彩色镜头抢（播放时不压）
+            if (inlineKey != 'ref_${line.id}')
+              Container(color: Colors.black.withValues(alpha: 0.22)),
             Positioned(
               left: 4,
               top: 4,
@@ -774,6 +794,9 @@ class _LineBand extends StatelessWidget {
               // 缩略图**本地帧优先**：miaoa 的 thumbnailUrl 是签名地址，
               // 过期就黑卡（真机发生过）。素材本体已固定到本地，
               // 封面直接用本地抽帧——凡是进入方案的都不依赖会过期的外链
+              if (inlineKey == 'shot_${line.id}_$j' && inlineVideo != null)
+                inlineVideo!
+              else
               Builder(builder: (context) {
                 final local = handlers.shotFramesOf(shot);
                 if (local != null && local.frames.isNotEmpty) {
@@ -794,6 +817,33 @@ class _LineBand extends StatelessWidget {
                                 size: 14, color: AppColors.textTertiary)
                             : null);
               }),
+              // 原位播放选用段：悬停出 ▶（平时不挡「点卡展开详情」），
+              // 在卡上播不弹窗；播放中常驻 ⏹ 再点停
+              _HoverReveal(
+                builder: (hovering) =>
+                    hovering || inlineKey == 'shot_${line.id}_$j'
+                        ? Center(
+                            child: InkWell(
+                              key: ValueKey('band-play-shot-$index-$j'),
+                              onTap: () => handlers.onPlayShot(index, j),
+                              borderRadius: BorderRadius.circular(999),
+                              child: Container(
+                                padding: const EdgeInsets.all(5),
+                                decoration: BoxDecoration(
+                                    color:
+                                        Colors.black.withValues(alpha: 0.45),
+                                    shape: BoxShape.circle),
+                                child: Icon(
+                                    inlineKey == 'shot_${line.id}_$j'
+                                        ? Icons.stop
+                                        : Icons.play_arrow,
+                                    size: 14,
+                                    color: Colors.white),
+                              ),
+                            ),
+                          )
+                        : const SizedBox.expand(),
+              ),
               Positioned(
                 left: 3,
                 top: 3,

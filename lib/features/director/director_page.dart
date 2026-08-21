@@ -644,6 +644,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _previewRebuild?.cancel();
     unawaited(_positionSub?.cancel());
     unawaited(_playingSub?.cancel());
+    unawaited(_inlineLoop?.cancel());
+    unawaited(_inlinePlayer?.dispose());
     _playback?.dispose();
     _positionMs.dispose();
     unawaited(_voicePreview.dispose());
@@ -956,27 +958,93 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }());
   }
 
-  /// 播放参考：小窗循环。[segIndex] >=0 播该参考分镜（原子）区间，
-  /// 传负数播整段（分子）
+  // ---- 原位播放（卡片就地播，不弹窗）----
+
+  /// 共享的原位播放器：同时只有一张卡在播，谁在播就挂到谁的卡上
+  MediaKitPlaybackController? _inlinePlayer;
+  Widget? _inlineVideo;
+
+  /// 正在原位播放的卡：'ref_行id' 或 'shot_行id_镜下标'；null = 没在播
+  String? _inlineKey;
+  StreamSubscription<bool>? _inlineLoop;
+
+  /// 原位播放一段：再点同一张卡 = 停。播放期间暂停主预览（防串音）
+  Future<void> _playInline(
+      String key, String path, int startMs, int endMs) async {
+    if (_inlineKey == key) {
+      _stopInline();
+      return;
+    }
+    if (!File(path).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('这段视频已不在本地，回来后才能播放。')));
+      return;
+    }
+    await _playback?.pause();
+    await _inlineLoop?.cancel();
+    _inlineLoop = null;
+    final player = _inlinePlayer ??= MediaKitPlaybackController();
+    _inlineVideo ??= player.buildVideoWidget();
+    setState(() => _inlineKey = key);
+    await player.open(path);
+    await player.waitUntilLoaded();
+    if (!mounted || _inlineKey != key) return;
+    Future<void> playSeg() async {
+      final ok = await player.playRange(startMs, endMs, 30);
+      if (!ok) {
+        await player.seekMs(startMs);
+        await player.play();
+      }
+    }
+
+    await playSeg();
+    // 到段尾自然停住（mpv end 属性）：停了就绕回开头循环
+    _inlineLoop = player.playingStream.listen((playing) {
+      if (!playing && mounted && _inlineKey == key) {
+        unawaited(playSeg());
+      }
+    });
+  }
+
+  void _stopInline() {
+    unawaited(_inlineLoop?.cancel());
+    _inlineLoop = null;
+    unawaited(_inlinePlayer?.pause());
+    if (mounted && _inlineKey != null) setState(() => _inlineKey = null);
+  }
+
+  /// 播放参考：**原位**循环播（在参考卡自己的位置上，不弹窗）。
+  /// [segIndex] >=0 播该参考分镜（原子）区间，传负数播整段（分子）
   Future<void> _playReference(int index, int segIndex) async {
     final line = _doc.lines[index];
     final ref = line.reference;
     final video = _refVideoOf(line);
     if (ref == null || video == null) return;
-    if (!File(video).existsSync()) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('参考视频已不在原位，放回后才能播放。')));
-      return;
-    }
     final segments = ref.segments;
     final (startMs, endMs) = segIndex >= 0 && segIndex < segments.length
         ? segments[segIndex]
         : (ref.startMs, ref.endMs);
-    await showDialog<void>(
-      context: context,
-      builder: (_) =>
-          _RefClipDialog(videoPath: video, startMs: startMs, endMs: endMs),
-    );
+    await _playInline('ref_${line.id}', video, startMs, endMs);
+  }
+
+  /// 原位播放一个镜头的**选用段**——确认选的是哪段画面
+  Future<void> _playShotInline(int index, int j) async {
+    final line = _doc.lines[index];
+    if (j < 0 || j >= line.shots.length) return;
+    final shot = line.shots[j];
+    final path =
+        shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
+    if (path == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('素材还没下载好，稍等一下再播。')));
+      return;
+    }
+    final start = shot.trimStartMs;
+    final end = start +
+        (shot.consumedSourceMs > 0
+            ? shot.consumedSourceMs
+            : (shot.durationMs ?? 3000));
+    await _playInline('shot_${line.id}_$j', path, start, end);
   }
 
   /// 参考分镜一键作镜头：原片本地文件直接当镜头用
@@ -1550,6 +1618,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     generatingLineIds: _generatingLineIds,
                     playingLineId: _playingLineId,
                     previewLineIndex: _previewLineIndex,
+                    inlineKey: _inlineKey,
+                    inlineVideo: _inlineVideo,
                     controller: _boardScroll,
                     handlers: LineBoardHandlers(
                       onFocusLine: _focusLine,
@@ -1582,6 +1652,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                               _shotFrameAspect[shot.materialId] ?? 9 / 16,
                         );
                       },
+                      onPlayShot: _playShotInline,
                       onSplitSubline: _splitSubline,
                       onMergeSubline: _mergeSubline,
                       onManualMs: (index, ms) =>
@@ -2336,78 +2407,3 @@ class _SublineCutDialogState extends State<_SublineCutDialog> {
       );
 }
 
-class _RefClipDialog extends StatefulWidget {
-  final String videoPath;
-  final int startMs;
-  final int endMs;
-
-  const _RefClipDialog(
-      {required this.videoPath, required this.startMs, required this.endMs});
-
-  @override
-  State<_RefClipDialog> createState() => _RefClipDialogState();
-}
-
-class _RefClipDialogState extends State<_RefClipDialog> {
-  final MediaKitPlaybackController _player = MediaKitPlaybackController();
-  StreamSubscription<bool>? _loop;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(() async {
-      await _player.open(widget.videoPath);
-      // 等 mpv 真正加载完再定位——加载中发出的 seek 会被吞掉，
-      // 结果就是「每个分镜都从头播」（真机反馈的 bug）
-      await _player.waitUntilLoaded();
-      await _playSegment();
-      // playRange 到区间尾会自然停住（mpv end 属性）：停了就绕回开头循环
-      _loop = _player.playingStream.listen((playing) {
-        if (!playing && mounted) unawaited(_playSegment());
-      });
-    }());
-  }
-
-  Future<void> _playSegment() async {
-    final ok = await _player.playRange(widget.startMs, widget.endMs, 30);
-    if (!ok) {
-      // 区间播放不可用时退回普通播放，至少从这一镜的起点开始
-      await _player.seekMs(widget.startMs);
-      await _player.play();
-    }
-  }
-
-  @override
-  void dispose() {
-    unawaited(_loop?.cancel());
-    _player.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => Dialog(
-        backgroundColor: AppColors.stageBackground,
-        child: SizedBox(
-          width: 300,
-          height: 560,
-          child: Column(children: [
-            Expanded(child: _player.buildVideoWidget()),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              child: Row(children: [
-                Text(
-                    '参考 ${(widget.startMs / 1000).toStringAsFixed(1)}s'
-                    ' ~ ${(widget.endMs / 1000).toStringAsFixed(1)}s（循环）',
-                    style: const TextStyle(
-                        fontSize: AppFontSize.caption,
-                        color: AppColors.textSecondary)),
-                const Spacer(),
-                TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('关闭')),
-              ]),
-            ),
-          ]),
-        ),
-      );
-}
