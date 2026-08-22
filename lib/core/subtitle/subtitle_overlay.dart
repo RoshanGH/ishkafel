@@ -153,31 +153,41 @@ class _TimedWord {
   _TimedWord(this.startMs, this.endMs, this.text);
 }
 
+const _clauseEnders = '，。？！；：、…,.?!;:';
+
 /// 把句子文本里的标点还原到词上（ASR 的词表里通常只有字，标点在句子
 /// 文本里）：顺序扫描，词与词之间的字符附加给前一个词的尾巴
 List<_TimedWord> _restorePunctuation(AsrSentence s) {
   final out = <_TimedWord>[];
   final text = s.text;
   var pos = 0;
+  // 词之间的空隙**只有全是标点才还原**。ASR 的词表和句子文本对不齐是
+  // 常态（真机：「69.9一」被识别成一个词 "69.91"，在原文里根本找不到），
+  // 这时把空隙原样塞回词尾会让这个词凭空变长十几个字，自动分屏就退化
+  // 成「一个字一屏」（真机字幕炸成一列的根因）。对不上就跳过，不硬塞
+  bool allPunct(String t) =>
+      t.isNotEmpty && t.split('').every((c) => _clauseEnders.contains(c));
   for (final AsrWord w in s.words) {
     final idx = text.indexOf(w.text, pos);
     if (idx < 0) {
+      // 对不上：按词长往前推进，后面的词还能重新对上
       out.add(_TimedWord(w.startMs, w.endMs, w.text));
+      pos = (pos + w.text.length).clamp(0, text.length);
       continue;
     }
     if (out.isNotEmpty && idx > pos) {
-      out.last.text += text.substring(pos, idx).trim();
+      final gap = text.substring(pos, idx).trim();
+      if (allPunct(gap)) out.last.text += gap;
     }
     out.add(_TimedWord(w.startMs, w.endMs, w.text));
     pos = idx + w.text.length;
   }
   if (out.isNotEmpty && pos < text.length) {
-    out.last.text += text.substring(pos).trim();
+    final tail = text.substring(pos).trim();
+    if (allPunct(tail)) out.last.text += tail;
   }
   return out;
 }
-
-const _clauseEnders = '，。？！；：、…,.?!;:';
 
 /// 渲染文本里的标点全部剥掉（不留空格）——原片字幕就是无标点的堆字
 /// 风格，句读靠「逐段出现」的节奏表达。标点只在**拆段**阶段用
@@ -194,19 +204,71 @@ String stripPunctuation(String text) {
   return stripped.replaceAll('\u0000', '.');
 }
 
+/// 没有逐字时间戳时的分屏：只按语言切（句读优先、其次字数上限）。
+/// 老配音（早期生成的）没有词级时间，但 26 个字照样不能堆在画面上
+List<String> splitTextByLength(String text, {int maxChars = 18}) {
+  final out = <String>[];
+  final buf = StringBuffer();
+  void flush() {
+    final t = buf.toString().trim();
+    if (t.isNotEmpty) out.add(t);
+    buf.clear();
+  }
+
+  for (var i = 0; i < text.length; i++) {
+    final c = text[i];
+    buf.write(c);
+    // 句读处断开；数字里的小数点不是句读（69.9 不能断成两屏）
+    final isDot = c == '.' &&
+        i > 0 &&
+        i + 1 < text.length &&
+        RegExp(r'\d').hasMatch(text[i - 1]) &&
+        RegExp(r'\d').hasMatch(text[i + 1]);
+    if (_clauseEnders.contains(c) && !isDot) {
+      flush();
+      continue;
+    }
+    if (buf.length >= maxChars) flush();
+  }
+  flush();
+  return List.unmodifiable(out);
+}
+
+/// 一行台词的**自动屏切点**（返回词序号，升序，不含 0）。
+///
+/// 字幕的节奏是语言的节奏：优先在句读标点处切，其次在停顿最大处切，
+/// 每屏不超过 [maxChars] 个字。[sentence] 用来把标点还原到词上。
+List<int> autoScreenCuts(AsrSentence sentence, {int maxChars = 18}) {
+  if (sentence.words.isEmpty) return const [];
+  final words = _restorePunctuation(sentence);
+  final cuts = <int>[];
+  var consumed = 0;
+  var rest = words;
+  while (true) {
+    final parts = _splitByLength(rest, maxChars: maxChars);
+    if (parts.length <= 1) break;
+    consumed += parts.first.length;
+    cuts.add(consumed);
+    rest = rest.sublist(parts.first.length);
+    if (rest.isEmpty) break;
+  }
+  return List.unmodifiable(cuts);
+}
+
 /// 超长的词串按上限拆段。切点优先级：窗口内**最后一个带句读标点的词**
 /// （语义断点最好读）> 窗口内词间停顿最大处 > 硬切在窗口末尾
-List<List<_TimedWord>> _splitByLength(List<_TimedWord> words) {
+List<List<_TimedWord>> _splitByLength(List<_TimedWord> words,
+    {int maxChars = _maxCharsPerLine}) {
   final out = <List<_TimedWord>>[];
   var rest = words;
   int charsOf(List<_TimedWord> ws) =>
       ws.fold(0, (n, w) => n + w.text.length);
-  while (charsOf(rest) > _maxCharsPerLine) {
+  while (charsOf(rest) > maxChars) {
     // 累计字数不超上限的最长前缀
     var window = 0;
     var chars = 0;
     while (window < rest.length &&
-        chars + rest[window].text.length <= _maxCharsPerLine) {
+        chars + rest[window].text.length <= maxChars) {
       chars += rest[window].text.length;
       window++;
     }
@@ -220,11 +282,17 @@ List<List<_TimedWord>> _splitByLength(List<_TimedWord> words) {
       }
     }
     if (cut < 0) {
-      // 没有标点：在窗口内词间停顿最大处切
+      // 没有标点：在窗口**后半段**里挑停顿最大的地方切。
+      //
+      // 两条都是真机踩出来的：①只找「最大停顿」而停顿又都一样大时，
+      // 第一个词就成了赢家，字幕退化成「一个字一屏」；②即便有停顿差异，
+      // 也不该为了几十毫秒的差把一屏切得只剩两三个字——屏要尽量装满，
+      // 所以只在窗口后半段找，平局取更靠后的那个
       var bestGap = -1;
-      for (var i = 0; i < window - 1; i++) {
+      final from = ((window - 1) / 2).floor();
+      for (var i = from; i < window - 1; i++) {
         final gap = rest[i + 1].startMs - rest[i].endMs;
-        if (gap > bestGap) {
+        if (gap >= bestGap) {
           bestGap = gap;
           cut = i;
         }

@@ -92,232 +92,186 @@ void main() {
     });
   });
 
-  group('镜头级字幕（字幕写在镜头上）', () {
-    ScriptLine lineWith(List<LineShot> shots, {List<VoiceWord>? words}) {
-      var l = ScriptLine.create(text: '家人们这是我们的最新产品')
-          .withShots(shots)
-          .withVoiceover(LineVoiceover(
-            audioPath: '/vo.mp3',
-            durationMs: 5000,
-            sourceText: '家人们这是我们的最新产品',
-            voiceId: 'v',
-            speechRate: 0,
-            words: words ??
-                [
-                  for (var i = 0; i < 12; i++)
-                    VoiceWord(
-                        text: '家人们这是我们的最新产品'[i],
-                        startMs: i * 400,
-                        endMs: i * 400 + 380),
-                ],
-          ));
-      return l;
+  group('字幕屏（切点跟语言走，与镜头无关）', () {
+    const long = '家人们你好呀，这是我们今年最新的爆款产品啊，真的很好用哦';
+
+    ScriptLine lineWith(List<LineShot> shots,
+        {String text = long, int durationMs = 7000}) {
+      return ScriptLine.create(text: text).withShots(shots).withVoiceover(
+            LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: durationMs,
+              sourceText: text,
+              voiceId: 'v',
+              speechRate: 0,
+              words: [
+                for (var i = 0; i < text.replaceAll('，', '').length; i++)
+                  VoiceWord(
+                      text: text.replaceAll('，', '')[i],
+                      startMs: (i * durationMs /
+                              text.replaceAll('，', '').length)
+                          .round(),
+                      endMs: (i * durationMs /
+                                  text.replaceAll('，', '').length)
+                              .round() +
+                          180),
+              ],
+            ),
+          );
     }
 
-    test('默认自动预填：每镜的字幕 = 这镜时段内说出口的字', () {
+    test('长台词自动分屏依次出现，不堆在画面上；字不丢、时间递增', () {
       final line = lineWith(const [
-        LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 1200),
-        LineShot(materialId: 2, name: 'b', durationMs: 9000, allocMs: 3800),
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
       ]);
-      final segs = line.shotSubtitleSegments;
-      expect(segs, hasLength(2));
-      expect(segs[0].text, '家人们');
-      expect(segs[0].startMs, 0);
-      expect(segs[0].endMs, 1200);
-      expect(segs[1].text, '这是我们的最新产品');
-    });
-
-    test('人写的字幕优先；相邻镜头同文本合并成一条连续段（不闪断）', () {
-      final line = lineWith(const [
-        LineShot(
-            materialId: 1,
-            name: 'a',
-            durationMs: 9000,
-            allocMs: 1700,
-            subtitleText: '那就趁现在赶紧买'),
-        LineShot(
-            materialId: 2,
-            name: 'b',
-            durationMs: 9000,
-            allocMs: 1400,
-            subtitleText: '那就趁现在赶紧买'),
-        LineShot(
-            materialId: 3,
-            name: 'c',
-            durationMs: 9000,
-            allocMs: 1900,
-            subtitleText: '那就趁现在赶紧买'),
-      ]);
-      final segs = line.shotSubtitleSegments;
-      expect(segs, hasLength(1), reason: '三镜同句 = 一条连续字幕');
-      expect(segs.single.text, '那就趁现在赶紧买');
-      expect(segs.single.startMs, 0);
-      expect(segs.single.endMs, 5000);
-    });
-
-    test('长镜头的字幕按语言节奏分屏依次出现，不堆在画面上', () {
-      // 一个镜头覆盖整句 12 个字（每字 400ms）：自动按标点/停顿/字数
-      // 上限切成若干屏，一屏一屏出——原片里长镜头下字幕就是这么走的
-      const long = '家人们你好呀，这是我们今年最新的爆款产品啊，真的很好用哦';
-      final line = ScriptLine.create(text: long)
-          .withShots(const [
-            LineShot(
-                materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
-          ])
-          .withVoiceover(LineVoiceover(
-            audioPath: '/vo.mp3',
-            durationMs: 7000,
-            sourceText: long,
-            voiceId: 'v',
-            speechRate: 0,
-            words: [
-              for (var i = 0; i < long.length; i++)
-                VoiceWord(
-                    text: long[i],
-                    startMs: (i * 7000 / long.length).round(),
-                    endMs: (i * 7000 / long.length).round() + 180),
-            ],
-          ));
-      final segs = line.shotSubtitleSegments;
+      final segs = line.subtitleScreensAt();
       expect(segs.length, greaterThan(1),
-          reason: '一个长镜头下字幕该分屏依次出现，而不是一次堆上去');
-      expect(segs.map((s) => s.text).join(),
-          long.replaceAll(RegExp('[，。]'), ''),
-          reason: '分屏只是分，字不能丢');
-      for (final s in segs) {
-        expect(s.endMs, greaterThan(s.startMs));
+          reason: '一个长镜头下字幕该一屏一屏出，而不是一次堆上去');
+      expect(segs.first.startMs, 0, reason: '第一屏从行首就在');
+      expect(segs.last.endMs, 7000, reason: '最后一屏留到行末尾');
+      for (var i = 1; i < segs.length; i++) {
+        expect(segs[i].startMs, segs[i - 1].endMs, reason: '屏与屏无缝衔接');
       }
-      expect(segs.first.startMs, lessThan(segs[1].startMs),
-          reason: '按说话顺序依次出现');
     });
 
-    test('手写多行 = 一行一屏（人切的优先），时间按每屏第一个字说出口的时刻',
-        () {
-      final line = ScriptLine.create(text: '家人们你好呀这是我们的最新产品啊')
-          .withShots(const [
-            LineShot(
-                materialId: 1,
-                name: 'a',
-                durationMs: 30000,
-                allocMs: 7000,
-                // 三行 = 三屏，按用户自己的句读切
-                subtitleText: '家人们\n你好呀\n这是我们的最新产品啊'),
-          ])
-          .withVoiceover(LineVoiceover(
-            audioPath: '/vo.mp3',
-            durationMs: 7000,
-            sourceText: '家人们你好呀这是我们的最新产品啊',
-            voiceId: 'v',
-            speechRate: 0,
-            words: [
-              for (var i = 0; i < 16; i++)
-                VoiceWord(
-                    text: '家人们你好呀这是我们的最新产品啊'[i],
-                    startMs: i * 420,
-                    endMs: i * 420 + 400),
-            ],
-          ));
-      final segs = line.shotSubtitleSegments;
-      expect(segs.map((s) => s.text).toList(),
-          ['家人们', '你好呀', '这是我们的最新产品啊']);
-      expect(segs[0].startMs, 0, reason: '第一屏从镜头开头就在');
-      expect(segs[1].startMs, 3 * 420,
-          reason: '第二屏从「你」说出口的那一刻出现');
-      expect(segs[2].startMs, 6 * 420);
-      expect(segs.last.endMs, 7000, reason: '最后一屏留到镜头结束');
+    test('切一刀 = 只记切点：改镜头时长后字幕自愈，不重复不丢屏', () {
+      var line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 4000),
+        LineShot(materialId: 2, name: 'b', durationMs: 30000, allocMs: 3000),
+      ]);
+      line = line.cutSubtitleAt(2000);
+      final before = line.subtitleScreensAt();
+      // 把第一镜从 4 秒缩到 1.6 秒（第二镜补上）——屏该原样还在
+      line = line.withShots(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 1600),
+        LineShot(materialId: 2, name: 'b', durationMs: 30000, allocMs: 5400),
+      ]);
+      final after = line.subtitleScreensAt();
+      expect(after.map((s) => s.text).toList(),
+          before.map((s) => s.text).toList(),
+          reason: '切点跟语言走，与镜头时长无关——不该重复也不该丢屏');
+      expect(after.map((s) => s.text).toSet().length, after.length,
+          reason: '同一段字不许出现两遍');
     });
 
-    test('对不回词序列时按字数比例分时间——不静默糊弄', () {
-      final line = ScriptLine.create(text: '家人们你好')
-          .withShots(const [
-            LineShot(
-                materialId: 1,
-                name: 'a',
-                durationMs: 9000,
-                allocMs: 4000,
-                subtitleText: '完全改过的词\n又一屏'),
-          ])
-          .withVoiceover(LineVoiceover(
-            audioPath: '/vo.mp3',
-            durationMs: 4000,
-            sourceText: '家人们你好',
-            voiceId: 'v',
-            speechRate: 0,
-            words: const [
-              VoiceWord(text: '家', startMs: 0, endMs: 400),
-              VoiceWord(text: '人', startMs: 400, endMs: 800),
-            ],
-          ));
-      final segs = line.shotSubtitleSegments;
-      expect(segs, hasLength(2));
-      expect(segs[0].startMs, 0);
-      expect(segs[1].endMs, 4000);
-      expect(segs[1].startMs, greaterThan(0));
+    test('手写某一屏只改那一屏；标点一律剥掉（预览与成片同一份）', () {
+      var line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
+      ]);
+      line = line.setSubtitleScreenText(0, '家人们，你好呀！');
+      final segs = line.subtitleScreensAt();
+      expect(segs.first.text, '家人们你好呀',
+          reason: '手写的标点也剥——四处显示同一套规则');
+      expect(segs.length, greaterThan(1), reason: '别的屏不受影响');
     });
 
-    test('subtitleText json 往返；清空回到自动匹配', () {
-      const shot = LineShot(
-          materialId: 1,
-          name: 'a',
-          durationMs: 9000,
-          allocMs: 1000,
-          subtitleText: '家人们');
-      expect(LineShot.tryFromJson(shot.toJson())!.subtitleText, '家人们');
-      // 清空 = subtitleText 回到 null = 重新跟随自动匹配
-      final line = lineWith(const [
+    test('某一屏可以显式不出字（纯画面镜）', () {
+      var line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
+      ]);
+      final n = line.subtitleScreensAt().length;
+      line = line.setSubtitleScreenText(0, '');
+      expect(line.subtitleScreensAt().length, n - 1);
+    });
+
+    test('并回上一屏；恢复自动 = 清掉切点', () {
+      var line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
+      ]);
+      line = line.cutSubtitleAt(2000);
+      final cut = line.subtitleScreensAt().length;
+      line = line.mergeSubtitleScreen(1);
+      expect(line.subtitleScreensAt().length, lessThan(cut));
+      line = line.withSubtitleScreens(null);
+      expect(line.subtitleScreens, isNull, reason: '恢复自动');
+    });
+
+    test('停顿一样大时不许一个字一屏——屏要尽量装满', () {
+      const src = '家人们你好呀这是我们今年最新的爆款产品真的很好用';
+      final line = ScriptLine.create(text: src).withShots(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 6000),
+      ]).withVoiceover(LineVoiceover(
+        audioPath: '/vo.mp3',
+        durationMs: 6000,
+        sourceText: src,
+        voiceId: 'v',
+        speechRate: 0,
+        // 逐字等距：词间停顿完全一样大（真机就是这样）
+        words: [
+          for (var i = 0; i < src.length; i++)
+            VoiceWord(
+                text: src[i],
+                startMs: (i * 6000 / src.length).round(),
+                endMs: (i * 6000 / src.length).round() + 200),
+        ],
+      ));
+      final segs = line.subtitleScreensAt(maxChars: 15);
+      expect(segs, hasLength(2), reason: '24 个字按 15 字上限就是两屏');
+      expect(segs.first.text.length, greaterThanOrEqualTo(10),
+          reason: '第一屏要装满，不能只切走一两个字');
+      expect(segs.map((s) => s.text).join(), src, reason: '一个字都不许丢');
+    });
+
+    test('ASR 词表与原文对不齐时不炸屏，价格照原文写', () {
+      // 真机数据：「69.9一」被 ASR 并成一个词 "69.91"。以前这会让
+      // 标点还原把整段原文塞进一个词里，字数爆炸 → 一个字一屏；
+      // 而照词拼接又会把价格写成「69.91瓶」
+      const src = '再不买就恢复69.9一瓶了。';
+      final line = ScriptLine.create(text: src).withShots(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 3000),
+      ]).withVoiceover(LineVoiceover(
+        audioPath: '/vo.mp3',
+        durationMs: 3000,
+        sourceText: src,
+        voiceId: 'v',
+        speechRate: 0,
+        words: const [
+          VoiceWord(text: '再', startMs: 330, endMs: 490),
+          VoiceWord(text: '不', startMs: 490, endMs: 690),
+          VoiceWord(text: '买', startMs: 690, endMs: 890),
+          VoiceWord(text: '就', startMs: 890, endMs: 1130),
+          VoiceWord(text: '恢', startMs: 1130, endMs: 1290),
+          VoiceWord(text: '复', startMs: 1290, endMs: 1410),
+          VoiceWord(text: '69.91', startMs: 1410, endMs: 2330),
+          VoiceWord(text: '瓶', startMs: 2330, endMs: 2490),
+          VoiceWord(text: '了', startMs: 2530, endMs: 2730),
+        ],
+      ));
+      final segs = line.subtitleScreensAt(maxChars: 15);
+      expect(segs, hasLength(1), reason: '13 个字装得下一屏，不许一个字一屏');
+      expect(segs.single.text, '再不买就恢复69.9一瓶了',
+          reason: '字幕按原文出，不按 ASR 词表拼——价格不许写错');
+    });
+
+    test('老配音没有逐字时间：照样分屏（不堆字），时间按字数摊', () {
+      const src = '你宁愿冰箱发霉有异味，也不愿意试试这个滴露除菌喷雾吗？';
+      final line = ScriptLine.create(text: src).withShots(const [
         LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
+      ]).withVoiceover(LineVoiceover(
+        audioPath: '/vo.mp3',
+        durationMs: 5000,
+        sourceText: src,
+        voiceId: 'v',
+        speechRate: 0,
+      ));
+      final segs = line.subtitleScreensAt(maxChars: 15);
+      expect(segs.length, greaterThan(1), reason: '26 个字不能堆在画面上');
+      expect(segs.first.startMs, 0);
+      expect(segs.last.endMs, 5000);
+      expect(segs.map((s) => s.text).join(),
+          '你宁愿冰箱发霉有异味也不愿意试试这个滴露除菌喷雾吗',
+          reason: '一个字都不许丢');
+    });
+
+    test('屏与切点 json 往返不丢', () {
+      var line = lineWith(const [
+        LineShot(materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
       ]);
-      expect(line.shotSubtitleSegments.single.text, '家人们这是我们的最新产品',
-          reason: '没有手改就按词时间戳自动算这一镜的字');
-    });
-  });
-
-  group('台词语义单元内的小行切分（sublineCuts）', () {
-    // 「家人们，这是我们的最新产品」3 镜：「家人们」给前 2 镜、
-    // 后半句给第 3 镜——用户定的分组模型
-    ScriptLine line3shots() =>
-        ScriptLine.create(text: '家人们，这是我们的最新产品').withShots(const [
-          LineShot(materialId: 1, name: 'a', durationMs: 4000, allocMs: 2000),
-          LineShot(materialId: 2, name: 'b', durationMs: 4000, allocMs: 1000),
-          LineShot(materialId: 3, name: 'c', durationMs: 4000, allocMs: 2000),
-        ]);
-
-    test('设切点后 sublines 给出各小行的文本段与镜头范围', () {
-      final line = line3shots().withSublineCuts(const [(4, 2)]);
-      final subs = line.sublines;
-      expect(subs, hasLength(2));
-      expect(subs[0].text, '家人们，');
-      expect(subs[0].shotStart, 0);
-      expect(subs[0].shotEnd, 2, reason: '「家人们」占前两镜');
-      expect(subs[1].text, '这是我们的最新产品');
-      expect(subs[1].shotStart, 2);
-      expect(subs[1].shotEnd, 3);
-    });
-
-    test('没有切点 = 整句一组；json 往返不丢', () {
-      final line = line3shots();
-      expect(line.sublines.single.text, '家人们，这是我们的最新产品');
-      final cut = line.withSublineCuts(const [(4, 2)]);
-      final back = ScriptLine.tryFromJson(cut.toJson())!;
-      expect(back.sublineCuts, const [(4, 2)]);
-    });
-
-    test('镜头删得只剩 1 个后越界切点自动失效，不炸', () {
-      final line = line3shots()
-          .withSublineCuts(const [(4, 2)])
-          .withShots(const [
-        LineShot(materialId: 1, name: 'a', durationMs: 4000, allocMs: 2000),
-      ]);
-      expect(line.sublines, hasLength(1), reason: '切点越界即整句一组');
-    });
-
-    test('小行的时间区间 = 组内镜头 allocMs 累计（字幕显示用）', () {
-      final line = line3shots().withSublineCuts(const [(4, 2)]);
-      final spans = line.sublineSpans;
-      expect(spans[0].startMs, 0);
-      expect(spans[0].endMs, 3000, reason: '前两镜 2000+1000');
-      expect(spans[1].startMs, 3000);
-      expect(spans[1].endMs, 5000);
+      line = line.cutSubtitleAt(2000).setSubtitleScreenText(0, '改过的');
+      final back = ScriptLine.tryFromJson(line.toJson())!;
+      expect(back.subtitleScreens!.map((s) => s.startWord).toList(),
+          line.subtitleScreens!.map((s) => s.startWord).toList());
+      expect(back.subtitleScreens!.first.text, '改过的');
     });
   });
 

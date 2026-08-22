@@ -42,6 +42,12 @@ class SubtitleStyle {
     this.colorHex,
   });
 
+  /// 一屏最多放几个字：竖屏宽 = 高 × 9/16，字号 = 高 × [fontRatio]，
+  /// 留 8% 的左右余量 → 0.5625 × 0.92 ÷ fontRatio。默认字号下约 15 字，
+  /// 与真机实测一致；把字调大，自动分屏就跟着切得更碎（字不会出画）
+  int get maxCharsPerScreen =>
+      (0.5175 / fontRatio).floor().clamp(6, 24);
+
   /// 开箱即用的默认样式
   static const standard = SubtitleStyle();
 

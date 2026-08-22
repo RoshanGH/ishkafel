@@ -306,6 +306,40 @@ class LineRef {
   }
 }
 
+/// 一屏字幕（**屏是一等公民**：字幕的节奏跟语言走，画面的节奏跟镜头走，
+/// 两条独立的轨）。
+///
+/// [startWord] 是这一屏从行内第几个词开始——**只记切点，不记时间**，
+/// 所以镜头时长怎么改，屏都自愈；[text] 只在人真的改了字时才存
+/// （null = 用这几个词拼出来的原文，'' = 这一屏不出字）。
+class SubtitleScreen {
+  final int startWord;
+  final String? text;
+
+  const SubtitleScreen({required this.startWord, this.text});
+
+  SubtitleScreen copyWith({int? startWord, Object? text = _unsetText}) =>
+      SubtitleScreen(
+        startWord: startWord ?? this.startWord,
+        text: identical(text, _unsetText) ? this.text : text as String?,
+      );
+
+  static const _unsetText = Object();
+
+  Map<String, dynamic> toJson() =>
+      {'startWord': startWord, if (text != null) 'text': text};
+
+  static SubtitleScreen? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final w = raw['startWord'];
+    if (w is! int || w < 0) return null;
+    return SubtitleScreen(
+      startWord: w,
+      text: raw['text'] is String ? raw['text'] as String : null,
+    );
+  }
+}
+
 /// 一行里的一个镜头位：从 miaoa 挑中的一条分镜素材。
 ///
 /// 存的是素材的**身份与元信息快照**（名字/台词/画面描述/缩略图），不存
@@ -335,11 +369,10 @@ class LineShot {
   /// 非空时 materialId 只是行内唯一的负数占位，不参与下载/防撞车
   final String? localSource;
 
-  /// 这一镜的字幕文本（**字幕写在镜头上**——用户定的模型）。
-  /// null = 跟随自动匹配（按配音词时间戳算这镜时段说出口的字，
-  /// 时长一改就重算）；非空 = **手改**，从此不跟自动走，直到被清空。
-  /// 多镜共用一句 = 几个镜头写同一句
-  final String? subtitleText;
+  /// 【旧数据】曾经字幕写在镜头上，现在字幕屏挂在行上（见
+  /// [ScriptLine.subtitleScreens]）。这里只保留读取，供打开老方案时
+  /// 一次性迁移成屏；新写入一律不再产生它
+  final String? legacySubtitleText;
 
   const LineShot({
     required this.materialId,
@@ -353,7 +386,7 @@ class LineShot {
     this.speed = 1.0,
     this.allocMs,
     this.localSource,
-    this.subtitleText,
+    this.legacySubtitleText,
   });
 
   /// 从 [trimStartMs] 起、按 [speed] 播，这条素材最多还能出多少**成片时长**。
@@ -375,7 +408,6 @@ class LineShot {
     int? trimStartMs,
     double? speed,
     Object? allocMs = _unsetAlloc,
-    Object? subtitleText = _unsetAlloc,
   }) =>
       LineShot(
         materialId: materialId,
@@ -389,9 +421,6 @@ class LineShot {
         speed: speed ?? this.speed,
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
         localSource: localSource,
-        subtitleText: subtitleText == _unsetAlloc
-            ? this.subtitleText
-            : subtitleText as String?,
       );
 
   static const _unsetAlloc = Object();
@@ -413,7 +442,6 @@ class LineShot {
         if (speed != 1.0) 'speed': speed,
         if (allocMs != null) 'allocMs': allocMs,
         if (localSource != null) 'localSource': localSource,
-        if (subtitleText != null) 'subtitleText': subtitleText,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -437,7 +465,7 @@ class LineShot {
       allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
       localSource:
           raw['localSource'] is String ? raw['localSource'] as String : null,
-      subtitleText:
+      legacySubtitleText:
           raw['subtitleText'] is String ? raw['subtitleText'] as String : null,
     );
   }
@@ -475,11 +503,9 @@ class ScriptLine {
   /// 行级字幕样式覆盖；null = 跟随全局（素材自带字幕位置不同时按行改）
   final SubtitleStyle? subtitleOverride;
 
-  /// 台词语义单元内的**小行切分**：把台词文本与镜头序列同步分组——
-  /// 「家人们」指定给前两个镜头、后半句归其余镜头。每个切点是
-  /// (文本字符索引, 镜头下标)，两轴都升序；空 = 不分组（整句一组）。
-  /// 字幕的显示区间跟组走：这段字横跨组内所有镜头
-  final List<(int, int)> sublineCuts;
+  /// 这一行的字幕屏（切点 + 可选的文本覆盖）。null = 全自动
+  /// （按标点/停顿/每屏字数上限分屏，镜头时长一改就重算）
+  final List<SubtitleScreen>? subtitleScreens;
 
   ScriptLine({
     required this.id,
@@ -492,10 +518,9 @@ class ScriptLine {
     List<LineShot> shots = const [],
     this.reference,
     this.subtitleOverride,
-    List<(int, int)> sublineCuts = const [],
+    this.subtitleScreens,
   })  : tags = List.unmodifiable(tags),
-        shots = List.unmodifiable(shots),
-        sublineCuts = List.unmodifiable(sublineCuts);
+        shots = List.unmodifiable(shots);
 
   static int _seq = 0;
 
@@ -532,7 +557,7 @@ class ScriptLine {
     Object? voiceover = _unset,
     List<LineShot>? shots,
     Object? subtitleOverride = _unset,
-    List<(int, int)>? sublineCuts,
+    Object? subtitleScreens = _unset,
   }) =>
       ScriptLine(
         id: id,
@@ -548,7 +573,9 @@ class ScriptLine {
         subtitleOverride: subtitleOverride == _unset
             ? this.subtitleOverride
             : subtitleOverride as SubtitleStyle?,
-        sublineCuts: sublineCuts ?? this.sublineCuts,
+        subtitleScreens: subtitleScreens == _unset
+            ? this.subtitleScreens
+            : subtitleScreens as List<SubtitleScreen>?,
       );
 
   static const _unset = Object();
@@ -572,41 +599,205 @@ class ScriptLine {
   ScriptLine withSubtitleOverride(SubtitleStyle? next) =>
       _copy(subtitleOverride: next);
 
-  ScriptLine withSublineCuts(List<(int, int)> next) =>
-      _copy(sublineCuts: next);
+  /// 换这一行的字幕屏（null = 恢复全自动）
+  ScriptLine withSubtitleScreens(List<SubtitleScreen>? next) =>
+      _copy(subtitleScreens: next);
 
-  /// 镜头级字幕段（行时间轴）：**字幕写在镜头上**。
+  /// 词 → 原文字符区间（顺序扫描；对不上的词给 null）
+  static List<(int, int)?> _wordOffsets(String src, List<VoiceWord> words) {
+    final out = <(int, int)?>[];
+    var pos = 0;
+    for (final w in words) {
+      final idx = w.text.isEmpty ? -1 : src.indexOf(w.text, pos);
+      if (idx < 0) {
+        out.add(null);
+        pos = (pos + w.text.length).clamp(0, src.length);
+        continue;
+      }
+      out.add((idx, idx + w.text.length));
+      pos = idx + w.text.length;
+    }
+    return out;
+  }
+
+  /// 第 [from, to) 个词对应的原文片段；对不齐时退回词拼接
+  static String _sliceSource(
+      String src, List<(int, int)?> offsets, int from, int to) {
+    int? start;
+    int? end;
+    for (var k = from; k < to && k < offsets.length; k++) {
+      final o = offsets[k];
+      if (o == null) continue;
+      start ??= o.$1;
+      end = o.$2;
+    }
+    if (start == null || end == null || end <= start) return '';
+    return src.substring(start, end);
+  }
+
+  /// 这一行的字幕屏（行时间轴）：**屏是一等公民**——切点跟语言走、
+  /// 与镜头无关；镜头时长怎么改，屏都自愈。
   ///
-  /// 每镜的文本 = 人写的 [LineShot.subtitleText]（空串 = 不要字幕），
-  /// 没写则自动预填「这镜时段内说出口的字」（配音词时间戳，词的时间
-  /// 中点归属）。相邻镜头文本相同合并为一条连续段——多镜共用一句时
-  /// 字幕不闪断。预览与导出都用这一份
-  List<({int startMs, int endMs, String text})> get shotSubtitleSegments {
+  /// 每屏的文本：人改过就用人的（'' = 这一屏不出字），没改过就用这几个
+  /// 词拼出来的原文（标点一律剥掉——原片字幕就是无标点的堆字风格，
+  /// 预览、卡片、成片四处同一份）。
+  /// 每屏何时出现：这一屏第一个字说出口的时刻（第一屏从行首就在），
+  /// 显示到下一屏出现为止；最后一屏留到行末尾。
+  /// [maxChars] 是自动分屏的每屏字数上限——由**字号**推导
+  /// （见 [SubtitleStyle.maxCharsPerScreen]）：知道生效样式的调用方
+  /// （预览 / 卡片 / 导出）都把它传进来，字调大了屏就切得更碎、不出画。
+  /// 不传时按本行覆盖样式或默认样式算
+  List<({int startMs, int endMs, String text})> subtitleScreensAt(
+      {int? maxChars}) {
+    final chars =
+        maxChars ?? (subtitleOverride ?? const SubtitleStyle()).maxCharsPerScreen;
     final vo = voiceover;
+    if (type != ScriptLineType.voiced || vo == null) return const [];
+    // 行长 = 画面总长（镜头 alloc 之和）；还没配镜头就用配音时长
+    var lineSpan = 0;
+    for (final s in shots) {
+      lineSpan += s.allocMs ?? 0;
+    }
+    if (lineSpan <= 0) lineSpan = vo.durationMs;
+    if (lineSpan <= 0) return const [];
+    final words = vo.words;
+    if (words.isEmpty) {
+      // 老配音没有逐字时间戳：仍然分屏（26 个字堆在画面上是不合格的），
+      // 只是切点靠语言与字数、时间按字数比例摊——这是**说得出口的降级**，
+      // 界面上会写明「按字数均分」，重新生成配音后就有逐字时间了
+      final src = vo.sourceText.trim().isNotEmpty ? vo.sourceText : text;
+      final parts = [
+        for (final p in splitTextByLength(src.trim(), maxChars: chars))
+          if (stripPunctuation(p).isNotEmpty) p,
+      ];
+      if (parts.isEmpty) return const [];
+      final total = parts.fold<int>(0, (n, p) => n + p.length);
+      final out = <({int startMs, int endMs, String text})>[];
+      var cursor = 0;
+      for (var i = 0; i < parts.length; i++) {
+        final end = i == parts.length - 1
+            ? lineSpan
+            : cursor +
+                (lineSpan * parts[i].length / total).round().clamp(1, lineSpan);
+        out.add((
+          startMs: cursor,
+          endMs: end.clamp(cursor, lineSpan),
+          text: stripPunctuation(parts[i].trim())
+        ));
+        cursor = end;
+      }
+      return out;
+    }
+    final sentence = AsrSentence(
+      startMs: 0,
+      endMs: vo.durationMs,
+      text: vo.sourceText,
+      words: [
+        for (final w in words)
+          AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
+      ],
+    );
+    // 切点：人切过就用人的，否则按语言节奏自动切
+    final manual = subtitleScreens;
+    final cuts = <int>[
+      0,
+      ...(manual != null
+              ? manual.map((s) => s.startWord).where((w) => w > 0)
+              : autoScreenCuts(sentence, maxChars: chars))
+          .where((w) => w < words.length),
+    ]..sort();
+    // 每个词在原文里的字符区间（对不上给 null）
+    final src = vo.sourceText.trim().isNotEmpty ? vo.sourceText : text;
+    final offsets = _wordOffsets(src, words);
     final out = <({int startMs, int endMs, String text})>[];
-    var cursor = 0;
-    for (final shot in shots) {
-      final alloc = shot.allocMs ?? 0;
-      if (alloc <= 0) continue;
-      final start = cursor;
-      final end = cursor + alloc;
-      cursor = end;
-      final screens = <({int startMs, int endMs, String text})>[];
-      final written = shot.subtitleText;
-      if (written != null) {
-        // 人写的：**一行一屏**（回车就是切一刀）。每屏什么时候出现，
-        // 由「这屏第一个字什么时候说出口」定；对不回词序列（改过字）
-        // 的按字数比例分——不静默糊弄
-        final lines = [
-          for (final l in written.split('\n'))
-            if (l.trim().isNotEmpty) l.trim(),
-        ];
-        if (lines.isEmpty) continue;
-        screens.addAll(_placeScreens(lines, vo, start, end));
-      } else if (vo != null && vo.words.isNotEmpty) {
-        // 自动：镜头内按**语言节奏**分屏（词时间戳 + 标点 + 每屏字数
-        // 上限）——长镜头下字幕一屏一屏出，不是一次堆上去
-        final sentence = AsrSentence(
+    for (var i = 0; i < cuts.length; i++) {
+      final from = cuts[i];
+      final to = i + 1 < cuts.length ? cuts[i + 1] : words.length;
+      if (to <= from) continue;
+      // 人改过这一屏的字就用人的；'' = 这一屏不出字
+      final override = manual != null && i < manual.length
+          ? manual[i].text
+          : null;
+      // 屏文本**优先从原文切片**：ASR 词表会把「69.9一」并成一个词
+      // "69.91"，照词拼接就把价格写错了（进入成片的字不许凭空错）。
+      // 对不齐时才退回词拼接
+      var raw = override ?? _sliceSource(src, offsets, from, to);
+      if (raw.isEmpty && override == null) {
+        raw = [for (var k = from; k < to; k++) words[k].text].join();
+      }
+      final t = stripPunctuation(raw.trim());
+      final start = i == 0 ? 0 : words[from].startMs.clamp(0, lineSpan);
+      final end = (i + 1 < cuts.length
+              ? words[cuts[i + 1]].startMs
+              : lineSpan)
+          .clamp(0, lineSpan);
+      if (end <= start || t.isEmpty) continue;
+      out.add((startMs: start, endMs: end, text: t));
+    }
+    return out;
+  }
+
+  /// 兼容名：预览/卡片/导出都读这一份（曾经按镜头切，现在按屏）
+  List<({int startMs, int endMs, String text})> get shotSubtitleSegments =>
+      subtitleScreensAt();
+
+
+  /// 在行时间轴 [atMs] 处切一刀（打轴/回车分屏都走它）：
+  /// 找到这一刻正在说的那个词，从它开始另起一屏。已经是切点就原样返回
+  ScriptLine cutSubtitleAt(int atMs, {int? maxChars}) {
+    final vo = voiceover;
+    if (vo == null || vo.words.isEmpty) return this;
+    final words = vo.words;
+    var idx = -1;
+    for (var i = 0; i < words.length; i++) {
+      if (words[i].startMs >= atMs) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx <= 0) return this;
+    final current = _screensOrAuto(maxChars: maxChars);
+    if (current.any((s) => s.startWord == idx)) return this;
+    final next = [...current, SubtitleScreen(startWord: idx)]
+      ..sort((a, b) => a.startWord.compareTo(b.startWord));
+    return withSubtitleScreens(next);
+  }
+
+  /// 把第 [screenIndex] 屏并回上一屏（删这一刀）
+  ScriptLine mergeSubtitleScreen(int screenIndex, {int? maxChars}) {
+    final current = _screensOrAuto(maxChars: maxChars);
+    if (screenIndex <= 0 || screenIndex >= current.length) return this;
+    return withSubtitleScreens([
+      for (var i = 0; i < current.length; i++)
+        if (i != screenIndex) current[i],
+    ]);
+  }
+
+  /// 改第 [screenIndex] 屏的字（null = 这屏回到原文，'' = 这屏不出字）
+  ScriptLine setSubtitleScreenText(int screenIndex, String? text,
+      {int? maxChars}) {
+    final current = _screensOrAuto(maxChars: maxChars);
+    if (screenIndex < 0 || screenIndex >= current.length) return this;
+    return withSubtitleScreens([
+      for (var i = 0; i < current.length; i++)
+        if (i == screenIndex) current[i].copyWith(text: text) else current[i],
+    ]);
+  }
+
+  /// 当前的屏切点：人切过就是人的，否则把自动结果**固化一次**
+  /// （人一动就成为「已手改」，这一行从此按人的切点走）
+  List<SubtitleScreen> _screensOrAuto({int? maxChars}) {
+    final chars =
+        maxChars ?? (subtitleOverride ?? const SubtitleStyle()).maxCharsPerScreen;
+    final manual = subtitleScreens;
+    if (manual != null) return manual;
+    final vo = voiceover;
+    if (vo == null || vo.words.isEmpty) {
+      return const [SubtitleScreen(startWord: 0)];
+    }
+    final cuts = autoScreenCuts(
+        maxChars: chars,
+        AsrSentence(
           startMs: 0,
           endMs: vo.durationMs,
           text: vo.sourceText,
@@ -614,172 +805,11 @@ class ScriptLine {
             for (final w in vo.words)
               AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
           ],
-        );
-        final lines = subtitleLinesInSlot(
-            sentences: [sentence], slotStartMs: start, slotEndMs: end);
-        for (var i = 0; i < lines.length; i++) {
-          final l = lines[i];
-          screens.add((
-            startMs: l.startMs + start,
-            // 一屏显示到下一屏出现为止；这一镜的最后一屏留到镜头结束
-            // ——不然镜头末尾会有一小段没字幕的空当（闪一下）
-            endMs: i + 1 < lines.length
-                ? lines[i + 1].startMs + start
-                : end,
-            text: l.text,
-          ));
-        }
-      } else {
-        // 老配音没有词级时间戳：整句兜底（保持旧行为，不倒退）
-        final t = text.trim();
-        if (t.isNotEmpty) {
-          screens.add((startMs: start, endMs: end, text: t));
-        }
-      }
-      for (final s in screens) {
-        if (s.text.isEmpty || s.endMs <= s.startMs) continue;
-        // 相邻镜头显示同一屏文字时连成一条：多镜共用一句不闪断
-        if (out.isNotEmpty &&
-            out.last.text == s.text &&
-            out.last.endMs == s.startMs) {
-          final last = out.removeLast();
-          out.add((startMs: last.startMs, endMs: s.endMs, text: s.text));
-        } else {
-          out.add(s);
-        }
-      }
-    }
-    return out;
-  }
-
-  /// 把人写的每一屏放到时间轴上：按顺序把每屏文字对回词序列，
-  /// 取「这屏第一个字说出口的时刻」作为它的出现时间；对不上就按
-  /// 字数比例分掉剩下的时间
-  List<({int startMs, int endMs, String text})> _placeScreens(
-      List<String> lines, LineVoiceover? vo, int slotStart, int slotEnd) {
-    final starts = List<int?>.filled(lines.length, null);
-    final words = vo?.words ?? const <VoiceWord>[];
-    if (words.isNotEmpty) {
-      // 只在这一镜时间窗内的词里对——跨镜的字不参与
-      final inSlot = [
-        for (final w in words)
-          if ((w.startMs + w.endMs) / 2 >= slotStart &&
-              (w.startMs + w.endMs) / 2 < slotEnd)
-            w,
-      ];
-      var wi = 0;
-      for (var i = 0; i < lines.length; i++) {
-        final chars = lines[i].replaceAll(RegExp(r'\s'), '');
-        if (chars.isEmpty || wi >= inSlot.length) continue;
-        // 这屏的第一个字：从当前位置往后找（允许跳过对不上的词）
-        var found = -1;
-        for (var k = wi; k < inSlot.length && k < wi + 6; k++) {
-          if (chars.startsWith(inSlot[k].text)) {
-            found = k;
-            break;
-          }
-        }
-        if (found < 0) continue;
-        starts[i] = i == 0 ? slotStart : inSlot[found].startMs;
-        // 往前推进 chars 长度那么多个词
-        var consumed = 0;
-        var k = found;
-        while (k < inSlot.length && consumed < chars.length) {
-          consumed += inSlot[k].text.length;
-          k++;
-        }
-        wi = k;
-      }
-    }
-    // 没对上的屏：按字数比例把相邻已知锚点之间的时间分掉
-    final out = <({int startMs, int endMs, String text})>[];
-    for (var i = 0; i < lines.length; i++) {
-      final s = starts[i];
-      if (s != null) continue;
-      final prev = i == 0 ? slotStart : (out.isNotEmpty ? out.last.endMs : slotStart);
-      // 下一个已知锚点
-      var nextAnchor = slotEnd;
-      for (var j = i + 1; j < lines.length; j++) {
-        if (starts[j] != null) {
-          nextAnchor = starts[j]!;
-          break;
-        }
-      }
-      final restChars = [
-        for (var j = i; j < lines.length && starts[j] == null; j++)
-          lines[j].length,
-      ].fold(0, (a, b) => a + b);
-      final span = nextAnchor - prev;
-      starts[i] = prev;
-      if (restChars > 0 && span > 0) {
-        // 这一屏按自己的字数占比分走一段（下一屏从这里接着算）
-        final mine = (span * lines[i].length / restChars).round();
-        out.add((startMs: prev, endMs: prev + mine, text: lines[i]));
-      }
-    }
-    // 统一按锚点生成（上面只是为了算出没对上的那些的起点）
-    final result = <({int startMs, int endMs, String text})>[];
-    for (var i = 0; i < lines.length; i++) {
-      final s = starts[i] ?? slotStart;
-      final e = i + 1 < lines.length ? (starts[i + 1] ?? slotEnd) : slotEnd;
-      result.add((
-        startMs: s.clamp(slotStart, slotEnd),
-        endMs: e.clamp(slotStart, slotEnd),
-        text: lines[i],
-      ));
-    }
-    return result;
-  }
-
-  /// 有效切点：文本与镜头两轴都在界内且严格递增——镜头删了、台词改了
-  /// 之后越界的切点自动失效（宽容派生，不炸也不静默保留错数据）
-  List<(int, int)> get _validCuts {
-    final out = <(int, int)>[];
-    var lastChar = 0;
-    var lastShot = 0;
-    for (final (c, s) in sublineCuts) {
-      if (c <= lastChar || c >= text.length) continue;
-      if (s <= lastShot || s >= shots.length) continue;
-      out.add((c, s));
-      lastChar = c;
-      lastShot = s;
-    }
-    return out;
-  }
-
-  /// 小行序列：每个小行 = 一段台词文本 + 它对应的镜头范围
-  /// [shotStart, shotEnd)。没有切点（或切点全失效）= 整句一组
-  List<({String text, int shotStart, int shotEnd})> get sublines {
-    final cuts = _validCuts;
-    final out = <({String text, int shotStart, int shotEnd})>[];
-    var charFrom = 0;
-    var shotFrom = 0;
-    for (final (c, s) in [...cuts, (text.length, shots.length)]) {
-      out.add((
-        text: text.substring(charFrom, c),
-        shotStart: shotFrom,
-        shotEnd: s,
-      ));
-      charFrom = c;
-      shotFrom = s;
-    }
-    return out;
-  }
-
-  /// 各小行的时间区间（行时间轴）：组内镜头 allocMs 累计。
-  /// 字幕的显示区间用它——这段字横跨组内所有镜头
-  List<({int startMs, int endMs, String text})> get sublineSpans {
-    final out = <({int startMs, int endMs, String text})>[];
-    var cursor = 0;
-    for (final sub in sublines) {
-      var span = 0;
-      for (var i = sub.shotStart; i < sub.shotEnd && i < shots.length; i++) {
-        span += shots[i].allocMs ?? 0;
-      }
-      out.add((startMs: cursor, endMs: cursor + span, text: sub.text));
-      cursor += span;
-    }
-    return out;
+        ));
+    return [
+      const SubtitleScreen(startWord: 0),
+      for (final c in cuts) SubtitleScreen(startWord: c),
+    ];
   }
 
   /// 换参考段（行级上传参考视频用）。_copy 不动 reference（它跟行身份走），
@@ -809,11 +839,46 @@ class ScriptLine {
         if (reference != null) 'reference': reference!.toJson(),
         if (subtitleOverride != null)
           'subtitleOverride': subtitleOverride!.toJson(),
-        if (sublineCuts.isNotEmpty)
-          'sublineCuts': [
-            for (final (c, sh) in sublineCuts) {'char': c, 'shot': sh},
+        if (subtitleScreens != null)
+          'subtitleScreens': [
+            for (final sc in subtitleScreens!) sc.toJson(),
           ],
       };
+
+  /// 【旧数据迁移】老方案把字幕写在镜头上（LineShot.subtitleText）。
+  /// 打开时一次性折算成行级字幕屏：镜头边界当切点、镜头上写的字当这屏
+  /// 的文本；相邻镜头写了同一句就不切（原来它们本就连成一条）。
+  /// 迁移完屏跟语言走，改镜头时长不再影响字幕——但用户写过的字一个不丢
+  static ScriptLine _migrateLegacyShotSubtitles(ScriptLine line) {
+    if (line.subtitleScreens != null) return line;
+    if (!line.shots.any((s) => s.legacySubtitleText != null)) return line;
+    final words = line.voiceover?.words ?? const <VoiceWord>[];
+    if (words.isEmpty) return line;
+    final screens = <SubtitleScreen>[];
+    var shotStart = 0;
+    String? prevText;
+    for (var i = 0; i < line.shots.length; i++) {
+      final shot = line.shots[i];
+      final t = shot.legacySubtitleText;
+      final sameAsPrev = i > 0 && t == prevText;
+      if (!sameAsPrev) {
+        var idx = 0;
+        if (i > 0) {
+          idx = words.indexWhere((w) => w.startMs >= shotStart);
+          if (idx <= 0) idx = -1; // 对不上就不切这一刀
+        }
+        if (idx >= 0 && !screens.any((sc) => sc.startWord == idx)) {
+          screens.add(SubtitleScreen(startWord: idx, text: t));
+        }
+      }
+      prevText = t;
+      shotStart += shot.allocMs ?? 0;
+    }
+    if (screens.isEmpty || screens.first.startWord != 0) {
+      screens.insert(0, const SubtitleScreen(startWord: 0));
+    }
+    return line.withSubtitleScreens(screens);
+  }
 
   /// 宽松解析：一条坏行只丢它自己，不牵连整份脚本
   static ScriptLine? tryFromJson(Object? raw) {
@@ -821,7 +886,7 @@ class ScriptLine {
     final id = raw['id'];
     final text = raw['text'];
     if (id is! String || id.isEmpty || text is! String) return null;
-    return ScriptLine(
+    return _migrateLegacyShotSubtitles(ScriptLine(
       id: id,
       text: text,
       manualMs: raw['manualMs'] is int ? raw['manualMs'] as int : null,
@@ -841,13 +906,13 @@ class ScriptLine {
       subtitleOverride: raw['subtitleOverride'] is Map
           ? SubtitleStyle.fromJson(raw['subtitleOverride'])
           : null,
-      sublineCuts: [
-        if (raw['sublineCuts'] is List)
-          for (final c in raw['sublineCuts'] as List)
-            if (c is Map && c['char'] is int && c['shot'] is int)
-              (c['char'] as int, c['shot'] as int),
-      ],
-    );
+      subtitleScreens: raw['subtitleScreens'] is List
+          ? [
+              for (final sc in raw['subtitleScreens'] as List)
+                ?SubtitleScreen.tryFromJson(sc),
+            ]
+          : null,
+    ));
   }
 }
 
@@ -988,21 +1053,32 @@ class ScriptDoc {
     return _update(index, (line) => line.withTags(tags));
   }
 
-  /// 按行 id 给某一镜写字幕（null = 恢复自动跟随词时间戳）
-  ScriptDoc setShotSubtitleById(String lineId, int shotIndex, String? text) {
+  /// 按行 id 改第 [screenIndex] 屏的字（null = 回到原文，'' = 这屏不出字）
+  ScriptDoc setScreenTextById(String lineId, int screenIndex, String? text,
+      {int? maxChars}) {
     final index = lines.indexWhere((l) => l.id == lineId);
-    return _update(index, (line) {
-      if (shotIndex < 0 || shotIndex >= line.shots.length) return line;
-      final shots = [...line.shots];
-      shots[shotIndex] = shots[shotIndex].copyWith(subtitleText: text);
-      return line.withShots(shots);
-    });
+    return _update(index,
+        (line) => line.setSubtitleScreenText(screenIndex, text, maxChars: maxChars));
   }
 
-  /// 按行 id 设小行切分（台词段 ↔ 镜头组的指定）
-  ScriptDoc setSublineCutsById(String lineId, List<(int, int)> cuts) {
+  /// 按行 id 把第 [screenIndex] 屏并回上一屏
+  ScriptDoc mergeScreenById(String lineId, int screenIndex, {int? maxChars}) {
     final index = lines.indexWhere((l) => l.id == lineId);
-    return _update(index, (line) => line.withSublineCuts(cuts));
+    return _update(index,
+        (line) => line.mergeSubtitleScreen(screenIndex, maxChars: maxChars));
+  }
+
+  /// 按行 id 在行时间轴 [atMs] 处切一刀（打轴 / 拆屏）
+  ScriptDoc cutScreenById(String lineId, int atMs, {int? maxChars}) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(
+        index, (line) => line.cutSubtitleAt(atMs, maxChars: maxChars));
+  }
+
+  /// 按行 id 让字幕恢复全自动（清掉切点与改字）
+  ScriptDoc resetScreensById(String lineId) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withSubtitleScreens(null));
   }
 
   /// 按行 id 换参考段（行级参考视频上传）

@@ -672,6 +672,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     unawaited(_playingSub?.cancel());
     _replayDebounce?.cancel();
     unawaited(_inlineLoop?.cancel());
+    unawaited(_inlinePosSub?.cancel());
+    _inlinePositionMs.dispose();
     unawaited(_inlinePlayer?.dispose());
     unawaited(_inlineAudio?.dispose());
     _playback?.dispose();
@@ -998,61 +1000,52 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _pinBgm();
   }
 
-  /// 打轴：正在原位播这一镜时，在**当前播放位置**把字幕切成两屏。
-  /// 十秒六句话，听一遍点五下就切完了——比数字数快
+  /// 一句短提示（打轴这类高频操作要立刻有交代，不许点了没反应）
+  void _toast(String message) {
+    if (!mounted) return;
+    final m = ScaffoldMessenger.of(context)..clearSnackBars();
+    m.showSnackBar(SnackBar(
+        content: Text(message), duration: const Duration(seconds: 2)));
+  }
+
+  /// 打轴：正在原位播这一镜时，在**当前播放位置**换一屏。
+  /// 十秒六句话，听一遍点五下就切完了——比数字数快。
+  /// 切点只记「从哪个字另起一屏」，镜头时长怎么改都不跑偏
   void _cutSubtitleHere(int index, int j) {
     final line = _doc.lines[index];
     if (j < 0 || j >= line.shots.length) return;
     final player = _inlinePlayer;
-    if (player == null || _inlineKey != 'shot_${line.id}_$j') return;
-    // 播放位置（素材坐标）→ 这一镜内已经走了多久 → 行时间轴
+    if (player == null || _inlineKey != 'shot_${line.id}_$j') {
+      _toast('先播这一镜，听到该换屏的地方再点。');
+      return;
+    }
+    // 播放位置（素材坐标）→ 这一镜内已经走了多久 → 行时间轴（成片时间）
     final shot = line.shots[j];
     final playedMs =
         ((player.positionMs - shot.trimStartMs) / shot.speed).round();
-    var shotStart = 0;
-    for (var i = 0; i < j; i++) {
-      shotStart += line.shots[i].allocMs ?? 0;
+    final atMs = _lineShotStart(line, j) +
+        playedMs.clamp(0, shot.allocMs ?? 0);
+    final chars = _styleOf(line).maxCharsPerScreen;
+    final before = line.subtitleScreensAt(maxChars: chars).length;
+    final next = line.cutSubtitleAt(atMs, maxChars: chars);
+    if (next.subtitleScreensAt(maxChars: chars).length == before) {
+      // 切不动要说清为什么（这一刻正说着这一屏的第一个字 / 没有词级时间戳）
+      _toast(line.voiceover?.words.isEmpty ?? true
+          ? '这句配音没有逐字时间，重新生成配音后才能打轴。'
+          : '这里已经是一屏的开头了。');
+      return;
     }
-    final atMs = shotStart + playedMs.clamp(0, shot.allocMs ?? 0);
-    // 当前这一镜的字幕屏（人写的或自动的），在 atMs 处切开
-    final screens = [
-      for (final s in line.shotSubtitleSegments)
-        if (s.startMs >= shotStart &&
-            s.startMs < shotStart + (shot.allocMs ?? 0))
-          s,
-    ];
-    if (screens.isEmpty) return;
-    final hit = screens.lastWhere((s) => s.startMs <= atMs,
-        orElse: () => screens.first);
-    final words = line.voiceover?.words ?? const <VoiceWord>[];
-    // 这一屏里，播放位置之后说的字归下一屏
-    final headChars = <String>[];
-    final tailChars = <String>[];
-    if (words.isNotEmpty) {
-      for (final w in words) {
-        final mid = (w.startMs + w.endMs) / 2;
-        if (mid < hit.startMs || mid >= hit.endMs) continue;
-        (mid < atMs ? headChars : tailChars).add(w.text);
-      }
+    _mutate((d) => d.cutScreenById(line.id, atMs, maxChars: chars));
+    _toast('已在 ${(atMs / 1000).toStringAsFixed(1)}s 换屏。');
+  }
+
+  /// 这一镜在行时间轴上的起点（成片时间）
+  int _lineShotStart(ScriptLine line, int j) {
+    var start = 0;
+    for (var i = 0; i < j && i < line.shots.length; i++) {
+      start += line.shots[i].allocMs ?? 0;
     }
-    if (headChars.isEmpty || tailChars.isEmpty) {
-      // 对不出来（老配音没词级时间戳）：按字数一半切，不空转
-      final t = hit.text;
-      if (t.length < 2) return;
-      headChars.clear();
-      tailChars.clear();
-      headChars.add(t.substring(0, t.length ~/ 2));
-      tailChars.add(t.substring(t.length ~/ 2));
-    }
-    final next = [
-      for (final s in screens)
-        if (s.startMs == hit.startMs) ...[
-          headChars.join(),
-          tailChars.join(),
-        ] else
-          s.text,
-    ].join('\n');
-    _mutate((d) => d.setShotSubtitleById(line.id, j, next));
+    return start;
   }
 
   /// 改行标签：从妙啊标签体系里搜索、点选、替换（不只是删）
@@ -1203,6 +1196,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   String? _inlineKey;
   StreamSubscription<bool>? _inlineLoop;
 
+  /// 原位播放的位置（素材坐标）——卡上叠的字幕跟着它换屏。
+  /// 用 ValueNotifier：只重建那一块字，不带着整块板子每秒刷几次
+  final ValueNotifier<int> _inlinePositionMs = ValueNotifier<int>(0);
+  StreamSubscription<int>? _inlinePosSub;
+
   /// 原位播放一段：再点同一张卡 = 停。开播前停掉其他一切声源
   /// （主预览、配音试听）——同时只有一个东西在响。
   /// [audioPath] 非空时用独立实例同步播配音的 [audioStartMs, audioEndMs)
@@ -1228,6 +1226,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final player = _inlinePlayer ??= MediaKitPlaybackController();
     _inlineVideo ??= player.buildVideoWidget();
     setState(() => _inlineKey = key);
+    await _inlinePosSub?.cancel();
+    _inlinePosSub =
+        player.positionMsStream.listen((ms) => _inlinePositionMs.value = ms);
     await player.open(path);
     await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
@@ -1292,6 +1293,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   void _stopInline() {
     unawaited(_inlineLoop?.cancel());
     _inlineLoop = null;
+    unawaited(_inlinePosSub?.cancel());
+    _inlinePosSub = null;
     unawaited(_inlinePlayer?.pause());
     unawaited(_inlineAudio?.pause());
     if (mounted && _inlineKey != null) setState(() => _inlineKey = null);
@@ -2038,6 +2041,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     previewLineIndex: _previewLineIndex,
                     inlineKey: _inlineKey,
                     inlineVideo: _inlineVideo,
+                    inlinePosition: _inlinePositionMs,
                     controller: _boardScroll,
                     handlers: LineBoardHandlers(
                       onFocusLine: _focusLine,
@@ -2073,31 +2077,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onPlayShot: _playShotInline,
                       onTrimDone: _scheduleReplayShot,
                       subtitleStyleOf: _styleOf,
-                      onShotSubtitle: (index, j, text) {
+                      onScreenText: (index, screenIndex, text) {
                         final line = _doc.lines[index];
-                        _mutate((d) =>
-                            d.setShotSubtitleById(line.id, j, text));
+                        _mutate((d) => d.setScreenTextById(
+                            line.id, screenIndex, text,
+                            maxChars: _styleOf(line).maxCharsPerScreen));
+                      },
+                      onScreenMerge: (index, screenIndex) {
+                        final line = _doc.lines[index];
+                        _mutate((d) => d.mergeScreenById(line.id, screenIndex,
+                            maxChars: _styleOf(line).maxCharsPerScreen));
+                      },
+                      onScreenCut: (index, atMs) {
+                        final line = _doc.lines[index];
+                        _mutate((d) => d.cutScreenById(line.id, atMs,
+                            maxChars: _styleOf(line).maxCharsPerScreen));
+                      },
+                      onScreenReset: (index) {
+                        final line = _doc.lines[index];
+                        _mutate((d) => d.resetScreensById(line.id));
                       },
                       onSubtitleCutHere: _cutSubtitleHere,
-                      onShotSubtitleSameAsPrev: (index, j) {
-                        final line = _doc.lines[index];
-                        if (j <= 0 || j >= line.shots.length) return;
-                        // 上一镜的字幕（人写的或自动的）写给这一镜——
-                        // 两镜同句，播放时连成一条不闪断
-                        final segs = line.shotSubtitleSegments;
-                        var start = 0;
-                        for (var i = 0; i < j; i++) {
-                          start += line.shots[i].allocMs ?? 0;
-                        }
-                        final prev = segs
-                            .where((s) => s.startMs < start && s.endMs >= start)
-                            .firstOrNull;
-                        final text = prev?.text ??
-                            line.shots[j - 1].subtitleText;
-                        if (text == null || text.isEmpty) return;
-                        _mutate((d) =>
-                            d.setShotSubtitleById(line.id, j, text));
-                      },
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,
@@ -2803,9 +2803,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (line.type != ScriptLineType.voiced) return const SizedBox.shrink();
     final lineStart = _planResult.lineStarts[index] ?? 0;
     final relMs = _positionMs.value - lineStart;
-    // 字幕写在镜头上：人写的优先、没写的按词时间戳自动预填、
-    // 相邻同文本连成一条（shotSubtitleSegments，与导出同一份派生）
-    final seg = line.shotSubtitleSegments
+    // 字幕屏：切点跟语言走，与镜头无关；每屏字数按**生效样式**的字号推，
+    // 与镜头卡、卡上播放、成片导出取的是同一份派生
+    final seg = line
+        .subtitleScreensAt(maxChars: _styleOf(line).maxCharsPerScreen)
         .where((s) => relMs >= s.startMs && relMs < s.endMs)
         .firstOrNull;
     final text = seg?.text ?? '';

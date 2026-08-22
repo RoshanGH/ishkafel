@@ -544,46 +544,83 @@ void main() {
       expect(shot.allocMs, 3200, reason: '按行根（配音时长）分配');
     });
 
-    testWidgets('字幕写在镜头上：详情框写字落盘、「同上一镜」快捷共用',
+    testWidgets('字幕屏：详情里一屏一行，改字落盘、并屏、这屏不出字',
         (tester) async {
       final repo = _MemoryRepo();
-      var doc = docWith(['家人们这是我们的最新产品']);
+      const text = '家人们你好呀这是我们今年最新的爆款产品真的很好用';
+      var doc = docWith([text]);
       doc = doc.setVoiceoverById(
           doc.lines.first.id,
           LineVoiceover(
-              audioPath: '/vo.mp3',
-              durationMs: 5000,
-              sourceText: '家人们这是我们的最新产品',
-              voiceId: 'v',
-              speechRate: 0));
+            audioPath: '/vo.mp3',
+            durationMs: 6000,
+            sourceText: text,
+            voiceId: 'v',
+            speechRate: 0,
+            // 逐字时间戳：屏的切点跟语言走，靠它算
+            words: [
+              for (var i = 0; i < text.length; i++)
+                VoiceWord(
+                    text: text[i],
+                    startMs: (i * 6000 / text.length).round(),
+                    endMs: (i * 6000 / text.length).round() + 200),
+            ],
+          ));
       doc = doc.setShotsById(doc.lines.first.id, const [
-        LineShot(materialId: 1, name: 'a', durationMs: 8000, allocMs: 2000),
-        LineShot(materialId: 2, name: 'b', durationMs: 8000, allocMs: 3000),
+        LineShot(materialId: 1, name: 'a', durationMs: 8000, allocMs: 6000),
       ]);
       await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
       await tester.pumpAndSettle();
 
-      // 展开第 1 镜详情，写这一镜的字幕
+      // 一个长镜头下的长台词自动切成好几屏——不许堆在画面上
+      final screens = doc.lines.first.subtitleScreensAt();
+      expect(screens.length, greaterThan(1));
+
       await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
       await tester.pumpAndSettle();
+      expect(find.text('字幕 · ${screens.length} 屏'), findsOneWidget,
+          reason: '详情里说清这一镜下有几屏字');
+
+      // 改第一屏的字：只改这一屏
       await tester.enterText(
-          find.byKey(const ValueKey('band-shot-subtitle-0-0')), '家人们');
+          find.byKey(ValueKey(
+              'band-screen-0-0-${screens.first.text.hashCode}')),
+          '家人们好');
       await tester.testTextInput.receiveAction(TextInputAction.done);
       await tester.pump(const Duration(milliseconds: 900));
       await tester.pumpAndSettle();
       var saved = await repo.findById('t1');
-      expect(saved!.script!.lines.first.shots[0].subtitleText, '家人们');
+      var line = saved!.script!.lines.first;
+      expect(line.subtitleScreensAt().first.text, '家人们好');
+      expect(line.subtitleScreensAt().length, screens.length,
+          reason: '改字不改切点');
 
-      // 第 2 镜点「同上一镜」：两镜同句
-      await tester.tap(find.byKey(const ValueKey('band-shot-0-1')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('band-subtitle-same-0-1')));
+      // 拆屏：从中间再切一刀
+      final n0 = line.subtitleScreensAt().length;
+      await tester.tap(find.byKey(const ValueKey('band-screen-split-0-0')));
       await tester.pump(const Duration(milliseconds: 900));
       await tester.pumpAndSettle();
       saved = await repo.findById('t1');
-      expect(saved!.script!.lines.first.shots[1].subtitleText, '家人们');
-      // 派生：两镜同句合并为一条连续字幕
-      expect(saved.script!.lines.first.shotSubtitleSegments, hasLength(1));
+      line = saved!.script!.lines.first;
+      expect(line.subtitleScreensAt().length, n0 + 1,
+          reason: '拆屏：不用播放也能手工切一刀');
+
+      // 第 2 屏并回上一屏
+      final before = line.subtitleScreensAt().length;
+      await tester.tap(find.byKey(const ValueKey('band-screen-merge-0-1')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      saved = await repo.findById('t1');
+      line = saved!.script!.lines.first;
+      expect(line.subtitleScreensAt().length, before - 1);
+
+      // 这屏不出字
+      final n = line.subtitleScreensAt().length;
+      await tester.tap(find.byKey(const ValueKey('band-screen-hide-0-0')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.subtitleScreensAt().length, n - 1);
     });
 
     testWidgets('镜头详情在块内展开/收起（内容切换只发生在块内）', (tester) async {

@@ -96,7 +96,9 @@ class ScriptExportRunner {
       // 行的字幕（相对行起点的时间轴）；跨镜连续由逐镜裁剪自然形成。
       // 行级覆盖优先（素材自带字幕位置不同时按行改）
       final lineStyle = line.subtitleOverride ?? style;
-      final sentences = burnSubtitles ? _sentenceOf(line) : const <AsrSentence>[];
+      final sentences = burnSubtitles
+          ? _sentenceOf(line, line.subtitleOverride ?? style)
+          : const <AsrSentence>[];
       var shotAtMs = 0;
       for (var j = 0; j < line.shots.length; j++) {
         final shot = line.shots[j];
@@ -296,15 +298,15 @@ class ScriptExportRunner {
     return ready;
   }
 
-  /// 镜头级字幕段 → 字幕句：**字幕写在镜头上**（人写的优先、没写的
-  /// 按词时间戳自动、相邻同文本连成一条）。预览用同一份派生，
-  /// 成片和预览看到的字幕一字不差
-  List<AsrSentence> _sentenceOf(ScriptLine line) {
+  /// 字幕屏 → 字幕句。**四处同一份派生**（预览层 / 镜头卡 / 卡上播放 /
+  /// 成片），且都按这一行生效样式推出的每屏字数——成片与预览一字不差
+  List<AsrSentence> _sentenceOf(ScriptLine line, SubtitleStyle style) {
     if (line.type != ScriptLineType.voiced || line.voiceover == null) {
       return const [];
     }
     return [
-      for (final seg in line.shotSubtitleSegments)
+      for (final seg
+          in line.subtitleScreensAt(maxChars: style.maxCharsPerScreen))
         AsrSentence(startMs: seg.startMs, endMs: seg.endMs, text: seg.text),
     ];
   }

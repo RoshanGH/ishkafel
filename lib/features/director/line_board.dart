@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -48,11 +49,17 @@ class LineBoardHandlers {
   /// 镜头卡上按它画字幕缩略，改样式时几张卡同时变
   final SubtitleStyle Function(ScriptLine line) subtitleStyleOf;
 
-  /// 给某一镜写字幕（null = 恢复自动跟随词时间戳，空串 = 不要字幕）
-  final void Function(int index, int shotIndex, String? text) onShotSubtitle;
+  /// 改第 [screenIndex] 屏的字（null = 这屏回到原文，'' = 这屏不出字）
+  final void Function(int index, int screenIndex, String? text) onScreenText;
 
-  /// 这一镜与上一镜共用同一句字幕（多镜共用一句的快捷）
-  final void Function(int index, int shotIndex) onShotSubtitleSameAsPrev;
+  /// 把第 [screenIndex] 屏并回上一屏（撤掉这一刀）
+  final void Function(int index, int screenIndex) onScreenMerge;
+
+  /// 在行时间轴 [atMs] 处切一刀（拆屏 / 打轴都走它）
+  final void Function(int index, int atMs) onScreenCut;
+
+  /// 这一行的字幕恢复全自动（清掉所有切点与改字）
+  final void Function(int index) onScreenReset;
 
   /// 打轴：正在原位播这一镜时，在当前播放位置把字幕切成两屏
   final void Function(int index, int shotIndex) onSubtitleCutHere;
@@ -98,8 +105,10 @@ class LineBoardHandlers {
     required this.onPlayShot,
     required this.onTrimDone,
     required this.subtitleStyleOf,
-    required this.onShotSubtitle,
-    required this.onShotSubtitleSameAsPrev,
+    required this.onScreenText,
+    required this.onScreenMerge,
+    required this.onScreenCut,
+    required this.onScreenReset,
     required this.onSubtitleCutHere,
     required this.onManualMs,
     required this.onPickVoice,
@@ -136,6 +145,10 @@ class LineBoard extends StatelessWidget {
   /// 画面——谁在播，画面就挂到谁的卡上
   final String? inlineKey;
   final Widget? inlineVideo;
+
+  /// 原位播放到哪儿了（素材坐标，毫秒）——播这一镜时字幕跟着当前屏走。
+  /// 用 ValueListenable 只让那一块字重建，不带着整块板子每秒刷几次
+  final ValueListenable<int>? inlinePosition;
   final LineBoardHandlers handlers;
   final ScrollController? controller;
 
@@ -150,6 +163,7 @@ class LineBoard extends StatelessWidget {
     this.previewLineIndex,
     this.inlineKey,
     this.inlineVideo,
+    this.inlinePosition,
     required this.handlers,
     this.controller,
   });
@@ -177,6 +191,7 @@ class LineBoard extends StatelessWidget {
           previewing: i == previewLineIndex,
           inlineKey: inlineKey,
           inlineVideo: inlineVideo,
+          inlinePosition: inlinePosition,
           handlers: handlers,
         ),
       ),
@@ -373,27 +388,27 @@ class _TrimBar extends StatelessWidget {
   static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
 }
 
-/// 这一镜的字幕输入框：预填自动结果（灰提示），写了就以人写的为准，
-/// 清空 = 恢复自动。失焦才落盘，避免每敲一个字都触发保存与预览重建
-class _ShotSubtitleField extends StatefulWidget {
-  final String auto;
-  final String? written;
+/// 一屏字幕的输入框：**预填真实文字**（不是灰提示）——想改一个字就改
+/// 一个字，不用把整段重打。失焦/回车才落盘，避免每敲一个字就重建预览
+class _ScreenTextField extends StatefulWidget {
+  final String text;
+
+  /// null = 这屏回到原文（清空输入框）；非空 = 这屏按你写的显示
   final ValueChanged<String?> onChanged;
 
-  const _ShotSubtitleField({
+  const _ScreenTextField({
     super.key,
-    required this.auto,
-    required this.written,
+    required this.text,
     required this.onChanged,
   });
 
   @override
-  State<_ShotSubtitleField> createState() => _ShotSubtitleFieldState();
+  State<_ScreenTextField> createState() => _ScreenTextFieldState();
 }
 
-class _ShotSubtitleFieldState extends State<_ShotSubtitleField> {
-  late final TextEditingController _text =
-      TextEditingController(text: widget.written ?? '');
+class _ScreenTextFieldState extends State<_ScreenTextField> {
+  late final TextEditingController _c =
+      TextEditingController(text: widget.text);
   final FocusNode _focus = FocusNode();
 
   @override
@@ -404,50 +419,31 @@ class _ShotSubtitleFieldState extends State<_ShotSubtitleField> {
     });
   }
 
-  @override
-  void didUpdateWidget(_ShotSubtitleField old) {
-    super.didUpdateWidget(old);
-    // 外部改动（同上一镜、撤销）同步进输入框；正在编辑时不动光标
-    if (!_focus.hasFocus && (widget.written ?? '') != _text.text) {
-      _text.text = widget.written ?? '';
-    }
-  }
-
   void _commit() {
-    final t = _text.text.trim();
-    // 用户定的规则：**只要写了就算手改**（哪怕内容与自动一致）——
-    // 从此不再跟自动走；**清空就回到自动匹配**
+    final t = _c.text.trim();
+    // 没动过就不落盘——别把自动结果悄悄固化成手写
+    if (t == widget.text.trim()) return;
     widget.onChanged(t.isEmpty ? null : t);
   }
 
   @override
   void dispose() {
-    _text.dispose();
+    _c.dispose();
     _focus.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => TextField(
-        controller: _text,
+        controller: _c,
         focusNode: _focus,
-        // **一行 = 一屏**：长镜头里字幕按语言节奏一屏一屏出，
-        // 回车就是切一刀（自动分屏的结果预填在灰字里）
-        maxLines: null,
-        minLines: 1,
-        keyboardType: TextInputType.multiline,
-        style: const TextStyle(fontSize: AppFontSize.caption, height: 1.4),
-        decoration: InputDecoration(
+        style: const TextStyle(fontSize: AppFontSize.caption, height: 1.3),
+        decoration: const InputDecoration(
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          hintText: widget.auto.isEmpty ? '这一镜显示的字（回车分屏）' : widget.auto,
-          hintMaxLines: 4,
-          hintStyle: TextStyle(
-              fontSize: AppFontSize.caption,
-              height: 1.4,
-              color: AppColors.textTertiary.withValues(alpha: 0.9)),
+          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          hintText: '这屏显示的字',
         ),
+        onSubmitted: (_) => _commit(),
       );
 }
 
@@ -517,6 +513,10 @@ class _LineBand extends StatelessWidget {
   final bool previewing;
   final String? inlineKey;
   final Widget? inlineVideo;
+
+  /// 原位播放到哪儿了（素材坐标，毫秒）——播这一镜时字幕跟着当前屏走。
+  /// 用 ValueListenable 只让那一块字重建，不带着整块板子每秒刷几次
+  final ValueListenable<int>? inlinePosition;
   final LineBoardHandlers handlers;
 
   const _LineBand({
@@ -530,6 +530,7 @@ class _LineBand extends StatelessWidget {
     required this.previewing,
     this.inlineKey,
     this.inlineVideo,
+    this.inlinePosition,
     required this.handlers,
   });
 
@@ -933,10 +934,10 @@ class _LineBand extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 3, vertical: 2),
                       color: Colors.black.withValues(alpha: 0.55),
-                      child: Text(
-                        (line.shots[j].subtitleText ?? _autoSubtitleOf(j))
-                            .split('\n')
-                            .first,
+                      child: ValueListenableBuilder<int>(
+                        valueListenable: inlinePosition ?? _noPosition,
+                        builder: (context, pos, _) => Text(
+                        _playingScreenText(j, pos),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -944,7 +945,7 @@ class _LineBand extends StatelessWidget {
                             fontSize: AppFontSize.micro,
                             height: 1.3,
                             color: Colors.white),
-                      ),
+                      )),
                     ),
                   ),
                 ])
@@ -1253,72 +1254,10 @@ class _LineBand extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
-        // 这一镜的字幕（字幕写在镜头上）：预填自动结果（这镜时段说的
-        // 字），改了就以你写的为准；清空文本框 = 恢复自动。
-        // 多镜共用一句：把同一句写给几个镜头（或点「同上一镜」）
-        if (voiced)
-          Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child:
-                Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-              const SizedBox(
-                  width: 30,
-                  child: Text('字幕',
-                      style: TextStyle(
-                          fontSize: AppFontSize.micro,
-                          color: AppColors.textSecondary))),
-              Expanded(
-                child: _ShotSubtitleField(
-                  key: ValueKey('band-shot-subtitle-$index-$j'),
-                  auto: _autoSubtitleOf(j),
-                  written: shot.subtitleText,
-                  onChanged: (text) =>
-                      handlers.onShotSubtitle(index, j, text),
-                ),
-              ),
-              // 手改过的镜头脱离自动匹配——标出来并给一键回到自动
-              if (shot.subtitleText != null) ...[
-                const SizedBox(width: AppSpacing.sm),
-                const Text('已手改',
-                    style: TextStyle(
-                        fontSize: AppFontSize.micro,
-                        color: AppColors.orange)),
-                const SizedBox(width: 6),
-                InkWell(
-                  key: ValueKey('band-subtitle-auto-$index-$j'),
-                  onTap: () => handlers.onShotSubtitle(index, j, null),
-                  child: const Text('恢复自动',
-                      style: TextStyle(
-                          fontSize: AppFontSize.micro,
-                          color: AppColors.accentBlueLight)),
-                ),
-              ],
-              // 打轴：这一镜正在播时，听到该换屏的地方点一下
-              if (inlineKey == 'shot_${line.id}_$j') ...[
-                const SizedBox(width: AppSpacing.sm),
-                InkWell(
-                  key: ValueKey('band-subtitle-cut-$index-$j'),
-                  onTap: () => handlers.onSubtitleCutHere(index, j),
-                  child: const Text('✂ 在这里换屏',
-                      style: TextStyle(
-                          fontSize: AppFontSize.micro,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.accentBlueLight)),
-                ),
-              ],
-              if (j > 0) ...[
-                const SizedBox(width: AppSpacing.sm),
-                InkWell(
-                  key: ValueKey('band-subtitle-same-$index-$j'),
-                  onTap: () => handlers.onShotSubtitleSameAsPrev(index, j),
-                  child: const Text('同上一镜',
-                      style: TextStyle(
-                          fontSize: AppFontSize.micro,
-                          color: AppColors.accentBlueLight)),
-                ),
-              ],
-            ]),
-          ),
+        // 这一镜时间窗里的**字幕屏**：一屏一行，左边是它在成片里的
+        // 入点、中间直接改字、行尾能拆开 / 并回上一屏 / 设为不出字。
+        // 屏跟着语言走、镜头跟着画面走——改镜头时长，屏自愈
+        if (voiced) _screenList(j),
       ]),
     );
   }
@@ -1327,7 +1266,8 @@ class _LineBand extends StatelessWidget {
   /// 字号按比例缩放后夹在可读区间（卡片只有几十像素宽，严格等比会
   /// 糊成一条；真实字号以中栏预览与成片为准）
   Widget _cardSubtitle(int j) {
-    final text = (line.shots[j].subtitleText ?? _autoSubtitleOf(j)).trim();
+    final rows = _screensOfShot(j);
+    final text = rows.isEmpty ? '' : rows.first.text.trim();
     if (text.isEmpty) return const SizedBox.shrink();
     final style = handlers.subtitleStyleOf(line);
     return LayoutBuilder(builder: (context, c) {
@@ -1360,7 +1300,7 @@ class _LineBand extends StatelessWidget {
                     )
                   : null,
               child: Text(
-                text,
+                rows.length > 1 ? '$text  +${rows.length - 1}屏' : text,
                 maxLines: 2,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
@@ -1384,24 +1324,185 @@ class _LineBand extends StatelessWidget {
     });
   }
 
-  /// 第 [j] 镜的自动字幕——**多行 = 多屏**（与成片里的分屏同一套规则），
-  /// 文本框的灰字预填值
-  String _autoSubtitleOf(int j) {
+  /// 这一镜的时间窗（行时间轴，成片时间）
+  (int, int) _shotWindow(int j) {
     var start = 0;
     for (var i = 0; i < j && i < line.shots.length; i++) {
       start += line.shots[i].allocMs ?? 0;
     }
-    final end = start + (line.shots[j].allocMs ?? 0);
-    // 拿这一镜时间窗内的字幕屏（派生逻辑与预览/导出完全同源）
-    final auto = line.withShots([
-      for (var i = 0; i < line.shots.length; i++)
-        i == j ? line.shots[i].copyWith(subtitleText: null) : line.shots[i],
-    ]).shotSubtitleSegments;
-    return [
-      for (final s in auto)
-        if (s.startMs >= start && s.startMs < end) s.text,
-    ].join('\n');
+    return (start, start + (line.shots[j].allocMs ?? 0));
   }
+
+  /// 与这一镜**相交**的字幕屏（跨镜的屏在两边都看得到）。
+  /// 与预览层、成片导出取的是同一份派生——四处显示永远一致
+  List<({int index, int startMs, int endMs, String text})> _screensOfShot(
+      int j) {
+    final (start, end) = _shotWindow(j);
+    final all = line.subtitleScreensAt(
+        maxChars: handlers.subtitleStyleOf(line).maxCharsPerScreen);
+    return [
+      for (var i = 0; i < all.length; i++)
+        if (all[i].endMs > start && all[i].startMs < end)
+          (
+            index: i,
+            startMs: all[i].startMs,
+            endMs: all[i].endMs,
+            text: all[i].text
+          ),
+    ];
+  }
+
+  /// 正在原位播这一镜时该显示哪一屏——听到的话和看到的字对上
+  String _playingScreenText(int j, int pos) {
+    final rows = _screensOfShot(j);
+    if (rows.isEmpty) return '';
+    final shot = line.shots[j];
+    final (start, _) = _shotWindow(j);
+    final atMs =
+        start + ((pos - shot.trimStartMs) / shot.speed).round();
+    for (final r in rows.reversed) {
+      if (r.startMs <= atMs) return r.text;
+    }
+    return rows.first.text;
+  }
+
+  /// 这一镜时间窗内的字幕屏列表：一屏一行，看得见、改得动
+  Widget _screenList(int j) {
+    final rows = _screensOfShot(j);
+    final playing = inlineKey == 'shot_${line.id}_$j';
+    // 老配音没有逐字时间：屏还是照分（不堆字），但切点改不了——
+    // 说清为什么、说清怎么办，不让人对着改不动的界面猜
+    final timed = line.voiceover?.words.isNotEmpty ?? false;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          Text('字幕 · ${rows.length} 屏',
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  color: AppColors.textSecondary)),
+          if (!timed) ...[
+            const SizedBox(width: AppSpacing.sm),
+            const Tooltip(
+              message: '这句配音是早期生成的，没有逐字时间。重新生成配音后\n就能手工分屏、按播放位置打轴。',
+              child: Text('按字数均分',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro, color: AppColors.orange)),
+            ),
+          ],
+          if (timed && line.subtitleScreens != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            const Text('已手改',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro, color: AppColors.orange)),
+            const SizedBox(width: 6),
+            InkWell(
+              key: ValueKey('band-subtitle-auto-$index'),
+              onTap: () => handlers.onScreenReset(index),
+              child: const Text('恢复自动',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.accentBlueLight)),
+            ),
+          ],
+          const Spacer(),
+          // 打轴：这一镜正在播时，听到该换屏的地方点一下
+          if (playing && timed)
+            InkWell(
+              key: ValueKey('band-subtitle-cut-$index-$j'),
+              onTap: () => handlers.onSubtitleCutHere(index, j),
+              child: const Text('✂ 在这里换屏',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.accentBlueLight)),
+            ),
+        ]),
+        const SizedBox(height: 4),
+        for (final row in rows)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(children: [
+              // 界面上的时间一律是成片时间
+              SizedBox(
+                width: 38,
+                child: Text('${(row.startMs / 1000).toStringAsFixed(1)}s',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textTertiary,
+                        fontFeatures: [FontFeature.tabularFigures()])),
+              ),
+              Expanded(
+                child: !timed
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(row.text,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                fontSize: AppFontSize.caption,
+                                color: AppColors.textSecondary)),
+                      )
+                    : _ScreenTextField(
+                  key: ValueKey(
+                      'band-screen-$index-${row.index}-${row.text.hashCode}'),
+                  text: row.text,
+                  onChanged: (t) => handlers.onScreenText(index, row.index, t),
+                ),
+              ),
+              _screenAction(
+                key: 'band-screen-split-$index-${row.index}',
+                icon: Icons.call_split,
+                tip: timed ? '从中间拆成两屏' : '这句没有逐字时间，改不了切点',
+                onTap: !timed || row.endMs - row.startMs < 400
+                    ? null
+                    : () => handlers.onScreenCut(
+                        index, (row.startMs + row.endMs) ~/ 2),
+              ),
+              _screenAction(
+                key: 'band-screen-merge-$index-${row.index}',
+                icon: Icons.vertical_align_top,
+                tip: timed ? '并回上一屏' : '这句没有逐字时间，改不了切点',
+                onTap: !timed || row.index == 0
+                    ? null
+                    : () => handlers.onScreenMerge(index, row.index),
+              ),
+              _screenAction(
+                key: 'band-screen-hide-$index-${row.index}',
+                icon: Icons.visibility_off_outlined,
+                tip: timed ? '这屏不出字' : '这句没有逐字时间，改不了',
+                onTap: !timed
+                    ? null
+                    : () => handlers.onScreenText(index, row.index, ''),
+              ),
+            ]),
+          ),
+      ]),
+    );
+  }
+
+  Widget _screenAction({
+    required String key,
+    required IconData icon,
+    required String tip,
+    VoidCallback? onTap,
+  }) =>
+      Tooltip(
+        message: tip,
+        waitDuration: const Duration(milliseconds: 500),
+        child: InkWell(
+          key: ValueKey(key),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+            child: Icon(icon,
+                size: 13,
+                color: onTap == null
+                    ? AppColors.textTertiary.withValues(alpha: 0.3)
+                    : AppColors.textTertiary),
+          ),
+        ),
+      );
 
   // ---- 配音行（紧凑）：状态 · 音色 · 时长 · 生成 · 试听 ----
 
@@ -1549,3 +1650,6 @@ class _LineBand extends StatelessWidget {
 
   static String _s(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
 }
+
+/// 没在播时的占位位置（避免每次 build 新建 notifier）
+final ValueNotifier<int> _noPosition = ValueNotifier<int>(0);
