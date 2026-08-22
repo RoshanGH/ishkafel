@@ -53,6 +53,9 @@ class LineBoardHandlers {
 
   /// 这一镜与上一镜共用同一句字幕（多镜共用一句的快捷）
   final void Function(int index, int shotIndex) onShotSubtitleSameAsPrev;
+
+  /// 打轴：正在原位播这一镜时，在当前播放位置把字幕切成两屏
+  final void Function(int index, int shotIndex) onSubtitleCutHere;
   final void Function(int index, int? manualMs) onManualMs;
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
@@ -97,6 +100,7 @@ class LineBoardHandlers {
     required this.subtitleStyleOf,
     required this.onShotSubtitle,
     required this.onShotSubtitleSameAsPrev,
+    required this.onSubtitleCutHere,
     required this.onManualMs,
     required this.onPickVoice,
     required this.onSpeechRate,
@@ -427,17 +431,23 @@ class _ShotSubtitleFieldState extends State<_ShotSubtitleField> {
   Widget build(BuildContext context) => TextField(
         controller: _text,
         focusNode: _focus,
-        style: const TextStyle(fontSize: AppFontSize.caption),
+        // **一行 = 一屏**：长镜头里字幕按语言节奏一屏一屏出，
+        // 回车就是切一刀（自动分屏的结果预填在灰字里）
+        maxLines: null,
+        minLines: 1,
+        keyboardType: TextInputType.multiline,
+        style: const TextStyle(fontSize: AppFontSize.caption, height: 1.4),
         decoration: InputDecoration(
           isDense: true,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          hintText: widget.auto.isEmpty ? '这一镜显示的字' : widget.auto,
+          hintText: widget.auto.isEmpty ? '这一镜显示的字（回车分屏）' : widget.auto,
+          hintMaxLines: 4,
           hintStyle: TextStyle(
               fontSize: AppFontSize.caption,
+              height: 1.4,
               color: AppColors.textTertiary.withValues(alpha: 0.9)),
         ),
-        onSubmitted: (_) => _commit(),
       );
 }
 
@@ -924,7 +934,9 @@ class _LineBand extends StatelessWidget {
                           horizontal: 3, vertical: 2),
                       color: Colors.black.withValues(alpha: 0.55),
                       child: Text(
-                        line.shots[j].subtitleText ?? _autoSubtitleOf(j),
+                        (line.shots[j].subtitleText ?? _autoSubtitleOf(j))
+                            .split('\n')
+                            .first,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.center,
@@ -1281,6 +1293,19 @@ class _LineBand extends StatelessWidget {
                           color: AppColors.accentBlueLight)),
                 ),
               ],
+              // 打轴：这一镜正在播时，听到该换屏的地方点一下
+              if (inlineKey == 'shot_${line.id}_$j') ...[
+                const SizedBox(width: AppSpacing.sm),
+                InkWell(
+                  key: ValueKey('band-subtitle-cut-$index-$j'),
+                  onTap: () => handlers.onSubtitleCutHere(index, j),
+                  child: const Text('✂ 在这里换屏',
+                      style: TextStyle(
+                          fontSize: AppFontSize.micro,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.accentBlueLight)),
+                ),
+              ],
               if (j > 0) ...[
                 const SizedBox(width: AppSpacing.sm),
                 InkWell(
@@ -1359,21 +1384,23 @@ class _LineBand extends StatelessWidget {
     });
   }
 
-  /// 第 [j] 镜的自动字幕（这镜时段内说出口的字）——文本框的预填值
+  /// 第 [j] 镜的自动字幕——**多行 = 多屏**（与成片里的分屏同一套规则），
+  /// 文本框的灰字预填值
   String _autoSubtitleOf(int j) {
-    final vo = line.voiceover;
-    if (vo == null || vo.words.isEmpty) return '';
     var start = 0;
     for (var i = 0; i < j && i < line.shots.length; i++) {
       start += line.shots[i].allocMs ?? 0;
     }
     final end = start + (line.shots[j].allocMs ?? 0);
+    // 拿这一镜时间窗内的字幕屏（派生逻辑与预览/导出完全同源）
+    final auto = line.withShots([
+      for (var i = 0; i < line.shots.length; i++)
+        i == j ? line.shots[i].copyWith(subtitleText: null) : line.shots[i],
+    ]).shotSubtitleSegments;
     return [
-      for (final w in vo.words)
-        if ((w.startMs + w.endMs) / 2 >= start &&
-            (w.startMs + w.endMs) / 2 < end)
-          w.text,
-    ].join();
+      for (final s in auto)
+        if (s.startMs >= start && s.startMs < end) s.text,
+    ].join('\n');
   }
 
   // ---- 配音行（紧凑）：状态 · 音色 · 时长 · 生成 · 试听 ----

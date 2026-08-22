@@ -998,6 +998,63 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _pinBgm();
   }
 
+  /// 打轴：正在原位播这一镜时，在**当前播放位置**把字幕切成两屏。
+  /// 十秒六句话，听一遍点五下就切完了——比数字数快
+  void _cutSubtitleHere(int index, int j) {
+    final line = _doc.lines[index];
+    if (j < 0 || j >= line.shots.length) return;
+    final player = _inlinePlayer;
+    if (player == null || _inlineKey != 'shot_${line.id}_$j') return;
+    // 播放位置（素材坐标）→ 这一镜内已经走了多久 → 行时间轴
+    final shot = line.shots[j];
+    final playedMs =
+        ((player.positionMs - shot.trimStartMs) / shot.speed).round();
+    var shotStart = 0;
+    for (var i = 0; i < j; i++) {
+      shotStart += line.shots[i].allocMs ?? 0;
+    }
+    final atMs = shotStart + playedMs.clamp(0, shot.allocMs ?? 0);
+    // 当前这一镜的字幕屏（人写的或自动的），在 atMs 处切开
+    final screens = [
+      for (final s in line.shotSubtitleSegments)
+        if (s.startMs >= shotStart &&
+            s.startMs < shotStart + (shot.allocMs ?? 0))
+          s,
+    ];
+    if (screens.isEmpty) return;
+    final hit = screens.lastWhere((s) => s.startMs <= atMs,
+        orElse: () => screens.first);
+    final words = line.voiceover?.words ?? const <VoiceWord>[];
+    // 这一屏里，播放位置之后说的字归下一屏
+    final headChars = <String>[];
+    final tailChars = <String>[];
+    if (words.isNotEmpty) {
+      for (final w in words) {
+        final mid = (w.startMs + w.endMs) / 2;
+        if (mid < hit.startMs || mid >= hit.endMs) continue;
+        (mid < atMs ? headChars : tailChars).add(w.text);
+      }
+    }
+    if (headChars.isEmpty || tailChars.isEmpty) {
+      // 对不出来（老配音没词级时间戳）：按字数一半切，不空转
+      final t = hit.text;
+      if (t.length < 2) return;
+      headChars.clear();
+      tailChars.clear();
+      headChars.add(t.substring(0, t.length ~/ 2));
+      tailChars.add(t.substring(t.length ~/ 2));
+    }
+    final next = [
+      for (final s in screens)
+        if (s.startMs == hit.startMs) ...[
+          headChars.join(),
+          tailChars.join(),
+        ] else
+          s.text,
+    ].join('\n');
+    _mutate((d) => d.setShotSubtitleById(line.id, j, next));
+  }
+
   /// 改行标签：从妙啊标签体系里搜索、点选、替换（不只是删）
   Future<void> _editTags(int index) async {
     final line = _doc.lines[index];
@@ -2021,6 +2078,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         _mutate((d) =>
                             d.setShotSubtitleById(line.id, j, text));
                       },
+                      onSubtitleCutHere: _cutSubtitleHere,
                       onShotSubtitleSameAsPrev: (index, j) {
                         final line = _doc.lines[index];
                         if (j <= 0 || j >= line.shots.length) return;

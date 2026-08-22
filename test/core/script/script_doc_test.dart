@@ -155,6 +155,106 @@ void main() {
       expect(segs.single.endMs, 5000);
     });
 
+    test('长镜头的字幕按语言节奏分屏依次出现，不堆在画面上', () {
+      // 一个镜头覆盖整句 12 个字（每字 400ms）：自动按标点/停顿/字数
+      // 上限切成若干屏，一屏一屏出——原片里长镜头下字幕就是这么走的
+      const long = '家人们你好呀，这是我们今年最新的爆款产品啊，真的很好用哦';
+      final line = ScriptLine.create(text: long)
+          .withShots(const [
+            LineShot(
+                materialId: 1, name: 'a', durationMs: 30000, allocMs: 7000),
+          ])
+          .withVoiceover(LineVoiceover(
+            audioPath: '/vo.mp3',
+            durationMs: 7000,
+            sourceText: long,
+            voiceId: 'v',
+            speechRate: 0,
+            words: [
+              for (var i = 0; i < long.length; i++)
+                VoiceWord(
+                    text: long[i],
+                    startMs: (i * 7000 / long.length).round(),
+                    endMs: (i * 7000 / long.length).round() + 180),
+            ],
+          ));
+      final segs = line.shotSubtitleSegments;
+      expect(segs.length, greaterThan(1),
+          reason: '一个长镜头下字幕该分屏依次出现，而不是一次堆上去');
+      expect(segs.map((s) => s.text).join(),
+          long.replaceAll(RegExp('[，。]'), ''),
+          reason: '分屏只是分，字不能丢');
+      for (final s in segs) {
+        expect(s.endMs, greaterThan(s.startMs));
+      }
+      expect(segs.first.startMs, lessThan(segs[1].startMs),
+          reason: '按说话顺序依次出现');
+    });
+
+    test('手写多行 = 一行一屏（人切的优先），时间按每屏第一个字说出口的时刻',
+        () {
+      final line = ScriptLine.create(text: '家人们你好呀这是我们的最新产品啊')
+          .withShots(const [
+            LineShot(
+                materialId: 1,
+                name: 'a',
+                durationMs: 30000,
+                allocMs: 7000,
+                // 三行 = 三屏，按用户自己的句读切
+                subtitleText: '家人们\n你好呀\n这是我们的最新产品啊'),
+          ])
+          .withVoiceover(LineVoiceover(
+            audioPath: '/vo.mp3',
+            durationMs: 7000,
+            sourceText: '家人们你好呀这是我们的最新产品啊',
+            voiceId: 'v',
+            speechRate: 0,
+            words: [
+              for (var i = 0; i < 16; i++)
+                VoiceWord(
+                    text: '家人们你好呀这是我们的最新产品啊'[i],
+                    startMs: i * 420,
+                    endMs: i * 420 + 400),
+            ],
+          ));
+      final segs = line.shotSubtitleSegments;
+      expect(segs.map((s) => s.text).toList(),
+          ['家人们', '你好呀', '这是我们的最新产品啊']);
+      expect(segs[0].startMs, 0, reason: '第一屏从镜头开头就在');
+      expect(segs[1].startMs, 3 * 420,
+          reason: '第二屏从「你」说出口的那一刻出现');
+      expect(segs[2].startMs, 6 * 420);
+      expect(segs.last.endMs, 7000, reason: '最后一屏留到镜头结束');
+    });
+
+    test('对不回词序列时按字数比例分时间——不静默糊弄', () {
+      final line = ScriptLine.create(text: '家人们你好')
+          .withShots(const [
+            LineShot(
+                materialId: 1,
+                name: 'a',
+                durationMs: 9000,
+                allocMs: 4000,
+                subtitleText: '完全改过的词\n又一屏'),
+          ])
+          .withVoiceover(LineVoiceover(
+            audioPath: '/vo.mp3',
+            durationMs: 4000,
+            sourceText: '家人们你好',
+            voiceId: 'v',
+            speechRate: 0,
+            words: const [
+              VoiceWord(text: '家', startMs: 0, endMs: 400),
+              VoiceWord(text: '人', startMs: 400, endMs: 800),
+            ],
+          ));
+      final segs = line.shotSubtitleSegments;
+      expect(segs, hasLength(2));
+      expect(segs[0].startMs, 0);
+      expect(segs[1].endMs, 4000);
+      expect(segs[1].startMs, greaterThan(0));
+    });
+
     test('subtitleText json 往返；清空回到自动匹配', () {
       const shot = LineShot(
           materialId: 1,

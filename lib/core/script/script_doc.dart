@@ -9,6 +9,8 @@
 library;
 
 import '../audio/bgm_plan.dart';
+import '../analysis/providers.dart' show AsrSentence, AsrWord;
+import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_style.dart';
 
 enum ScriptLineType { voiced, visual }
@@ -589,31 +591,144 @@ class ScriptLine {
       final start = cursor;
       final end = cursor + alloc;
       cursor = end;
-      String segText;
-      if (shot.subtitleText != null) {
-        segText = shot.subtitleText!.trim();
+      final screens = <({int startMs, int endMs, String text})>[];
+      final written = shot.subtitleText;
+      if (written != null) {
+        // 人写的：**一行一屏**（回车就是切一刀）。每屏什么时候出现，
+        // 由「这屏第一个字什么时候说出口」定；对不回词序列（改过字）
+        // 的按字数比例分——不静默糊弄
+        final lines = [
+          for (final l in written.split('\n'))
+            if (l.trim().isNotEmpty) l.trim(),
+        ];
+        if (lines.isEmpty) continue;
+        screens.addAll(_placeScreens(lines, vo, start, end));
       } else if (vo != null && vo.words.isNotEmpty) {
-        segText = [
-          for (final w in vo.words)
-            if ((w.startMs + w.endMs) / 2 >= start &&
-                (w.startMs + w.endMs) / 2 < end)
-              w.text,
-        ].join();
+        // 自动：镜头内按**语言节奏**分屏（词时间戳 + 标点 + 每屏字数
+        // 上限）——长镜头下字幕一屏一屏出，不是一次堆上去
+        final sentence = AsrSentence(
+          startMs: 0,
+          endMs: vo.durationMs,
+          text: vo.sourceText,
+          words: [
+            for (final w in vo.words)
+              AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
+          ],
+        );
+        final lines = subtitleLinesInSlot(
+            sentences: [sentence], slotStartMs: start, slotEndMs: end);
+        for (var i = 0; i < lines.length; i++) {
+          final l = lines[i];
+          screens.add((
+            startMs: l.startMs + start,
+            // 一屏显示到下一屏出现为止；这一镜的最后一屏留到镜头结束
+            // ——不然镜头末尾会有一小段没字幕的空当（闪一下）
+            endMs: i + 1 < lines.length
+                ? lines[i + 1].startMs + start
+                : end,
+            text: l.text,
+          ));
+        }
       } else {
-        // 老配音没有词级时间戳：整句兜底
-        segText = text.trim();
+        // 老配音没有词级时间戳：整句兜底（保持旧行为，不倒退）
+        final t = text.trim();
+        if (t.isNotEmpty) {
+          screens.add((startMs: start, endMs: end, text: t));
+        }
       }
-      if (segText.isEmpty) continue;
-      if (out.isNotEmpty &&
-          out.last.text == segText &&
-          out.last.endMs == start) {
-        final last = out.removeLast();
-        out.add((startMs: last.startMs, endMs: end, text: segText));
-      } else {
-        out.add((startMs: start, endMs: end, text: segText));
+      for (final s in screens) {
+        if (s.text.isEmpty || s.endMs <= s.startMs) continue;
+        // 相邻镜头显示同一屏文字时连成一条：多镜共用一句不闪断
+        if (out.isNotEmpty &&
+            out.last.text == s.text &&
+            out.last.endMs == s.startMs) {
+          final last = out.removeLast();
+          out.add((startMs: last.startMs, endMs: s.endMs, text: s.text));
+        } else {
+          out.add(s);
+        }
       }
     }
     return out;
+  }
+
+  /// 把人写的每一屏放到时间轴上：按顺序把每屏文字对回词序列，
+  /// 取「这屏第一个字说出口的时刻」作为它的出现时间；对不上就按
+  /// 字数比例分掉剩下的时间
+  List<({int startMs, int endMs, String text})> _placeScreens(
+      List<String> lines, LineVoiceover? vo, int slotStart, int slotEnd) {
+    final starts = List<int?>.filled(lines.length, null);
+    final words = vo?.words ?? const <VoiceWord>[];
+    if (words.isNotEmpty) {
+      // 只在这一镜时间窗内的词里对——跨镜的字不参与
+      final inSlot = [
+        for (final w in words)
+          if ((w.startMs + w.endMs) / 2 >= slotStart &&
+              (w.startMs + w.endMs) / 2 < slotEnd)
+            w,
+      ];
+      var wi = 0;
+      for (var i = 0; i < lines.length; i++) {
+        final chars = lines[i].replaceAll(RegExp(r'\s'), '');
+        if (chars.isEmpty || wi >= inSlot.length) continue;
+        // 这屏的第一个字：从当前位置往后找（允许跳过对不上的词）
+        var found = -1;
+        for (var k = wi; k < inSlot.length && k < wi + 6; k++) {
+          if (chars.startsWith(inSlot[k].text)) {
+            found = k;
+            break;
+          }
+        }
+        if (found < 0) continue;
+        starts[i] = i == 0 ? slotStart : inSlot[found].startMs;
+        // 往前推进 chars 长度那么多个词
+        var consumed = 0;
+        var k = found;
+        while (k < inSlot.length && consumed < chars.length) {
+          consumed += inSlot[k].text.length;
+          k++;
+        }
+        wi = k;
+      }
+    }
+    // 没对上的屏：按字数比例把相邻已知锚点之间的时间分掉
+    final out = <({int startMs, int endMs, String text})>[];
+    for (var i = 0; i < lines.length; i++) {
+      final s = starts[i];
+      if (s != null) continue;
+      final prev = i == 0 ? slotStart : (out.isNotEmpty ? out.last.endMs : slotStart);
+      // 下一个已知锚点
+      var nextAnchor = slotEnd;
+      for (var j = i + 1; j < lines.length; j++) {
+        if (starts[j] != null) {
+          nextAnchor = starts[j]!;
+          break;
+        }
+      }
+      final restChars = [
+        for (var j = i; j < lines.length && starts[j] == null; j++)
+          lines[j].length,
+      ].fold(0, (a, b) => a + b);
+      final span = nextAnchor - prev;
+      starts[i] = prev;
+      if (restChars > 0 && span > 0) {
+        // 这一屏按自己的字数占比分走一段（下一屏从这里接着算）
+        final mine = (span * lines[i].length / restChars).round();
+        out.add((startMs: prev, endMs: prev + mine, text: lines[i]));
+      }
+    }
+    // 统一按锚点生成（上面只是为了算出没对上的那些的起点）
+    final result = <({int startMs, int endMs, String text})>[];
+    for (var i = 0; i < lines.length; i++) {
+      final s = starts[i] ?? slotStart;
+      final e = i + 1 < lines.length ? (starts[i + 1] ?? slotEnd) : slotEnd;
+      result.add((
+        startMs: s.clamp(slotStart, slotEnd),
+        endMs: e.clamp(slotStart, slotEnd),
+        text: lines[i],
+      ));
+    }
+    return result;
   }
 
   /// 有效切点：文本与镜头两轴都在界内且严格递增——镜头删了、台词改了
