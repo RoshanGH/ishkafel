@@ -26,6 +26,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/playback/media_kit_follower.dart';
@@ -723,6 +724,45 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   void _onMediaCache() {
     if (mounted) setState(() {});
+    unawaited(_backfillMeasuredDurations());
+  }
+
+  /// 正在量的，避免同一条素材反复量
+  final Set<int> _measuring = {};
+
+  /// 素材落地就量一次**真实时长**回填。
+  ///
+  /// 时长原本靠对着签名地址跑 ffprobe 探测，网络一抖就探不到；探不到就是
+  /// null，而 null 在分配里被当成「无限长」——于是 1.2 秒的素材能被分到
+  /// 6 秒的坑位，预览与成片两头出错（真机踩过）。文件都在本地了，量一下
+  /// 几十毫秒的事，没有必要继续猜
+  Future<void> _backfillMeasuredDurations() async {
+    final cache = _mediaCache;
+    if (cache == null) return;
+    final todo = <int, String>{};
+    for (final line in _doc.lines) {
+      for (final shot in line.shots) {
+        if (shot.localSource != null || shot.durationMs != null) continue;
+        if (_measuring.contains(shot.materialId)) continue;
+        final path = cache.localPathOf(shot.materialId);
+        if (path != null) todo[shot.materialId] = path;
+      }
+    }
+    if (todo.isEmpty) return;
+    _measuring.addAll(todo.keys);
+    for (final e in todo.entries) {
+      try {
+        final info = await FfprobeService().probe(e.value);
+        final ms = info.duration.inMilliseconds;
+        if (ms > 0 && mounted) {
+          _mutate((d) => d.withMeasuredDuration(e.key, ms));
+        }
+      } catch (err) {
+        AppLog.warn('素材 ${e.key} 实测时长失败：$err');
+      } finally {
+        _measuring.remove(e.key);
+      }
+    }
   }
 
   /// 把全部行的全部镜头固定到本地——挑中即下载，检索结果随时会变，

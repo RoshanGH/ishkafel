@@ -1,5 +1,6 @@
 import '../playback/track_plan.dart';
 import 'script_doc.dart';
+import 'shot_coverage.dart';
 import 'shot_allocation.dart';
 
 /// 一个镜头段的画面来源：文件路径 + 从文件的哪一刻开始播。
@@ -99,6 +100,18 @@ ScriptPlanResult buildScriptTrackPlan(
       skipped[i] = notReady;
       continue;
     }
+    // 画面铺不满坑位 = 阻断。让它进预览只会两头错：画面轨按 EDL 声明的
+    // 长度算，mpv 读到文件尾就收，整条轨缩水，配音被反复拽回同一处
+    // （听起来就是台词一直在重复）；成片那边则是画面定格几秒。
+    // 宁可这一行不播，也不能播一个错的（真机踩过）
+    final gaps = lineShotGaps(line);
+    if (gaps.isNotEmpty) {
+      final g = gaps.first;
+      skipped[i] = '第 ${g.shotIndex + 1} 镜的画面只有 ${_sec(g.usableMs)} 秒，'
+          '铺不满 ${_sec(g.allocMs)} 秒（差 ${_sec(g.gapMs)} 秒）——'
+          '换条长一点的素材、放慢这一镜，或把它截短';
+      continue;
+    }
 
     lineStarts[i] = cursorMs;
     var shotAt = cursorMs;
@@ -185,3 +198,6 @@ ScriptPlanResult buildScriptTrackPlan(
     lineStarts: lineStarts,
   );
 }
+
+/// 毫秒 → 一位小数的秒（提示语里给人看的）
+String _sec(int ms) => (ms / 1000).toStringAsFixed(1);

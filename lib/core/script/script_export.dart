@@ -10,6 +10,7 @@ import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_rasterizer.dart';
 import '../subtitle/subtitle_style.dart';
 import 'script_doc.dart';
+import 'shot_coverage.dart';
 import 'shot_allocation.dart';
 
 /// 导出失败：message 面向用户，点名到行/镜头
@@ -78,6 +79,18 @@ class ScriptExportRunner {
             '配乐「${seg.material.name}」在本地找不到，这一版成片会缺这段配乐，'
             '所以先停下了。到配乐色带上重试下载，或把这一段配乐去掉再导。');
       }
+    }
+    // 画面铺不满坑位的，成片里只能靠克隆最后一帧补满——那是几秒钟的
+    // 定格，用户不会当成「设计」，只会当成软件坏了。停下来点名
+    final gaps = shotCoverageGaps(doc);
+    if (gaps.isNotEmpty) {
+      final g = gaps.first;
+      throw ScriptExportException(
+          '第 ${g.lineIndex + 1} 行第 ${g.shotIndex + 1} 镜的画面只有 '
+          '${(g.usableMs / 1000).toStringAsFixed(1)} 秒，'
+          '铺不满 ${(g.allocMs / 1000).toStringAsFixed(1)} 秒'
+          '${gaps.length > 1 ? '（另有 ${gaps.length - 1} 处同样的问题）' : ''}。'
+          '换条长一点的素材、放慢这一镜，或把它截短，再导出。');
     }
     final lines = _readyLines(doc);
     if (lines.isEmpty) {

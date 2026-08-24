@@ -20,6 +20,35 @@ LineShot shot(int id, {int? alloc, int trim = 0, double speed = 1.0}) =>
         speed: speed);
 
 void main() {
+  test('画面铺不满坑位：整行拦下不进预览，并说清差多少、该怎么办', () {
+    // 真机：这条素材只有 1.2 秒却被分了 6 秒（时长探测失败当成了无限长）。
+    // 让它进预览会两头出错——画面轨缩水、配音被反复拽回同一处（听起来
+    // 就是台词一直重复）。所以这是阻断性的：宁可这一行不播，也不能播错
+    final doc = ScriptDoc([
+      ScriptLine.create(text: '现在我们家每个月都有定期清理冰箱的好习惯')
+          .withShots(const [
+            LineShot(
+                materialId: 106720,
+                name: '滴露冰箱',
+                durationMs: 1207,
+                allocMs: 6048),
+          ])
+          .withVoiceover(LineVoiceover(
+              audioPath: '/vo.mp3',
+              durationMs: 6048,
+              sourceText: '现在我们家每个月都有定期清理冰箱的好习惯',
+              voiceId: 'v',
+              speechRate: 0)),
+    ]);
+    final result = buildScriptTrackPlan(doc,
+        sourceOf: (shot) => const ShotSource('/m/106720.mp4'));
+
+    expect(result.plan.video, isEmpty, reason: '铺不满就不进预览');
+    expect(result.skippedLines[0], contains('画面'));
+    expect(result.skippedLines[0], contains('4.8'),
+        reason: '差多少要说出来，不然人不知道要调多少');
+  });
+
   test('两行就绪：画面轨连续相接、配音各铺各行、总长正确', () {
     var doc = ScriptDoc.empty().updateText(0, '第一句');
     doc = doc.insertAfter(0, text: '第二句');

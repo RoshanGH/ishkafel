@@ -426,6 +426,22 @@ class LineShot {
 
   static const _unsetAlloc = Object();
 
+  /// 挂上实测时长（素材落地后量出来的）。其余字段原样
+  LineShot withMeasuredDuration(int ms) => LineShot(
+        materialId: materialId,
+        name: name,
+        voiceover: voiceover,
+        sceneDescription: sceneDescription,
+        thumbnailUrl: thumbnailUrl,
+        fileKey: fileKey,
+        durationMs: ms,
+        trimStartMs: trimStartMs,
+        speed: speed,
+        allocMs: allocMs,
+        localSource: localSource,
+        legacySubtitleText: legacySubtitleText,
+      );
+
   /// 卡片上显示什么：台词 → 画面描述 → 素材名
   String get label => voiceover.isNotEmpty
       ? voiceover
@@ -1060,6 +1076,41 @@ class ScriptDoc {
   ScriptDoc setShotsById(String lineId, List<LineShot> shots) {
     final index = lines.indexWhere((l) => l.id == lineId);
     return _update(index, (line) => line.withShots(shots));
+  }
+
+  /// 素材落地后回填**实测时长**。
+  ///
+  /// 素材时长原本靠对着签名地址跑 ffprobe 探测，网络一抖就探不到；探不到
+  /// 就是 null，而 null 在 [LineShot.availableMs] 里被当成「无限长」——
+  /// 于是这条素材可以被分配任意长的坑位，成片里画面定格、预览里时间轴
+  /// 缩水（真机踩过）。文件既然已经在本地，量一次就没有猜的余地了。
+  ///
+  /// 只回填**还不知道**的（已有值不动，那可能是用户认过的规格）。
+  ScriptDoc withMeasuredDuration(int materialId, int durationMs) {
+    if (durationMs <= 0) return this;
+    var changed = false;
+    final next = [
+      for (final line in lines)
+        if (line.shots.any((s) =>
+            s.materialId == materialId &&
+            s.localSource == null &&
+            s.durationMs == null))
+          () {
+            changed = true;
+            return line.withShots([
+              for (final s in line.shots)
+                if (s.materialId == materialId &&
+                    s.localSource == null &&
+                    s.durationMs == null)
+                  s.withMeasuredDuration(durationMs)
+                else
+                  s,
+            ]);
+          }()
+        else
+          line,
+    ];
+    return changed ? _withLines(next) : this;
   }
 
   /// 按行 id 换标签
