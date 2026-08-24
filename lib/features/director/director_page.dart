@@ -51,6 +51,7 @@ import 'line_board.dart';
 import 'script_panel.dart';
 import 'start_guide.dart';
 import '../../core/subtitle/subtitle_style.dart';
+import 'export_readiness.dart';
 import 'script_export_dialog.dart';
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
@@ -493,6 +494,102 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   final ValueNotifier<ScriptExportProgress?> _exportProgress =
       ValueNotifier(null);
 
+  /// 导出前把素材补齐：**人已经点了导出，意图很明确**——还在下的就等它
+  /// 下完（等待写进进度条），只有真下不下来才中断。把人赶回去自己猜
+  /// 「下完了没有」不是商业软件该有的样子。
+  ///
+  /// 返回下不下来的那些（名字 + 原因）；空列表 = 可以开导了。
+  Future<List<MediaBlocked>> _prepareMedia() async {
+    // 先确保都在队列里（老方案打开后可能还没排过队）
+    _pinAllShots();
+    _pinBgm();
+    final shotIds = <int, String>{};
+    for (final line in _doc.lines) {
+      for (final shot in line.shots) {
+        if (shot.localSource != null) continue; // 参考段用的是原片，不走缓存
+        shotIds[shot.materialId] = shot.name;
+      }
+    }
+    final bgmIds = <int, String>{
+      for (final seg in _doc.bgmSegments) seg.material.id: seg.material.name,
+    };
+    final needs = <MediaNeed>[
+      for (final e in shotIds.entries) (id: e.key, name: e.value, isBgm: false),
+      for (final e in bgmIds.entries) (id: e.key, name: e.value, isBgm: true),
+    ];
+    if (needs.isEmpty) return const [];
+    final deadline = DateTime.now().add(const Duration(minutes: 20));
+    while (true) {
+      if (!mounted) return const [];
+      final r = checkMedia(
+        needs,
+        statusOf: (n) =>
+            (n.isBgm ? _bgmCache : _mediaCache)?.statusOf(n.id),
+        failureOf: (n) =>
+            (n.isBgm ? _bgmCache : _mediaCache)?.failureOf(n.id),
+      );
+      if (r.failed.isNotEmpty) return r.failed;
+      if (r.canExport) return const [];
+      if (DateTime.now().isAfter(deadline)) {
+        return [
+          (
+            id: -1,
+            name: '还有 ${r.pending} 项',
+            reason: '下载迟迟没有完成（已等 20 分钟），请检查网络后重试',
+            isBgm: false
+          )
+        ];
+      }
+      // 等待也要有交代：进度条上写清准备到第几项
+      _exportProgress.value = ScriptExportProgress(
+          '正在准备素材 ${r.ready}/${r.total}', r.ready / r.total * 0.06);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+  }
+
+  /// 素材没齐时的出路：**「知道了」不是操作**。给重试；如果卡住的
+  /// 全是配乐，还可以把这几段配乐撤掉直接出片（画面和口播不受影响）
+  Future<String?> _askMediaBlocked(List<MediaBlocked> failed) async {
+    final allBgm = failed.every((f) => f.isBgm) && failed.first.id > 0;
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('素材还没齐'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final f in failed.take(5))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('· ${f.isBgm ? '配乐' : '素材'}「${f.name}」：${f.reason}',
+                    style: const TextStyle(fontSize: AppFontSize.caption)),
+              ),
+            if (failed.length > 5)
+              Text('…还有 ${failed.length - 5} 项',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('先不导')),
+          if (allBgm)
+            TextButton(
+                key: const ValueKey('export-drop-bgm'),
+                onPressed: () => Navigator.of(context).pop('drop-bgm'),
+                child: const Text('去掉这几段配乐继续导出')),
+          FilledButton(
+              key: const ValueKey('export-retry-download'),
+              onPressed: () => Navigator.of(context).pop('retry'),
+              child: const Text('重试下载')),
+        ],
+      ),
+    );
+  }
+
   Future<void> _exportScript() async {
     final cache = _mediaCache;
     final dataDir = ref.read(dataDirProvider);
@@ -521,6 +618,38 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       barrierDismissible: false,
       builder: (_) => _ExportProgressDialog(progress: _exportProgress),
     ));
+    // 先把素材补齐（还在下就等，进度写在条上）；下不下来才中断并给出路
+    while (true) {
+      final blocked = await _prepareMedia();
+      if (!mounted) return;
+      if (blocked.isEmpty) break;
+      Navigator.of(context, rootNavigator: true).pop();
+      final choice = await _askMediaBlocked(blocked);
+      if (!mounted) return;
+      if (choice == null) {
+        setState(() => _exporting = false);
+        return;
+      }
+      if (choice == 'drop-bgm') {
+        final drop = {for (final f in blocked) f.id};
+        _mutate((d) => d.withBgmSegments([
+              for (final seg in d.bgmSegments)
+                if (!drop.contains(seg.material.id)) seg,
+            ]));
+        _flushNow();
+        _pinBgm();
+      } else {
+        for (final f in blocked) {
+          (f.isBgm ? _bgmCache : _mediaCache)?.retry(f.id);
+        }
+      }
+      _exportProgress.value = const ScriptExportProgress('准备中', 0);
+      unawaited(showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _ExportProgressDialog(progress: _exportProgress),
+      ));
+    }
     final runner = ScriptExportRunner(
       workDir: Directory(p.join(dataDir.path, 'script_export', _task.id)),
       localPathOf: cache.localPathOf,
@@ -1803,6 +1932,89 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         needVoice: needVoice, needShots: needShots, defaultVoice: defaultVoice);
   }
 
+  /// 补上逐字时间：早期生成的配音只有整段音频、没有每个字的时间戳，
+  /// 字幕就只能按字数把时间摊开，也没法手工分屏与打轴。这里把全片
+  /// 缺时间的行**重配一次音**（同音色同台词，声音听不出差别）。
+  ///
+  /// 会花钱、会让行时长有毫秒级变化（镜头分配跟着重算），所以先说清
+  /// 再动手；跑的时候顶栏有进度，失败的行会点名
+  Future<void> _fixMissingWordTimings() async {
+    if (_draftProgress != null) return;
+    final need = [
+      for (final l in _doc.lines)
+        if (l.type == ScriptLineType.voiced &&
+            l.voiceover != null &&
+            l.voiceover!.words.isEmpty)
+          l.id,
+    ];
+    if (need.isEmpty) {
+      _toast('每一句都已经有逐字时间了。');
+      return;
+    }
+    if (ref.read(lineVoiceFactoryProvider) == null) {
+      _toast('尚未配置 AI 服务（语音合成），补不了逐字时间。');
+      return;
+    }
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('补上逐字时间？'),
+        content: Text([
+          '有 ${need.length} 句配音是早期生成的，没带每个字的时间戳，',
+          '所以字幕只能按字数摊时间，也改不了切点。',
+          '',
+          '· 这 ${need.length} 句会用**原来的音色和台词**重配一次'
+              '（${need.length} 次语音合成），声音听不出差别',
+          '· 行的时长可能有毫秒级变化，镜头分配会跟着重算',
+          '· 补完就能手工分屏、按播放位置打轴',
+        ].join('\n')),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('先不用')),
+          FilledButton(
+              key: const ValueKey('fix-timing-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('补上')),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+    final failed = <String>[];
+    for (var i = 0; i < need.length; i++) {
+      if (!mounted) return;
+      final line = _doc.lines.where((l) => l.id == need[i]).firstOrNull;
+      if (line == null) continue; // 期间被删了
+      setState(() =>
+          _draftProgress = ('补逐字时间', line.text.trim(), i, need.length));
+      final voiceId = line.voiceId ??
+          _doc.lines
+              .lastWhere((l) => l.voiceId != null, orElse: () => line)
+              .voiceId;
+      if (voiceId == null) {
+        failed.add(line.text.trim());
+        continue;
+      }
+      final ok = await _generateVoiceCore(line.id, voiceId);
+      // 重配了还是没有逐字时间（老服务端/长句）——也算没补上，别装成功
+      final after = _doc.lines.where((l) => l.id == line.id).firstOrNull;
+      if (!ok || (after?.voiceover?.words.isEmpty ?? true)) {
+        failed.add(line.text.trim());
+      }
+    }
+    if (!mounted) return;
+    setState(() => _draftProgress = null);
+    _flushNow();
+    _schedulePreviewRebuild();
+    if (failed.isEmpty) {
+      _toast('${need.length} 句都补上了逐字时间，现在可以手工分屏与打轴。');
+    } else {
+      // 不静默：补不上的点名，剩下的照常可用
+      _toast('${need.length - failed.length} 句补好了；'
+          '${failed.length} 句没补上（${failed.first}…），可以单独重新生成配音。');
+    }
+  }
+
   Future<void> _runDraftPipeline({
     required List<String> needVoice,
     required List<String> needShots,
@@ -2093,6 +2305,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         _mutate((d) => d.cutScreenById(line.id, atMs,
                             maxChars: _styleOf(line).maxCharsPerScreen));
                       },
+                      onFixTimings: _fixMissingWordTimings,
                       onScreenReset: (index) {
                         final line = _doc.lines[index];
                         _mutate((d) => d.resetScreensById(line.id));
@@ -2131,6 +2344,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                               volume: BgmSegment.defaultVolume),
                           isHead: true
                         );
+                      },
+                      bgmStatus: (id) => _bgmCache?.statusOf(id),
+                      onRetryBgm: (id) {
+                        _bgmCache?.retry(id);
+                        _toast('正在重新下载这首配乐…');
                       },
                       onBgmSplit: _bgmSplitAt,
                       onBgmEdit: _bgmEditSegment,

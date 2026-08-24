@@ -72,9 +72,11 @@ class ScriptExportRunner {
     final style = subtitleStyle ?? doc.subtitle;
     for (final seg in doc.bgmSegments) {
       if (bgmPathOf?.call(seg.material.id) == null) {
+        // 正常路径上，界面在这之前已经等过下载、也给过重试与出路；
+        // 走到这儿说明确实拿不到文件——说清是哪一段、下一步做什么
         throw ScriptExportException(
-            '配乐「${seg.material.name}」还没下载到本地，导出被拦下'
-            '（稍等下载完成或先移除该段）。');
+            '配乐「${seg.material.name}」在本地找不到，这一版成片会缺这段配乐，'
+            '所以先停下了。到配乐色带上重试下载，或把这一段配乐去掉再导。');
       }
     }
     final lines = _readyLines(doc);
@@ -113,7 +115,9 @@ class ScriptExportRunner {
           src = localPathOf(shot.materialId);
           if (src == null) {
             throw ScriptExportException(
-                '第 ${lineIndex + 1} 行第 ${j + 1} 镜的素材还没下载到本地，导出被拦下。');
+                '第 ${lineIndex + 1} 行第 ${j + 1} 镜的素材在本地找不到，'
+                '成片会缺这一段画面，所以先停下了。'
+                '到这一镜的卡片上重试下载，或换一条素材再导。');
           }
         }
         final allocMs = shot.allocMs!;

@@ -61,6 +61,15 @@ class LineBoardHandlers {
   /// 这一行的字幕恢复全自动（清掉所有切点与改字）
   final void Function(int index) onScreenReset;
 
+  /// 给全片缺逐字时间的行重配一次音（补上之后才能手工分屏、打轴）
+  final VoidCallback onFixTimings;
+
+  /// 这一段配乐的曲子在本地的状态（null = 这段没配乐 / 没有下载器）
+  final PickedMediaStatus? Function(int materialId) bgmStatus;
+
+  /// 重下这首配乐（下砸了之后的自救入口）
+  final void Function(int materialId) onRetryBgm;
+
   /// 打轴：正在原位播这一镜时，在当前播放位置把字幕切成两屏
   final void Function(int index, int shotIndex) onSubtitleCutHere;
   final void Function(int index, int? manualMs) onManualMs;
@@ -109,6 +118,9 @@ class LineBoardHandlers {
     required this.onScreenMerge,
     required this.onScreenCut,
     required this.onScreenReset,
+    required this.onFixTimings,
+    required this.bgmStatus,
+    required this.onRetryBgm,
     required this.onSubtitleCutHere,
     required this.onManualMs,
     required this.onPickVoice,
@@ -611,42 +623,86 @@ class _LineBand extends StatelessWidget {
   Widget _bgmRail() {
     final info = handlers.bgmOf(index);
     final seg = info.seg;
-    final color = seg.silent
+    // 曲子在不在本地：**在干活的地方就要看得见**，不能等到点导出
+    // 才告诉人「还没下载」（真机踩过：配乐下砸了全程无感，导出被拦）
+    final mid = seg.material?.id;
+    final status = mid == null ? null : handlers.bgmStatus(mid);
+    final failed = status == PickedMediaStatus.failed;
+    final waiting = status == PickedMediaStatus.downloading ||
+        status == PickedMediaStatus.absent;
+    final base = seg.silent
         ? AppColors.textTertiary.withValues(alpha: 0.22)
         : _bgmColors[info.index % _bgmColors.length];
-    return _HoverReveal(
-      builder: (hovering) => Stack(children: [
-        Positioned.fill(
-          child: Padding(
-            padding: EdgeInsets.only(
-                top: info.isHead ? 3 : 0,
-                bottom: seg.endLine == index ? 3 : 0),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
-        ),
-        if (hovering)
+    final color = failed
+        ? AppColors.red
+        : (waiting ? base.withValues(alpha: 0.35) : base);
+    final tip = failed
+        ? '这首配乐没下下来，点一下重试'
+        : (waiting
+            ? '配乐正在下载到本地…'
+            : (info.isHead ? '点一下换曲 / 调音量' : '从这一句起换一首'));
+    return Tooltip(
+      message: tip,
+      waitDuration: const Duration(milliseconds: 500),
+      child: _HoverReveal(
+        builder: (hovering) => Stack(children: [
           Positioned.fill(
-            child: InkWell(
-              key: ValueKey(info.isHead
-                  ? 'band-bgm-edit-$index'
-                  : 'band-bgm-split-$index'),
-              onTap: () => info.isHead
-                  ? handlers.onBgmEdit(info.index)
-                  : handlers.onBgmSplit(index),
-              child: Container(
-                color: Colors.black.withValues(alpha: 0.35),
-                alignment: Alignment.center,
-                child: Icon(info.isHead ? Icons.music_note : Icons.content_cut,
-                    size: 9, color: Colors.white),
+            child: Padding(
+              padding: EdgeInsets.only(
+                  top: info.isHead ? 3 : 0,
+                  bottom: seg.endLine == index ? 3 : 0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
           ),
-      ]),
+          // 没就绪的段首常驻一个记号：转圈 = 在下，叹号 = 下砸了
+          if (info.isHead && (failed || waiting))
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 5,
+              child: failed
+                  ? const Icon(Icons.priority_high, size: 9, color: Colors.white)
+                  : const SizedBox(
+                      width: 8,
+                      height: 8,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 1.4, color: Colors.white70)),
+            ),
+          if (hovering)
+            Positioned.fill(
+              child: InkWell(
+                key: ValueKey(failed
+                    ? 'band-bgm-retry-$index'
+                    : (info.isHead
+                        ? 'band-bgm-edit-$index'
+                        : 'band-bgm-split-$index')),
+                // 下砸了的段：点一下就是重下，别再让人先去开编辑面板
+                onTap: () => failed
+                    ? handlers.onRetryBgm(mid!)
+                    : (info.isHead
+                        ? handlers.onBgmEdit(info.index)
+                        : handlers.onBgmSplit(index)),
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.35),
+                  alignment: Alignment.center,
+                  child: Icon(
+                      failed
+                          ? Icons.refresh
+                          : (info.isHead
+                              ? Icons.music_note
+                              : Icons.content_cut),
+                      size: 9,
+                      color: Colors.white),
+                ),
+              ),
+            ),
+        ]),
+      ),
     );
   }
 
@@ -1384,10 +1440,20 @@ class _LineBand extends StatelessWidget {
           if (!timed) ...[
             const SizedBox(width: AppSpacing.sm),
             const Tooltip(
-              message: '这句配音是早期生成的，没有逐字时间。重新生成配音后\n就能手工分屏、按播放位置打轴。',
+              message: '这句配音是早期生成的，没带逐字时间，所以只能按字数把\n时间摊开。重新配一次音就能手工分屏、按播放位置打轴。',
               child: Text('按字数均分',
                   style: TextStyle(
                       fontSize: AppFontSize.micro, color: AppColors.orange)),
+            ),
+            const SizedBox(width: 6),
+            InkWell(
+              key: ValueKey('band-fix-timing-$index'),
+              onTap: handlers.onFixTimings,
+              child: const Text('补上逐字时间',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.accentBlueLight)),
             ),
           ],
           if (timed && line.subtitleScreens != null) ...[
@@ -1450,37 +1516,41 @@ class _LineBand extends StatelessWidget {
                   onChanged: (t) => handlers.onScreenText(index, row.index, t),
                 ),
               ),
-              _screenAction(
-                key: 'band-screen-split-$index-${row.index}',
-                icon: Icons.call_split,
-                tip: timed ? '从中间拆成两屏' : '这句没有逐字时间，改不了切点',
-                onTap: !timed || row.endMs - row.startMs < 400
-                    ? null
-                    : () => handlers.onScreenCut(
-                        index, (row.startMs + row.endMs) ~/ 2),
-              ),
-              _screenAction(
-                key: 'band-screen-merge-$index-${row.index}',
-                icon: Icons.vertical_align_top,
-                tip: timed ? '并回上一屏' : '这句没有逐字时间，改不了切点',
-                onTap: !timed || row.index == 0
-                    ? null
-                    : () => handlers.onScreenMerge(index, row.index),
-              ),
-              _screenAction(
-                key: 'band-screen-hide-$index-${row.index}',
-                icon: Icons.visibility_off_outlined,
-                tip: timed ? '这屏不出字' : '这句没有逐字时间，改不了',
-                onTap: !timed
-                    ? null
-                    : () => handlers.onScreenText(index, row.index, ''),
-              ),
+              // 改不了的行不摆一排灰图标（那看着像坏了）——
+              // 出路写在标题行的「补上逐字时间」上
+              if (timed) ...[
+                _screenAction(
+                  key: 'band-screen-split-$index-${row.index}',
+                  icon: Icons.content_cut,
+                  tip: '从中间拆成两屏',
+                  onTap: row.endMs - row.startMs < 400
+                      ? null
+                      : () => handlers.onScreenCut(
+                          index, (row.startMs + row.endMs) ~/ 2),
+                ),
+                _screenAction(
+                  key: 'band-screen-merge-$index-${row.index}',
+                  icon: Icons.call_merge,
+                  tip: '并回上一屏',
+                  onTap: row.index == 0
+                      ? null
+                      : () => handlers.onScreenMerge(index, row.index),
+                ),
+                _screenAction(
+                  key: 'band-screen-hide-$index-${row.index}',
+                  icon: Icons.visibility_off_outlined,
+                  tip: '这屏不出字',
+                  onTap: () => handlers.onScreenText(index, row.index, ''),
+                ),
+              ],
             ]),
           ),
       ]),
     );
   }
 
+  /// 屏行尾的一个动作。**能点就得看得见**：常态用二级文字色（比背景
+  /// 高出一档），指上去变蓝并浮出底衬——不是那种要贴着屏幕找的灰点
   Widget _screenAction({
     required String key,
     required IconData icon,
@@ -1489,18 +1559,11 @@ class _LineBand extends StatelessWidget {
   }) =>
       Tooltip(
         message: tip,
-        waitDuration: const Duration(milliseconds: 500),
-        child: InkWell(
+        waitDuration: const Duration(milliseconds: 400),
+        child: _HoverIcon(
           key: ValueKey(key),
+          icon: icon,
           onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
-            child: Icon(icon,
-                size: 13,
-                color: onTap == null
-                    ? AppColors.textTertiary.withValues(alpha: 0.3)
-                    : AppColors.textTertiary),
-          ),
         ),
       );
 
@@ -1653,3 +1716,48 @@ class _LineBand extends StatelessWidget {
 
 /// 没在播时的占位位置（避免每次 build 新建 notifier）
 final ValueNotifier<int> _noPosition = ValueNotifier<int>(0);
+
+/// 悬停会亮起来的小图标按钮：常态二级文字色，指上去变蓝并浮出底衬。
+/// 不可用时压暗但仍看得见形状——「不能点」和「不存在」是两回事
+class _HoverIcon extends StatefulWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _HoverIcon({super.key, required this.icon, this.onTap});
+
+  @override
+  State<_HoverIcon> createState() => _HoverIconState();
+}
+
+class _HoverIconState extends State<_HoverIcon> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.onTap != null;
+    return MouseRegion(
+      cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          margin: const EdgeInsets.symmetric(horizontal: 1),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+          decoration: BoxDecoration(
+            color: _hover && enabled ? AppColors.hover : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Icon(widget.icon,
+              size: 14,
+              color: !enabled
+                  ? AppColors.textTertiary.withValues(alpha: 0.5)
+                  : (_hover
+                      ? AppColors.accentBlueLight
+                      : AppColors.textSecondary)),
+        ),
+      ),
+    );
+  }
+}

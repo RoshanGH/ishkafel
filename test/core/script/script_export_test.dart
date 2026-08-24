@@ -81,7 +81,7 @@ void main() {
       () => runner(local: (_) => null).export(
           doc: readyDoc(), outPath: '${dir.path}/out.mp4', burnSubtitles: false),
       throwsA(isA<ScriptExportException>().having((e) => e.message, 'message',
-          contains('第 1 行第 1 镜的素材还没下载到本地'))),
+          contains('第 1 行第 1 镜的素材在本地找不到'))),
     );
   });
 

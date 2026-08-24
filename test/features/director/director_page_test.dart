@@ -73,7 +73,10 @@ class _StubTranscriber extends ScriptTranscriber {
 /// 纯内存配音服务：不碰 TTS 与文件系统
 class _StubVoiceService extends LineVoiceService {
   final bool fail;
-  _StubVoiceService({this.fail = false})
+
+  /// 生成的配音带不带逐字时间（老服务端不带——那是「补不上」的场景）
+  final bool withWords;
+  _StubVoiceService({this.fail = false, this.withWords = false})
       : super(
           tts: const TtsClient(appId: 't', accessToken: 't'),
           outputDir: Directory.systemTemp,
@@ -88,12 +91,21 @@ class _StubVoiceService extends LineVoiceService {
     int speechRate = 0,
   }) async {
     if (fail) throw const TtsException('连接语音合成服务超时，请检查网络后重试');
+    final t = text.trim();
     return LineVoiceover(
       audioPath: '/tmp/fake.mp3',
       durationMs: 3200,
-      sourceText: text.trim(),
+      sourceText: t,
       voiceId: voiceId,
       speechRate: speechRate,
+      words: [
+        if (withWords)
+          for (var i = 0; i < t.length; i++)
+            VoiceWord(
+                text: t[i],
+                startMs: (i * 3200 / t.length).round(),
+                endMs: (i * 3200 / t.length).round() + 120),
+      ],
     );
   }
 
@@ -621,6 +633,89 @@ void main() {
       await tester.pumpAndSettle();
       saved = await repo.findById('t1');
       expect(saved!.script!.lines.first.subtitleScreensAt().length, n - 1);
+    });
+
+    testWidgets('老配音没逐字时间：给出「补上」的路，补完能手工分屏',
+        (tester) async {
+      final repo = _MemoryRepo();
+      const text = '它虽然真的贵但是厨房厨垫上的油渍污垢也是真的怕它';
+      var doc = docWith([text]);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      // 早期生成的配音：有音频、没逐字时间
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/tmp/old.mp3',
+              durationMs: 5200,
+              sourceText: text,
+              voiceId: 'zh_female_vv_uranus_bigtts',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id, const [
+        LineShot(materialId: 1, name: 'a', durationMs: 16000, allocMs: 5200),
+      ]);
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService(withWords: true)),
+          ]));
+      await tester.pumpAndSettle();
+
+      // 没逐字时间也照样分屏（不堆字），但说明白是怎么摊的
+      expect(doc.lines.first.subtitleScreensAt().length, greaterThan(1));
+      await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
+      await tester.pumpAndSettle();
+      expect(find.text('按字数均分'), findsOneWidget);
+      expect(find.byKey(const ValueKey('band-screen-split-0-0')), findsNothing,
+          reason: '改不了的行不摆一排灰图标——那看着像坏了');
+
+      // 出路：补上逐字时间（先说清代价，再动手）
+      await tester.tap(find.byKey(const ValueKey('band-fix-timing-0')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('重配一次'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('fix-timing-confirm')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.voiceover!.words, isNotEmpty,
+          reason: '补完就有逐字时间了');
+      expect(find.textContaining('可以手工分屏'), findsOneWidget);
+    });
+
+    testWidgets('补逐字时间没补上要点名，不许装成功', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['它虽然真的贵但是厨房厨垫上的油渍污垢也是真的怕它']);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+              audioPath: '/tmp/old.mp3',
+              durationMs: 5200,
+              sourceText: '它虽然真的贵但是厨房厨垫上的油渍污垢也是真的怕它',
+              voiceId: 'zh_female_vv_uranus_bigtts',
+              speechRate: 0));
+      doc = doc.setShotsById(doc.lines.first.id, const [
+        LineShot(materialId: 1, name: 'a', durationMs: 16000, allocMs: 5200),
+      ]);
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            // 服务端照旧不给逐字时间
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService()),
+          ]));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('band-shot-0-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('band-fix-timing-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('fix-timing-confirm')));
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('没补上'), findsOneWidget,
+          reason: '补不上就点名，不能提示「补好了」');
     });
 
     testWidgets('镜头详情在块内展开/收起（内容切换只发生在块内）', (tester) async {
