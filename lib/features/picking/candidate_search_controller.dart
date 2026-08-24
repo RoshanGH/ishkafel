@@ -70,7 +70,7 @@ class CandidateSearchController extends ChangeNotifier {
     required this.probe,
     this.probeConcurrency = 4,
     this.projectIds = const [],
-    this.pageSize = 24,
+    this.pageSize = 40,
   });
 
   /// 检索限定在哪些项目内；空表示不限项目（我的全部项目聚合）。
@@ -136,6 +136,17 @@ class CandidateSearchController extends ChangeNotifier {
   Future<void> searchByDescription(String keyword,
           {List<int> tagIds = const []}) =>
       _start((page) => service.searchByDescription(
+            keyword: keyword,
+            tagIds: tagIds,
+            projectIds: projectIds,
+            page: page,
+            pageSize: pageSize,
+          ));
+
+  /// 按文件名搜（兜底：标签和描述都筛不到时，直接按名字捞）
+  Future<void> searchByName(String keyword,
+          {List<int> tagIds = const []}) =>
+      _start((page) => service.searchByName(
             keyword: keyword,
             tagIds: tagIds,
             projectIds: projectIds,

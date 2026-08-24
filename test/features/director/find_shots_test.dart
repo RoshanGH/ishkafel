@@ -157,6 +157,58 @@ void main() {
         reason: '没有查询帧时不能空转，要说清怎么发起');
   });
 
+  testWidgets('按名称兜底：切过去自动摘掉标签，切回来标签原样还回去',
+      (tester) async {
+    // 主路径是拿参考镜头的描述/标签去找像的；筛不到时人会说「我知道妙啊里
+    // 有那条片子」，直接按文件名捞。这时还挂着标签只会继续搜不到
+    final cli = _FakeCli();
+    final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
+    await openSheet(tester, services: _fakeServices(cli), line: line);
+    cli.searchArgs.clear();
+
+    await tester.tap(find.byKey(const ValueKey('shots-dim-name')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('shots-keyword-name')), '滴露_植源喷雾');
+    await tester.tap(find.byKey(const ValueKey('shots-search')));
+    await tester.pumpAndSettle();
+
+    final args = cli.searchArgs.single;
+    expect(args, containsAllInOrder(['--by', 'name']));
+    expect(args, containsAllInOrder(['--keyword', '滴露_植源喷雾']));
+    expect(args.contains('--public-tag'), isFalse,
+        reason: '按名字捞的时候不该再挂着标签约束');
+
+    // 切回台词维度：刚才摘掉的标签要还回来，不能让人重新勾一遍
+    cli.searchArgs.clear();
+    await tester.tap(find.byKey(const ValueKey('shots-dim-voiceover')));
+    await tester.pumpAndSettle();
+    expect(cli.searchArgs.single, containsAllInOrder(['--public-tag', '1']));
+  });
+
+  testWidgets('筛窄了搜不到：一键清空筛选，把约束全松开重来', (tester) async {
+    final cli = _FakeCli();
+    final line = ScriptLine.create(text: '细菌怕它').withTags(['痛点引入']);
+    await openSheet(tester, services: _fakeServices(cli), line: line);
+    cli.searchArgs.clear();
+
+    await tester.tap(find.byKey(const ValueKey('shots-clear-tags')));
+    await tester.pumpAndSettle();
+    expect(cli.searchArgs.single.contains('--public-tag'), isFalse,
+        reason: '清空之后不该再带标签');
+    expect(find.byKey(const ValueKey('shots-clear-tags')), findsNothing,
+        reason: '没有勾着的标签就不该再摆一个「清空筛选」');
+  });
+
+  testWidgets('候选卡能就地预览：卡上有播放键，不再弹一层窗', (tester) async {
+    final cli = _FakeCli();
+    await openSheet(tester,
+        services: _fakeServices(cli), line: ScriptLine.create(text: '细菌怕它'));
+
+    expect(find.byKey(const ValueKey('shot-preview-100')), findsOneWidget,
+        reason: '挑镜头是「看一眼再决定」的活，不该为此开关几十次弹窗');
+  });
+
   testWidgets('标签选择器：从词表加约束标签，加完立即重搜', (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它');

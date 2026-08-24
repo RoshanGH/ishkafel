@@ -126,6 +126,23 @@ void main() {
       expect(args, containsAllInOrder(['--by', 'content']));
     });
 
+    test('按名称搜：--by name（标签筛不到时的兜底路子）', () async {
+      // 主路径是拿参考镜头的画面描述去找像的；找不到时人会说
+      // 「我知道妙啊里有那条片子」，直接按文件名捞出来
+      final calls = <List<String>>[];
+      await _service(calls).searchByName(keyword: ' 滴露_植源喷雾 ');
+
+      final args = calls.single;
+      expect(args, containsAllInOrder(['--keyword', '滴露_植源喷雾']));
+      expect(args, containsAllInOrder(['--by', 'name']));
+      expect(args, containsAllInOrder(['--type', 'storyboard']));
+    });
+
+    test('按名称搜：名字为空直接拒绝，不拿空关键词去问服务端', () async {
+      expect(() => _service([]).searchByName(keyword: '  '),
+          throwsA(isA<MiaoaException>()));
+    });
+
     test('首帧以图搜图：--like-image 传 OSS key', () async {
       final calls = <List<String>>[];
       await _service(calls).searchByImage(fileKey: 'prod/tenant-19/x.mov');

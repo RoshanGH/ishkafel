@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -6,16 +7,22 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/log/app_log.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/playback/media_kit_playback.dart';
 import '../../core/script/line_tagger.dart';
 import '../../core/script/script_doc.dart';
 import '../picking/candidate_search_controller.dart';
 import 'director_providers.dart';
 import 'tag_picker.dart';
 
-/// 检索维度（用户定的三个）：台词 / 画面描述 / 首帧找相似。
+/// 检索维度。**有主次之分**，不是并列的四个入口：
+/// 进这个面板的默认动作是「复刻参考片的这一镜」，所以主路径是拿参考镜头的
+/// 画面描述/标签去找像的画面；[name] 是**兜底**——主路径筛不到时，人会说
+/// 「我知道妙啊里有那条片子」，直接按文件名把它捞出来。
+///
 /// 标签与项目不是维度，是所有维度共用的外部约束
-enum _SearchDim { voiceover, description, similar }
+enum _SearchDim { voiceover, description, similar, name }
 
 /// 给一行找镜头（M3）。
 ///
@@ -116,6 +123,66 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   /// 检索用的标签（预填行标签；勾选状态就在这里维护）。
   /// 标签不是一个独立维度，是**所有维度共用的外部约束**
   late final List<String> _tags = [..._line.tags];
+
+  /// 按名称搜的关键词（兜底路子）
+  final TextEditingController _nameKw = TextEditingController();
+
+  /// 原位预览：同时只有一张卡在播，谁在播就把画面挂到谁身上。
+  /// 挑镜头是「看一眼再决定」的活，为此弹一层播放窗、看完再关掉，
+  /// 一条条看下来就是几十次开关（编导台的镜头卡早就是原位播了）
+  MediaKitPlaybackController? _preview;
+  Widget? _previewVideo;
+  int? _previewId;
+
+  /// 播这条候选；再点同一条 = 停。素材还没落地，播的是妙啊的预览地址
+  Future<void> _togglePreview(CandidateMaterial m) async {
+    if (_previewId == m.id) {
+      await _stopPreview();
+      return;
+    }
+    final url = m.previewUrl;
+    if (url == null || url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('这条素材没有可播的预览地址。')));
+      return;
+    }
+    final player = _preview ??= MediaKitPlaybackController();
+    _previewVideo ??= player.buildVideoWidget();
+    setState(() => _previewId = m.id);
+    try {
+      await player.open(url);
+      await player.waitUntilLoaded();
+      if (!mounted || _previewId != m.id) return;
+      await player.setMuted(false);
+      await player.play();
+    } catch (e) {
+      AppLog.warn('候选预览播放失败（id=${m.id}）：$e');
+      if (!mounted) return;
+      await _stopPreview();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('这条素材播不了，可能预览地址已过期。')));
+      }
+    }
+  }
+
+  Future<void> _stopPreview() async {
+    await _preview?.pause();
+    if (mounted && _previewId != null) setState(() => _previewId = null);
+  }
+
+  /// 切到「按名称」之前勾着的标签——切回别的维度时原样还给用户
+  Set<String>? _tagsBeforeName;
+
+  /// 从「按名称」切回别的维度：把之前的标签约束还回去
+  void _restoreTagsFromName() {
+    final saved = _tagsBeforeName;
+    if (_dim != _SearchDim.name || saved == null) return;
+    _enabledTags
+      ..clear()
+      ..addAll(saved);
+    _tagsBeforeName = null;
+  }
   late final Set<String> _enabledTags = {..._line.tags};
 
   /// 标签名 → miaoa 标签 id。打开面板时按任务的分子标签组拉一次；
@@ -231,6 +298,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         final key = _similarFileKey;
         if (key == null) return;
         await _search.searchByImage(key, tagIds: ids);
+      case _SearchDim.name:
+        final kw = _nameKw.text.trim();
+        if (kw.isEmpty) return;
+        await _search.searchByName(kw, tagIds: ids);
     }
   }
 
@@ -318,6 +389,8 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
     _search.dispose();
     _voiceoverKw.dispose();
     _descKw.dispose();
+    _nameKw.dispose();
+    unawaited(_preview?.dispose());
     super.dispose();
   }
 
@@ -327,9 +400,12 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       backgroundColor: AppColors.surface,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg)),
+      // 一屏能看到多少候选，直接决定要翻几页（197 条曾经要翻 9 页）。
+      // 按屏幕比例给，大屏受益；上下限夹住，小屏不溢出、超大屏不空旷
+      insetPadding: const EdgeInsets.all(AppSpacing.lg),
       child: SizedBox(
-        width: 920,
-        height: 660,
+        width: (MediaQuery.sizeOf(context).width * 0.88).clamp(920.0, 1680.0),
+        height: (MediaQuery.sizeOf(context).height * 0.88).clamp(660.0, 1100.0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(
@@ -618,12 +694,18 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       // 三个检索维度（可切）；标签在下面一行，是所有维度共用的约束
       Row(children: [
         _modePill('按台词', _dim == _SearchDim.voiceover, () {
-          setState(() => _dim = _SearchDim.voiceover);
+          setState(() {
+            _restoreTagsFromName();
+            _dim = _SearchDim.voiceover;
+          });
           _runSearch();
         }, key: const ValueKey('shots-dim-voiceover')),
         const SizedBox(width: AppSpacing.xs),
         _modePill('按画面描述', _dim == _SearchDim.description, () {
-          setState(() => _dim = _SearchDim.description);
+          setState(() {
+            _restoreTagsFromName();
+            _dim = _SearchDim.description;
+          });
           if (_descKw.text.trim().isNotEmpty) _runSearch();
         }, key: const ValueKey('shots-dim-description')),
         const SizedBox(width: AppSpacing.xs),
@@ -633,9 +715,24 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                 content: Text('先在下面的候选卡上点「找相似」，以那条的首帧为查询帧。')));
             return;
           }
-          setState(() => _dim = _SearchDim.similar);
+          setState(() {
+            _restoreTagsFromName();
+            _dim = _SearchDim.similar;
+          });
           _runSearch();
         }, key: const ValueKey('shots-dim-similar')),
+        const SizedBox(width: AppSpacing.xs),
+        // 兜底：标签和描述都筛不到时，按妙啊里的文件名直接捞。
+        // 切过去顺手把标签约束摘掉——都到按名字找了，还挂着标签只会
+        // 继续搜不到（切回别的维度会恢复）
+        _modePill('按名称', _dim == _SearchDim.name, () {
+          setState(() {
+            _tagsBeforeName = {..._enabledTags};
+            _enabledTags.clear();
+            _dim = _SearchDim.name;
+          });
+          if (_nameKw.text.trim().isNotEmpty) _runSearch();
+        }, key: const ValueKey('shots-dim-name')),
         const Spacer(),
         if (widget.tagger != null)
           TextButton.icon(
@@ -660,6 +757,9 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             _descKw, '描述想要的画面，例如「厨房喷洒清洁剂」',
             key: const ValueKey('shots-keyword-desc')),
         _SearchDim.similar => _similarBar(),
+        _SearchDim.name => _keywordField(
+            _nameKw, '输入妙啊里的文件名，例如「滴露_植源喷雾」',
+            key: const ValueKey('shots-keyword-name')),
       },
       const SizedBox(height: AppSpacing.sm),
       _constraintChips(),
@@ -712,6 +812,23 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             visualDensity: VisualDensity.compact,
             onPressed: _pickTags,
           ),
+          // 筛窄了搜不到东西时，要能一下子把约束全松开重来
+          if (_enabledTags.isNotEmpty)
+            InkWell(
+              key: const ValueKey('shots-clear-tags'),
+              onTap: () {
+                setState(_enabledTags.clear);
+                _runSearch();
+              },
+              child: const Padding(
+                padding: EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xs, vertical: 4),
+                child: Text('清空筛选',
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.accentBlueLight)),
+              ),
+            ),
           if (error != null)
             Text(error,
                 style: const TextStyle(
@@ -806,10 +923,10 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
             child: GridView.builder(
               padding: const EdgeInsets.all(AppSpacing.lg),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 168,
+                maxCrossAxisExtent: 152,
                 mainAxisSpacing: AppSpacing.md,
                 crossAxisSpacing: AppSpacing.md,
-                childAspectRatio: 0.62,
+                childAspectRatio: 0.66,
               ),
               itemCount: _search.entries.length,
               itemBuilder: (context, i) => _card(_search.entries[i]),
@@ -864,17 +981,42 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
-              m.thumbnailUrl == null
-                  ? Container(
-                      color: Colors.black,
-                      child: const Icon(Icons.image_not_supported_outlined,
-                          size: 18, color: AppColors.textTertiary))
-                  : Image.network(m.thumbnailUrl!,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Container(
-                          color: Colors.black,
-                          child: const Icon(Icons.broken_image_outlined,
-                              size: 18, color: AppColors.textTertiary))),
+              if (_previewId == m.id && _previewVideo != null)
+                _previewVideo!
+              else if (m.thumbnailUrl == null)
+                Container(
+                    color: Colors.black,
+                    child: const Icon(Icons.image_not_supported_outlined,
+                        size: 18, color: AppColors.textTertiary))
+              else
+                Image.network(m.thumbnailUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                        color: Colors.black,
+                        child: const Icon(Icons.broken_image_outlined,
+                            size: 18, color: AppColors.textTertiary))),
+              // 就地预览：点一下在这张卡上播，再点停。
+              // 放正中而不是角上——四个角分别被「第N行在用」「选中序号」
+              // 「找相似」「时长」占着；而且常驻（不靠悬停才露），
+              // 一眼就知道这张卡能播
+              Align(
+                alignment: Alignment.center,
+                child: InkWell(
+                  key: ValueKey('shot-preview-${m.id}'),
+                  onTap: () => _togglePreview(m),
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        shape: BoxShape.circle),
+                    child: Icon(
+                        _previewId == m.id ? Icons.stop : Icons.play_arrow,
+                        size: 16,
+                        color: Colors.white),
+                  ),
+                ),
+              ),
               if (entry.spec != null)
                 Positioned(
                   right: 4,

@@ -120,6 +120,7 @@ enum CandidateSearchMode {
 /// 三种模式对应 CLI 的三组参数：
 /// - 标签：`--public-tag <id,...> --public-mode and|or`
 /// - 画面描述：`--keyword X --by content`
+/// - 文件名：`--keyword X --by name`（兜底：知道有那条片子，直接按名字捞）
 /// - 以图搜图：`--like-image <fileKey>`
 ///
 /// 全部限定 `--type storyboard`：本产品替换的是**视觉镜头**，对应 miaoa 的
@@ -168,6 +169,33 @@ class MiaoaContentService {
       keyword.trim(),
       '--by',
       'content',
+      ..._tagFilter(tagIds),
+      ..._projects(projectIds),
+      ..._paging(page, pageSize),
+    ]);
+  }
+
+  /// 按**文件名**检索（CLI 的默认维度 `--by name`）。
+  ///
+  /// 这是**兜底路子**：主路径是拿参考镜头的画面描述/标签去找像的画面，
+  /// 筛不到时人会说「我知道妙啊里有那条片子」，直接按名字捞出来。
+  /// 所以调用方切到这个维度时会顺手把标签约束摘掉——都到按名字找了，
+  /// 还挂着标签只会继续搜不到
+  Future<CandidatePage> searchByName({
+    required String keyword,
+    List<int> tagIds = const [],
+    List<int> projectIds = const [],
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    if (keyword.trim().isEmpty) {
+      throw MiaoaException('名称为空，无法检索候选素材');
+    }
+    return await _search([
+      '--keyword',
+      keyword.trim(),
+      '--by',
+      'name',
       ..._tagFilter(tagIds),
       ..._projects(projectIds),
       ..._paging(page, pageSize),
