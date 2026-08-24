@@ -66,22 +66,43 @@ mkdir -p "$DIST"
 ZIP="$DIST/ishkafel-$VERSION.zip"
 
 # 这一版的更新说明必须存在：包发出去而对方不知道改了什么，等于每次都要
-# 靠猜。抽第一节（也就是最新版本那一节）跟着包一起走
+# 靠猜。默认抽第一节（最新版本那一节）跟着包一起走。
+#
+# 对方手上不是上一版时（隔了好几个版本才发给他），用 --since <版本> 把
+# 中间几节一并抽出来——他反馈的问题是在哪一版修的，他得看得到
+SINCE=""
+if [[ "${1:-}" == "--since" && -n "${2:-}" ]]; then
+  SINCE="$2"
+fi
+
 CHANGES="$DIST/更新说明-$VERSION.md"
 if ! grep -q "^## $VERSION\b" CHANGELOG.md; then
   echo "CHANGELOG.md 里没有 $VERSION 这一节——先补上再打包。" >&2
   echo "（版本号已经自增，直接在文件顶上加一节 '## $VERSION' 就行）" >&2
   exit 1
 fi
-awk -v ver="## $VERSION" '
-  $0 ~ "^" ver "$" { on = 1; print; next }
-  on && /^## / { exit }
-  on { print }
-' CHANGELOG.md > "$CHANGES"
+if [[ -n "$SINCE" ]]; then
+  if ! grep -q "^## $SINCE\b" CHANGELOG.md; then
+    echo "CHANGELOG.md 里没有 $SINCE 这一节——--since 要给一个真实存在的版本。" >&2
+    exit 1
+  fi
+  CHANGES="$DIST/更新说明-${SINCE}到${VERSION}.md"
+  awk -v from="## $VERSION" -v to="## $SINCE" '
+    $0 ~ "^" from "$" { on = 1 }
+    on && $0 ~ "^" to "$" { exit }
+    on { print }
+  ' CHANGELOG.md > "$CHANGES"
+else
+  awk -v ver="## $VERSION" '
+    $0 ~ "^" ver "$" { on = 1; print; next }
+    on && /^## / { exit }
+    on { print }
+  ' CHANGELOG.md > "$CHANGES"
+fi
 
 # 只留这一份。同一个目录里躺着好几个版本、界面又长得一样，迟早发错——
 # 今天就误判过一次：以为功能没打进包，其实是对方装的旧包
-for old in "$DIST"/ishkafel-*.zip "$DIST"/更新说明-*.md; do
+for old in "$DIST"/ishkafel-*.zip "$DIST"/更新说明*.md; do
   [[ -e "$old" ]] || continue
   [[ "$old" == "$ZIP" || "$old" == "$CHANGES" ]] && continue
   rm -f "$old"
