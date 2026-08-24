@@ -370,6 +370,12 @@ class LineShot {
   /// 非空时 materialId 只是行内唯一的负数占位，不参与下载/防撞车
   final String? localSource;
 
+  /// 这一镜的**素材原声**音量（0~1）。null = 跟随全片设置。
+  ///
+  /// 分镜素材自带的声音里常有音效（喷雾声、开门声），全丢掉片子会发干；
+  /// 但有的素材背景嘈杂，又得单独压下去。所以全局定基调、这里开小灶
+  final double? sourceVolume;
+
   /// 【旧数据】曾经字幕写在镜头上，现在字幕屏挂在行上（见
   /// [ScriptLine.subtitleScreens]）。这里只保留读取，供打开老方案时
   /// 一次性迁移成屏；新写入一律不再产生它
@@ -387,6 +393,7 @@ class LineShot {
     this.speed = 1.0,
     this.allocMs,
     this.localSource,
+    this.sourceVolume,
     this.legacySubtitleText,
   });
 
@@ -422,6 +429,25 @@ class LineShot {
         speed: speed ?? this.speed,
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
         localSource: localSource,
+        sourceVolume: sourceVolume,
+        legacySubtitleText: legacySubtitleText,
+      );
+
+  /// 改这一镜的原声音量（null = 回到跟随全片）
+  LineShot withSourceVolume(double? v) => LineShot(
+        materialId: materialId,
+        name: name,
+        voiceover: voiceover,
+        sceneDescription: sceneDescription,
+        thumbnailUrl: thumbnailUrl,
+        fileKey: fileKey,
+        durationMs: durationMs,
+        trimStartMs: trimStartMs,
+        speed: speed,
+        allocMs: allocMs,
+        localSource: localSource,
+        sourceVolume: v?.clamp(0.0, 1.0),
+        legacySubtitleText: legacySubtitleText,
       );
 
   static const _unsetAlloc = Object();
@@ -439,6 +465,7 @@ class LineShot {
         speed: speed,
         allocMs: allocMs,
         localSource: localSource,
+        sourceVolume: sourceVolume,
         legacySubtitleText: legacySubtitleText,
       );
 
@@ -459,6 +486,7 @@ class LineShot {
         if (speed != 1.0) 'speed': speed,
         if (allocMs != null) 'allocMs': allocMs,
         if (localSource != null) 'localSource': localSource,
+        if (sourceVolume != null) 'sourceVolume': sourceVolume,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -482,6 +510,9 @@ class LineShot {
       allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
       localSource:
           raw['localSource'] is String ? raw['localSource'] as String : null,
+      sourceVolume: raw['sourceVolume'] is num
+          ? (raw['sourceVolume'] as num).toDouble().clamp(0.0, 1.0)
+          : null,
       legacySubtitleText:
           raw['subtitleText'] is String ? raw['subtitleText'] as String : null,
     );
@@ -1004,12 +1035,21 @@ class ScriptDoc {
   /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
   final String? refVideoPath;
 
+  /// 全片的**素材原声**音量（0~1）。0 = 只留口播与配乐（默认，
+  /// 与这个功能出现之前的成片一模一样——升级不该悄悄改变已有片子的声音）。
+  /// 单个镜头可以在这个基调上开小灶（见 [LineShot.sourceVolume]）
+  final double sourceVolume;
+
   ScriptDoc(
     List<ScriptLine> lines, {
     this.subtitle = SubtitleStyle.standard,
     List<ScriptBgmSegment> bgmSegments = const [],
     this.refVideoPath,
-  })  : lines = List.unmodifiable(lines),
+    double sourceVolume = 0.0,
+  })  : sourceVolume = sourceVolume < 0
+            ? 0.0
+            : (sourceVolume > 1 ? 1.0 : sourceVolume),
+        lines = List.unmodifiable(lines),
         bgmSegments = List.unmodifiable(bgmSegments);
 
   /// 新脚本自带一个空行：编导打开就能写，不用先学会「加行」
@@ -1019,12 +1059,40 @@ class ScriptDoc {
   ScriptDoc _withLines(List<ScriptLine> next) => ScriptDoc(next,
       subtitle: subtitle,
       bgmSegments: bgmSegments,
-      refVideoPath: refVideoPath);
+      refVideoPath: refVideoPath,
+      sourceVolume: sourceVolume);
 
   ScriptDoc withSubtitle(SubtitleStyle next) => ScriptDoc(lines,
       subtitle: next,
       bgmSegments: bgmSegments,
-      refVideoPath: refVideoPath);
+      refVideoPath: refVideoPath,
+      sourceVolume: sourceVolume);
+
+  /// 换全片的原声音量
+  ScriptDoc withSourceVolume(double next) => ScriptDoc(lines,
+      subtitle: subtitle,
+      bgmSegments: bgmSegments,
+      refVideoPath: refVideoPath,
+      sourceVolume: next);
+
+  /// 这一镜实际该用多大的原声：镜头上设过就听它的，没设过跟随全片
+  double sourceVolumeOf(LineShot shot) => shot.sourceVolume ?? sourceVolume;
+
+  /// 按行 id 改某一镜的原声音量（null = 回到跟随全片）
+  ScriptDoc setShotSourceVolumeById(
+      String lineId, int shotIndex, double? volume) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) {
+      if (shotIndex < 0 || shotIndex >= line.shots.length) return line;
+      return line.withShots([
+        for (var i = 0; i < line.shots.length; i++)
+          if (i == shotIndex)
+            line.shots[i].withSourceVolume(volume)
+          else
+            line.shots[i],
+      ]);
+    });
+  }
 
   ScriptDoc withBgmSegments(List<ScriptBgmSegment> next) => ScriptDoc(lines,
       subtitle: subtitle, bgmSegments: next, refVideoPath: refVideoPath);
@@ -1172,6 +1240,7 @@ class ScriptDoc {
         if (bgmSegments.isNotEmpty)
           'bgmSegments': [for (final s in bgmSegments) s.toJson()],
         if (refVideoPath != null) 'refVideoPath': refVideoPath,
+        if (sourceVolume > 0) 'sourceVolume': sourceVolume,
       };
 
   /// 宽松解析；整体坏掉退回空脚本（打不开任务比丢一份草稿更糟）
@@ -1206,6 +1275,9 @@ class ScriptDoc {
                       : BgmSegment.defaultVolume,
                 ),
             ],
+      sourceVolume: raw['sourceVolume'] is num
+          ? (raw['sourceVolume'] as num).toDouble()
+          : 0.0,
       refVideoPath: raw['refVideoPath'] is String
           ? raw['refVideoPath'] as String
           : null,

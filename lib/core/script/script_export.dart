@@ -163,55 +163,61 @@ class ScriptExportRunner {
       final audioOut = p.join(workDir.path, 'a_$lineIndex.wav');
       final vo = line.voiceover;
       if (line.type == ScriptLineType.voiced && vo != null) {
-        await _exec([
-          '-y', '-v', 'error',
-          '-i', vo.audioPath,
-          '-af', 'apad',
-          '-t', _sec(lineSpanMs),
-          '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
-          audioOut,
-        ], what: '第 ${lineIndex + 1} 行配音');
-      } else {
-        // 画面行用素材自己的声音（设计稿：有画面有音乐或用分镜自己的
-        // 声音）：逐镜截取、变速跟 atempo；素材没有音轨时该镜垫静音
-        final segParts = <String>[];
-        for (var j = 0; j < line.shots.length; j++) {
-          final shot = line.shots[j];
-          final segOut = p.join(workDir.path, 'a_${lineIndex}_$j.wav');
-          final srcPath = shot.localSource ?? localPathOf(shot.materialId)!;
-          final tempo = shot.speed;
-          final r = await run('ffmpeg', [
+        // 素材原声：分镜自带的声音里常有音效（喷雾声、开门声）。
+        // 全片默认静音（升级不该改变已有片子的声音），调大了就和口播
+        // 一起混进来；逐镜可以单独开小灶
+        // 配音行的原声音量：镜头上设过就听它的，否则跟随全片（默认 0）
+        final sourceTrack = await _lineSourceAudio(
+          line: line,
+          lineIndex: lineIndex,
+          volumeOf: doc.sourceVolumeOf,
+          localPathOf: localPathOf,
+        );
+        if (sourceTrack == null) {
+          await _exec([
             '-y', '-v', 'error',
-            '-ss', _sec(shot.trimStartMs),
-            '-t', _sec((shot.allocMs! * tempo).round()),
-            '-i', srcPath,
-            '-vn',
-            '-af',
-            (tempo - 1).abs() > 1e-6 ? 'atempo=$tempo,apad' : 'apad',
-            '-t', _sec(shot.allocMs!),
+            '-i', vo.audioPath,
+            '-af', 'apad',
+            '-t', _sec(lineSpanMs),
             '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
-            segOut,
-          ]);
-          if (r.exitCode != 0 ||
-              !File(segOut).existsSync() ||
-              File(segOut).lengthSync() == 0) {
-            await _exec([
-              '-y', '-v', 'error',
-              '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-              '-t', _sec(shot.allocMs!),
-              '-c:a', 'pcm_s16le',
-              segOut,
-            ], what: '第 ${lineIndex + 1} 行第 ${j + 1} 镜静音垫');
-          }
-          segParts.add(segOut);
+            audioOut,
+          ], what: '第 ${lineIndex + 1} 行配音');
+        } else {
+          // 口播与原声同时响：normalize=0 保住各自的音量（默认的归一化
+          // 会把两路都压小，听感上像是口播突然变轻）
+          await _exec([
+            '-y', '-v', 'error',
+            '-i', vo.audioPath,
+            '-i', sourceTrack,
+            '-filter_complex',
+            '[0:a]apad[vo];[1:a]apad[src];'
+                '[vo][src]amix=inputs=2:duration=first:normalize=0[out]',
+            '-map', '[out]',
+            '-t', _sec(lineSpanMs),
+            '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+            audioOut,
+          ], what: '第 ${lineIndex + 1} 行配音与原声混合');
         }
-        final segList = File(p.join(workDir.path, 'a_$lineIndex.txt'))
-          ..writeAsStringSync(ExportCommands.concatList(segParts));
-        await _exec([
-          '-y', '-v', 'error',
-          '-f', 'concat', '-safe', '0', '-i', segList.path,
-          '-c', 'copy', audioOut,
-        ], what: '第 ${lineIndex + 1} 行素材原声');
+      } else {
+        // 画面行本来就用素材自己的声音（设计稿：有画面有音乐或用分镜
+        // 自己的声音），所以基调是满音量——除非这一镜单独压过
+        final track = await _lineSourceAudio(
+          line: line,
+          lineIndex: lineIndex,
+          volumeOf: (shot) => shot.sourceVolume ?? 1.0,
+          localPathOf: localPathOf,
+        );
+        if (track != null) {
+          File(track).renameSync(audioOut);
+        } else {
+          await _exec([
+            '-y', '-v', 'error',
+            '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+            '-t', _sec(lineSpanMs),
+            '-c:a', 'pcm_s16le',
+            audioOut,
+          ], what: '第 ${lineIndex + 1} 行静音垫');
+        }
       }
       audioParts.add(audioOut);
       tick('铺第 ${lineIndex + 1} 行声音');
@@ -313,6 +319,70 @@ class ScriptExportRunner {
       throw ScriptExportException('导出被拦下：\n${problems.join('\n')}');
     }
     return ready;
+  }
+
+  /// 一行的**素材原声**轨：逐镜截取、变速跟 atempo、按音量缩放，
+  /// 素材没有音轨的那一镜垫静音。全行音量都是 0 时返回 null——
+  /// 那就没必要多混一路进去。
+  ///
+  /// 配音行与画面行共用这一份：区别只在 [volumeOf] 给的基调不同
+  /// （画面行本来就靠素材出声，配音行默认静音、开了才响）
+  Future<String?> _lineSourceAudio({
+    required ScriptLine line,
+    required int lineIndex,
+    required double Function(LineShot shot) volumeOf,
+    required String? Function(int materialId) localPathOf,
+  }) async {
+    if (line.shots.every((s) => volumeOf(s) <= 0.001)) return null;
+    final segParts = <String>[];
+    for (var j = 0; j < line.shots.length; j++) {
+      final shot = line.shots[j];
+      final segOut = p.join(workDir.path, 'a_${lineIndex}_$j.wav');
+      final srcPath = shot.localSource ?? localPathOf(shot.materialId)!;
+      final tempo = shot.speed;
+      final volume = volumeOf(shot);
+      final filters = [
+        if ((tempo - 1).abs() > 1e-6) 'atempo=$tempo',
+        if ((volume - 1).abs() > 1e-6) 'volume=${volume.toStringAsFixed(3)}',
+        'apad',
+      ].join(',');
+      final r = volume <= 0.001
+          ? null
+          : await run('ffmpeg', [
+              '-y', '-v', 'error',
+              '-ss', _sec(shot.trimStartMs),
+              '-t', _sec((shot.allocMs! * tempo).round()),
+              '-i', srcPath,
+              '-vn',
+              '-af', filters,
+              '-t', _sec(shot.allocMs!),
+              '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
+              segOut,
+            ]);
+      // 这一镜静音、或者素材根本没有音轨：垫一段静音，保住时间轴
+      if (r == null ||
+          r.exitCode != 0 ||
+          !File(segOut).existsSync() ||
+          File(segOut).lengthSync() == 0) {
+        await _exec([
+          '-y', '-v', 'error',
+          '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+          '-t', _sec(shot.allocMs!),
+          '-c:a', 'pcm_s16le',
+          segOut,
+        ], what: '第 ${lineIndex + 1} 行第 ${j + 1} 镜静音垫');
+      }
+      segParts.add(segOut);
+    }
+    final out = p.join(workDir.path, 'asrc_$lineIndex.wav');
+    final segList = File(p.join(workDir.path, 'asrc_$lineIndex.txt'))
+      ..writeAsStringSync(ExportCommands.concatList(segParts));
+    await _exec([
+      '-y', '-v', 'error',
+      '-f', 'concat', '-safe', '0', '-i', segList.path,
+      '-c', 'copy', out,
+    ], what: '第 ${lineIndex + 1} 行素材原声');
+    return out;
   }
 
   /// 字幕屏 → 字幕句。**四处同一份派生**（预览层 / 镜头卡 / 卡上播放 /

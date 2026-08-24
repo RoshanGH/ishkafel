@@ -18,6 +18,10 @@ class TrackSegment {
   /// 从这个文件的什么位置开始播
   final int inMs;
 
+  /// 这一段自己的音量（0~1）。画面轨用它表达「素材原声出多大」——
+  /// 音效要听得见，但不能盖过口播；逐镜可以不一样
+  final double volume;
+
   /// 这一段在**原片时间轴**上对应哪一段（起点，时长）。
   ///
   /// 时间线画的是原片切分，播放头要靠它换算回去。绝大多数段落就是自己
@@ -31,6 +35,7 @@ class TrackSegment {
     required this.durationMs,
     required this.source,
     this.inMs = 0,
+    this.volume = 1.0,
     int? sourceStartMs,
     int? sourceSpanMs,
   })  : sourceStartMs = sourceStartMs ?? inMs,
@@ -61,12 +66,14 @@ class TrackSegment {
       other.durationMs == durationMs &&
       other.source == source &&
       other.inMs == inMs &&
+      other.volume == volume &&
       other.sourceStartMs == sourceStartMs &&
       other.sourceSpanMs == sourceSpanMs;
 
   @override
   int get hashCode =>
-      Object.hash(atMs, durationMs, source, inMs, sourceStartMs, sourceSpanMs);
+      Object.hash(atMs, durationMs, source, inMs, volume, sourceStartMs,
+          sourceSpanMs);
 
   @override
   String toString() => 'TrackSegment($atMs+$durationMs ← $source@$inMs)';

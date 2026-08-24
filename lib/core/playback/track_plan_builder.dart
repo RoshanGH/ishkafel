@@ -78,6 +78,9 @@ class TrackPlanBuilder {
           atMs: at,
           durationMs: durationMs,
           source: whole.path,
+          // 画面轨不出声：这条线的声音一律走口播轨（整体替换用候选自己的
+          // 声音、被配乐盖住用纯人声）。两边都响就是两份声音重叠
+          volume: 0,
           // 时间线上这个格子还是按原单元画的，播放头要按比例走完它
           sourceStartMs: unit.startMs,
           sourceSpanMs: unit.durationMs,
@@ -122,6 +125,7 @@ class TrackPlanBuilder {
                 atMs: at,
                 durationMs: slotMs,
                 source: fitted,
+                volume: 0, // 画面轨不出声，声音走口播轨
                 // 它在**原片轴**上占的还是这个镜头的坑位。不写这两项的话
                 // sourceStartMs 会默认取 inMs（=0），这一段就变成「对应原片
                 // 开头几秒」，同时把它真正占着的原片区间挖成一个空洞——换轨
@@ -133,6 +137,7 @@ class TrackPlanBuilder {
                 atMs: at,
                 durationMs: slotMs,
                 source: sourcePath,
+                volume: 0, // 画面轨不出声，声音走口播轨
                 inMs: shotStart));
         at += slotMs;
       }

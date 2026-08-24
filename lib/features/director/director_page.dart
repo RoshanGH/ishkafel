@@ -2329,6 +2329,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onPlayShot: _playShotInline,
                       onTrimDone: _scheduleReplayShot,
                       subtitleStyleOf: _styleOf,
+                      docSourceVolume: _doc.sourceVolume,
+                      onShotSourceVolume: (index, j, volume) {
+                        final line = _doc.lines[index];
+                        _mutate((d) => d.setShotSourceVolumeById(
+                            line.id, j, volume));
+                      },
                       onScreenText: (index, screenIndex, text) {
                         final line = _doc.lines[index];
                         _mutate((d) => d.setScreenTextById(
@@ -2840,6 +2846,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       fontFeatures: const [FontFeature.tabularFigures()])),
             ),
           ])),
+          if (playable) _soundToolbar(),
           if (playable) _subtitleToolbar(),
           // 预览可以少几行——人还在编排——但少了哪几行必须点名。
           // 行多时按原因分组汇总，不拿一面墙的橙字糊满中栏
@@ -2867,6 +2874,57 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 在同一视线里——不再用弹窗盖住唯一能看出效果的地方。
   /// 跟着**当前这一句**走（播到哪句就是哪句，否则是选中的那句）；
   /// 样式粒度 = 句，右端「整片」把这套提升为全局基调
+  /// 拖动中的原声音量（松手才落盘：每动一下就重建预览会卡）
+  double? _sourceVolumeDraft;
+
+  /// 声音：素材原声 / 口播 / 配乐三者共存，这里管**素材原声**出多大。
+  ///
+  /// 分镜自带的声音里常有音效（喷雾声、开门声），全丢掉片子会发干；
+  /// 但它又不能盖过口播。默认 0（与这个功能出现之前的成片一模一样），
+  /// 想要就往上推；某一镜要单独放大或压掉，在那一镜的详情里改
+  Widget _soundToolbar() {
+    final value = _sourceVolumeDraft ?? _doc.sourceVolume;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Row(children: [
+        const SizedBox(
+            width: 28,
+            child: Text('原声',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.textSecondary))),
+        Expanded(
+          child: SliderTheme(
+            data: const SliderThemeData(
+              trackHeight: 2,
+              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 5),
+              overlayShape: RoundSliderOverlayShape(overlayRadius: 10),
+            ),
+            child: Slider(
+              key: const ValueKey('sound-bar-source-volume'),
+              value: value.clamp(0.0, 1.0),
+              activeColor: AppColors.accentBlue,
+              onChanged: (v) => setState(() => _sourceVolumeDraft = v),
+              onChangeEnd: (v) {
+                setState(() => _sourceVolumeDraft = null);
+                _mutate((d) => d.withSourceVolume(v));
+              },
+            ),
+          ),
+        ),
+        SizedBox(
+            width: 42,
+            child: Text(
+                value <= 0.001 ? '静音' : '${(value * 100).round()}%',
+                textAlign: TextAlign.right,
+                style: const TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.textTertiary,
+                    fontFeatures: [FontFeature.tabularFigures()]))),
+      ]),
+    );
+  }
+
   Widget _subtitleToolbar() {
     final index = _subtitleTargetIndex;
     if (_doc.lines.isEmpty) return const SizedBox.shrink();

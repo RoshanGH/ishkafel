@@ -130,6 +130,11 @@ class MediaKitPlaybackController implements MasterTrack {
   ///
   /// 关掉之后画面轨只解码视频，段与段之间的轨道布局也就一致了。
   @override
+  Future<void> setVolume(double volume) => _gate.run(() async {
+        await player.setVolume((volume.clamp(0.0, 1.0)) * 100);
+      });
+
+  @override
   Future<void> setMuted(bool muted) => _gate.run(() async {
         await player.setVolume(muted ? 0 : 100);
         await _setMpv('aid', muted ? 'no' : 'auto');

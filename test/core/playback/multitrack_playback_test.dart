@@ -221,7 +221,8 @@ void _switchBehaviour() {
     TrackPlan planWith({required String videoSource, String? bgmSource}) =>
         TrackPlan(
           video: [
-            TrackSegment(atMs: 0, durationMs: 8000, source: videoSource),
+            TrackSegment(
+                atMs: 0, durationMs: 8000, source: videoSource, volume: 0),
           ],
           voice: const [
             TrackSegment(atMs: 0, durationMs: 8000, source: '/v/a.mp4'),
@@ -236,12 +237,32 @@ void _switchBehaviour() {
           ],
         );
 
-    test('第一次推方案：打开画面轨并静音', () async {
+    test('第一次推方案：打开画面轨，原声默认不出声', () async {
       await playback.setPlan(planWith(videoSource: '/v/a.mp4'));
 
       expect(master.calls.where((c) => c.startsWith('open(')), hasLength(1));
-      expect(master.muted, isTrue,
-          reason: '画面轨出声会和口播轨叠成两份');
+      expect(master.volume, 0.0,
+          reason: '素材原声默认关着——开着会和口播叠成两份');
+    });
+
+    test('把素材原声开起来：画面轨按这一段的音量出声（音效要能听见）', () async {
+      await playback.setPlan(TrackPlan(
+        video: [
+          const TrackSegment(
+              atMs: 0, durationMs: 4000, source: '/v/a.mp4', volume: 0.3),
+          const TrackSegment(
+              atMs: 4000, durationMs: 4000, source: '/v/b.mp4', volume: 0.9),
+        ],
+        voice: const [
+          TrackSegment(atMs: 0, durationMs: 8000, source: '/vo.mp3'),
+        ],
+      ));
+      expect(master.volume, 0.3, reason: '第一镜按它自己的原声音量');
+
+      // 播到第二镜：音量跟着换（这一镜的音效想放大）
+      master.emitPosition(5000);
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(master.volume, 0.9);
     });
 
     test('只改配乐时画面**一帧都不动**——重开一次就是一下黑闪', () async {

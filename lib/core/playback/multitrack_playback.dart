@@ -104,11 +104,11 @@ class MultitrackPlayback implements PlaybackController {
       // 出问题时没有它就只能靠猜
       AppLog.info('画面轨换源，共 ${plan.video.length} 段：$videoEdl');
       await video.open(videoEdl);
-      // 画面轨一律静音：它播的可能是候选素材，而那条素材自带的声音该不该出
-      // 由口播轨按替换规格决定（整体替换要、镜头替换不要）。这里出声只会
-      // 变成两份声音重叠
-      await video.setMuted(true);
     }
+    // 画面轨的音量 = 这一段素材原声该出多大。默认 0（素材自带的声音
+    // 会和口播叠成两份），调大了才响；逐镜可以不一样，所以跟着播放
+    // 位置走（见 [_applySourceVolume]）
+    await _applySourceVolume(video.positionMs, force: true);
     final voiceEdl = Edl.of(plan.voice);
     final voiceChanged = await voice.load(voiceEdl);
     if (voiceChanged) {
@@ -144,6 +144,7 @@ class MultitrackPlayback implements PlaybackController {
     if (_disposed) return;
     _checkPace(masterMs);
     unawaited(_applyBgm(masterMs));
+    unawaited(_applySourceVolume(masterMs));
   }
 
   /// 画面轨的走时探针：每一拍走掉的**内容**，对得上真实过去的时间吗。
@@ -246,6 +247,23 @@ class MultitrackPlayback implements PlaybackController {
         needsResync(masterMs: want, followerMs: bgm.positionMs)) {
       await bgm.seekMs(want);
     }
+  }
+
+  /// 画面轨（素材原声）当前生效的音量。只在**变化时**下命令：
+  /// 每帧都设音量会把播放器搅得一卡一卡
+  double? _sourceVolume;
+
+  Future<void> _applySourceVolume(int masterMs, {bool force = false}) async {
+    var want = 0.0;
+    for (final seg in _plan.video) {
+      if (seg.covers(masterMs)) {
+        want = seg.volume;
+        break;
+      }
+    }
+    if (!force && _sourceVolume == want) return;
+    _sourceVolume = want;
+    await video.setVolume(want);
   }
 
   /// 配乐按范围启停。只在**换段/换曲/换音量**时下命令——每帧都 seek 会把

@@ -64,6 +64,13 @@ class LineBoardHandlers {
   /// 给全片缺逐字时间的行重配一次音（补上之后才能手工分屏、打轴）
   final VoidCallback onFixTimings;
 
+  /// 改这一镜的**素材原声**音量（null = 回到跟随整片）
+  final void Function(int index, int shotIndex, double? volume)
+      onShotSourceVolume;
+
+  /// 整片的原声基调（这一镜没单独设时显示它）
+  final double docSourceVolume;
+
   /// 这一段配乐的曲子在本地的状态（null = 这段没配乐 / 没有下载器）
   final PickedMediaStatus? Function(int materialId) bgmStatus;
 
@@ -119,6 +126,8 @@ class LineBoardHandlers {
     required this.onScreenCut,
     required this.onScreenReset,
     required this.onFixTimings,
+    required this.onShotSourceVolume,
+    required this.docSourceVolume,
     required this.bgmStatus,
     required this.onRetryBgm,
     required this.onSubtitleCutHere,
@@ -1310,6 +1319,9 @@ class _LineBand extends StatelessWidget {
                   fontSize: AppFontSize.micro,
                   color: AppColors.textTertiary.withValues(alpha: 0.8))),
         ]),
+        // 这一镜的**素材原声**：音效要能听见，杂音要能压掉。
+        // 不设就跟随整片（预览下方那根「原声」滑杆）
+        _shotSourceVolumeRow(j),
         // 这一镜时间窗里的**字幕屏**：一屏一行，左边是它在成片里的
         // 入点、中间直接改字、行尾能拆开 / 并回上一屏 / 设为不出字。
         // 屏跟着语言走、镜头跟着画面走——改镜头时长，屏自愈
@@ -1378,6 +1390,60 @@ class _LineBand extends StatelessWidget {
         ),
       );
     });
+  }
+
+  /// 这一镜的原声音量行
+  Widget _shotSourceVolumeRow(int j) {
+    final shot = line.shots[j];
+    final own = shot.sourceVolume;
+    final value = own ?? handlers.docSourceVolume;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(children: [
+        const SizedBox(
+            width: 30,
+            child: Text('原声',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.textSecondary))),
+        Expanded(
+          child: SliderTheme(
+            data: const SliderThemeData(
+              trackHeight: 2,
+              thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4),
+              overlayShape: RoundSliderOverlayShape(overlayRadius: 8),
+            ),
+            child: Slider(
+              key: ValueKey('band-shot-volume-$index-$j'),
+              value: value.clamp(0.0, 1.0),
+              activeColor: AppColors.accentBlue,
+              onChanged: (v) => handlers.onShotSourceVolume(index, j, v),
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 34,
+          child: Text(value <= 0.001 ? '静音' : '${(value * 100).round()}%',
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                  fontSize: AppFontSize.micro,
+                  color: AppColors.textTertiary,
+                  fontFeatures: [FontFeature.tabularFigures()])),
+        ),
+        // 单独设过就标出来，并给一键回到整片基调
+        if (own != null) ...[
+          const SizedBox(width: 6),
+          InkWell(
+            key: ValueKey('band-shot-volume-reset-$index-$j'),
+            onTap: () => handlers.onShotSourceVolume(index, j, null),
+            child: const Text('跟随整片',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.accentBlueLight)),
+          ),
+        ],
+      ]),
+    );
   }
 
   /// 这一镜的时间窗（行时间轴，成片时间）

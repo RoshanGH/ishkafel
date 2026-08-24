@@ -122,6 +122,12 @@ ScriptPlanResult buildScriptTrackPlan(
         durationMs: shot.allocMs!,
         source: sources[j].path,
         inMs: sources[j].inMs,
+        // 配音行的素材原声：默认不出声（会和口播叠成两份），
+        // 全片调大或这一镜单独调大才响。画面行的声音走口播轨，
+        // 这里保持静音，免得同一份声音响两遍
+        volume: line.type == ScriptLineType.voiced
+            ? doc.sourceVolumeOf(shot)
+            : 0.0,
       ));
       // 画面行没有配音，用素材自己的声音（设计稿：画面行有画面有音乐
       // 或用分镜自己的声音）；配音行的声音轨在下面统一铺配音
@@ -131,6 +137,9 @@ ScriptPlanResult buildScriptTrackPlan(
           durationMs: shot.allocMs!,
           source: sources[j].path,
           inMs: sources[j].inMs,
+          // 画面行本来就靠素材出声，所以基调是满音量——除非这一镜
+          // 单独压过（导出侧同一套规则）
+          volume: shot.sourceVolume ?? 1.0,
         ));
       }
       shotAt += shot.allocMs!;

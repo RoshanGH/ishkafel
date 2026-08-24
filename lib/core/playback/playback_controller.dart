@@ -78,6 +78,10 @@ abstract class PlaybackController {
 /// 不能注入替身就只能靠反复戳界面去验，那不是验证。
 abstract class MasterTrack implements PlaybackController {
   Future<void> setMuted(bool muted);
+
+  /// 画面轨自己的音量（0~1）：素材原声要不要出、出多大。
+  /// 分镜自带的声音里常有音效，全丢掉片子会发干；但它又不能盖过口播
+  Future<void> setVolume(double volume);
 }
 
 /// 测试替身：内存位置模拟，记录调用，零 libmpv 依赖。
@@ -98,10 +102,25 @@ class FakePlaybackController implements MasterTrack {
   /// 静音状态（测试断言用）
   bool muted = false;
 
+  /// 画面轨音量（测试断言用）
+  double volume = 1.0;
+
   @override
   Future<void> setMuted(bool value) async {
     muted = value;
     calls.add('setMuted:$value');
+  }
+
+  @override
+  Future<void> setVolume(double value) async {
+    volume = value;
+    calls.add('setVolume:$value');
+  }
+
+  /// 测试里模拟主时钟走到某一刻
+  void emitPosition(int ms) {
+    _positionMs = ms;
+    _positionController.add(ms);
   }
 
   @override

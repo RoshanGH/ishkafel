@@ -21,11 +21,14 @@ void main() {
   setUp(() async => dir = await Directory.systemTemp.createTemp('script_export'));
   tearDown(() => dir.delete(recursive: true));
 
+  final commands = <List<String>>[];
+
   ScriptExportRunner runner({String? Function(int)? local}) =>
       ScriptExportRunner(
         workDir: dir,
         localPathOf: local ?? (_) => '/m.mp4',
         run: (_, args) async {
+          commands.add(args);
           // 假 ffmpeg：把「输出文件」造出来，编排走得下去
           final out = args.last;
           if (!out.startsWith('-')) File(out).writeAsBytesSync([0]);
@@ -83,6 +86,53 @@ void main() {
       throwsA(isA<ScriptExportException>().having((e) => e.message, 'message',
           contains('第 1 行第 1 镜的素材在本地找不到'))),
     );
+  });
+
+  test('原声默认不进成片——升级不许悄悄改变已有片子的声音', () async {
+    commands.clear();
+    await runner().export(
+      doc: readyDoc(),
+      outPath: '${dir.path}/out/成片.mp4',
+      burnSubtitles: false,
+    );
+    final mixes = commands.where((c) => c.join(' ').contains('amix'));
+    expect(mixes, isEmpty, reason: '没开原声就只有口播，不该多混一路');
+  });
+
+  test('开了原声：口播与素材原声一起混进成片，各自音量不被压小', () async {
+    commands.clear();
+    await runner().export(
+      doc: readyDoc().withSourceVolume(0.3),
+      outPath: '${dir.path}/out/成片.mp4',
+      burnSubtitles: false,
+    );
+    final all = commands.map((c) => c.join(' ')).toList();
+    expect(all.any((c) => c.contains('volume=0.300')), isTrue,
+        reason: '原声按设定的音量缩放');
+    expect(all.any((c) => c.contains('amix=inputs=2')), isTrue,
+        reason: '口播与原声要混在一起');
+    expect(all.any((c) => c.contains('normalize=0')), isTrue,
+        reason: '默认的归一化会把口播也压小，听感上像口播突然变轻');
+  });
+
+  test('某一镜单独压掉原声：那一镜垫静音，别的镜头照旧', () async {
+    commands.clear();
+    var doc = readyDoc().withSourceVolume(0.5);
+    doc = doc.setShotsById(doc.lines[0].id, [
+      shot(1, alloc: 2000),
+      shot(2, alloc: 2000),
+    ]);
+    doc = doc.setShotSourceVolumeById(doc.lines[0].id, 0, 0);
+    await runner().export(
+      doc: doc,
+      outPath: '${dir.path}/out/成片.mp4',
+      burnSubtitles: false,
+    );
+    final all = commands.map((c) => c.join(' ')).toList();
+    expect(all.any((c) => c.contains('anullsrc')), isTrue,
+        reason: '压掉的那一镜垫静音，时间轴不能塌');
+    expect(all.any((c) => c.contains('volume=0.500')), isTrue,
+        reason: '没单独设的镜头跟随整片');
   });
 
   test('空脚本直接拒绝', () async {
