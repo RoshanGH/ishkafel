@@ -718,6 +718,37 @@ void main() {
           reason: '补不上就点名，不能提示「补好了」');
     });
 
+    testWidgets('躺在方案里的坏配音要在行上标出来，不等人听到才发现',
+        (tester) async {
+      final repo = _MemoryRepo();
+      const text = '不然里面的食物只会越放越脏';
+      var doc = docWith([text]);
+      doc = doc.setVoiceId(0, 'zh_female_vv_uranus_bigtts');
+      // 结尾卡住反复念的那种（大模型 TTS 抽风）
+      const heard = '不然里面的食物只会越放越脏越放越脏越放越脏越放越脏';
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+            audioPath: '/tmp/bad.mp3',
+            durationMs: 5000,
+            sourceText: text,
+            voiceId: 'zh_female_vv_uranus_bigtts',
+            speechRate: 0,
+            words: [
+              for (var i = 0; i < heard.length; i++)
+                VoiceWord(
+                    text: heard[i],
+                    startMs: (i * 5000 / heard.length).round(),
+                    endMs: (i * 5000 / heard.length).round() + 100),
+            ],
+          ));
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('band-voice-defect-0')), findsOneWidget);
+      expect(find.text('这句念岔了'), findsOneWidget);
+    });
+
     testWidgets('镜头详情在块内展开/收起（内容切换只发生在块内）', (tester) async {
       var doc = docWith(['台词']);
       doc = doc.setVoiceoverById(

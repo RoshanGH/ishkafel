@@ -1641,7 +1641,27 @@ class _LineBand extends StatelessWidget {
       if (state == LineVoiceState.stale)
         const Text('内容已改，配音是旧的',
             style:
-                TextStyle(fontSize: AppFontSize.micro, color: AppColors.orange)),
+                TextStyle(fontSize: AppFontSize.micro, color: AppColors.orange))
+      // 念岔了的配音要在**听到之前**就看得见：结尾卡住反复念那种，
+      // 埋在两分钟的片子里很容易漏过去
+      else if (line.voiceDefectText != null)
+        Flexible(
+          child: Tooltip(
+            message: '${line.voiceDefectText}。\n点右边「重新生成」重来一次；'
+                '还不行就把这句台词拆短一点。',
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.warning_amber_rounded,
+                  size: 11, color: AppColors.red),
+              const SizedBox(width: 3),
+              Text('这句念岔了',
+                  key: ValueKey('band-voice-defect-$index'),
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.red)),
+            ]),
+          ),
+        ),
       const Spacer(),
       const SizedBox(width: AppSpacing.sm),
       SizedBox(

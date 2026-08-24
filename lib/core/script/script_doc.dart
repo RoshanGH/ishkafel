@@ -12,6 +12,7 @@ import '../audio/bgm_plan.dart';
 import '../analysis/providers.dart' show AsrSentence, AsrWord;
 import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_style.dart';
+import 'voice_qc.dart';
 
 enum ScriptLineType { voiced, visual }
 
@@ -633,6 +634,20 @@ class ScriptLine {
     }
     if (start == null || end == null || end <= start) return '';
     return src.substring(start, end);
+  }
+
+  /// 这一句的配音**念岔了没有**（结尾卡住反复念、半截断掉、语速离谱）。
+  /// null = 没问题或没证据可判。
+  ///
+  /// 用的是配音自带的词级时间戳（它本来就是 ASR 转写合成音频来的），
+  /// 纯本地计算、不花钱。生成时已经拦过一道，这里管的是**早就躺在
+  /// 方案里的那些**——不体检的话，坏配音要等人听到才发现（真机就是
+  /// 这么撞上的）
+  String? get voiceDefectText {
+    final vo = voiceover;
+    if (vo == null || type != ScriptLineType.voiced) return null;
+    return voiceDefect(
+        source: vo.sourceText, heard: vo.words, durationMs: vo.durationMs);
   }
 
   /// 这一行的字幕屏（行时间轴）：**屏是一等公民**——切点跟语言走、

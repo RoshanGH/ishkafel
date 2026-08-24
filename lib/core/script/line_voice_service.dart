@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../audio/tts_client.dart';
 import '../log/app_log.dart';
 import 'script_doc.dart';
+import 'voice_qc.dart';
 
 /// 编导台「生成配音」：一行台词 → TTS → mp3 落盘 → 量实际时长。
 ///
@@ -44,8 +45,45 @@ class LineVoiceService {
     if (trimmed.isEmpty) {
       throw const TtsException('这一行没有台词，没法配音。');
     }
+    // 抽风了就重来一次：大模型 TTS 会陷进重复解码（后半句两个词一直
+    // 重复）或半截断掉。这类音频听着就是「卡住了」，不能进成片。
+    // 质检用的是已经在做的那次 ASR 转写，不额外花钱（见 voice_qc.dart）
+    String? lastDefect;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      final vo = await _synthesizeOnce(
+        lineId: lineId,
+        text: trimmed,
+        voiceId: voiceId,
+        speechRate: speechRate,
+      );
+      final defect = voiceDefect(
+        source: trimmed,
+        heard: vo.words,
+        durationMs: vo.durationMs,
+      );
+      if (defect == null) return vo;
+      lastDefect = defect;
+      AppLog.warn('配音念岔了，重来一次（line=$lineId，第 ${attempt + 1} 次）：$defect');
+      // 坏的这份立刻删掉，不留孤儿
+      try {
+        File(vo.audioPath).deleteSync();
+      } catch (_) {}
+    }
+    // 两次都念岔——不静默：宁可让人知道这一句要处理，也不把卡住的
+    // 声音放进成片
+    throw TtsException('$lastDefect。已经自动重试过一次还是这样，'
+        '可以改一改这句台词（拆短、去掉重复的词）再生成。');
+  }
+
+  /// 合成一次并落盘：TTS → mp3 → 量时长 → 补词级时间戳
+  Future<LineVoiceover> _synthesizeOnce({
+    required String lineId,
+    required String text,
+    required String voiceId,
+    required int speechRate,
+  }) async {
     final result = await tts.synthesize(
-      text: trimmed,
+      text: text,
       speaker: voiceId,
       speechRate: speechRate == 0 ? null : speechRate,
     );
@@ -76,7 +114,7 @@ class LineVoiceService {
     return LineVoiceover(
       audioPath: file.path,
       durationMs: durationMs,
-      sourceText: trimmed,
+      sourceText: text,
       voiceId: voiceId,
       speechRate: speechRate,
       words: words,

@@ -55,6 +55,65 @@ void main() {
     expect(tts.calls.single.$3, 25);
   });
 
+  test('念岔了（结尾反复念同一句）自动重来一次；第二次好了就用第二次',
+      () async {
+    const text = '不然里面的食物只会越放越脏';
+    var round = 0;
+    final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
+    final service = LineVoiceService(
+      tts: tts,
+      outputDir: dir,
+      measureMs: (_) async => 4000,
+      transcribeWords: (_) async {
+        round++;
+        // 第一次抽风：后半句卡住反复念；第二次正常
+        final heard = round == 1
+            ? '不然里面的食物只会越放越脏越放越脏越放越脏越放越脏'
+            : text;
+        return [
+          for (var i = 0; i < heard.length; i++)
+            VoiceWord(
+                text: heard[i],
+                startMs: (i * 4000 / heard.length).round(),
+                endMs: (i * 4000 / heard.length).round() + 100),
+        ];
+      },
+    );
+    final vo = await service.generate(lineId: 'l1', text: text, voiceId: 'v');
+
+    expect(round, 2, reason: '第一次念岔了要自己重来，不能把卡住的声音交出去');
+    expect(vo.words.map((w) => w.text).join(), text);
+    expect(tts.calls, hasLength(2));
+    expect(dir.listSync().whereType<File>(), hasLength(1),
+        reason: '念岔的那份要删掉，不留孤儿文件');
+  });
+
+  test('重来一次还是念岔：点名报错，绝不把卡住的声音放进成片', () async {
+    const text = '不然里面的食物只会越放越脏';
+    final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
+    final service = LineVoiceService(
+      tts: tts,
+      outputDir: dir,
+      measureMs: (_) async => 4000,
+      transcribeWords: (_) async {
+        const heard = '不然里面的食物只会越放越脏越放越脏越放越脏越放越脏';
+        return [
+          for (var i = 0; i < heard.length; i++)
+            VoiceWord(
+                text: heard[i],
+                startMs: (i * 4000 / heard.length).round(),
+                endMs: (i * 4000 / heard.length).round() + 100),
+        ];
+      },
+    );
+    await expectLater(
+        service.generate(lineId: 'l1', text: text, voiceId: 'v'),
+        throwsA(isA<TtsException>().having((e) => e.message, 'message',
+            allOf(contains('重复'), contains('重试')))));
+    expect(dir.listSync().whereType<File>(), isEmpty,
+        reason: '两份坏音频都不留');
+  });
+
   test('TTS 不给词级时间戳时用 ASR 转写补上（字幕按镜头切分的地基）',
       () async {
     final tts = _FakeTts(result: TtsResult(audio: Uint8List.fromList([1])));
