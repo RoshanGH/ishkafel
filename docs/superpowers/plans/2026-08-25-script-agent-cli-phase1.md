@@ -55,6 +55,57 @@
 
 ---
 
+### Task 0: GUI 在锁释放后自动重载（先做）
+
+**排在最前是刻意的。** 锁与只读横幅在上一期（phase1 Task 4/5）已经做完了，
+缺的只是最后一下：Agent 放锁之后，GUI 得把它改的东西载进来。这一条不做，
+后面七个任务在「人在场」的场景下全是危险的——Agent 写得越多，被覆盖的越多。
+
+场景（用户原话的用法）：人开着 GUI，让 Agent「把第 5 句换个镜头」。Agent 持锁 → GUI 只读 → Agent 写完放锁 → **GUI 里还是旧数据**。人随手改一下，自动保存把 Agent 刚做的活整个覆盖掉。
+
+**Files:**
+- Modify: `lib/features/director/director_page.dart`（锁状态监听 + 重载）
+- Modify: `lib/core/storage/task_lock.dart`（如需要：暴露锁变化的通知）
+- Test: `test/features/director/director_lock_reload_test.dart`
+
+**Interfaces:**
+- Consumes: `TaskLockFile.read()`（已有），加一个轮询（2 秒一次，与心跳同量级）
+
+**行为契约：**
+
+| 状态变化 | GUI 表现 |
+|---|---|
+| 无锁 → 有锁（别人拿走） | 切只读，顶部横幅「Agent 正在操作这个任务」 |
+| 有锁 → 无锁（对方放锁） | **重新从磁盘读任务**，恢复可编辑，提示「Agent 改动已载入」 |
+| 重载时本地有未落盘改动 | 先 `_flushNow()` 再读——本地改动优先落盘，避免自己的活丢了 |
+
+**Steps:**
+
+- [ ] **Step 1: 写失败的测试**
+
+```dart
+testWidgets('Agent 放锁后自动载入它的改动，不让人覆盖掉', (tester) async {
+  // 打开任务 → 外部进程拿锁 → 改磁盘上的任务 → 放锁
+  await pumpDirector(tester, wrap(repo, task));
+  lock.acquire('Agent');
+  await tester.pump(const Duration(seconds: 3));
+  expect(find.textContaining('正在操作'), findsOneWidget);
+
+  await repo.save(taskWithAgentEdit);   // Agent 写入
+  lock.release('Agent');
+  await tester.pump(const Duration(seconds: 3));
+
+  expect(find.text('Agent 改动已载入'), findsOneWidget);
+  expect(find.text('Agent 挑的镜头'), findsOneWidget,
+      reason: '不重载的话，人再改一下就把 Agent 的活覆盖了');
+});
+```
+
+- [ ] **Step 2-4: 跑测试 → 实现 → 真机验收**（两个终端：一个跑 CLI apply，一个开 GUI 看）
+- [ ] **Step 5: 提交**
+
+---
+
 ### Task 1: `ishkafel script show` —— 脚本任务全貌
 
 Agent 干任何事之前先要能看懂这个任务。现在 `task_view.dart` 只投影成片翻新那部分（`units`），脚本任务在 CLI 里是**完全不可见**的。
@@ -531,8 +582,11 @@ dart run bin/ishkafel.dart script subtitles hlhivnohoo --line 14 --json | jq '.w
 | 不重复 | `第 N 行的切点 18 出现了两次` |
 | 每屏 ≤ 字数上限 | `第 N 行第 2 屏有 22 个字，超过这个字号一屏能放的 15 个字——会出画` |
 | 每屏非空 | `第 N 行第 3 屏一个字都没有` |
+| 每屏 ≥ 4 个字 | `第 N 行第 2 屏只有 2 个字——闪一下就过去，看的人只会觉得晃眼` |
 
-最后一条尤其重要：切点相邻（比如 `[8, 9]`）会切出只有一个字的屏，看起来像坏了。
+最后一条只在**有切点**时才可能触发，所以「哇塞！」这种整句两个字的短行不受
+影响：它压根不需要切，`cuts` 是空的，一屏就是整行。被拦下的是「把一句话切出
+一个两字屏」这种真正的坏切法。
 
 **Steps:**
 
@@ -681,56 +735,7 @@ test('容许 ±1 帧的取整零头', () {
 
 ---
 
-### Task 8: GUI 在锁释放后自动重载
-
-这一条不是锦上添花，**不做就会丢数据**。
-
-场景（用户原话的用法）：人开着 GUI，让 Agent「把第 5 句换个镜头」。Agent 持锁 → GUI 只读 → Agent 写完放锁 → **GUI 里还是旧数据**。人随手改一下，自动保存把 Agent 刚做的活整个覆盖掉。
-
-**Files:**
-- Modify: `lib/features/director/director_page.dart`（锁状态监听 + 重载）
-- Modify: `lib/core/storage/task_lock.dart`（如需要：暴露锁变化的通知）
-- Test: `test/features/director/director_lock_reload_test.dart`
-
-**Interfaces:**
-- Consumes: `TaskLockFile.read()`（已有），加一个轮询（2 秒一次，与心跳同量级）
-
-**行为契约：**
-
-| 状态变化 | GUI 表现 |
-|---|---|
-| 无锁 → 有锁（别人拿走） | 切只读，顶部横幅「Agent 正在操作这个任务」 |
-| 有锁 → 无锁（对方放锁） | **重新从磁盘读任务**，恢复可编辑，提示「Agent 改动已载入」 |
-| 重载时本地有未落盘改动 | 先 `_flushNow()` 再读——本地改动优先落盘，避免自己的活丢了 |
-
-**Steps:**
-
-- [ ] **Step 1: 写失败的测试**
-
-```dart
-testWidgets('Agent 放锁后自动载入它的改动，不让人覆盖掉', (tester) async {
-  // 打开任务 → 外部进程拿锁 → 改磁盘上的任务 → 放锁
-  await pumpDirector(tester, wrap(repo, task));
-  lock.acquire('Agent');
-  await tester.pump(const Duration(seconds: 3));
-  expect(find.textContaining('正在操作'), findsOneWidget);
-
-  await repo.save(taskWithAgentEdit);   // Agent 写入
-  lock.release('Agent');
-  await tester.pump(const Duration(seconds: 3));
-
-  expect(find.text('Agent 改动已载入'), findsOneWidget);
-  expect(find.text('Agent 挑的镜头'), findsOneWidget,
-      reason: '不重载的话，人再改一下就把 Agent 的活覆盖了');
-});
-```
-
-- [ ] **Step 2-4: 跑测试 → 实现 → 真机验收**（两个终端：一个跑 CLI apply，一个开 GUI 看）
-- [ ] **Step 5: 提交**
-
----
-
-### Task 9: 给 Agent 的 skill 文档
+### Task 8: 给 Agent 的 skill 文档
 
 spec 第九节：**没有它，CLI 只是一堆能调用的动作，产不出能用的片子。** 这条线尤其如此——挑镜头和断句都是判断，判断需要方法论。
 
