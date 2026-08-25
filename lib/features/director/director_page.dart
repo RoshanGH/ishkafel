@@ -305,6 +305,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _bgmCache?.addListener(_onMediaCache);
     _pinBgm();
     _pinAllShots();
+    unawaited(_ensureSilence());
     _setupPreview();
   }
 
@@ -425,6 +426,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           : ShotSource(local, inMs: shot.trimStartMs);
     },
         bgmPathOf: (id) => _bgmCache?.localPathOf(id),
+        silenceSource: _silencePath,
         voiceOk: (path) => File(path).existsSync());
     if (!mounted) return;
     setState(() => _planResult = result);
@@ -1360,6 +1362,47 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 在 macOS 上不工作，主预览的口播轨也是独立实例，照抄已验证模式）
   MediaKitPlaybackController? _inlineAudio;
   Widget? _inlineVideo;
+
+  /// 预览用的静音垫（一段无声音频）。
+  ///
+  /// 配音比画面短的行会在声音轨上留一个洞，而 EDL 是把各段首尾相接、
+  /// 没有「空档」这个概念——洞会被压掉，从那一行起声音整体提前，累到
+  /// 片尾就变成「最后几个字一直重复」（真机反馈）。用一段静音把洞垫平。
+  /// 全局共用一份，生成一次就一直在
+  String? _silencePath;
+
+  Future<void> _ensureSilence() async {
+    if (_silencePath != null) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final dir = Directory(p.join(dataDir.path, 'preview_cache'));
+    final file = File(p.join(dir.path, 'silence.mp3'));
+    if (file.existsSync() && file.lengthSync() > 0) {
+      if (mounted) setState(() => _silencePath = file.path);
+      return;
+    }
+    try {
+      await dir.create(recursive: true);
+      final r = await const ResolvingProcessRunner().call('ffmpeg', [
+        '-y', '-v', 'error',
+        '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+        // 五分钟足够垫任何一个洞；静音 mp3 压得很小（约 1MB）
+        '-t', '300',
+        '-c:a', 'libmp3lame', '-b:a', '32k',
+        file.path,
+      ]);
+      if (r.exitCode != 0 || !file.existsSync()) {
+        AppLog.warn('预览静音垫生成失败（exit=${r.exitCode}）：${r.stderr}');
+        return;
+      }
+      if (mounted) {
+        setState(() => _silencePath = file.path);
+        _schedulePreviewRebuild();
+      }
+    } catch (e) {
+      AppLog.warn('预览静音垫生成失败：$e');
+    }
+  }
 
   /// 正在原位播放的卡：'ref_行id' 或 'shot_行id_镜下标'；null = 没在播
   String? _inlineKey;

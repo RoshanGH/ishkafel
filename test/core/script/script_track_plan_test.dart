@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
+import 'package:ishkafel/core/playback/track_plan.dart';
 import 'package:ishkafel/core/script/script_track_plan.dart';
 
 /// 整片预览轨：只拼就绪的行、跳过必点名、画面轨连续、配音随行铺。
@@ -20,6 +21,60 @@ LineShot shot(int id, {int? alloc, int trim = 0, double speed = 1.0}) =>
         speed: speed);
 
 void main() {
+  test('配音比画面短时，声音轨不能留洞——EDL 是顺序相接的', () {
+    // 真机（同事）：预览里台词最后几个字一直重复，导出却完全正常。
+    // 导出把每行音频补齐到画面那么长，预览这边却是把几十段配音首尾相接
+    // 成一条 EDL——某一行的配音比画面短，这个洞就被压掉，后面每一行的
+    // 声音都提前一截；累到片尾，声音轨已经播完而画面还在走，跟随轨就被
+    // 反复拽回末尾，听起来就是最后几个字一直重复
+    final doc = ScriptDoc([
+      // 第一行：画面 5 秒，配音只有 3 秒（人手动拉长了镜头）
+      ScriptLine.create(text: '第一句')
+          .withShots(const [
+            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
+          ])
+          .withVoiceover(vo(3000)),
+      ScriptLine.create(text: '第二句')
+          .withShots(const [
+            LineShot(materialId: 2, name: 'b', durationMs: 9000, allocMs: 4000),
+          ])
+          .withVoiceover(vo(4000)),
+    ]);
+    final result = buildScriptTrackPlan(doc,
+        sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'),
+        silenceSource: '/silence.wav');
+
+    final videoSpan = result.plan.video
+        .fold<int>(0, (int a, TrackSegment s) => a + s.durationMs);
+    final voiceSpan = result.plan.voice
+        .fold<int>(0, (int a, TrackSegment s) => a + s.durationMs);
+    expect(voiceSpan, videoSpan,
+        reason: '声音轨与画面轨一样长，中间的洞要垫上静音');
+
+    // 段与段首尾相接，一个洞都不许有
+    var at = 0;
+    for (final seg in result.plan.voice) {
+      expect(seg.atMs, at, reason: '声音轨必须连续：${result.plan.voice}');
+      at += seg.durationMs;
+    }
+    expect(result.plan.voice.any((s) => s.source == '/silence.wav'), isTrue,
+        reason: '差的那 2 秒要用静音垫上');
+  });
+
+  test('没有静音垫可用时：这一行拦下，不放一条会错位的轨出去', () {
+    final doc = ScriptDoc([
+      ScriptLine.create(text: '第一句')
+          .withShots(const [
+            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
+          ])
+          .withVoiceover(vo(3000)),
+    ]);
+    final result = buildScriptTrackPlan(doc,
+        sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'));
+    expect(result.plan.video, isEmpty);
+    expect(result.skippedLines[0], contains('配音'));
+  });
+
   test('画面铺不满坑位：整行拦下不进预览，并说清差多少、该怎么办', () {
     // 真机：这条素材只有 1.2 秒却被分了 6 秒（时长探测失败当成了无限长）。
     // 让它进预览会两头出错——画面轨缩水、配音被反复拽回同一处（听起来

@@ -49,6 +49,10 @@ ScriptPlanResult buildScriptTrackPlan(
   /// 配音文件是否还在（撤销可能把数据回滚到已被清理的旧文件上）。
   /// null = 不检查（纯函数场景）；页面注入 File.existsSync
   bool Function(String path)? voiceOk,
+
+  /// 一段静音音频的路径，用来把声音轨的洞垫平（见下面「声音轨也必须
+  /// 连续」）。null = 没有可用的静音垫，遇到洞就把那一行拦下
+  String? silenceSource,
 }) {
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
@@ -150,11 +154,34 @@ ScriptPlanResult buildScriptTrackPlan(
     final lineSpanMs = shotAt - cursorMs;
     final vo = line.voiceover;
     if (line.type == ScriptLineType.voiced && vo != null && lineSpanMs > 0) {
+      final voiceMs = root < lineSpanMs ? root : lineSpanMs;
       voice.add(TrackSegment(
         atMs: cursorMs,
-        durationMs: root < lineSpanMs ? root : lineSpanMs,
+        durationMs: voiceMs,
         source: vo.audioPath,
       ));
+      // **声音轨也必须连续**。EDL 是把各段首尾相接成一条流，它没有
+      // 「空档」这个概念：配音比画面短时留下的洞会被直接压掉，从这一行
+      // 起后面每一句的声音都提前一截；累到片尾，声音轨已经播完而画面
+      // 还在走，跟随轨就被反复拽回末尾——听起来是「最后几个字一直重复」
+      // （真机反馈；导出那边逐行 apad 补齐，所以只有预览会这样）
+      final holeMs = lineSpanMs - voiceMs;
+      if (holeMs > 0) {
+        if (silenceSource == null) {
+          // 垫不上就别放一条会错位的轨出去：拦下这一行并说清楚
+          voice.removeLast();
+          video.removeRange(video.length - line.shots.length, video.length);
+          skipped[i] = '这一句的配音比画面短 ${(holeMs / 1000).toStringAsFixed(1)} 秒，'
+              '预览暂时铺不出来（把镜头改短一点，或重新生成配音）';
+          lineStarts.remove(i);
+          continue;
+        }
+        voice.add(TrackSegment(
+          atMs: cursorMs + voiceMs,
+          durationMs: holeMs,
+          source: silenceSource,
+        ));
+      }
     }
     cursorMs = shotAt;
   }

@@ -1,3 +1,4 @@
+import '../log/app_log.dart';
 import 'track_plan.dart';
 
 /// 把一条轨拼成 libmpv 的 `edl://` 地址。
@@ -42,6 +43,7 @@ class Edl {
   /// 空轨返回 null——没有东西可播时不该造一个空 EDL 塞给播放器
   static String? of(List<TrackSegment> segments) {
     if (segments.isEmpty) return null;
+    _warnIfHoles(segments);
     final parts = [
       for (final s in segments)
         '${quote(s.source)},start=${_seconds(s.inMs)},'
@@ -52,4 +54,25 @@ class Edl {
 
   /// 毫秒转秒。保留三位小数——EDL 的时间是浮点秒，写成整数会丢帧
   static String _seconds(int ms) => (ms / 1000).toStringAsFixed(3);
+
+  /// 段与段之间留了洞就叫出来。
+  ///
+  /// **EDL 没有「空档」这个概念**：它把各段首尾相接成一条流，洞会被直接
+  /// 压掉，从那儿起后面所有内容都提前一截。画面轨提前 = 画面与声音对不上；
+  /// 声音轨提前 = 累到片尾声音先播完，跟随轨被反复拽回末尾，听起来是
+  /// 「最后几个字一直重复」（真机反馈，排查了两轮才定位到）。
+  ///
+  /// 这类错位在界面上没有任何征兆，只能靠日志指认——所以宁可多打一行。
+  static void _warnIfHoles(List<TrackSegment> segments) {
+    var at = segments.first.atMs;
+    for (final s in segments) {
+      if (s.atMs != at) {
+        AppLog.warn('EDL 轨上有洞：期望 ${at}ms 接上，实际从 ${s.atMs}ms 开始'
+            '（差 ${s.atMs - at}ms，源 ${s.source}）——'
+            'EDL 会把洞压掉，这一段之后的内容都会提前');
+        return;
+      }
+      at += s.durationMs;
+    }
+  }
 }
