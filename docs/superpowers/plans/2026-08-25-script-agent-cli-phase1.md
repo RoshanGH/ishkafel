@@ -1,5 +1,9 @@
 # 编导台 Agent CLI 实现计划（第一期：读 + 判断类回填）
 
+> **状态：待执行**（2026-08-25 定稿归档，尚未开工。开工前先读一遍
+> `docs/superpowers/specs/2026-08-11-agent-cli-design.md`——这份计划的
+> 全部规矩都来自它。）
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让 Agent 能读懂一个脚本成片任务，并接管其中全部「选哪个」的判断——挑镜头、字幕断句、分时长、配段配乐——每一次回填都过校验才落盘。
