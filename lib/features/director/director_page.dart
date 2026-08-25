@@ -872,7 +872,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _mutate((d) => d.setVoiceId(index, voiceId));
       return;
     }
-    // 整片换声：一次改完；旧配音自然标黄，「生成草片」一键全部重配
+    // 整片换声：一次改完；旧配音自然标黄，「自动铺一版」一键全部重配
     _mutate((d) {
       var next = d;
       for (var i = 0; i < next.lines.length; i++) {
@@ -884,7 +884,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
     final name = VoiceCatalog.byId(voiceId)?.ref.name ?? voiceId;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('整片音色换成「$name」了——点「生成草片」一键全部重新配音。')));
+        content: Text('整片音色换成「$name」了——点「自动铺一版」一键全部重新配音。')));
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
@@ -1874,8 +1874,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
   }
 
-  /// 提取完成后追问一次「生成草片」：打标 → 配音 → 配镜 → 直接开播。
-  /// 一次确认把费用说清，之后人只做否决和替换——这是产品的北极星
+  /// 提取完成后追问一次「自动铺一版」：打标 → 配音 → 照着参考片配镜 →
+  /// 直接开播。一次确认把费用说清，之后人只做否决和替换——这是产品的北极星
   Future<void> _offerDraftAfterExtract() async {
     if (!mounted) return;
     final tagger = ref.read(lineTaggerProvider);
@@ -1891,14 +1891,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('直接生成一版草片？'),
+        title: const Text('自动铺一版？'),
         content: Text([
-          '脚本已经就位（${voiced.length} 句）。接下来可以自动：',
+          '脚本已经就位（${voiced.length} 句）。接下来照着参考片自动铺：',
           if (canTag) '· 给每句打上标签（${voiced.length} 次 AI 调用）',
           if (canVoice)
             '· 用「$defaultVoice」配上声音（${voiced.length} 次语音合成，之后每句可换）',
-          '· 按标签或台词给每句配一个镜头',
-          '几分钟后草片会直接播出来，不满意的随手替换。',
+          '· 看懂参考片的每一镜，去妙啊找像的画面，每句配一个'
+              '（${voiced.length} 次 AI 识图）',
+          '铺完直接播出来，不满意的随手换。',
         ].join('\n')),
         actions: [
           TextButton(
@@ -1907,12 +1908,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           FilledButton(
               key: const ValueKey('draft-after-extract'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('生成草片')),
+              child: const Text('铺一版')),
         ],
       ),
     );
     if (go != true || !mounted) return;
-    // 阶段〇：打标（有词表才打；失败不挡路，退回按台词搜镜头）
+    // 阶段〇：给每句打话术标签（有词表才打；失败不挡路——镜头那步靠的是
+    // 参考镜的画面描述，与这里的话术标签是两回事）
     if (canTag) {
       for (var i = 0; i < voiced.length; i++) {
         if (!mounted) return;
@@ -1929,7 +1931,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           if (!mounted) return;
           if (tags.isNotEmpty) _mutate((d) => d.setTagsById(line.id, tags));
         } catch (e) {
-          AppLog.warn('草片打标失败（第 ${i + 1} 句）：$e');
+          AppLog.warn('话术打标失败（第 ${i + 1} 句）：$e');
         }
       }
     }
@@ -1941,9 +1943,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                 l.id,
           ]
         : <String>[];
+    // 只给**有参考镜可依据**的行配镜：手写脚本没有参考片，就不去瞎捞
+    // （用户定的：手写的自己上传参考，或者直接去找镜头面板搜）
     final needShots = [
       for (final l in _doc.lines)
-        if (l.shots.isEmpty && l.type == ScriptLineType.voiced) l.id,
+        if (l.shots.isEmpty &&
+            l.type == ScriptLineType.voiced &&
+            (l.reference?.segments.isNotEmpty ?? false))
+          l.id,
     ];
     await _runDraftPipeline(
         needVoice: needVoice,
@@ -1953,8 +1960,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   // ---- 草片流水线（北极星：人是来看片子诞生的，不是来操作块的）----
 
-  /// 一键生成草片：给还没配音的句子配上音、还没镜头的句子自动配镜，
-  /// 全部完成后草片直接开播。花钱的事先说清再动手
+  /// 「自动铺一版」：把还没做的补齐——没配音的配上音，没镜头的**照着
+  /// 参考片这一镜的画面**去找像的，铺完直接开播。
+  ///
+  /// 「铺」对应的心智是把整片的空位填满、然后逐句替换；「一版」是说它
+  /// 可以改，不是终稿。花钱的事先说清再动手
   Future<void> _generateDraft() async {
     if (_draftProgress != null) return;
     final voiceFactory = ref.read(lineVoiceFactoryProvider);
@@ -1964,19 +1974,34 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             l.voiceState != LineVoiceState.fresh)
           l.id,
     ];
+    // 只铺**有参考镜可依据**的行（手写脚本没有参考片，不去瞎捞）
     final needShots = [
       for (final l in _doc.lines)
-        if (l.shots.isEmpty && (l.type == ScriptLineType.voiced))
+        if (l.shots.isEmpty &&
+            l.type == ScriptLineType.voiced &&
+            (l.reference?.segments.isNotEmpty ?? false))
+          l.id,
+    ];
+    // 还空着、但没有参考可依据的行：说清楚它们为什么没被铺上
+    final noRef = [
+      for (final l in _doc.lines)
+        if (l.shots.isEmpty &&
+            l.type == ScriptLineType.voiced &&
+            (l.reference?.segments.isEmpty ?? true))
           l.id,
     ];
     if (needVoice.isEmpty && needShots.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('每一句都已经就绪，直接按播放看草片。')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(noRef.isEmpty
+              ? '每一句都铺好了，直接按播放看。'
+              : '配音都好了。还有 ${noRef.length} 句没有镜头——'
+                  '它们没有参考片可依据，去右栏「找镜头」挑，'
+                  '或者先上传一段参考视频。')));
       return;
     }
     if (needVoice.isNotEmpty && voiceFactory == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('尚未配置 AI 服务（语音合成），生成不了草片。')));
+          content: Text('尚未配置 AI 服务（语音合成），铺不了。')));
       return;
     }
     // 默认音色：全片最近用过的，其次目录第一个——批量时绝不弹 27 次选择器
@@ -1990,14 +2015,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final go = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('生成草片？'),
+        title: const Text('自动铺一版？'),
         content: Text([
           if (needVoice.isNotEmpty)
             '· 给 ${needVoice.length} 句配上「$defaultVoiceName」的声音'
                 '（${needVoice.length} 次语音合成，每句之后可单独换）',
           if (needShots.isNotEmpty)
-            '· 给 ${needShots.length} 句自动配一个镜头（按标签或台词从素材库找）',
-          '完成后草片会直接播出来，不满意的镜头随手替换。',
+            '· 照着参考片这一镜的画面，给 ${needShots.length} 句各找一个像的镜头'
+                '（要先看懂参考片，${needShots.length} 次 AI 识图）',
+          if (noRef.isNotEmpty)
+            '· 另有 ${noRef.length} 句没有参考片可依据，这次不铺镜头——'
+                '去右栏「找镜头」挑，或先上传一段参考视频',
+          '铺完直接播出来，不满意的随手换。',
         ].join('\n')),
         actions: [
           TextButton(
@@ -2006,7 +2035,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           FilledButton(
               key: const ValueKey('draft-confirm'),
               onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('生成草片')),
+              child: const Text('铺一版')),
         ],
       ),
     );
@@ -2098,6 +2127,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
   }
 
+  void setStateProgress(String step, String what, int i, int total) =>
+      _draftProgress = (step, what, i, total);
+
   Future<void> _runDraftPipeline({
     required List<String> needVoice,
     required List<String> needShots,
@@ -2110,8 +2142,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (!mounted) return;
       final line = _doc.lines.where((l) => l.id == needVoice[i]).firstOrNull;
       if (line == null) continue; // 生成期间被删了
-      setState(() => _draftProgress =
-          ('配音', line.text.trim(), i, needVoice.length));
+      setState(() =>
+          setStateProgress('配音', line.text.trim(), i, needVoice.length));
       if (line.voiceId == null) {
         _mutate((d) => d.setVoiceId(
             _doc.lines.indexWhere((l) => l.id == line.id), defaultVoice));
@@ -2120,20 +2152,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
       if (!ok) voiceFailed++;
     }
-    // 二、配镜
-    final tagIds = needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
+    // 二、配镜：照着参考片这一镜的画面去找像的
+    final tagIds =
+        needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
     for (var i = 0; i < needShots.length; i++) {
       if (!mounted) return;
       final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
       if (line == null) continue;
-      setState(() =>
-          _draftProgress = ('找镜头', line.text.trim(), i, needShots.length));
-      final ok = await _autoPickShot(line.id, tagIds);
+      setState(() => setStateProgress(
+          '照着参考片找镜头', line.text.trim(), i, needShots.length));
+      final ok = await _autoPickShotByReference(line.id, tagIds);
       if (!ok) shotFailed++;
     }
     if (!mounted) return;
     // 三、完成一拍 + 开播——魔法时刻要有个 crescendo：进度收束成
-    // 「草片好了」的对勾一拍（1.1s），然后播放器入场直接开播
+    // 「铺好了」的对勾一拍（1.1s），然后播放器入场直接开播
     setState(() {
       _draftProgress = null;
       _draftCelebrating = true;
@@ -2150,20 +2183,24 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }));
     final problems = [
       if (voiceFailed > 0) '$voiceFailed 句配音没成',
-      if (shotFailed > 0) '$shotFailed 句没找到合适的镜头',
+      if (shotFailed > 0) '$shotFailed 句没找到像的镜头',
     ];
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(problems.isEmpty
-            ? '草片好了，正在播——不满意的镜头随手换。'
-            : '草片好了（${problems.join('、')}，对应句子可以手动补）。')));
+            ? '铺好了，正在播——不满意的镜头随手换。'
+            : '铺好了（${problems.join('、')}，对应句子可以手动补）。')));
   }
 
-  /// 任务标签组的 标签名 → id 映射（自动配镜按标签检索用）。拉不到不挡路
+  /// 标签名 → id 映射（自动配镜的标签约束用）。
+  /// **视觉镜头标签组也要**：自动配镜依据的是参考镜的画面标签，
+  /// 它来自视觉镜头组，与话术标签不是一套。拉不到不挡路
   Future<Map<String, int>> _loadTagIds() async {
     try {
       final services = ref.read(shotSearchServicesProvider);
       final groups = await services.tags.listGroups();
-      final wanted = {for (final g in _task.unitTagGroups) g.id};
+      final wanted = {
+        for (final g in [..._task.shotTagGroups, ..._task.unitTagGroups]) g.id,
+      };
       final ids = <String, int>{};
       for (final g in groups) {
         if (!wanted.contains(g.id)) continue;
@@ -2180,22 +2217,47 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 给一句自动配一个镜头：按行标签检索（其次按台词的画面描述搜），
   /// 取第一个没被别的句子占用的候选，探好时长落地并按行时长分配
-  Future<bool> _autoPickShot(String lineId, Map<String, int> tagIds) async {
+  /// 照着**参考片这一镜的画面**给一行配镜头。
+  ///
+  /// 以前这里是「有行标签就按标签搜，否则拿台词去搜画面描述」——后者是个
+  /// 错配：台词说的是「如果你觉得有点贵」，而画面描述库里存的是「手持喷雾
+  /// 瓶在厨房台面」，一句话和一幅画的描述根本不在一个维度上，搜出来的东西
+  /// 和这句话没关系（而且只取第一条，不做挑选）。
+  ///
+  /// 现在走的是这个产品真正的主线：**复刻参考片**。先看懂参考片这一镜
+  /// 长什么样（多帧识图，一次调用同时拿画面描述和标签），再拿这个描述去
+  /// 妙啊找像的画面——和你在找镜头面板里手动做的是同一条路。
+  ///
+  /// 没有参考镜可依据时**直接放弃**，不退回去瞎捞：宁可这一行空着
+  /// （空着一眼就看得出「这里还没做」），也不铺一堆不相干的画面让人逐个删。
+  Future<bool> _autoPickShotByReference(
+      String lineId, Map<String, int> tagIds) async {
     try {
       final services = ref.read(shotSearchServicesProvider);
-      final line = _doc.lines.firstWhere((l) => l.id == lineId);
+      final line = _doc.lines.where((l) => l.id == lineId).firstOrNull;
+      if (line == null) return false;
+      final refSegs = line.reference?.segments ?? const <(int, int)>[];
+      if (refSegs.isEmpty) return false;
+
+      // 参考片这一镜长什么样：打过标就直接用，没打过现打一次
+      var meta = line.reference!.metaAt(refSegs.first.$1);
+      if (meta == null || meta.description.trim().isEmpty) {
+        meta = await _tagRefShot(lineId, 0);
+      }
+      final description = meta?.description.trim() ?? '';
+      if (description.isEmpty) return false;
+
+      // 参考镜自己的画面标签当约束（比行的话术标签更贴画面）
       final ids = [
-        for (final t in line.tags) ?tagIds[t],
+        for (final t in meta!.tags) ?tagIds[t],
       ];
-      final page = ids.isNotEmpty
-          ? await services.content.searchByTags(
-              tagIds: ids,
-              projectIds: [if (_task.project != null) _task.project!.id],
-              pageSize: 10)
-          : await services.content.searchByDescription(
-              keyword: line.text.trim(),
-              projectIds: [if (_task.project != null) _task.project!.id],
-              pageSize: 10);
+
+      final page = await services.content.searchByDescription(
+        keyword: description,
+        tagIds: ids,
+        projectIds: [if (_task.project != null) _task.project!.id],
+        pageSize: 10,
+      );
       final used = <int>{
         for (final l in _doc.lines)
           for (final s in l.shots)
@@ -2565,7 +2627,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// （实心蓝），全就绪后让位给「导出成片」——一屏只有一个主角，
   /// 所以两个按钮的实心/描边永远互补（见 [_exportButton]）
   Widget _draftButton() {
-    final label = Text(_draftProgress != null ? '生成中…' : '生成草片');
+    final label = Text(_draftProgress != null ? '铺片中…' : '自动铺一版');
     const icon = Icon(Icons.auto_awesome, size: 14);
     final onPressed = _draftProgress != null ? null : _generateDraft;
     if (_draftHasWork) {
@@ -2721,7 +2783,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
-            const Text('草片好了',
+            const Text('铺好了',
                 style: TextStyle(
                     fontSize: AppFontSize.title,
                     fontWeight: FontWeight.w600,

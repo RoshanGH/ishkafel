@@ -778,7 +778,52 @@ void main() {
     });
   });
   group('草片流水线（双8分 Loop 第 1 轮）', () {
-    testWidgets('顶栏「生成草片」：确认后自动配音+自动配镜，句句落盘',
+    testWidgets('「自动铺一版」照着参考片这一镜的画面找镜头，不是拿台词搜',
+        (tester) async {
+      final repo = _MemoryRepo();
+      final cli = _DraftFakeCli();
+      var doc = docWith(['再不买就恢复69.9一瓶了']);
+      // 这一行有参考片，而且参考镜已经看懂了（画面描述 + 画面标签）
+      doc = doc.setReferenceById(
+          doc.lines.first.id,
+          LineRef(startMs: 0, endMs: 3000, shotMeta: [
+            RefShotMeta(
+                startMs: 0,
+                description: '一只手在厨房台面上举着喷雾瓶，背景虚化',
+                tags: ['产品特写']),
+          ]));
+      await pumpDirector(
+          tester,
+          wrap(repo, scriptTask(doc: doc), overrides: [
+            lineVoiceFactoryProvider
+                .overrideWithValue((_) => _StubVoiceService()),
+            shotSearchServicesProvider
+                .overrideWithValue(_draftFakeServices(cli)),
+          ]));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('director-draft')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('照着参考片'), findsOneWidget,
+          reason: '要说清依据的是什么，不然人读不出这跟参考片有什么关系');
+      await tester.tap(find.byKey(const ValueKey('draft-confirm')));
+      await tester.pumpAndSettle();
+
+      final search = cli.calls.firstWhere((a) => a.contains('search'));
+      expect(search, containsAllInOrder(['--by', 'content']));
+      expect(
+          search.any((a) => a.contains('一只手在厨房台面上举着喷雾瓶')), isTrue,
+          reason: '拿的是参考镜的画面描述');
+      expect(search.any((a) => a.contains('再不买就恢复')), isFalse,
+          reason: '台词是一句话、画面描述是一幅画，用台词搜画面是错配');
+
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines.first.shots, isNotEmpty);
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('手写脚本没有参考片：只配音、不铺镜头，并说清为什么',
         (tester) async {
       final repo = _MemoryRepo();
       final cli = _DraftFakeCli();
@@ -795,20 +840,18 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('director-draft')));
       await tester.pumpAndSettle();
-      expect(find.textContaining('语音合成'), findsOneWidget,
-          reason: '花钱的事先说清再动手');
+      expect(find.textContaining('没有参考片可依据'), findsOneWidget,
+          reason: '不铺就要说清为什么、下一步去哪儿做');
       await tester.tap(find.byKey(const ValueKey('draft-confirm')));
       await tester.pumpAndSettle();
 
+      expect(cli.calls.where((a) => a.contains('search')), isEmpty,
+          reason: '没有参考镜就不去素材库瞎捞——空着一眼看得出还没做');
       final saved = await repo.findById('t1');
-      expect(cli.calls.where((a) => a.contains('search')).length, 2,
-          reason: '两句各检索一次');
       for (final line in saved!.script!.lines) {
-        expect(line.voiceover, isNotNull, reason: '每句自动配上音');
-        expect(line.shots, isNotEmpty, reason: '每句自动配上镜头');
-        expect(line.shots.first.allocMs, isNotNull, reason: '时长自动分好');
+        expect(line.voiceover, isNotNull, reason: '配音照配');
+        expect(line.shots, isEmpty, reason: '镜头留给人自己挑');
       }
-      // 完成后草片自动开播的 900ms 延时要跑完，别留挂起的 Timer
       await tester.pump(const Duration(milliseconds: 900));
       await tester.pumpAndSettle();
     });
