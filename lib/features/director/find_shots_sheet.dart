@@ -132,43 +132,73 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   /// 一条条看下来就是几十次开关（编导台的镜头卡早就是原位播了）
   MediaKitPlaybackController? _preview;
   Widget? _previewVideo;
-  int? _previewId;
+
+  /// 谁在播：候选卡用 'c<素材id>'，参考镜用 'r<下标>'；null = 没在播
+  String? _previewKey;
 
   /// 播这条候选；再点同一条 = 停。素材还没落地，播的是妙啊的预览地址
   Future<void> _togglePreview(CandidateMaterial m) async {
-    if (_previewId == m.id) {
-      await _stopPreview();
-      return;
-    }
     final url = m.previewUrl;
     if (url == null || url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('这条素材没有可播的预览地址。')));
       return;
     }
+    await _playAt('c${m.id}', url, what: '候选素材 ${m.id}');
+  }
+
+  /// 播参考片的某一镜（原片的一个区间）。参考镜和候选卡共用一个播放器，
+  /// 所以同时只有一个在响
+  Future<void> _toggleRefPreview(int k, (int, int) seg) async {
+    final path = widget.refVideoPath;
+    if (path == null || !File(path).existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('参考视频不在原位了，播不了这一镜。')));
+      return;
+    }
+    await _playAt('r$k', path,
+        startMs: seg.$1, endMs: seg.$2, what: '参考第 ${k + 1} 镜');
+  }
+
+  /// 原位播一段。[startMs]/[endMs] 都给时只播这个区间（参考镜是原片里的
+  /// 一段，不能从头播）
+  Future<void> _playAt(String key, String source,
+      {int? startMs, int? endMs, required String what}) async {
+    if (_previewKey == key) {
+      await _stopPreview();
+      return;
+    }
     final player = _preview ??= MediaKitPlaybackController();
     _previewVideo ??= player.buildVideoWidget();
-    setState(() => _previewId = m.id);
+    setState(() => _previewKey = key);
     try {
-      await player.open(url);
+      await player.open(source);
       await player.waitUntilLoaded();
-      if (!mounted || _previewId != m.id) return;
+      if (!mounted || _previewKey != key) return;
       await player.setMuted(false);
-      await player.play();
+      if (startMs != null && endMs != null && endMs > startMs) {
+        final ok = await player.playRange(startMs, endMs, 30);
+        if (!ok) {
+          await player.seekMs(startMs);
+          await player.play();
+        }
+      } else {
+        await player.play();
+      }
     } catch (e) {
-      AppLog.warn('候选预览播放失败（id=${m.id}）：$e');
+      AppLog.warn('$what 预览播放失败：$e');
       if (!mounted) return;
       await _stopPreview();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('这条素材播不了，可能预览地址已过期。')));
+            const SnackBar(content: Text('这一段播不了，可能地址已过期或文件已移动。')));
       }
     }
   }
 
   Future<void> _stopPreview() async {
     await _preview?.pause();
-    if (mounted && _previewId != null) setState(() => _previewId = null);
+    if (mounted && _previewKey != null) setState(() => _previewKey = null);
   }
 
   /// 切到「按名称」之前勾着的标签——切回别的维度时原样还给用户
@@ -479,7 +509,9 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       const SizedBox(width: AppSpacing.sm),
       Expanded(
         child: SizedBox(
-          height: 96,
+          // 参考镜是这个面板的主线索（默认就拿它去找像的画面），
+          // 给它更大的地方：看得清画面才知道要复刻什么
+          height: 132,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             itemCount: segments.length,
@@ -493,6 +525,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
 
   Widget _refAtomCard(int k, (int, int) seg) {
     final selected = _refSeg == k;
+    final playing = _previewKey == 'r$k';
     final thumb = widget.refThumbOf?.call(k);
     final meta = _line.reference!.metaAt(seg.$1);
     // 卡上显示两样东西：这一镜的**画面属性**（打过标就是描述+标签，
@@ -510,8 +543,8 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       borderRadius: BorderRadius.circular(AppRadius.sm),
       hoverColor: AppColors.hover,
       child: Container(
-        width: 168,
-        padding: const EdgeInsets.all(4),
+        width: 232,
+        padding: const EdgeInsets.all(5),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(AppRadius.sm),
           border: Border.all(
@@ -525,16 +558,39 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           ClipRRect(
             borderRadius: BorderRadius.circular(3),
             child: SizedBox(
-              width: 48,
-              child: thumb != null
-                  ? Image.file(File(thumb), fit: BoxFit.cover)
-                  : Container(
+              width: 78,
+              child: Stack(fit: StackFit.expand, children: [
+                // 正在播这一镜时，画面就顶在这张缩略图的位置上
+                if (playing && _previewVideo != null)
+                  _previewVideo!
+                else if (thumb != null)
+                  Image.file(File(thumb), fit: BoxFit.cover)
+                else
+                  Container(
                       color: Colors.black,
                       child: const Icon(Icons.hourglass_empty,
                           size: 11, color: AppColors.textTertiary)),
+                // 点这里播这一镜；点卡片其余地方仍然是「用它的画面去找」
+                Align(
+                  alignment: Alignment.center,
+                  child: InkWell(
+                    key: ValueKey('shots-ref-play-$k'),
+                    onTap: () => _toggleRefPreview(k, seg),
+                    borderRadius: BorderRadius.circular(999),
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          shape: BoxShape.circle),
+                      child: Icon(playing ? Icons.stop : Icons.play_arrow,
+                          size: 14, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ]),
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 7),
           Expanded(
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -549,7 +605,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                   const SizedBox(height: 2),
                   Expanded(
                     child: Text(text,
-                        maxLines: 3,
+                        maxLines: 4,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: AppFontSize.micro,
@@ -981,7 +1037,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Expanded(
             child: Stack(fit: StackFit.expand, children: [
-              if (_previewId == m.id && _previewVideo != null)
+              if (_previewKey == 'c${m.id}' && _previewVideo != null)
                 _previewVideo!
               else if (m.thumbnailUrl == null)
                 Container(
@@ -1011,7 +1067,9 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                         color: Colors.black.withValues(alpha: 0.45),
                         shape: BoxShape.circle),
                     child: Icon(
-                        _previewId == m.id ? Icons.stop : Icons.play_arrow,
+                        _previewKey == 'c${m.id}'
+                            ? Icons.stop
+                            : Icons.play_arrow,
                         size: 16,
                         color: Colors.white),
                   ),

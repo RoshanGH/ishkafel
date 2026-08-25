@@ -86,6 +86,7 @@ Future<FindShotsResult? Function()> openSheet(
   required ShotSearchServices services,
   required ScriptLine line,
   Map<int, int> usedBy = const {},
+  String? refVideoPath,
 }) async {
   tester.view.physicalSize = const Size(1600, 1000);
   tester.view.devicePixelRatio = 1;
@@ -103,6 +104,7 @@ Future<FindShotsResult? Function()> openSheet(
                   task: task(),
                   lineIndex: 0,
                   line: line,
+                  refVideoPath: refVideoPath,
                   usedBy: usedBy);
             },
             child: const Text('开面板'),
@@ -198,6 +200,21 @@ void main() {
         reason: '清空之后不该再带标签');
     expect(find.byKey(const ValueKey('shots-clear-tags')), findsNothing,
         reason: '没有勾着的标签就不该再摆一个「清空筛选」');
+  });
+
+  testWidgets('参考镜也能就地播：点缩略图上的播放键，不影响「用它去找」',
+      (tester) async {
+    final cli = _FakeCli();
+    final line = ScriptLine.create(text: '细菌怕它')
+        .withReference(LineRef(startMs: 0, endMs: 8000, cuts: const [3000]));
+    await openSheet(tester,
+        services: _fakeServices(cli), line: line, refVideoPath: '/v/参考片.mp4');
+
+    // 参考镜是这个面板的主线索，每一镜都要能点开看
+    expect(find.byKey(const ValueKey('shots-ref-play-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('shots-ref-play-1')), findsOneWidget);
+    // 「用它的画面去找」仍在，播放键没有抢掉主操作
+    expect(find.byKey(const ValueKey('shots-ref-atom-0')), findsOneWidget);
   });
 
   testWidgets('候选卡能就地预览：卡上有播放键，不再弹一层窗', (tester) async {
