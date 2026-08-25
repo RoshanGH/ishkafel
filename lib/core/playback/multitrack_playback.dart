@@ -275,6 +275,9 @@ class MultitrackPlayback implements PlaybackController {
   /// 原声轨当前挂着哪一段（`源文件@段起点`）；null = 这一刻不出原声
   String? _sourceKey;
 
+  /// 原声轨当前的音量。单独记一份：拖音量滑杆时段没变，只该改音量
+  double _sourceVolume = 0;
+
   /// 素材原声跟着画面走：换段才重新加载与对位，同一段里让它自己播。
   /// 原声是音效，几十毫秒的漂移无所谓——反倒是每帧都 seek 会把它搅碎
   Future<void> _applySource(int masterMs, {bool force = false}) async {
@@ -289,15 +292,22 @@ class MultitrackPlayback implements PlaybackController {
     }
     final want = (hit == null || hit.volume <= 0.001) ? null : hit;
     final key = want == null ? null : '${want.source}@${want.atMs}';
-    if (!force && key == _sourceKey) return;
+    final volume = want?.volume ?? 0.0;
+    final sameSegment = key == _sourceKey;
+    // 音量单独变了（人正在拖那根滑杆）就只改音量——不重新加载，
+    // 否则声音会断一下
+    if (!force && sameSegment && volume == _sourceVolume) return;
     _sourceKey = key;
+    _sourceVolume = volume;
     if (want == null) {
       await track.pause();
       return;
     }
-    await track.load(want.source);
-    await track.seekMs(want.inMs + (masterMs - want.atMs));
-    await track.setVolume(want.volume);
+    if (!sameSegment || force) {
+      await track.load(want.source);
+      await track.seekMs(want.inMs + (masterMs - want.atMs));
+    }
+    await track.setVolume(volume);
     if (video.isPlaying) await track.play();
   }
 

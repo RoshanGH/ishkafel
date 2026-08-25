@@ -18,6 +18,7 @@ import '../../core/audio/voice_catalog.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/bgm_rail.dart';
+import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/task_lock.dart';
@@ -257,6 +258,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 变速切片：渲染好的路径按指纹存着；正在渲的记 key 防重复
   SpeedClipRenderer? _clipRenderer;
+
+  /// 口播轨的段规范化器：进这条轨的每一段都要转成同规格（见
+  /// PreviewVoiceNormalizer）。渲好的路径按内容指纹记在这里
+  PreviewVoiceNormalizer? _voiceNormalizer;
+  final Map<String, String> _voiceSegs = {};
+  final Set<String> _renderingVoiceSegs = {};
   final Map<String, String> _speedClips = {};
   final Set<String> _renderingClips = {};
 
@@ -305,7 +312,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _bgmCache?.addListener(_onMediaCache);
     _pinBgm();
     _pinAllShots();
-    unawaited(_ensureSilence());
     _setupPreview();
   }
 
@@ -362,6 +368,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
     final dataDir = ref.read(dataDirProvider);
     if (dataDir != null) {
+      _voiceNormalizer = PreviewVoiceNormalizer(
+          cache: RenderedCache(
+              dir: Directory(
+                  p.join(dataDir.path, 'preview_voice', _task.id)),
+              run: const ResolvingProcessRunner().call));
       _clipRenderer = SpeedClipRenderer(
         cache: RenderedCache(
           dir: Directory(
@@ -405,6 +416,84 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     } catch (e) {
       AppLog.warn('变速切片时长自检失败（$path）：$e');
     }
+  }
+
+  /// 原声音量改了就**立刻**让正在播的预览跟着变。
+  ///
+  /// 走 `_mutate` 的话要等 600ms 防抖再重铺整条轨，人拖着滑杆听不到反馈，
+  /// 只会以为没生效（真机反馈）。音量不改变任何编排，直接把新音量推给
+  /// 播放器即可
+  /// 拖动过程中的临时音量：不落盘，只让正在播的预览跟着变
+  void _docPreviewVolume(double v) {
+    final playback = _playback;
+    if (playback is! MultitrackPlayback) return;
+    final preview = _doc.withSourceVolume(v);
+    final result = buildScriptTrackPlan(preview, sourceOf: (shot) {
+      if (shot.speed != 1.0) {
+        final clip = _speedClips[_clipKey(shot)];
+        return clip == null ? null : ShotSource(clip);
+      }
+      final local =
+          shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
+      return local == null ? null : ShotSource(local, inMs: shot.trimStartMs);
+    },
+        bgmPathOf: (id) => _bgmCache?.localPathOf(id),
+        voiceSegmentOf: _voiceSegmentOf,
+        voiceOk: (path) => File(path).existsSync());
+    unawaited(playback.setPlan(result.plan));
+  }
+
+  void _applySourceVolumeNow() {
+    final playback = _playback;
+    if (playback is! MultitrackPlayback) return;
+    final result = buildScriptTrackPlan(_doc, sourceOf: (shot) {
+      if (shot.speed != 1.0) {
+        final clip = _speedClips[_clipKey(shot)];
+        return clip == null ? null : ShotSource(clip);
+      }
+      final local =
+          shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
+      return local == null ? null : ShotSource(local, inMs: shot.trimStartMs);
+    },
+        bgmPathOf: (id) => _bgmCache?.localPathOf(id),
+        voiceSegmentOf: _voiceSegmentOf,
+        voiceOk: (path) => File(path).existsSync());
+    setState(() => _planResult = result);
+    unawaited(playback.setPlan(result.plan));
+  }
+
+  /// 口播轨上这一段该用哪个已规范化的文件；还没渲好就先返回 null
+  /// （这一行这一轮不进预览），渲好之后自动重排一次
+  String? _voiceSegmentOf({
+    required String kind,
+    required String source,
+    required int inMs,
+    required int durationMs,
+    required double speed,
+  }) {
+    final key = '$kind|$source|$inMs|$durationMs|$speed';
+    final ready = _voiceSegs[key];
+    if (ready != null) return ready;
+    final normalizer = _voiceNormalizer;
+    if (normalizer == null || _renderingVoiceSegs.contains(key)) return null;
+    if (kind != 'mute' && !File(source).existsSync()) return null;
+    _renderingVoiceSegs.add(key);
+    final job = kind == 'mute'
+        ? normalizer.silence(durationMs: durationMs)
+        : normalizer.normalize(
+            source: source,
+            inMs: inMs,
+            durationMs: durationMs,
+            speed: speed,
+            tag: kind,
+          );
+    unawaited(job.then((path) {
+      _voiceSegs[key] = path;
+      if (mounted) _schedulePreviewRebuild();
+    }).catchError((Object e) {
+      AppLog.warn('预览口播段规范化失败（$kind $source）：$e');
+    }).whenComplete(() => _renderingVoiceSegs.remove(key)));
+    return null;
   }
 
   Future<void> _rebuildPreview() async {
@@ -458,7 +547,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           : ShotSource(local, inMs: shot.trimStartMs);
     },
         bgmPathOf: (id) => _bgmCache?.localPathOf(id),
-        silenceSource: _silencePath,
+        voiceSegmentOf: _voiceSegmentOf,
         voiceOk: (path) => File(path).existsSync());
     if (!mounted) return;
     setState(() => _planResult = result);
@@ -466,7 +555,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       await playback.setPlan(result.plan);
     }
     // 还有切片在渲就先不落——那时候画面还会再变一次
-    if (mounted && _renderingClips.isEmpty && _previewBusy) {
+    if (mounted &&
+        _renderingClips.isEmpty &&
+        _renderingVoiceSegs.isEmpty &&
+        _previewBusy) {
       setState(() => _previewBusy = false);
     }
   }
@@ -1192,6 +1284,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       projectIds: [if (_task.project != null) _task.project!.id],
       initialVolume: seg.volume,
       initialMaterials: [if (seg.material != null) seg.material!],
+      // 编导台是一条片子，一段配乐就一首曲子——多选出来的其余几首
+      // 根本不会被用到（代码里一直只取第一首），摆出来只会误导
+      singleSelect: true,
     );
     if (choice == null || !mounted) return;
     final updated = switch (choice) {
@@ -1401,47 +1496,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   MediaKitPlaybackController? _inlineAudio;
   Widget? _inlineVideo;
 
-  /// 预览用的静音垫（一段无声音频）。
-  ///
-  /// 配音比画面短的行会在声音轨上留一个洞，而 EDL 是把各段首尾相接、
-  /// 没有「空档」这个概念——洞会被压掉，从那一行起声音整体提前，累到
-  /// 片尾就变成「最后几个字一直重复」（真机反馈）。用一段静音把洞垫平。
-  /// 全局共用一份，生成一次就一直在
-  String? _silencePath;
-
-  Future<void> _ensureSilence() async {
-    if (_silencePath != null) return;
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final dir = Directory(p.join(dataDir.path, 'preview_cache'));
-    final file = File(p.join(dir.path, 'silence.mp3'));
-    if (file.existsSync() && file.lengthSync() > 0) {
-      if (mounted) setState(() => _silencePath = file.path);
-      return;
-    }
-    try {
-      await dir.create(recursive: true);
-      final r = await const ResolvingProcessRunner().call('ffmpeg', [
-        '-y', '-v', 'error',
-        '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
-        // 五分钟足够垫任何一个洞；静音 mp3 压得很小（约 1MB）
-        '-t', '300',
-        '-c:a', 'libmp3lame', '-b:a', '32k',
-        file.path,
-      ]);
-      if (r.exitCode != 0 || !file.existsSync()) {
-        AppLog.warn('预览静音垫生成失败（exit=${r.exitCode}）：${r.stderr}');
-        return;
-      }
-      if (mounted) {
-        setState(() => _silencePath = file.path);
-        _schedulePreviewRebuild();
-      }
-    } catch (e) {
-      AppLog.warn('预览静音垫生成失败：$e');
-    }
-  }
-
   /// 正在原位播放的卡：'ref_行id' 或 'shot_行id_镜下标'；null = 没在播
   String? _inlineKey;
   StreamSubscription<bool>? _inlineLoop;
@@ -1460,7 +1514,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       {double rate = 1.0,
       String? audioPath,
       int audioStartMs = 0,
-      int audioEndMs = 0}) async {
+      int audioEndMs = 0,
+
+      /// 素材原声在这一镜该出多大（0 = 不出）。**卡上播的必须和成片一致**
+      /// ——调了原声音量却只有主预览变、卡上还是满音量，人会以为没生效
+      double sourceVolume = 1.0}) async {
     if (_inlineKey == key) {
       _stopInline();
       return;
@@ -1482,7 +1540,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     await player.open(path);
     await player.waitUntilLoaded();
     if (!mounted || _inlineKey != key) return;
-    await player.setMuted(false);
+    await player.setVolume(sourceVolume);
     await player.player.setRate(rate);
     final withVoice =
         audioPath != null && File(audioPath).existsSync() && audioEndMs > 0;
@@ -1620,6 +1678,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
     await _playInline('shot_${line.id}_$j', path, start, end,
         rate: rate,
+        // 与排轨同一套规则：配音行跟随全片（默认静音），
+        // 画面行本来就靠素材出声（除非这一镜单独压过）
+        sourceVolume: line.type == ScriptLineType.voiced
+            ? _doc.sourceVolumeOf(shot)
+            : (shot.sourceVolume ?? 1.0),
         audioPath: vo?.audioPath,
         // 配音段 = 该镜在行时间轴上的区间（配音与行同轴）
         audioStartMs: segStartMs,
@@ -2485,8 +2548,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       docSourceVolume: _doc.sourceVolume,
                       onShotSourceVolume: (index, j, volume) {
                         final line = _doc.lines[index];
-                        _mutate((d) => d.setShotSourceVolumeById(
-                            line.id, j, volume));
+                        // 音量不改变编排，所以不重铺轨道；改完直接把新音量
+                        // 推给播放器，正在播就当场听得到
+                        _mutate(
+                            (d) => d.setShotSourceVolumeById(
+                                line.id, j, volume),
+                            affectsTracks: false);
+                        _applySourceVolumeNow();
+                        // 正在卡上播这一镜的话，当场跟着变——不然人拖着
+                        // 滑杆听不到任何变化，只会以为没生效
+                        if (_inlineKey == 'shot_${line.id}_$j') {
+                          unawaited(_inlinePlayer?.setVolume(volume ??
+                              (line.type == ScriptLineType.voiced
+                                  ? _doc.sourceVolume
+                                  : 1.0)));
+                        }
                       },
                       onScreenText: (index, screenIndex, text) {
                         final line = _doc.lines[index];
@@ -3092,10 +3168,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               key: const ValueKey('sound-bar-source-volume'),
               value: value.clamp(0.0, 1.0),
               activeColor: AppColors.accentBlue,
-              onChanged: (v) => setState(() => _sourceVolumeDraft = v),
+              // 拖动时就把新音量推给播放器——正在播的话当场听得到
+              onChanged: (v) {
+                setState(() => _sourceVolumeDraft = v);
+                _docPreviewVolume(v);
+              },
               onChangeEnd: (v) {
                 setState(() => _sourceVolumeDraft = null);
-                _mutate((d) => d.withSourceVolume(v));
+                _mutate((d) => d.withSourceVolume(v), affectsTracks: false);
+                _applySourceVolumeNow();
               },
             ),
           ),

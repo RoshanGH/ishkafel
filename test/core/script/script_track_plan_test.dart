@@ -21,58 +21,85 @@ LineShot shot(int id, {int? alloc, int trim = 0, double speed = 1.0}) =>
         speed: speed);
 
 void main() {
-  test('配音比画面短时，声音轨不能留洞——EDL 是顺序相接的', () {
-    // 真机（同事）：预览里台词最后几个字一直重复，导出却完全正常。
-    // 导出把每行音频补齐到画面那么长，预览这边却是把几十段配音首尾相接
-    // 成一条 EDL——某一行的配音比画面短，这个洞就被压掉，后面每一行的
-    // 声音都提前一截；累到片尾，声音轨已经播完而画面还在走，跟随轨就被
-    // 反复拽回末尾，听起来就是最后几个字一直重复
+  test('三路声音各司其职：口播轨只放配音，素材原声走原声轨', () {
+    // 真机踩过的坑：把素材原声塞进画面轨或口播轨，等于让这条轨上出现
+    // 「有音轨/无音轨」「24kHz 单声道/48kHz 立体声」的接缝——播放器
+    // 到接缝处要重搭音频链路，主时钟当场卡死，一个词反复念十几遍
     final doc = ScriptDoc([
-      // 第一行：画面 5 秒，配音只有 3 秒（人手动拉长了镜头）
       ScriptLine.create(text: '第一句')
           .withShots(const [
-            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
-          ])
-          .withVoiceover(vo(3000)),
-      ScriptLine.create(text: '第二句')
-          .withShots(const [
-            LineShot(materialId: 2, name: 'b', durationMs: 9000, allocMs: 4000),
+            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 4000),
           ])
           .withVoiceover(vo(4000)),
+    ]).withSourceVolume(0.35);
+    final result = buildScriptTrackPlan(doc,
+        sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'),
+        voiceSegmentOf: ({
+          required kind,
+          required source,
+          required inMs,
+          required durationMs,
+          required speed,
+        }) =>
+            '/norm/$kind-$durationMs.mp3');
+
+    expect(result.plan.voice.single.source, '/norm/voice-4000.mp3',
+        reason: '口播轨拿的是**规范化后**的配音段——统一规格才没有接缝');
+    expect(result.plan.video.single.volume, 0.35,
+        reason: '素材原声的音量挂在画面段上，由原声轨按段取用');
+  });
+
+  test('画面行：口播轨垫同规格静音，声音走原声轨且逐镜音量生效', () {
+    final doc = ScriptDoc([
+      ScriptLine.create(text: '')
+          .withManualMs(15000)
+          .withShots(const [
+        LineShot(
+            materialId: 7,
+            name: '外壳',
+            durationMs: 20000,
+            allocMs: 15000,
+            sourceVolume: 0.35),
+      ]),
     ]);
     final result = buildScriptTrackPlan(doc,
         sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'),
-        silenceSource: '/silence.wav');
+        voiceSegmentOf: ({
+          required kind,
+          required source,
+          required inMs,
+          required durationMs,
+          required speed,
+        }) =>
+            '/norm/$kind-$durationMs.mp3');
 
-    final videoSpan = result.plan.video
-        .fold<int>(0, (int a, TrackSegment s) => a + s.durationMs);
-    final voiceSpan = result.plan.voice
-        .fold<int>(0, (int a, TrackSegment s) => a + s.durationMs);
-    expect(voiceSpan, videoSpan,
-        reason: '声音轨与画面轨一样长，中间的洞要垫上静音');
-
-    // 段与段首尾相接，一个洞都不许有
-    var at = 0;
-    for (final seg in result.plan.voice) {
-      expect(seg.atMs, at, reason: '声音轨必须连续：${result.plan.voice}');
-      at += seg.durationMs;
-    }
-    expect(result.plan.voice.any((s) => s.source == '/silence.wav'), isTrue,
-        reason: '差的那 2 秒要用静音垫上');
+    expect(result.plan.voice.single.source, '/norm/mute-15000.mp3',
+        reason: '画面行没有配音，但口播轨不能留空档——EDL 会把空档压掉');
+    expect(result.plan.video.single.volume, 0.35,
+        reason: '这一镜单独调的原声音量要能生效（真机反馈：调了没反应）');
   });
 
-  test('没有静音垫可用时：这一行拦下，不放一条会错位的轨出去', () {
+  test('声音段还没准备好：这一行先不进预览，并说清在等什么', () {
     final doc = ScriptDoc([
       ScriptLine.create(text: '第一句')
           .withShots(const [
-            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 5000),
+            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 4000),
           ])
-          .withVoiceover(vo(3000)),
+          .withVoiceover(vo(4000)),
     ]);
+    // 规范化器在，但这一段还在渲（返回 null）
     final result = buildScriptTrackPlan(doc,
-        sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'));
+        sourceOf: (s) => ShotSource('/m/${s.materialId}.mp4'),
+        voiceSegmentOf: ({
+          required kind,
+          required source,
+          required inMs,
+          required durationMs,
+          required speed,
+        }) =>
+            null);
     expect(result.plan.video, isEmpty);
-    expect(result.skippedLines[0], contains('配音'));
+    expect(result.skippedLines[0], contains('声音还在准备'));
   });
 
   test('画面铺不满坑位：整行拦下不进预览，并说清差多少、该怎么办', () {

@@ -50,9 +50,22 @@ ScriptPlanResult buildScriptTrackPlan(
   /// null = 不检查（纯函数场景）；页面注入 File.existsSync
   bool Function(String path)? voiceOk,
 
-  /// 一段静音音频的路径，用来把声音轨的洞垫平（见下面「声音轨也必须
-  /// 连续」）。null = 没有可用的静音垫，遇到洞就把那一行拦下
-  String? silenceSource,
+  /// 口播轨上这一段该用哪个**已规范化**的文件。
+  ///
+  /// 口播轨是把几十段音频拼成一条流播的，规格一变播放器就要停下来重搭
+  /// 音频链路——画面轨上同样的接缝让主时钟卡死过（真机：一个词反复念
+  /// 十几遍）。所以进这条轨的每一段都预先转成同规格、并补足到坑位那么长
+  /// （见 [PreviewVoiceNormalizer]）。
+  ///
+  /// [kind] 是 'voice'（配音行）或 'shot'（画面行用素材自己的声音）。
+  /// 返回 null = 这一段还没准备好，这一行先不进预览
+  String? Function({
+    required String kind,
+    required String source,
+    required int inMs,
+    required int durationMs,
+    required double speed,
+  })? voiceSegmentOf,
 }) {
   final video = <TrackSegment>[];
   final voice = <TrackSegment>[];
@@ -126,24 +139,43 @@ ScriptPlanResult buildScriptTrackPlan(
         durationMs: shot.allocMs!,
         source: sources[j].path,
         inMs: sources[j].inMs,
-        // 配音行的素材原声：默认不出声（会和口播叠成两份），
-        // 全片调大或这一镜单独调大才响。画面行的声音走口播轨，
-        // 这里保持静音，免得同一份声音响两遍
+        // 这一镜的素材原声出多大——**画面轨不出声，这个数交给原声轨**。
+        // 配音行默认静音（原声会和口播叠成两份），全片或这一镜调大才响；
+        // 画面行本来就靠素材出声，所以是满音量，除非这一镜单独压过
         volume: line.type == ScriptLineType.voiced
             ? doc.sourceVolumeOf(shot)
-            : 0.0,
+            : (shot.sourceVolume ?? 1.0),
       ));
       // 画面行没有配音，用素材自己的声音（设计稿：画面行有画面有音乐
       // 或用分镜自己的声音）；配音行的声音轨在下面统一铺配音
       if (line.type == ScriptLineType.visual) {
+        // 画面行没有配音，口播轨在这一段垫同规格的静音——**不能留空档**，
+        // EDL 会把空档直接压掉，后面每一句都提前一截。
+        // 它真正的声音（素材自己的）走**原声轨**：那条轨按镜头逐段加载、
+        // 逐段设音量，所以「这一镜的原声调到 35%」才能生效，播放中改也
+        // 立刻听得到
+        String? mute;
+        if (voiceSegmentOf != null) {
+          mute = voiceSegmentOf(
+            kind: 'mute',
+            source: '',
+            inMs: 0,
+            durationMs: shot.allocMs!,
+            speed: 1.0,
+          );
+          if (mute == null) {
+            notReady = '这一镜的声音还在准备（预览要把各段声音统一规格）';
+            break;
+          }
+        }
         voice.add(TrackSegment(
           atMs: shotAt,
           durationMs: shot.allocMs!,
-          source: sources[j].path,
-          inMs: sources[j].inMs,
-          // 画面行本来就靠素材出声，所以基调是满音量——除非这一镜
-          // 单独压过（导出侧同一套规则）
-          volume: shot.sourceVolume ?? 1.0,
+          // 没接规范化器时（测试/精简装配）退回素材本身：可能在接缝处
+          // 卡一下，但至少听得到
+          source: mute ?? sources[j].path,
+          inMs: mute == null ? sources[j].inMs : 0,
+          volume: mute == null ? (shot.sourceVolume ?? 1.0) : 1.0,
         ));
       }
       shotAt += shot.allocMs!;
@@ -154,34 +186,34 @@ ScriptPlanResult buildScriptTrackPlan(
     final lineSpanMs = shotAt - cursorMs;
     final vo = line.voiceover;
     if (line.type == ScriptLineType.voiced && vo != null && lineSpanMs > 0) {
-      final voiceMs = root < lineSpanMs ? root : lineSpanMs;
-      voice.add(TrackSegment(
-        atMs: cursorMs,
-        durationMs: voiceMs,
-        source: vo.audioPath,
-      ));
-      // **声音轨也必须连续**。EDL 是把各段首尾相接成一条流，它没有
-      // 「空档」这个概念：配音比画面短时留下的洞会被直接压掉，从这一行
-      // 起后面每一句的声音都提前一截；累到片尾，声音轨已经播完而画面
-      // 还在走，跟随轨就被反复拽回末尾——听起来是「最后几个字一直重复」
-      // （真机反馈；导出那边逐行 apad 补齐，所以只有预览会这样）
-      final holeMs = lineSpanMs - voiceMs;
-      if (holeMs > 0) {
-        if (silenceSource == null) {
-          // 垫不上就别放一条会错位的轨出去：拦下这一行并说清楚
-          voice.removeLast();
+      // 配音也走规范化：**输出严格等于这一行的画面长度**——短了在尾巴上
+      // 垫静音、长了截断。声音轨因此与画面轨严格等长、段段首尾相接，
+      // 既不会留洞（洞会被 EDL 压掉、后面全部提前），也不会因为插一段
+      // 异构的静音文件而制造新的接缝
+      String? seg;
+      if (voiceSegmentOf != null) {
+        seg = voiceSegmentOf(
+          kind: 'voice',
+          source: vo.audioPath,
+          inMs: 0,
+          durationMs: lineSpanMs,
+          speed: 1.0,
+        );
+        if (seg == null) {
+          skipped[i] = '这一句的声音还在准备（预览要把各段声音统一规格）';
           video.removeRange(video.length - line.shots.length, video.length);
-          skipped[i] = '这一句的配音比画面短 ${(holeMs / 1000).toStringAsFixed(1)} 秒，'
-              '预览暂时铺不出来（把镜头改短一点，或重新生成配音）';
           lineStarts.remove(i);
           continue;
         }
-        voice.add(TrackSegment(
-          atMs: cursorMs + voiceMs,
-          durationMs: holeMs,
-          source: silenceSource,
-        ));
       }
+      voice.add(TrackSegment(
+        atMs: cursorMs,
+        // 没接规范化器时退回原配音：短于画面就按配音长度铺（旧行为）
+        durationMs: seg != null
+            ? lineSpanMs
+            : (root < lineSpanMs ? root : lineSpanMs),
+        source: seg ?? vo.audioPath,
+      ));
     }
     cursorMs = shotAt;
   }

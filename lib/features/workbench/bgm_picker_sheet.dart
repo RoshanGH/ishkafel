@@ -62,6 +62,13 @@ Future<BgmChoice?> showBgmPicker(
   double initialVolume = BgmSegment.defaultVolume,
   List<BgmMaterial> initialMaterials = const [],
   int initialPreviewIndex = 0,
+
+  /// 只能选一首。
+  ///
+  /// 成片翻新那条线一个任务要导出好几条片子、每条配不同的曲子，所以那边
+  /// 是多选（选中的都会用上）。**编导台是一条片子**，一段配乐就只有一首，
+  /// 多选出来的其余几首根本不会被用到——摆出来只会让人以为都生效了
+  bool singleSelect = false,
 }) =>
     showDialog<BgmChoice>(
       context: context,
@@ -69,6 +76,7 @@ Future<BgmChoice?> showBgmPicker(
         rangeMs: rangeMs,
         rangeLabel: rangeLabel,
         canClear: canClear,
+        singleSelect: singleSelect,
         projectIds: projectIds,
         initialVolume: initialVolume,
         initialMaterials: initialMaterials,
@@ -84,6 +92,9 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
   final List<int> projectIds;
   final bool canClear;
 
+  /// 只能选一首（编导台是一条片子，一段配乐就一首曲子）
+  final bool singleSelect;
+
   /// 这一段当前的音量。改这一段时带进来，用户看到的是现在的值而不是默认值
   final double initialVolume;
 
@@ -98,6 +109,7 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
     this.initialMaterials = const [],
     this.initialPreviewIndex = 0,
     required this.canClear,
+    this.singleSelect = false,
     this.projectIds = const [],
   });
 
@@ -130,6 +142,12 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         } else if (at < _previewIndex) {
           _previewIndex--;
         }
+      } else if (widget.singleSelect) {
+        // 单选：换一首就是换掉，不做备选队列
+        _picked
+          ..clear()
+          ..add(m);
+        _previewIndex = 0;
       } else {
         _picked.add(m);
       }
@@ -249,7 +267,9 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                       previewIndex: _previewIndex,
                       volume: _volume,
                     )),
-            child: Text(_picked.isEmpty
+            child: Text(widget.singleSelect
+                ? (_picked.isEmpty ? '先选一首' : '用这一首')
+                : _picked.isEmpty
                 ? '选一首'
                 : '用这 ${_picked.length} 首'),
           ),
