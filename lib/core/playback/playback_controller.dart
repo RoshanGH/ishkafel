@@ -79,6 +79,9 @@ abstract class PlaybackController {
 abstract class MasterTrack implements PlaybackController {
   Future<void> setMuted(bool muted);
 
+  /// 关掉这一路的音频解码（画面轨用；见 MediaKitPlaybackController.disableAudio）
+  Future<void> disableAudio();
+
   /// 画面轨自己的音量（0~1）：素材原声要不要出、出多大。
   /// 分镜自带的声音里常有音效，全丢掉片子会发干；但它又不能盖过口播
   Future<void> setVolume(double volume);
@@ -115,6 +118,15 @@ class FakePlaybackController implements MasterTrack {
   Future<void> setVolume(double value) async {
     volume = value;
     calls.add('setVolume:$value');
+  }
+
+  /// 音频解码是否已关（测试断言用）
+  bool audioDisabled = false;
+
+  @override
+  Future<void> disableAudio() async {
+    audioDisabled = true;
+    calls.add('disableAudio');
   }
 
   /// 测试里模拟主时钟走到某一刻

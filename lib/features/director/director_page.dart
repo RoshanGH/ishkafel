@@ -339,6 +339,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             video: MediaKitPlaybackController(),
             voice: MediaKitFollower(),
             bgm: MediaKitFollower(loop: true),
+            // 素材原声独立成轨：挂在画面轨上会让主时钟在
+            // 「无音轨→有音轨」的接缝处卡死（真机踩过）
+            source: MediaKitFollower(),
           );
     if (playback == null) return;
     _playback = playback;

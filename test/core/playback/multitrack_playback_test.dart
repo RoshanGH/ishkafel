@@ -237,32 +237,56 @@ void _switchBehaviour() {
           ],
         );
 
-    test('第一次推方案：打开画面轨，原声默认不出声', () async {
+    test('第一次推方案：打开画面轨，并且**永不解码它的音频**', () async {
       await playback.setPlan(planWith(videoSource: '/v/a.mp4'));
 
       expect(master.calls.where((c) => c.startsWith('open(')), hasLength(1));
-      expect(master.volume, 0.0,
-          reason: '素材原声默认关着——开着会和口播叠成两份');
+      expect(master.audioDisabled, isTrue,
+          reason: '画面轨拼的是几十条来路不同的素材，有的带音轨有的不带；'
+              '让它出声就要在接缝处重建音频链路，主时钟会当场卡死好几秒');
     });
 
-    test('把素材原声开起来：画面轨按这一段的音量出声（音效要能听见）', () async {
-      await playback.setPlan(TrackPlan(
-        video: [
-          const TrackSegment(
+    test('素材原声走独立的一条轨，跟着画面段走', () async {
+      final source = _Fake();
+      final pb = MultitrackPlayback(
+          video: master, voice: voice, bgm: bgm, source: source);
+      addTearDown(pb.dispose);
+      await pb.setPlan(TrackPlan(
+        video: const [
+          TrackSegment(
               atMs: 0, durationMs: 4000, source: '/v/a.mp4', volume: 0.3),
-          const TrackSegment(
+          TrackSegment(
               atMs: 4000, durationMs: 4000, source: '/v/b.mp4', volume: 0.9),
         ],
         voice: const [
           TrackSegment(atMs: 0, durationMs: 8000, source: '/vo.mp3'),
         ],
       ));
-      expect(master.volume, 0.3, reason: '第一镜按它自己的原声音量');
+      expect(source.loaded, '/v/a.mp4', reason: '第一镜的原声挂上去');
+      expect(source.volume, 0.3);
 
-      // 播到第二镜：音量跟着换（这一镜的音效想放大）
       master.emitPosition(5000);
       await Future<void>.delayed(const Duration(milliseconds: 10));
-      expect(master.volume, 0.9);
+      expect(source.loaded, '/v/b.mp4', reason: '换镜头就换原声');
+      expect(source.volume, 0.9, reason: '这一镜想把音效放大');
+    });
+
+    test('原声音量为 0 的段：原声轨停着，不做无谓的加载', () async {
+      final source = _Fake();
+      final pb = MultitrackPlayback(
+          video: master, voice: voice, bgm: bgm, source: source);
+      addTearDown(pb.dispose);
+      await pb.setPlan(TrackPlan(
+        // 排轨时配音行的画面段拿的是全片原声音量，默认就是 0
+        video: const [
+          TrackSegment(
+              atMs: 0, durationMs: 4000, source: '/v/a.mp4', volume: 0),
+        ],
+        voice: const [
+          TrackSegment(atMs: 0, durationMs: 4000, source: '/vo.mp3'),
+        ],
+      ));
+      expect(source.loaded, isNull, reason: '不出原声就别去加载它');
     });
 
     test('只改配乐时画面**一帧都不动**——重开一次就是一下黑闪', () async {

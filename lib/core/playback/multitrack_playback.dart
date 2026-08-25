@@ -32,6 +32,15 @@ class MultitrackPlayback implements PlaybackController {
   final FollowerTrack voice;
   final FollowerTrack bgm;
 
+  /// 素材自带的原声（音效那一路）。
+  ///
+  /// **必须是独立的一条轨，不能挂在画面轨上**：画面轨拼的是几十条来路不同
+  /// 的素材，有的带音轨有的不带，让它出声就意味着播到接缝处要重建音频链路，
+  /// 主时钟会当场卡住好几秒（真机：卡在 9955ms 不动，口播被反复拽回同一处，
+  /// 听感是一个词反复念十几遍）。分出来之后画面轨永远不解码音频，接缝不存在了。
+  /// null = 这个装配不播原声（测试/精简环境）
+  final FollowerTrack? source;
+
   /// 多久校一次跟随轨。太密会被采样抖动骗得反复 seek，太疏则接缝期变长
   final Duration syncInterval;
 
@@ -56,6 +65,7 @@ class MultitrackPlayback implements PlaybackController {
     required this.video,
     required this.voice,
     required this.bgm,
+    this.source,
     this.syncInterval = const Duration(milliseconds: 500),
   }) {
     _positionSub = video.positionMsStream.listen(_onMasterPosition);
@@ -104,11 +114,13 @@ class MultitrackPlayback implements PlaybackController {
       // 出问题时没有它就只能靠猜
       AppLog.info('画面轨换源，共 ${plan.video.length} 段：$videoEdl');
       await video.open(videoEdl);
+      // 画面轨不解码音频：这条轨拼的是几十条来路不同的素材，有的带音轨
+      // 有的不带，播到接缝处播放器要重建音频链路，主时钟会卡住好几秒
+      // （真机 16 处这样的接缝，第一处就在第 2 句里）
+      await video.disableAudio();
     }
-    // 画面轨的音量 = 这一段素材原声该出多大。默认 0（素材自带的声音
-    // 会和口播叠成两份），调大了才响；逐镜可以不一样，所以跟着播放
-    // 位置走（见 [_applySourceVolume]）
-    await _applySourceVolume(video.positionMs, force: true);
+    // 素材原声挂在独立的一条轨上，跟着画面段走（见 [_applySource]）
+    await _applySource(video.positionMs, force: true);
     final voiceEdl = Edl.of(plan.voice);
     final voiceChanged = await voice.load(voiceEdl);
     if (voiceChanged) {
@@ -140,11 +152,20 @@ class MultitrackPlayback implements PlaybackController {
     await _applyBgm(video.positionMs, force: true);
   }
 
+  /// 上一条采样日志的时刻——排查同步问题时要看得见偏差怎么演变的，
+  /// 但每次位置更新都打会把日志刷爆，一秒一条足够
+  int _lastTraceMs = -100000;
+
   void _onMasterPosition(int masterMs) {
     if (_disposed) return;
+    if (video.isPlaying && (masterMs - _lastTraceMs).abs() >= 1000) {
+      _lastTraceMs = masterMs;
+      AppLog.info('同步采样：主时钟 ${masterMs}ms、口播轨 ${voice.positionMs}ms、'
+          '偏差 ${voice.positionMs - masterMs}ms、前瞻 ${_seekCostMs}ms');
+    }
     _checkPace(masterMs);
     unawaited(_applyBgm(masterMs));
-    unawaited(_applySourceVolume(masterMs));
+    unawaited(_applySource(masterMs));
   }
 
   /// 画面轨的走时探针：每一拍走掉的**内容**，对得上真实过去的时间吗。
@@ -202,9 +223,11 @@ class MultitrackPlayback implements PlaybackController {
     if (playing) {
       await voice.play();
       if (_bgmCue.source != null) await bgm.play();
+      if (_sourceKey != null) await source?.play();
     } else {
       await voice.pause();
       await bgm.pause();
+      await source?.pause();
     }
   }
 
@@ -249,21 +272,33 @@ class MultitrackPlayback implements PlaybackController {
     }
   }
 
-  /// 画面轨（素材原声）当前生效的音量。只在**变化时**下命令：
-  /// 每帧都设音量会把播放器搅得一卡一卡
-  double? _sourceVolume;
+  /// 原声轨当前挂着哪一段（`源文件@段起点`）；null = 这一刻不出原声
+  String? _sourceKey;
 
-  Future<void> _applySourceVolume(int masterMs, {bool force = false}) async {
-    var want = 0.0;
+  /// 素材原声跟着画面走：换段才重新加载与对位，同一段里让它自己播。
+  /// 原声是音效，几十毫秒的漂移无所谓——反倒是每帧都 seek 会把它搅碎
+  Future<void> _applySource(int masterMs, {bool force = false}) async {
+    final track = source;
+    if (track == null) return;
+    TrackSegment? hit;
     for (final seg in _plan.video) {
       if (seg.covers(masterMs)) {
-        want = seg.volume;
+        hit = seg;
         break;
       }
     }
-    if (!force && _sourceVolume == want) return;
-    _sourceVolume = want;
-    await video.setVolume(want);
+    final want = (hit == null || hit.volume <= 0.001) ? null : hit;
+    final key = want == null ? null : '${want.source}@${want.atMs}';
+    if (!force && key == _sourceKey) return;
+    _sourceKey = key;
+    if (want == null) {
+      await track.pause();
+      return;
+    }
+    await track.load(want.source);
+    await track.seekMs(want.inMs + (masterMs - want.atMs));
+    await track.setVolume(want.volume);
+    if (video.isPlaying) await track.play();
   }
 
   /// 配乐按范围启停。只在**换段/换曲/换音量**时下命令——每帧都 seek 会把
@@ -310,6 +345,7 @@ class MultitrackPlayback implements PlaybackController {
     await video.seekMs(ms);
     await voice.seekMs(ms);
     await _applyBgm(ms, force: true);
+    await _applySource(ms, force: true);
   }
 
   @override
@@ -362,6 +398,7 @@ class MultitrackPlayback implements PlaybackController {
     await _playingSub?.cancel();
     await voice.dispose();
     await bgm.dispose();
+    await source?.dispose();
     await video.dispose();
   }
 

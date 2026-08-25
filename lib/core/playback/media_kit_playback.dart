@@ -130,6 +130,17 @@ class MediaKitPlaybackController implements MasterTrack {
   ///
   /// 关掉之后画面轨只解码视频，段与段之间的轨道布局也就一致了。
   @override
+  /// 彻底关掉这一路的音频解码。
+  ///
+  /// 画面轨拼的是几十条来路不同的素材，有的带音轨有的不带；播到「无音轨 →
+  /// 有音轨」的接缝时，播放器要重新初始化整条音频链路，**主时钟会在那里
+  /// 停住几秒**（真机：卡在 9955ms 不动，跟随轨被反复拽回同一处，听感就是
+  /// 一个词反复念十几遍）。画面轨的声音本来就不该出——口播、配乐、素材原声
+  /// 各有各的轨——所以干脆不解码，接缝也就不存在了
+  Future<void> disableAudio() =>
+      _gate.run(() => player.setAudioTrack(AudioTrack.no()));
+
+  @override
   Future<void> setVolume(double volume) => _gate.run(() async {
         await player.setVolume((volume.clamp(0.0, 1.0)) * 100);
       });
