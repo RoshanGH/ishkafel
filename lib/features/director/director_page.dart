@@ -372,9 +372,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 内容一变就排一次轨道重建（600ms 防抖）。画面轨没变时
   /// MultitrackPlayback 自己会挡住重复 open，不闪黑
+  /// 预览正在重建（换素材、改时长之后要重铺轨道）。
+  /// **超过一两秒的等待都要有交代**——没有它，人只会以为自己没点中，
+  /// 于是反复点（真机反馈：「点了以后没反应，要点很多下」）
+  bool _previewBusy = false;
+
   void _schedulePreviewRebuild() {
     if (_playback == null) return;
     _previewRebuild?.cancel();
+    if (!_previewBusy && mounted) setState(() => _previewBusy = true);
     _previewRebuild =
         Timer(const Duration(milliseconds: 600), _rebuildPreview);
   }
@@ -382,9 +388,28 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   String _clipKey(LineShot s) =>
       '${s.materialId}|${s.trimStartMs}|${s.allocMs}|${s.speed}';
 
+  /// 切片够不够长。短了只记日志不拦——拦下来这一行就没画面了，
+  /// 而短几十毫秒的片子仍然能看；但必须让它在日志里留下名字
+  Future<void> _warnIfClipTooShort(String path, int allocMs) async {
+    try {
+      final info = await FfprobeService().probe(path);
+      final realMs = info.duration.inMilliseconds;
+      if (realMs + 2 < allocMs) {
+        AppLog.warn('变速切片比坑位短：$path 实际 ${realMs}ms、'
+            '轨上要 ${allocMs}ms（差 ${allocMs - realMs}ms）——'
+            '画面轨会提前收，口播会被往前拽');
+      }
+    } catch (e) {
+      AppLog.warn('变速切片时长自检失败（$path）：$e');
+    }
+  }
+
   Future<void> _rebuildPreview() async {
     final playback = _playback;
-    if (playback == null || !mounted) return;
+    if (playback == null || !mounted) {
+      if (mounted && _previewBusy) setState(() => _previewBusy = false);
+      return;
+    }
     // 变速镜头先渲对齐切片（按内容指纹缓存，改了才重渲）
     for (final line in _doc.lines) {
       for (final shot in line.shots) {
@@ -407,7 +432,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           allocMs: shot.allocMs!,
           speed: shot.speed,
         )
-            .then((path) {
+            .then((path) async {
+          // 渲完当场量一次：切片比它在轨上声明的长度短，画面轨就会一路
+          // 偏快、口播被反复往前拽（真机踩过）。这类错位在界面上毫无征兆，
+          // 只能靠日志指认
+          await _warnIfClipTooShort(path, shot.allocMs!);
           _speedClips[key] = path;
           if (mounted) _schedulePreviewRebuild();
         }).catchError((Object e) {
@@ -432,6 +461,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     setState(() => _planResult = result);
     if (playback is MultitrackPlayback) {
       await playback.setPlan(result.plan);
+    }
+    // 还有切片在渲就先不落——那时候画面还会再变一次
+    if (mounted && _renderingClips.isEmpty && _previewBusy) {
+      setState(() => _previewBusy = false);
     }
   }
 
@@ -1206,7 +1239,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           : '这里已经是一屏的开头了。');
       return;
     }
-    _mutate((d) => d.cutScreenById(line.id, atMs, maxChars: chars));
+    _mutate((d) => d.cutScreenById(line.id, atMs, maxChars: chars),
+        affectsTracks: false);
     _toast('已在 ${(atMs / 1000).toStringAsFixed(1)}s 换屏。');
   }
 
@@ -1230,7 +1264,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
     if (picked == null || !mounted) return;
     _mutate(
-        (d) => d.setTagsById(line.id, [for (final t in picked) t.name]));
+        (d) => d.setTagsById(line.id, [for (final t in picked) t.name]),
+        affectsTracks: false);
   }
 
   // ---- 时长分配 ----
@@ -1768,7 +1803,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 改动随手落库（800ms 防抖）——写作软件没有「保存」这回事。
   /// 每次改动前把旧文档压进撤销栈（新改动作废重做栈）
-  void _mutate(ScriptDoc Function(ScriptDoc) f) {
+  /// 改一次文档。
+  ///
+  /// [affectsTracks] 说的是这次改动**影不影响预览的轨道结构**。
+  /// 默认 true（保守），但语速、标签、字幕文字与样式这些**跟轨道无关**的
+  /// 改动必须显式传 false——正在播放时重建轨道会扰动播放位置与跟随轨，
+  /// 听感就是声音忽大忽小、严重时卡住反复念同几个字（真机反馈）。
+  /// 字幕是画在预览层上的 widget，`setState` 就够，不必动轨道。
+  void _mutate(ScriptDoc Function(ScriptDoc) f, {bool affectsTracks = true}) {
     _undoStack.add(_doc);
     if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
     _redoStack.clear();
@@ -1778,7 +1820,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
     _autosave?.cancel();
     _autosave = Timer(const Duration(milliseconds: 800), _flushNow);
-    _schedulePreviewRebuild();
+    if (affectsTracks) _schedulePreviewRebuild();
   }
 
   void _undo() {
@@ -1929,7 +1971,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             constraint: _task.unitTagPrompt,
           );
           if (!mounted) return;
-          if (tags.isNotEmpty) _mutate((d) => d.setTagsById(line.id, tags));
+          if (tags.isNotEmpty) {
+            _mutate((d) => d.setTagsById(line.id, tags),
+                affectsTracks: false);
+          }
         } catch (e) {
           AppLog.warn('话术打标失败（第 ${i + 1} 句）：$e');
         }
@@ -2442,31 +2487,51 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       },
                       onScreenText: (index, screenIndex, text) {
                         final line = _doc.lines[index];
-                        _mutate((d) => d.setScreenTextById(
-                            line.id, screenIndex, text,
-                            maxChars: _styleOf(line).maxCharsPerScreen));
+                        _mutate(
+                            (d) => d.setScreenTextById(
+                                line.id, screenIndex, text,
+                                maxChars: _styleOf(line).maxCharsPerScreen),
+                            affectsTracks: false);
                       },
                       onScreenMerge: (index, screenIndex) {
                         final line = _doc.lines[index];
-                        _mutate((d) => d.mergeScreenById(line.id, screenIndex,
-                            maxChars: _styleOf(line).maxCharsPerScreen));
+                        _mutate(
+                            (d) => d.mergeScreenById(line.id, screenIndex,
+                                maxChars: _styleOf(line).maxCharsPerScreen),
+                            affectsTracks: false);
                       },
                       onScreenCut: (index, atMs) {
                         final line = _doc.lines[index];
-                        _mutate((d) => d.cutScreenById(line.id, atMs,
-                            maxChars: _styleOf(line).maxCharsPerScreen));
+                        _mutate(
+                            (d) => d.cutScreenById(line.id, atMs,
+                                maxChars: _styleOf(line).maxCharsPerScreen),
+                            affectsTracks: false);
                       },
                       onFixTimings: _fixMissingWordTimings,
                       onScreenReset: (index) {
                         final line = _doc.lines[index];
-                        _mutate((d) => d.resetScreensById(line.id));
+                        _mutate((d) => d.resetScreensById(line.id),
+                            affectsTracks: false);
                       },
                       onSubtitleCutHere: _cutSubtitleHere,
                       onManualMs: (index, ms) =>
                           _mutate((d) => d.setManualMs(index, ms)),
                       onPickVoice: _pickVoice,
-                      onSpeechRate: (index, rate) =>
-                          _mutate((d) => d.setSpeechRate(index, rate)),
+                      onSpeechRate: (index, rate) {
+                        _mutate((d) => d.setSpeechRate(index, rate),
+                            affectsTracks: false);
+                        // 语速只在**下一次生成配音**时生效，界面上不会有
+                        // 任何立刻可见的变化——不说一声，人只会以为没点中
+                        // 而反复点（真机反馈）
+                        final label = switch (rate) {
+                          -25 => '0.75x',
+                          25 => '1.25x',
+                          50 => '1.5x',
+                          _ => '1x',
+                        };
+                        _toast('第 ${index + 1} 句语速设为 $label——'
+                            '点这一行的「重新生成」才会按新语速配音。');
+                      },
                       onGenerateVoice: _generateVoice,
                       onTogglePlayVoice: _togglePlayVoice,
                       onPlayReference: _playReference,
@@ -2951,6 +3016,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       fontFeatures: const [FontFeature.tabularFigures()])),
             ),
           ])),
+          if (_previewBusy)
+            const Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs),
+              child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(strokeWidth: 1.4)),
+                SizedBox(width: 6),
+                Text('正在重铺预览…',
+                    style: TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textSecondary)),
+              ]),
+            ),
           if (playable) _soundToolbar(),
           if (playable) _subtitleToolbar(),
           // 预览可以少几行——人还在编排——但少了哪几行必须点名。
@@ -3049,7 +3129,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _styleDraft = null;
         _styleDraftLineId = null;
       });
-      _mutate((d) => d.setSubtitleOverrideById(line.id, next));
+      _mutate((d) => d.setSubtitleOverrideById(line.id, next),
+          affectsTracks: false);
     }
 
     Widget slider({
@@ -3110,7 +3191,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             InkWell(
               key: const ValueKey('subtitle-bar-reset'),
               onTap: () =>
-                  _mutate((d) => d.setSubtitleOverrideById(line.id, null)),
+                  _mutate((d) => d.setSubtitleOverrideById(line.id, null),
+                      affectsTracks: false),
               child: const Text('跟随整片',
                   style: TextStyle(
                       fontSize: AppFontSize.micro,
@@ -3244,7 +3326,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       onDragEnd: (ratio) {
         _subtitleDragRatio = null;
         // 样式粒度 = 句：拖字幕改的就是这一句
-        _mutate((d) => d.setSubtitleOverrideById(
+        _mutate(affectsTracks: false, (d) => d.setSubtitleOverrideById(
             line.id, style.copyWith(bottomRatio: ratio)));
       },
       dragRatio: _subtitleDragRatio,
