@@ -11,6 +11,18 @@
 
 所以你的一切判断都围绕一句话：**这一镜要复刻的是参考片的哪个画面。**
 
+## 一点五、从零到一条片子
+
+```bash
+ishkafel script new "8月新品口播"                    # 建任务
+ishkafel script extract <任务> ~/参考片.mp4          # 识别台词，生成脚本行
+ishkafel script voice <任务>                        # 给所有句子配音
+# …挑镜头、断句、分时长、配乐（见下文）…
+ishkafel script export <任务>                       # 导出成片
+```
+
+手写脚本（没有参考片）就跳过 extract，用 `apply lines` 一行行写。
+
 ## 二、先看清楚，再动手
 
 ```bash
@@ -99,6 +111,28 @@ ishkafel script apply subtitles <任务> --file c.json
 切点的意思是「**从第几个词另起一屏**」。第 0 屏隐含从头开始，不用写 0。
 
 提交后这一行会标成「已手改」，人在界面上能看到是你断的句，也能一键退回自动。
+
+## 四点五、改台词、改镜头、改字幕文字
+
+```bash
+# 改台词 / 插入 / 删除（删掉带配音的行会连配音镜头一起没了，会先提醒）
+echo '{"lines":[{"op":"set","lineIndex":0,"text":"改过的台词"}]}' > l.json
+ishkafel script apply lines <任务> --file l.json
+
+# 取段、变速、原声音量、删镜
+echo '{"shots":[{"lineIndex":2,"shotIndex":0,"op":"volume","value":0.35}]}' > s.json
+ishkafel script apply shot-edit <任务> --file s.json
+
+# 某一屏的字幕文字（null = 回到原文，"" = 这屏不出字）
+echo '{"screens":[{"lineIndex":2,"screenIndex":0,"text":"改过的字"}]}' > t.json
+ishkafel script apply screen-text <任务> --file t.json
+```
+
+**改字幕文字有一条硬规矩**：只能改这一屏说了什么，**不能凭空加内容**。
+字幕是给念出来的话配的字，与配音对不上就是错的。所以只允许同长或更短——
+同音改写、去掉语气词都行，加戏不行。
+
+倍速限定 0.5~2.0：再快听不清，再慢像卡带。
 
 ## 五、分时长
 

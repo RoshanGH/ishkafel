@@ -159,6 +159,94 @@ void main() {
     });
   });
 
+  group('行编辑', () {
+    test('改台词：放行', () {
+      expect(
+          validateLineEdits(doc: doc(), edits: [
+            (op: 'set', lineIndex: 0, text: '改过的台词'),
+          ]),
+          isEmpty);
+    });
+
+    test('删到只剩零行：拒绝——空脚本在界面上是起步态，人打开会一头雾水', () {
+      final one = ScriptDoc([ScriptLine.create(text: '唯一一行')]);
+      final issues = validateLineEdits(
+          doc: one, edits: [(op: 'remove', lineIndex: 0, text: null)]);
+      expect(issues.map((i) => i.message).join(), contains('至少留一行'));
+    });
+
+    test('删掉有配音有镜头的行：要提醒会一起没了', () {
+      final issues = validateLineEdits(
+          doc: doc(), edits: [(op: 'remove', lineIndex: 0, text: null)]);
+      expect(issues.map((i) => i.message).join(), contains('一起没了'));
+    });
+
+    test('认不出的操作：点名', () {
+      final issues = validateLineEdits(
+          doc: doc(), edits: [(op: 'flip', lineIndex: 0, text: null)]);
+      expect(issues.single.message, contains('认不出'));
+    });
+  });
+
+  group('镜头编辑', () {
+    test('取段、变速、原声音量都在范围内：放行', () {
+      expect(
+          validateShotEdits(doc: doc(), edits: [
+            (lineIndex: 0, shotIndex: 0, op: 'trim', value: 1000),
+            (lineIndex: 0, shotIndex: 0, op: 'speed', value: 1.25),
+            (lineIndex: 0, shotIndex: 0, op: 'volume', value: 0.3),
+          ]),
+          isEmpty);
+    });
+
+    test('取段起点超出素材长度：拒绝', () {
+      final issues = validateShotEdits(doc: doc(), edits: [
+        (lineIndex: 0, shotIndex: 0, op: 'trim', value: 99000),
+      ]);
+      expect(issues.single.message, contains('超出'));
+    });
+
+    test('倍速离谱：拒绝（0.5~2.0）', () {
+      final issues = validateShotEdits(doc: doc(), edits: [
+        (lineIndex: 0, shotIndex: 0, op: 'speed', value: 4),
+      ]);
+      expect(issues.single.message, contains('0.5~2.0'));
+    });
+
+    test('这一行根本没有那一镜：说清它有几镜', () {
+      final issues = validateShotEdits(doc: doc(), edits: [
+        (lineIndex: 0, shotIndex: 5, op: 'remove', value: null),
+      ]);
+      expect(issues.single.message, contains('共 1 镜'));
+    });
+  });
+
+  group('每屏改字', () {
+    test('同长或更短：放行（同音改写、去语气词都行）', () {
+      expect(
+          validateScreenTexts(doc: doc(), edits: [
+            (lineIndex: 0, screenIndex: 0, text: '第一句'),
+          ]),
+          isEmpty);
+    });
+
+    test('凭空加内容：拒绝——字幕要跟着念出来的话走', () {
+      final issues = validateScreenTexts(doc: doc(), edits: [
+        (lineIndex: 0, screenIndex: 0, text: '这是一段原本根本没有说过的长话'),
+      ]);
+      expect(issues.single.message, contains('凭空加内容'));
+    });
+
+    test('空串 = 这屏不出字，null = 回到原文：都放行', () {
+      expect(
+          validateScreenTexts(doc: doc(), edits: [
+            (lineIndex: 0, screenIndex: 0, text: ''),
+            (lineIndex: 1, screenIndex: 0, text: null),
+          ]),
+          isEmpty);
+    });
+  });
+
   group('配乐回填', () {
     test('连续铺满全片就放行', () {
       expect(

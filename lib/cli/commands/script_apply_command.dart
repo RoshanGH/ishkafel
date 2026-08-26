@@ -30,7 +30,10 @@ Future<int> runScriptApplyCommand({
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
-  const supported = ['shots', 'subtitles', 'alloc', 'bgm'];
+  const supported = [
+    'shots', 'subtitles', 'alloc', 'bgm',
+    'lines', 'shot-edit', 'screen-text',
+  ];
   if (rest.length < 2) {
     sink.writeln('用法：ishkafel script apply <${supported.join('|')}> '
         '<任务 id> --file <结果.json>');
@@ -151,6 +154,12 @@ List<ApplyIssue> _validate(
         submissions: _bgms(payload),
         offered: _offeredBgm(payload),
       );
+    case 'lines':
+      return validateLineEdits(doc: doc, edits: _lineEdits(payload));
+    case 'shot-edit':
+      return validateShotEdits(doc: doc, edits: _shotEdits(payload));
+    case 'screen-text':
+      return validateScreenTexts(doc: doc, edits: _screenTexts(payload));
     default:
       return const [];
   }
@@ -199,6 +208,56 @@ ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
             rail, seg.startLine, seg.endLine, offered[seg.materialId], seg.volume);
       }
       next = next.withBgmSegments(railToSegments(rail));
+    case 'lines':
+      // 倒着做：先删后面的，前面的下标才不会被搅乱
+      final edits = [..._lineEdits(payload)]
+        ..sort((a, b) => b.lineIndex.compareTo(a.lineIndex));
+      for (final e in edits) {
+        switch (e.op) {
+          case 'set':
+            next = next.updateText(e.lineIndex, e.text ?? '');
+          case 'insert':
+            next = next.insertAfter(e.lineIndex);
+            if ((e.text ?? '').isNotEmpty) {
+              next = next.updateText(e.lineIndex + 1, e.text!);
+            }
+          case 'remove':
+            next = next.removeAt(e.lineIndex);
+        }
+      }
+    case 'shot-edit':
+      final edits = [..._shotEdits(payload)]
+        ..sort((a, b) => b.shotIndex.compareTo(a.shotIndex));
+      for (final e in edits) {
+        final line = next.lines[e.lineIndex];
+        final shots = [...line.shots];
+        switch (e.op) {
+          case 'remove':
+            shots.removeAt(e.shotIndex);
+          case 'trim':
+            shots[e.shotIndex] = ShotAllocation.setTrimStart(
+                shots[e.shotIndex], e.value!.round());
+          case 'speed':
+            shots[e.shotIndex] = ShotAllocation.setSpeed(
+                shots[e.shotIndex], e.value!.toDouble());
+          case 'volume':
+            shots[e.shotIndex] =
+                shots[e.shotIndex].withSourceVolume(e.value!.toDouble());
+        }
+        // 删了镜头就把剩下的重新分满这一行；其余编辑保持既有分配
+        final root = ShotAllocation.rootMsOf(line);
+        next = next.setShotsById(
+            line.id,
+            e.op == 'remove' && root != null && shots.isNotEmpty
+                ? ShotAllocation.fillBySlowdown(
+                    ShotAllocation.distribute(shots, root), root)
+                : shots);
+      }
+    case 'screen-text':
+      for (final e in _screenTexts(payload)) {
+        final line = next.lines[e.lineIndex];
+        next = next.setScreenTextById(line.id, e.screenIndex, e.text);
+      }
   }
   return next;
 }
@@ -292,11 +351,45 @@ Map<int, BgmMaterial> _offeredBgmMaterials(Map<String, dynamic> payload) => {
           ),
     };
 
+List<LineEdit> _lineEdits(Map<String, dynamic> payload) => [
+      for (final e in (payload['lines'] as List? ?? const []))
+        if (e is Map && e['lineIndex'] is int)
+          (
+            op: '${e['op'] ?? 'set'}',
+            lineIndex: e['lineIndex'] as int,
+            text: e['text'] as String?,
+          ),
+    ];
+
+List<ShotEdit> _shotEdits(Map<String, dynamic> payload) => [
+      for (final e in (payload['shots'] as List? ?? const []))
+        if (e is Map && e['lineIndex'] is int && e['shotIndex'] is int)
+          (
+            lineIndex: e['lineIndex'] as int,
+            shotIndex: e['shotIndex'] as int,
+            op: '${e['op'] ?? ''}',
+            value: e['value'] as num?,
+          ),
+    ];
+
+List<ScreenText> _screenTexts(Map<String, dynamic> payload) => [
+      for (final e in (payload['screens'] as List? ?? const []))
+        if (e is Map && e['lineIndex'] is int && e['screenIndex'] is int)
+          (
+            lineIndex: e['lineIndex'] as int,
+            screenIndex: e['screenIndex'] as int,
+            text: e['text'] as String?,
+          ),
+    ];
+
 String _actionOf(String what, Map<String, dynamic> payload) => switch (what) {
       'shots' => '正在给${_lineLabel(payload, 'picks')}挑镜头',
       'subtitles' => '正在给${_lineLabel(payload, 'subtitles')}断句',
       'alloc' => '正在调${_lineLabel(payload, 'alloc')}的镜头时长',
       'bgm' => '正在铺配乐',
+      'lines' => '正在改台词',
+      'shot-edit' => '正在调${_lineLabel(payload, 'shots')}的镜头',
+      'screen-text' => '正在改${_lineLabel(payload, 'screens')}的字幕文字',
       _ => '正在操作',
     };
 
@@ -317,6 +410,9 @@ AgentFocus? _focusOf(String what, Map<String, dynamic> payload) {
     'shots' => 'picks',
     'subtitles' => 'subtitles',
     'alloc' => 'alloc',
+    'shot-edit' => 'shots',
+    'screen-text' => 'screens',
+    'lines' => 'lines',
     _ => null,
   };
   if (key == null) return null;
@@ -330,6 +426,8 @@ AgentFocus? _focusOf(String what, Map<String, dynamic> payload) {
       'shots' => AgentPanel.shot,
       'subtitles' => AgentPanel.subtitle,
       'alloc' => AgentPanel.shot,
+      'shot-edit' => AgentPanel.shot,
+      'screen-text' => AgentPanel.subtitle,
       _ => AgentPanel.none,
     },
   );
@@ -340,5 +438,8 @@ int _countOf(String what, Map<String, dynamic> payload) => switch (what) {
       'subtitles' => _subtitles(payload).length,
       'alloc' => _allocs(payload).length,
       'bgm' => _bgms(payload).length,
+      'lines' => _lineEdits(payload).length,
+      'shot-edit' => _shotEdits(payload).length,
+      'screen-text' => _screenTexts(payload).length,
       _ => 0,
     };

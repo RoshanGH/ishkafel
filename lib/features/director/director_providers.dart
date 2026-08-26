@@ -11,7 +11,6 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/script/line_tagger.dart';
 import '../../core/script/script_service_wiring.dart';
-import '../../core/script/script_doc.dart' show VoiceWord;
 import '../../core/script/script_transcriber.dart';
 
 /// 「从视频提取脚本」的服务。null = AI 凭据不全——编导台把入口禁用并

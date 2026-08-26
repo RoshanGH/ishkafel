@@ -1,7 +1,7 @@
 # 编导台 Agent CLI 实现计划（第一期：读 + 判断类回填）
 
-> **状态：第一期已完成**（2026-08-26 落地。九个任务全部做完，验收串在真机
-> 跑通；下一期见文末「不在这一期」。规矩来自
+> **状态：全部完成**（2026-08-26。第一期九个任务 + 第二期的执行类与编辑类
+> 命令都已落地，验收串在真机跑通。规矩来自
 > `docs/superpowers/specs/2026-08-11-agent-cli-design.md`，读那份再动手。）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -893,12 +893,16 @@ $B script show hlhivnohoo --json | jq '.blocking'   # 必须是 []
 - 任何一条 `apply` 提交非法数据都被整批拒绝，stderr 一次点全所有问题
 - 每一次写入在任务里留痕：谁做的、什么时候、改了哪几行
 
-## 不在这一期（进第二期）
+## 第二期（也已完成）
 
-- `script new` / `script extract` / `script voice` / `script export`——**执行类**动作。
-  没有判断，实现快，但没有第一期它们只是遥控器
-- **每屏改字**：输出是自由文本，「改得对不对」无法验证。要开放的话得先想清楚校验规则
-  （只允许同音改写？只允许删字？）
+- `script new` / `extract` / `voice` / `export`：执行类动作，Agent 从此能把
+  整条链从头跑到尾，不必回头找人点界面
+- `apply lines` / `shot-edit` / `screen-text`：改台词与增删行、取段变速原声音量
+  与删镜、每屏改字
+- **每屏改字的校验规则定了**：只允许同长或更短——字幕是给念出来的话配的字，
+  同音改写、去语气词都行，凭空加内容不行
+
+## 仍然不做
 - 配音音色的自动选择：可验证（音色 id 在目录内），但选得好不好没有判据，先不做
 - MCP Server：等真有不会用 bash 的调用方（沿用 spec 第二节）
 - 人与 Agent **同时编辑**同一任务：需要细粒度冲突检测，需求未被验证

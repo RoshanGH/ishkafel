@@ -312,3 +312,202 @@ List<ApplyIssue> validateBgmSubmission({
 }
 
 String _sec(int ms) => (ms / 1000).toStringAsFixed(1);
+
+/// 改台词 / 增删行
+typedef LineEdit = ({
+  /// 'set'（改台词）/ 'insert'（在这一行后插入）/ 'remove'（删这一行）
+  String op,
+  int lineIndex,
+  String? text,
+});
+
+/// 一镜的编辑：取段、变速、原声音量、删除
+typedef ShotEdit = ({
+  int lineIndex,
+  int shotIndex,
+  /// 'trim' / 'speed' / 'volume' / 'remove'
+  String op,
+  num? value,
+});
+
+/// 一屏的文字覆盖
+typedef ScreenText = ({int lineIndex, int screenIndex, String? text});
+
+/// 校验行编辑。
+///
+/// 删行有个硬约束：**至少留一行**——空脚本在界面上是「起步态」，
+/// 会弹出引导覆盖工作台，Agent 删空了人打开会一头雾水
+List<ApplyIssue> validateLineEdits({
+  required ScriptDoc doc,
+  required List<LineEdit> edits,
+}) {
+  final issues = <ApplyIssue>[];
+  var count = doc.lines.length;
+  for (final e in edits) {
+    if (!const ['set', 'insert', 'remove'].contains(e.op)) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '认不出的操作「${e.op}」（可用：set / insert / remove）'
+      ));
+      continue;
+    }
+    if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行不存在（脚本共 ${doc.lines.length} 行）'
+      ));
+      continue;
+    }
+    if (e.op == 'remove') {
+      count--;
+      if (count < 1) {
+        issues.add((
+          lineIndex: e.lineIndex,
+          shotIndex: null,
+          message: '不能把脚本删空——至少留一行'
+        ));
+      }
+      // 删掉一行会把它的配音、镜头、字幕一起带走，值得说一声
+      final line = doc.lines[e.lineIndex];
+      if (line.voiceover != null || line.shots.isNotEmpty) {
+        issues.add((
+          lineIndex: e.lineIndex,
+          shotIndex: null,
+          message: '第 ${e.lineIndex + 1} 行已经有配音或镜头，删掉就一起没了'
+              '——确定要删就先把它的镜头清掉'
+        ));
+      }
+    } else if ((e.text ?? '').trim().isEmpty && e.op == 'set') {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行给了空台词——'
+            '想变成画面行就把 text 留空并另行设置时长'
+      ));
+    } else if (e.op == 'insert') {
+      count++;
+    }
+  }
+  return issues;
+}
+
+/// 校验镜头编辑
+List<ApplyIssue> validateShotEdits({
+  required ScriptDoc doc,
+  required List<ShotEdit> edits,
+}) {
+  final issues = <ApplyIssue>[];
+  for (final e in edits) {
+    if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: e.shotIndex,
+        message: '第 ${e.lineIndex + 1} 行不存在（脚本共 ${doc.lines.length} 行）'
+      ));
+      continue;
+    }
+    final line = doc.lines[e.lineIndex];
+    if (e.shotIndex < 0 || e.shotIndex >= line.shots.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: e.shotIndex,
+        message: '第 ${e.lineIndex + 1} 行没有第 ${e.shotIndex + 1} 镜'
+            '（这一行共 ${line.shots.length} 镜）'
+      ));
+      continue;
+    }
+    final shot = line.shots[e.shotIndex];
+    final v = e.value;
+    switch (e.op) {
+      case 'remove':
+        break;
+      case 'trim':
+        if (v == null || v < 0) {
+          issues.add((
+            lineIndex: e.lineIndex,
+            shotIndex: e.shotIndex,
+            message: '取段起点要给一个非负毫秒数'
+          ));
+        } else if (shot.durationMs != null && v >= shot.durationMs!) {
+          issues.add((
+            lineIndex: e.lineIndex,
+            shotIndex: e.shotIndex,
+            message: '取段起点 ${v}ms 超出这条素材的长度'
+                '（${shot.durationMs}ms）'
+          ));
+        }
+      case 'speed':
+        if (v == null || v < 0.5 || v > 2.0) {
+          issues.add((
+            lineIndex: e.lineIndex,
+            shotIndex: e.shotIndex,
+            message: '倍速要在 0.5~2.0 之间（给的是 $v）'
+          ));
+        }
+      case 'volume':
+        if (v == null || v < 0 || v > 1) {
+          issues.add((
+            lineIndex: e.lineIndex,
+            shotIndex: e.shotIndex,
+            message: '原声音量要在 0~1 之间（给的是 $v）'
+          ));
+        }
+      default:
+        issues.add((
+          lineIndex: e.lineIndex,
+          shotIndex: e.shotIndex,
+          message: '认不出的操作「${e.op}」（可用：trim / speed / volume / remove）'
+        ));
+    }
+  }
+  return issues;
+}
+
+/// 校验每屏改字。
+///
+/// **只能改这一屏说了什么，不能凭空加内容**：字幕是给人念出来的话配的字，
+/// 与配音对不上就是错的。所以只允许「与原文同长或更短」——同音改写、
+/// 去掉语气词都行，长篇加戏不行
+List<ApplyIssue> validateScreenTexts({
+  required ScriptDoc doc,
+  required List<ScreenText> edits,
+}) {
+  final issues = <ApplyIssue>[];
+  for (final e in edits) {
+    if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行不存在（脚本共 ${doc.lines.length} 行）'
+      ));
+      continue;
+    }
+    final line = doc.lines[e.lineIndex];
+    final screens = line.subtitleScreensAt(
+        maxChars: (line.subtitleOverride ?? doc.subtitle).maxCharsPerScreen);
+    if (e.screenIndex < 0 || e.screenIndex >= screens.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行没有第 ${e.screenIndex + 1} 屏'
+            '（这一行共 ${screens.length} 屏）'
+      ));
+      continue;
+    }
+    final text = e.text;
+    if (text == null || text.isEmpty) continue; // null = 回到原文，'' = 不出字
+    final was = screens[e.screenIndex].text;
+    if (text.length > was.length + 2) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行第 ${e.screenIndex + 1} 屏原本是'
+            '「$was」（${was.length} 字），改成了 ${text.length} 字——'
+            '字幕要跟着念出来的话走，不能凭空加内容'
+      ));
+    }
+  }
+  return issues;
+}
