@@ -123,6 +123,9 @@ class MultitrackPlayback implements PlaybackController {
     await _applySource(video.positionMs, force: true);
     final voiceEdl = Edl.of(plan.voice);
     final voiceChanged = await voice.load(voiceEdl);
+    // 口播轨总音量：整轨一个数（EDL 没法逐段设）。
+    // 换不换源都要设——人拉的可能就是这根滑杆
+    await voice.setVolume(plan.voiceVolume);
     if (voiceChanged) {
       AppLog.info('口播轨换源，共 ${plan.voice.length} 段：$voiceEdl');
     }

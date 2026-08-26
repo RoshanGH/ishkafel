@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
-import 'package:ishkafel/core/playback/track_plan.dart';
+import 'package:ishkafel/core/script/sound_mix.dart';
+
 import 'package:ishkafel/core/script/script_track_plan.dart';
 
 /// 整片预览轨：只拼就绪的行、跳过必点名、画面轨连续、配音随行铺。
@@ -21,6 +22,8 @@ LineShot shot(int id, {int? alloc, int trim = 0, double speed = 1.0}) =>
         speed: speed);
 
 void main() {
+  group('三轨混音台', _mixTests);
+
   test('三路声音各司其职：口播轨只放配音，素材原声走原声轨', () {
     // 真机踩过的坑：把素材原声塞进画面轨或口播轨，等于让这条轨上出现
     // 「有音轨/无音轨」「24kHz 单声道/48kHz 立体声」的接缝——播放器
@@ -208,5 +211,76 @@ void main() {
     expect(result.plan.voice, hasLength(1),
         reason: '画面行用素材自己的声音（设计稿：或用分镜自己的声音）');
     expect(result.plan.voice.single.source, '/m.mp4');
+  });
+}
+
+/// 三轨混音台落到轨道上：**拉总音量，画面行必须跟着变**。
+///
+/// 真机 bug：主预览下面那根「原声」滑杆对画面行永远没反应——它调的其实是
+/// 「配音行没单独设时原声压到多少」，画面行不参与那条规则。
+void _mixTests() {
+  ShotSource src(LineShot s) => ShotSource('/m/${s.materialId}.mp4');
+  String? norm({
+    required String kind,
+    required String source,
+    required int inMs,
+    required int durationMs,
+    required double speed,
+  }) =>
+      '/norm/$kind-$durationMs.mp3';
+
+  final visual = ScriptLine.create(text: '').withManualMs(4000).withShots(
+      const [LineShot(materialId: 7, name: '外壳', durationMs: 9000, allocMs: 4000)]);
+
+  test('原声总音量对画面行生效——这正是用户拉不动的那一根', () {
+    final doc =
+        ScriptDoc([visual]).withMix(const SoundMix(source: 0.5));
+    final result =
+        buildScriptTrackPlan(doc, sourceOf: src, voiceSegmentOf: norm);
+    expect(result.plan.video.single.volume, 0.5);
+  });
+
+  test('原声静音钮：画面行也哑', () {
+    final doc = ScriptDoc([visual]).withMix(const SoundMix(sourceMuted: true));
+    final result =
+        buildScriptTrackPlan(doc, sourceOf: src, voiceSegmentOf: norm);
+    expect(result.plan.video.single.volume, 0.0);
+  });
+
+  test('总音量乘在逐镜设定上——单独调过的镜头也跟着变', () {
+    final line = ScriptLine.create(text: '').withManualMs(4000).withShots(
+        const [
+          LineShot(
+              materialId: 7,
+              name: '外壳',
+              durationMs: 9000,
+              allocMs: 4000,
+              sourceVolume: 0.4)
+        ]);
+    final doc = ScriptDoc([line]).withMix(const SoundMix(source: 0.5));
+    final result =
+        buildScriptTrackPlan(doc, sourceOf: src, voiceSegmentOf: norm);
+    expect(result.plan.video.single.volume, closeTo(0.2, 1e-9));
+  });
+
+  test('配音轨总音量按轨给——EDL 没法逐段设', () {
+    final doc = ScriptDoc([
+      ScriptLine.create(text: '第一句')
+          .withShots(const [
+            LineShot(materialId: 1, name: 'a', durationMs: 9000, allocMs: 4000),
+          ])
+          .withVoiceover(vo(4000)),
+    ]).withMix(const SoundMix(voice: 0.6));
+    final result =
+        buildScriptTrackPlan(doc, sourceOf: src, voiceSegmentOf: norm);
+    expect(result.plan.voiceVolume, 0.6);
+  });
+
+  test('默认值不改变已有片子：全默认时画面行满音量、配音行压到 0', () {
+    final doc = ScriptDoc([visual]);
+    final result =
+        buildScriptTrackPlan(doc, sourceOf: src, voiceSegmentOf: norm);
+    expect(result.plan.video.single.volume, 1.0);
+    expect(result.plan.voiceVolume, 1.0);
   });
 }

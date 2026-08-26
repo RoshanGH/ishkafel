@@ -239,7 +239,7 @@ ScriptPlanResult buildScriptTrackPlan(
     if (last != null &&
         last.clip.source == path &&
         last.clip.endMs == fromMs &&
-        last.volume == seg.volume) {
+        last.volume == doc.bgmVolumeOf(seg.volume)) {
       // 相邻同曲：并成一段，接着播不重头
       bgm[bgm.length - 1] = BgmTrackSegment(
         clip: TrackSegment(
@@ -253,13 +253,20 @@ ScriptPlanResult buildScriptTrackPlan(
       bgm.add(BgmTrackSegment(
         clip: TrackSegment(
             atMs: fromMs, durationMs: toMs - fromMs, source: path),
-        volume: seg.volume,
+        // 段上设的是相对值，乘在配乐轨总音量上——拉总音量，
+        // 单独调过的段落也跟着变
+        volume: doc.bgmVolumeOf(seg.volume),
         sourceDurationMs: seg.material.durationMs,
       ));
     }
   }
   return ScriptPlanResult(
-    plan: TrackPlan(video: video, voice: voice, bgm: bgm),
+    plan: TrackPlan(
+        video: video,
+        voice: voice,
+        bgm: bgm,
+        // 口播轨是整条 EDL 加载的，逐段音量表达不了——总音量按轨给
+        voiceVolume: doc.voiceVolume),
     skippedLines: skipped,
     lineStarts: lineStarts,
   );

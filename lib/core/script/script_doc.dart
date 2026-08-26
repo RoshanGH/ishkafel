@@ -8,6 +8,7 @@
 /// 清空文案自动变画面行——编导只管写，不用理解「类型」这个概念。
 library;
 
+import 'sound_mix.dart';
 import '../audio/bgm_plan.dart';
 import '../analysis/providers.dart' show AsrSentence, AsrWord;
 import '../subtitle/subtitle_overlay.dart';
@@ -1035,21 +1036,23 @@ class ScriptDoc {
   /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
   final String? refVideoPath;
 
-  /// 全片的**素材原声**音量（0~1）。0 = 只留口播与配乐（默认，
-  /// 与这个功能出现之前的成片一模一样——升级不该悄悄改变已有片子的声音）。
-  /// 单个镜头可以在这个基调上开小灶（见 [LineShot.sourceVolume]）
-  final double sourceVolume;
+  /// 三条声音轨的总控（原声 / 配音 / 配乐）与闪避设置。见 [SoundMix]
+  final SoundMix mix;
+
+  /// 口播段落把原声压到多少。
+  ///
+  /// **老字段名，语义没变**：它一直就是「配音行没单独设时原声出多大」，
+  /// 只是以前被摆在主预览下面当总音量用——画面行不参与这条规则，
+  /// 所以拉它对画面行永远没反应。现在总音量是 [mix]，这里回归本名
+  double get sourceVolume => mix.duckedSourceVolume;
 
   ScriptDoc(
     List<ScriptLine> lines, {
     this.subtitle = SubtitleStyle.standard,
     List<ScriptBgmSegment> bgmSegments = const [],
     this.refVideoPath,
-    double sourceVolume = 0.0,
-  })  : sourceVolume = sourceVolume < 0
-            ? 0.0
-            : (sourceVolume > 1 ? 1.0 : sourceVolume),
-        lines = List.unmodifiable(lines),
+    this.mix = const SoundMix(),
+  })  : lines = List.unmodifiable(lines),
         bgmSegments = List.unmodifiable(bgmSegments);
 
   /// 新脚本自带一个空行：编导打开就能写，不用先学会「加行」
@@ -1060,20 +1063,24 @@ class ScriptDoc {
       subtitle: subtitle,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      sourceVolume: sourceVolume);
+      mix: mix);
 
   ScriptDoc withSubtitle(SubtitleStyle next) => ScriptDoc(lines,
       subtitle: next,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      sourceVolume: sourceVolume);
+      mix: mix);
 
-  /// 换全片的原声音量
-  ScriptDoc withSourceVolume(double next) => ScriptDoc(lines,
+  /// 换三条轨的总控
+  ScriptDoc withMix(SoundMix next) => ScriptDoc(lines,
       subtitle: subtitle,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      sourceVolume: next);
+      mix: next);
+
+  /// 换「口播时原声压到多少」。老调用点仍在用这个名字
+  ScriptDoc withSourceVolume(double next) =>
+      withMix(mix.copyWith(duckedSourceVolume: next));
 
   /// 这一镜实际该用多大的原声。**全软件只此一处**——显示、预览、行内播放、
   /// 成片必须是同一个数。
@@ -1083,7 +1090,16 @@ class ScriptDoc {
   /// 一拖就把一个显式的 0.0 写死在那一镜上——从此那一行真的哑了，
   /// 而且调全片也救不回来。
   double sourceVolumeFor(ScriptLine line, LineShot shot) =>
-      shot.sourceVolume ?? defaultSourceVolumeFor(line);
+      mix.effectiveSource *
+      (shot.sourceVolume ?? defaultSourceVolumeFor(line));
+
+  /// 配音轨该出多大（整轨一个数：口播段落之间不需要各自不同）
+  double get voiceVolume => mix.effectiveVoice;
+
+  /// 这一段配乐该出多大：**段上设的是相对值**，乘在配乐轨总音量上——
+  /// 所以拉总音量，单独调过的段落也跟着变
+  double bgmVolumeOf(double segmentVolume) =>
+      mix.effectiveBgm * segmentVolume;
 
   /// 没单独设过时，这一行的原声该多大。
   ///
@@ -1095,7 +1111,9 @@ class ScriptDoc {
   ///   **不跟随全片**：全片调到 0 是为了压住口播下的原声，
   ///   不该顺手把整条画面行也弄哑
   double defaultSourceVolumeFor(ScriptLine line) =>
-      line.type == ScriptLineType.voiced ? sourceVolume : 1.0;
+      line.type == ScriptLineType.voiced && mix.duckSourceUnderVoice
+          ? mix.duckedSourceVolume
+          : 1.0;
 
   /// 只按镜头看的旧入口（不知道行的类型时用）。
   /// 新代码一律用 [sourceVolumeFor]——它才知道画面行和配音行的默认不同
@@ -1269,7 +1287,9 @@ class ScriptDoc {
         if (bgmSegments.isNotEmpty)
           'bgmSegments': [for (final s in bgmSegments) s.toJson()],
         if (refVideoPath != null) 'refVideoPath': refVideoPath,
+        // 老字段照写：旧版本打开这份档，声音行为和以前完全一致
         if (sourceVolume > 0) 'sourceVolume': sourceVolume,
+        if (mix.toJson().isNotEmpty) 'soundMix': mix.toJson(),
       };
 
   /// 宽松解析；整体坏掉退回空脚本（打不开任务比丢一份草稿更糟）
@@ -1304,9 +1324,14 @@ class ScriptDoc {
                       : BgmSegment.defaultVolume,
                 ),
             ],
-      sourceVolume: raw['sourceVolume'] is num
-          ? (raw['sourceVolume'] as num).toDouble()
-          : 0.0,
+      // 老档只有 sourceVolume：它一直就是「口播时原声压到多少」，
+      // 原样搬进闪避电平——升级前后已有片子的声音一个字节不变
+      mix: raw['soundMix'] is Map
+          ? SoundMix.fromJson(raw['soundMix'])
+          : SoundMix(
+              duckedSourceVolume: raw['sourceVolume'] is num
+                  ? (raw['sourceVolume'] as num).toDouble()
+                  : 0.0),
       refVideoPath: raw['refVideoPath'] is String
           ? raw['refVideoPath'] as String
           : null,

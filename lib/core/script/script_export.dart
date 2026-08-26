@@ -172,11 +172,15 @@ class ScriptExportRunner {
           volumeOf: (shot) => doc.sourceVolumeFor(line, shot),
           localPathOf: localPathOf,
         );
+        // 口播轨总音量：与预览同一条规则（见 ScriptDoc.voiceVolume）
+        final vv = doc.voiceVolume;
+        final voFilter =
+            (vv - 1).abs() < 1e-6 ? 'apad' : 'volume=${vv.toStringAsFixed(3)},apad';
         if (sourceTrack == null) {
           await _exec([
             '-y', '-v', 'error',
             '-i', vo.audioPath,
-            '-af', 'apad',
+            '-af', voFilter,
             '-t', _sec(lineSpanMs),
             '-ar', '48000', '-ac', '2', '-c:a', 'pcm_s16le',
             audioOut,
@@ -189,7 +193,7 @@ class ScriptExportRunner {
             '-i', vo.audioPath,
             '-i', sourceTrack,
             '-filter_complex',
-            '[0:a]apad[vo];[1:a]apad[src];'
+            '[0:a]$voFilter[vo];[1:a]apad[src];'
                 '[vo][src]amix=inputs=2:duration=first:normalize=0[out]',
             '-map', '[out]',
             '-t', _sec(lineSpanMs),
@@ -270,7 +274,8 @@ class ScriptExportRunner {
               out: mixed,
               startMs: fromMs,
               durationMs: toMs - fromMs,
-              bgmVolume: seg.volume,
+              // 段上是相对值，乘配乐轨总音量——与预览同一条规则
+              bgmVolume: doc.bgmVolumeOf(seg.volume),
             ),
             what: '混配乐（${seg.material.name}）');
         finalAudio = mixed;

@@ -21,6 +21,7 @@ import '../../core/script/bgm_rail.dart';
 import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_cover.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
@@ -432,10 +433,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 只会以为没生效（真机反馈）。音量不改变任何编排，直接把新音量推给
   /// 播放器即可
   /// 拖动过程中的临时音量：不落盘，只让正在播的预览跟着变
-  void _docPreviewVolume(double v) {
+  /// 拖动混音台时**当场**让正在播的预览跟着变（松手才落盘）。
+  /// 不这样的话，人拖着滑杆听不到任何变化，只会以为没生效
+  void _mixPreview(SoundMix next) {
     final playback = _playback;
     if (playback is! MultitrackPlayback) return;
-    final preview = _doc.withSourceVolume(v);
+    final preview = _doc.withMix(next);
     final result = buildScriptTrackPlan(preview, sourceOf: (shot) {
       if (shot.speed != 1.0) {
         final clip = _speedClips[_clipKey(shot)];
@@ -3335,25 +3338,82 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 在同一视线里——不再用弹窗盖住唯一能看出效果的地方。
   /// 跟着**当前这一句**走（播到哪句就是哪句，否则是选中的那句）；
   /// 样式粒度 = 句，右端「整片」把这套提升为全局基调
-  /// 拖动中的原声音量（松手才落盘：每动一下就重建预览会卡）
-  double? _sourceVolumeDraft;
+  /// 拖动中的混音台（松手才落盘：每动一下就重建轨道会卡）
+  SoundMix? _mixDraft;
 
-  /// 声音：素材原声 / 口播 / 配乐三者共存，这里管**素材原声**出多大。
+  /// 声音区：**三条轨的混音台**——原声 / 配音 / 配乐。
   ///
-  /// 分镜自带的声音里常有音效（喷雾声、开门声），全丢掉片子会发干；
-  /// 但它又不能盖过口播。默认 0（与这个功能出现之前的成片一模一样），
-  /// 想要就往上推；某一镜要单独放大或压掉，在那一镜的详情里改
+  /// 用户的心智就是一张混音台：三条轨可能同时响，也可能只调其中一条、
+  /// 或者直接关掉。此前这里只有一根滑杆，还名不副实——它叫「原声」、
+  /// 位置像总音量，实际调的是「配音行没单独设时原声压到多少」，
+  /// 所以拉它对画面行永远没反应，用户只会以为软件坏了。
   Widget _soundToolbar() {
-    final value = _sourceVolumeDraft ?? _doc.sourceVolume;
+    final mix = _mixDraft ?? _doc.mix;
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.sm),
-      child: Row(children: [
-        const SizedBox(
+      child: Column(children: [
+        _mixRow(
+          label: '原声',
+          slot: 'source',
+          value: mix.source,
+          muted: mix.sourceMuted,
+          onChanged: (v) => _mixDraftTo(mix.copyWith(source: v)),
+          onCommit: (v) => _mixCommit(mix.copyWith(source: v)),
+          onMute: () => _mixCommit(mix.withSourceMuted(!mix.sourceMuted)),
+        ),
+        _mixRow(
+          label: '配音',
+          slot: 'voice',
+          value: mix.voice,
+          muted: mix.voiceMuted,
+          onChanged: (v) => _mixDraftTo(mix.copyWith(voice: v)),
+          onCommit: (v) => _mixCommit(mix.copyWith(voice: v)),
+          onMute: () => _mixCommit(mix.withVoiceMuted(!mix.voiceMuted)),
+        ),
+        _mixRow(
+          label: '配乐',
+          slot: 'bgm',
+          value: mix.bgm,
+          muted: mix.bgmMuted,
+          onChanged: (v) => _mixDraftTo(mix.copyWith(bgm: v)),
+          onCommit: (v) => _mixCommit(mix.copyWith(bgm: v)),
+          onMute: () => _mixCommit(mix.withBgmMuted(!mix.bgmMuted)),
+        ),
+        _duckRow(mix),
+      ]),
+    );
+  }
+
+  void _mixDraftTo(SoundMix next) {
+    setState(() => _mixDraft = next);
+    _mixPreview(next);
+  }
+
+  void _mixCommit(SoundMix next) {
+    setState(() => _mixDraft = null);
+    // 音量不改变编排，所以不重铺轨道
+    _mutate((d) => d.withMix(next), affectsTracks: false);
+    _applySourceVolumeNow();
+  }
+
+  Widget _mixRow({
+    required String label,
+    required String slot,
+    required double value,
+    required bool muted,
+    required ValueChanged<double> onChanged,
+    required ValueChanged<double> onCommit,
+    required VoidCallback onMute,
+  }) =>
+      Row(children: [
+        SizedBox(
             width: 28,
-            child: Text('原声',
+            child: Text(label,
                 style: TextStyle(
                     fontSize: AppFontSize.micro,
-                    color: AppColors.textSecondary))),
+                    color: muted
+                        ? AppColors.textTertiary
+                        : AppColors.textSecondary))),
         Expanded(
           child: SliderTheme(
             data: const SliderThemeData(
@@ -3362,34 +3422,90 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               overlayShape: RoundSliderOverlayShape(overlayRadius: 10),
             ),
             child: Slider(
-              key: const ValueKey('sound-bar-source-volume'),
+              key: ValueKey('sound-bar-$slot-volume'),
               value: value.clamp(0.0, 1.0),
-              activeColor: AppColors.accentBlue,
-              // 拖动时就把新音量推给播放器——正在播的话当场听得到
-              onChanged: (v) {
-                setState(() => _sourceVolumeDraft = v);
-                _docPreviewVolume(v);
-              },
-              onChangeEnd: (v) {
-                setState(() => _sourceVolumeDraft = null);
-                _mutate((d) => d.withSourceVolume(v), affectsTracks: false);
-                _applySourceVolumeNow();
-              },
+              // 静音时滑杆变灰但**位置不动**：再点一下要回到原来的地方
+              activeColor:
+                  muted ? AppColors.textTertiary : AppColors.accentBlue,
+              onChanged: onChanged,
+              onChangeEnd: onCommit,
             ),
           ),
         ),
         SizedBox(
-            width: 42,
-            child: Text(
-                value <= 0.001 ? '静音' : '${(value * 100).round()}%',
+            width: 38,
+            child: Text('${(value * 100).round()}%',
                 textAlign: TextAlign.right,
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: muted
+                        ? AppColors.textTertiary
+                        : AppColors.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()]))),
+        IconButton(
+          key: ValueKey('sound-bar-$slot-mute'),
+          onPressed: onMute,
+          visualDensity: VisualDensity.compact,
+          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          padding: EdgeInsets.zero,
+          tooltip: muted ? '取消静音' : '静音这条轨',
+          icon: Icon(muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+              size: 15,
+              color: muted ? AppColors.orange : AppColors.textTertiary),
+        ),
+      ]);
+
+  /// 「有口播时自动压低原声」。
+  ///
+  /// 这是原声轨真正需要的那条规则：口播段落上原声会和人声叠成两份，
+  /// 默认压到 0。它以前被当成「原声总音量」摆在上面，所以画面行拉不动
+  Widget _duckRow(SoundMix mix) => Padding(
+        padding: const EdgeInsets.only(top: 2, right: 28),
+        child: Row(children: [
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Checkbox(
+              key: const ValueKey('sound-bar-duck'),
+              value: mix.duckSourceUnderVoice,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              onChanged: (v) =>
+                  _mixCommit(mix.copyWith(duckSourceUnderVoice: v ?? true)),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+                mix.duckSourceUnderVoice
+                    ? '有口播时把原声压到 ${(mix.duckedSourceVolume * 100).round()}%'
+                    : '有口播时不压低原声',
                 style: const TextStyle(
                     fontSize: AppFontSize.micro,
-                    color: AppColors.textTertiary,
-                    fontFeatures: [FontFeature.tabularFigures()]))),
-      ]),
-    );
-  }
+                    color: AppColors.textTertiary)),
+          ),
+          if (mix.duckSourceUnderVoice)
+            SizedBox(
+              width: 90,
+              child: SliderTheme(
+                data: const SliderThemeData(
+                  trackHeight: 2,
+                  thumbShape: RoundSliderThumbShape(enabledThumbRadius: 4),
+                  overlayShape: RoundSliderOverlayShape(overlayRadius: 8),
+                ),
+                child: Slider(
+                  key: const ValueKey('sound-bar-duck-level'),
+                  value: mix.duckedSourceVolume.clamp(0.0, 1.0),
+                  activeColor: AppColors.accentBlue,
+                  onChanged: (v) =>
+                      _mixDraftTo(mix.copyWith(duckedSourceVolume: v)),
+                  onChangeEnd: (v) =>
+                      _mixCommit(mix.copyWith(duckedSourceVolume: v)),
+                ),
+              ),
+            ),
+        ]),
+      );
 
   Widget _subtitleToolbar() {
     final index = _subtitleTargetIndex;

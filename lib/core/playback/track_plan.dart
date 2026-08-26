@@ -137,6 +137,12 @@ class TrackPlan {
   /// 配乐：各段各的曲子与音量
   final List<BgmTrackSegment> bgm;
 
+  /// 口播轨的总音量（0~1）。
+  ///
+  /// **按轨给而不是按段给**：这条轨是一整条 EDL 交给播放器的，
+  /// mpv 没法为 EDL 里的某一段单独设音量。口播段落之间也不需要各自不同
+  final double voiceVolume;
+
   /// 哪几段配乐这一次没铺上（人话，可直接展示）。
   /// 预览可以少一段垫乐——人还在编辑、听得出来——但必须说出来
   final List<String> bgmMissing;
@@ -153,6 +159,7 @@ class TrackPlan {
     this.bgm = const [],
     this.bgmMissing = const [],
     this.skippedEmptyUnits = const [],
+    this.voiceVolume = 1.0,
   });
 
   static const empty = TrackPlan();
