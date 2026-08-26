@@ -11,6 +11,17 @@ import '../log/app_log.dart';
 /// 永远不会释放的锁封死，而用户完全无从下手——那比「两边同时写」还糟。
 const Duration defaultStaleAfter = Duration(seconds: 60);
 
+/// 占着锁的是**界面**（人在场），还是另一个 Agent？
+///
+/// 这两种「写不进去」要区别对待：另一个 Agent 占着是真冲突，只能等；
+/// 界面占着说明人正开着它看——Agent 该把活儿**委派给界面**去做
+/// （见 [AgentRequest]），而不是报一句「写不进去」就完事。
+///
+/// 判据是持有者标识的约定：界面用 `gui:<pid>` 或 `人（…）`，
+/// Agent 用 `Agent` / `agent:<pid>`
+bool isGuiHolder(String? holder) =>
+    holder != null && (holder.startsWith('gui:') || holder.startsWith('人'));
+
 /// 一把任务锁的内容
 class TaskLock {
   /// 谁持有（`agent:<pid>` / `gui:<pid>`）——出问题时界面上要能说出是谁占着

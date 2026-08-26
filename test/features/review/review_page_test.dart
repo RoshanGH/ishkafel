@@ -8,6 +8,8 @@ import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
+import 'package:ishkafel/core/storage/agent_request.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/review/review_hover_player.dart';
@@ -208,15 +210,16 @@ void main() {
     expect(find.byKey(const Key('review-confirm')), findsNothing);
   });
 
-  testWidgets('Agent 占着锁时**进门就拦**，给强制接管——互斥是会话级的', (tester) async {
-    // 只在确认那一刻抢锁是补丁：审核期间任务不设防，Agent 中途改方案
+  testWidgets('另一个窗口占着锁时**进门就拦**，给强制接管——互斥是会话级的',
+      (tester) async {
+    // 只在确认那一刻抢锁是补丁：审核期间任务不设防，别人中途改方案
     // 会让确认剪的是过期状态
     final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
-    lock.acquire('agent');
+    lock.acquire('gui:999');
 
     await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
 
-    expect(find.textContaining('agent 正在操作这个任务'), findsOneWidget);
+    expect(find.textContaining('gui:999 正在操作这个任务'), findsOneWidget);
     expect(find.byKey(const Key('review-confirm')), findsNothing,
         reason: '被拦时不该出现确认按钮');
 
@@ -228,6 +231,123 @@ void main() {
     await tester.tap(find.text('接管'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('review-confirm')), findsOneWidget);
+  });
+
+  /// Agent 持锁时**不拦成一张空白页**——可视模式下人正是为了看它干活才
+  /// 把这页打开的。拦成空白页等于把要看的东西挡在门外
+  testWidgets('Agent 占着锁：照常显示候选，只读、并说清它在做什么',
+      (tester) async {
+    TaskLockFile(dataDir: dataDir, taskId: 'rv1').acquire('Agent');
+    writeAgentPresence(
+      dataDir: dataDir,
+      taskId: 'rv1',
+      presence: AgentPresence(
+        holder: 'Agent',
+        at: DateTime.now(),
+        action: '正在剔除第 1 段的素材 101',
+        step: 1,
+        focus: const AgentFocus(
+            module: 'review', lineIndex: 0, unitIndex: 0, materialId: 101),
+      ),
+    );
+
+    await pump(tester, taskWith([UnitReplacement.whole(const [101, 102])]));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 候选照常在，人能看见它在动什么
+    expect(find.byKey(const Key('review-card-0/null/101')), findsOneWidget);
+    expect(find.textContaining('正在剔除第 1 段的素材 101'), findsOneWidget);
+
+    // 只读：点了不生效
+    await tester.tap(find.byKey(const Key('review-card-0/null/101')));
+    await tester.pump();
+    expect(find.text('已剔除'), findsNothing);
+
+    // 展示完要回执，Agent 靠它决定什么时候走下一步
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(readAgentAck(dataDir: dataDir, taskId: 'rv1'), 1);
+  });
+
+  /// 人正开着审片台指挥 Agent：界面持锁，Agent 把活儿**委派**过来。
+  /// 剔除是界面里的临时状态，人按确认才落盘——所以必须由界面执行
+  group('人在场时替人代办', () {
+    testWidgets('Agent 下单剔除：卡片当场变成已剔除，并回执', (tester) async {
+      await pump(
+          tester, taskWith([UnitReplacement.whole(const [101, 102])]));
+
+      final id = writeAgentRequest(
+        dataDir: dataDir,
+        taskId: 'rv1',
+        kind: 'review.drop',
+        payload: const {
+          'decisions': [
+            {'unit': 0, 'shot': null, 'material': 101, 'keep': false}
+          ]
+        },
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      expect(find.text('已剔除'), findsOneWidget);
+      expect(find.textContaining('保留 1 · 剔除 1'), findsOneWidget);
+      // 盘上不能变——人还没按确认
+      expect(repo.tasks['rv1']!.replacements![0].wholeCandidateIds,
+          const [101, 102]);
+      // 回执要带上做了什么
+      final result = await waitForAgentRequest(
+          dataDir: dataDir, taskId: 'rv1', id: id,
+          timeout: const Duration(milliseconds: 100));
+      expect(result!.ok, isTrue);
+      expect(result.message, contains('1'));
+    });
+
+    testWidgets('下单里有界面上没有的卡：整批不做，回执说清原因', (tester) async {
+      await pump(tester, taskWith([UnitReplacement.whole(const [101, 102])]));
+
+      final id = writeAgentRequest(
+        dataDir: dataDir,
+        taskId: 'rv1',
+        kind: 'review.drop',
+        payload: const {
+          'decisions': [
+            {'unit': 0, 'shot': null, 'material': 101, 'keep': false},
+            {'unit': 9, 'shot': null, 'material': 999, 'keep': false}
+          ]
+        },
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+
+      // 合法的那条也不做：整批拒绝，不然人以为删了两条实际删了一条
+      expect(find.text('已剔除'), findsNothing);
+      final result = await waitForAgentRequest(
+          dataDir: dataDir, taskId: 'rv1', id: id,
+          timeout: const Duration(milliseconds: 100));
+      expect(result!.ok, isFalse);
+      expect(result.message, contains('999'));
+    });
+
+    testWidgets('恢复：把剔掉的标回来', (tester) async {
+      await pump(tester, taskWith([UnitReplacement.whole(const [101, 102])]));
+      await tester.tap(find.byKey(const Key('review-card-0/null/101')));
+      await tester.pump();
+      expect(find.text('已剔除'), findsOneWidget);
+
+      writeAgentRequest(
+        dataDir: dataDir,
+        taskId: 'rv1',
+        kind: 'review.keep',
+        payload: const {
+          'decisions': [
+            {'unit': 0, 'shot': null, 'material': 101, 'keep': true}
+          ]
+        },
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+      expect(find.text('已剔除'), findsNothing);
+    });
   });
 
   testWidgets('独立模式进门持锁——审核期间 Agent 的写入会被拒', (tester) async {

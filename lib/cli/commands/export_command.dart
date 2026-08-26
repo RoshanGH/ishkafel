@@ -14,8 +14,10 @@ import '../../core/miaoa/material_downloader.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../plan_submission.dart';
 import 'apply_command.dart';
@@ -36,6 +38,9 @@ Future<int> runExportCommand({
   String? codec,
   String? format,
   String holder = 'agent',
+
+  /// 可视模式：把 app 拉起来落到这个任务，导出进度实时显示在横幅上
+  bool? visual,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -118,6 +123,16 @@ Future<int> runExportCommand({
       '（${spec.width}×${spec.height} · ${spec.fps}fps · '
       '${spec.kbps ~/ 1000} Mbps · ${spec.encoderName} · ${spec.fileExtension}）');
 
+  // 导出是分钟级的活儿：可视模式下把它挂到界面上，人不用盯着终端
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder,
+  );
+  await stage.begin('正在导出 ${combos.length} 条成片',
+      focus: const AgentFocus(module: 'workbench'));
+
   final runner = ExportRunner(
     run: const ResolvingProcessRunner().call,
     workDir: Directory(p.join(dataDir.path, 'export_work', id)),
@@ -164,8 +179,12 @@ Future<int> runExportCommand({
     vocalsPath: task.vocalsPath,
     // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
     subtitleSentences: task.asrSentences ?? const [],
-    onProgress: (done, total, what) =>
-        sink.writeln('[$done/$total] $what'),
+    onProgress: (done, total, what) {
+      sink.writeln('[$done/$total] $what');
+      // 心跳而不是握手：导出不能为了等界面回执停下来
+      stage.heartbeat('正在导出 $done/$total：$what',
+          focus: const AgentFocus(module: 'workbench'));
+    },
   );
 
   final succeeded = outcomes.where((o) => o.failure == null).length;
@@ -179,6 +198,7 @@ Future<int> runExportCommand({
       outputDir: dest.path,
     ),
   ]));
+  stage.end();
   lock.release(holder);
 
   emitJson({

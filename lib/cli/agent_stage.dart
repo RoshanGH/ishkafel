@@ -78,7 +78,11 @@ class AgentStage {
     // 换模块了就唤醒界面把人带过去——它可能停在任务列表、也可能停在
     // 另一个模块。跨模块跳转走唤醒文件，模块内部的定位走在场状态
     final module = focus?.module;
-    if (module != null && module != _lastModule) {
+    // 全局槽上的活儿（导入）还没有任务可跳——只把软件拉起来，
+    // 状态显示在任务列表页上
+    if (taskId != globalPresenceSlot &&
+        module != null &&
+        module != _lastModule) {
       _lastModule = module;
       writeUiWake(dataDir, taskId, review: module == 'review', module: module);
     }
@@ -137,8 +141,10 @@ class AgentStage {
       // 「去哪个任务」走唤醒文件而不是 --args：启动参数只在冷启动时生效，
       // app 已经在跑时会被静默丢弃（`open` 命令那边真机撞到过——再点一次
       // 只是把窗口调到前台，什么都不发生）。文件冷热启动一条路
-      writeUiWake(dataDir, taskId,
-          review: module == 'review', module: module);
+      if (taskId != globalPresenceSlot) {
+        writeUiWake(dataDir, taskId,
+            review: module == 'review', module: module);
+      }
       await _run('open', ['-a', path]);
     } catch (e) {
       AppLog.warn('拉起 app 失败（可视模式退化成静默）：$e');

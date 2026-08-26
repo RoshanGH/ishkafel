@@ -93,6 +93,10 @@ class AgentFocus {
   /// 哪个语义单元（0 起）。工作台用
   final int? unitIndex;
 
+  /// 哪条候选素材。**审片台用**——那儿的定位单位是一张卡
+  /// （单元 + 镜头 + 素材），不是一行
+  final int? materialId;
+
   /// 该展开哪个面板——**跟人自己点开时是同一个面板**，不另造只读展示
   final AgentPanel panel;
 
@@ -101,6 +105,7 @@ class AgentFocus {
     this.lineIndex = 0,
     this.shotIndex,
     this.unitIndex,
+    this.materialId,
     this.panel = AgentPanel.none,
   });
 
@@ -109,6 +114,7 @@ class AgentFocus {
         'lineIndex': lineIndex,
         if (shotIndex != null) 'shotIndex': shotIndex,
         if (unitIndex != null) 'unitIndex': unitIndex,
+        if (materialId != null) 'materialId': materialId,
         'panel': panel.name,
       };
 
@@ -121,6 +127,7 @@ class AgentFocus {
       lineIndex: line,
       shotIndex: raw['shotIndex'] is int ? raw['shotIndex'] as int : null,
       unitIndex: raw['unitIndex'] is int ? raw['unitIndex'] as int : null,
+      materialId: raw['materialId'] is int ? raw['materialId'] as int : null,
       panel: AgentPanel.values.firstWhere(
         (p) => p.name == raw['panel'],
         orElse: () => AgentPanel.none,
@@ -149,6 +156,11 @@ enum AgentPanel {
   /// 找镜头面板（人点「添加分镜」弹出来的那个）
   findShots,
 }
+
+/// 不属于任何一个任务的活儿挂在这个槽上：**导入**（任务还没建出来）、
+/// 批量处理、跨任务的动作。任务列表页盯着它——不然导入那几秒里，
+/// 人在界面上完全看不出软件在干什么
+const String globalPresenceSlot = '__app__';
 
 File _presenceFile(Directory dataDir, String taskId) =>
     File(p.join(dataDir.path, 'presence', '$taskId.json'));

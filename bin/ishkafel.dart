@@ -43,6 +43,9 @@ Future<void> main(List<String> args) async {
         help: '可视模式：把 app 拉起来，一步一步演给人看'
             '（也可以用 ISHKAFEL_VISUAL=1）')
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
+    ..addOption('items',
+        help: 'review drop/keep 用：要动的候选，单元:镜头:素材（逗号分隔），'
+            '整体替换的候选镜头位写 `-`')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
     ..addFlag('install',
@@ -102,6 +105,7 @@ Future<void> main(List<String> args) async {
         rest: rest,
         dataDir: dataDir,
         tagGroups: parsed['tag-groups'] as String?,
+        visual: parsed['visual'] as bool,
       ),
     'tag-groups' => await runTagGroupsCommand(),
     'analyze' => await runAnalyzeCommand(
@@ -114,7 +118,13 @@ Future<void> main(List<String> args) async {
         install: parsed['install'] as bool,
         dir: parsed['dir'] as String?,
       ),
-    'review' => await runReviewCommand(rest: rest, dataDir: dataDir),
+    'review' => await runReviewCommand(
+        rest: rest,
+        dataDir: dataDir,
+        items: parsed['items'] as String?,
+        file: parsed['file'] as String?,
+        visual: parsed['visual'] as bool,
+      ),
     'blank' => await runBlankCommand(
         rest: rest,
         dataDir: dataDir,
@@ -147,6 +157,7 @@ Future<void> main(List<String> args) async {
         bitrate: parsed['bitrate'] as String?,
         codec: parsed['codec'] as String?,
         format: parsed['format'] as String?,
+        visual: parsed['visual'] as bool,
       ),
     'candidates' => await runCandidatesCommand(
         rest: rest,
@@ -193,6 +204,10 @@ ishkafel —— 成片翻新工具的命令行入口
   open <id>        把 app 弹出来并落到这个任务的工作台
   review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
                    确认后 task <id> 里的方案就是最终结果，等用户发话再继续
+  review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
+  review drop <id> --items 0:-:100,1:2:202
+                   替人剔掉这几条——人在审片台看着说「删掉哪几条」时用它
+  review keep <id> --items 0:-:100      把剔掉的恢复回来
   apply plans <id> --file <json>
                    提交完整方案列表（每条都是整体设计过的，不做笛卡尔积）
   export <id> [--out <目录>] [--resolution N] [--fps N]

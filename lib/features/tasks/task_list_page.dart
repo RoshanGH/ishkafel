@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../core/build_mode.dart';
 import '../../core/review/review_receipt.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_wake.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
@@ -91,11 +92,39 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   bool _handlingWake = false;
   String? _reviewOpenFor;
 
+  /// Agent 在干不属于任何一个任务的活儿（导入、批处理）。
+  ///
+  /// 有任务的活儿在各模块自己的横幅上说；**没任务的那几秒**只能在这里说——
+  /// 不然导入时软件弹出来却一片安静，人不知道它在干什么
+  AgentPresence? _globalAgent;
+
   void _startWakeWatcher() {
-    _wakeTimer ??=
-        Timer.periodic(const Duration(milliseconds: 700), (_) => _pollWake());
+    _wakeTimer ??= Timer.periodic(const Duration(milliseconds: 700), (_) {
+      _pollWake();
+      _pollGlobalAgent();
+    });
     // 冷启动的第一条请求不等第一个周期
     WidgetsBinding.instance.addPostFrameCallback((_) => _pollWake());
+  }
+
+  void _pollGlobalAgent() {
+    if (!mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final now =
+        readAgentPresence(dataDir: dataDir, taskId: globalPresenceSlot);
+    if (now?.action == _globalAgent?.action &&
+        (now == null) == (_globalAgent == null)) {
+      return;
+    }
+    setState(() => _globalAgent = now);
+    if (now != null && now.step > 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        writeAgentAck(
+            dataDir: dataDir, taskId: globalPresenceSlot, step: now.step);
+      });
+    }
   }
 
   Future<void> _pollWake() async {
@@ -424,6 +453,16 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       body: Column(
         children: [
           const EnvironmentBanners(),
+          // Agent 在干没有任务归属的活儿（导入）：这几秒里界面必须说话
+          if (_globalAgent != null)
+            NoticeBanner(
+              key: const Key('global-agent-banner'),
+              icon: Icons.smart_toy_outlined,
+              color: AppColors.accentBlue,
+              message: _globalAgent!.action.isEmpty
+                  ? '${_globalAgent!.holder} 正在操作'
+                  : _globalAgent!.action,
+            ),
           // 刷新失败但旧列表还在：不清空网格，只在顶部挂一条可重试的提示
           if (tasks.hasError && tasks.valueOrNull != null)
             NoticeBanner(

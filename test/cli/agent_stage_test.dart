@@ -3,10 +3,13 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/agent_stage.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
+import 'package:ishkafel/core/storage/ui_wake.dart';
 
 /// 两种模式不是技术开关，是两种使用场景：
 /// 静默 = 人不在场，跑完看结果；可视 = 人站在旁边看着它干活。
 void main() {
+  group('全局槽', _globalSlotTests);
+
   late Directory dir;
   final launched = <List<String>>[];
 
@@ -126,3 +129,37 @@ void main() {
 }
 
 void unawaited(Future<void> f) {}
+
+/// 全局槽：**没有任务归属的活儿**（导入时任务还没建出来）。
+///
+/// 这一层不能跳转——没有任务可跳。只把软件拉起来，状态显示在任务列表页上。
+void _globalSlotTests() {
+  late Directory dir;
+  setUp(() => dir = Directory.systemTemp.createTempSync('stage_global_'));
+  tearDown(() => dir.deleteSync(recursive: true));
+
+  test('全局槽不写唤醒文件——没有任务可跳，跳了只会把人甩到别处', () async {
+    final calls = <List<String>>[];
+    final stage = AgentStage(
+      mode: AgentStageMode.visual,
+      dataDir: dir,
+      taskId: globalPresenceSlot,
+      stepTimeout: const Duration(milliseconds: 80),
+      run: (bin, args) async {
+        calls.add([bin, ...args]);
+        return ProcessResult(0, 0, '', '');
+      },
+    );
+    await stage.begin('正在导入 a.mp4');
+    // 软件照样弹出来
+    expect(calls.single.first, 'open');
+    expect(consumeUiWake(dir), isNull);
+    // 状态照样报出去，任务列表页盯的就是它
+    final presence =
+        readAgentPresence(dataDir: dir, taskId: globalPresenceSlot);
+    expect(presence!.action, '正在导入 a.mp4');
+    stage.end();
+    expect(readAgentPresence(dataDir: dir, taskId: globalPresenceSlot),
+        isNull);
+  });
+}

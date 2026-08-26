@@ -15,6 +15,8 @@ import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
+import '../../core/storage/agent_presence.dart';
+import '../../core/storage/agent_request.dart';
 import '../../core/storage/task_lock.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
@@ -86,8 +88,21 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   Timer? _lockHeartbeat;
   static String get _holder => '人（审核中）';
 
-  /// 进门时锁在别人手里：显示是谁、给强制接管
+  /// 进门时锁在**另一个界面**手里：显示是谁、给强制接管。
+  /// Agent 持锁不走这条路——见 [_agent]
   String? _blockedBy;
+
+  /// Agent 此刻在这个任务上做什么。非 null = 它在干活：
+  /// 页面转成**只读跟随**（照常显示候选、滚到它动的那张卡），
+  /// 而不是拦成一张空白页——可视模式下人正是为了看它干活才打开这一页的
+  AgentPresence? _agent;
+  Timer? _agentPoll;
+
+  /// 每张卡的位置锚点，用来把 Agent 动到的那张滚进视野
+  final Map<String, GlobalKey> _cardKeys = {};
+
+  /// Agent 刚代办完什么（顶部轻提示）。人正开着这一页指挥它时走这条路
+  String? _delegateNote;
 
   static String keyOf(ReviewItem item) =>
       '${item.unit}/${item.shot}/${item.material}';
@@ -97,6 +112,117 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     super.initState();
     if (widget.onApply == null) _acquireSessionLock();
     _loadOriginThumbs();
+    _watchAgent();
+  }
+
+  /// 盯着 Agent：**两个方向都要接**。
+  ///
+  /// - 它在干活（在场状态）→ 页面转只读，把它动的那张卡滚到眼前，展示完回执
+  /// - 它请我代办（代办请求）→ 我来点这几张卡。剔除是界面里的临时状态，
+  ///   人按「确认」才落盘，所以只能由这一页执行，不能让它绕过去写盘
+  void _watchAgent() {
+    _agentPoll?.cancel();
+    _agentPoll = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      final dataDir = ref.read(dataDirProvider);
+      if (dataDir == null) return;
+      _handleDelegated(dataDir);
+      _followAgent(dataDir);
+    });
+  }
+
+  void _handleDelegated(Directory dataDir) {
+    final request =
+        consumeAgentRequest(dataDir: dataDir, taskId: widget.task.id);
+    if (request == null) return;
+    final keep = request.kind == 'review.keep';
+    if (request.kind != 'review.drop' && !keep) {
+      writeAgentRequestResult(
+          dataDir: dataDir,
+          taskId: widget.task.id,
+          id: request.id,
+          ok: false,
+          message: '审核页不认识「${request.kind}」这件事');
+      return;
+    }
+    final decisions = [
+      for (final raw in (request.payload['decisions'] as List? ?? const []))
+        ?ReviewDecision.tryFromJson(raw),
+    ];
+    // 整批拒绝：一条编号对不上就全不做。不然人以为剔了两条、实际剔了一条
+    final missing = [
+      for (final d in decisions)
+        if (!_items.any((i) =>
+            i.unit == d.unit && i.shot == d.shot && i.material == d.material))
+          '第 ${d.unit + 1} 段'
+              '${d.shot == null ? '' : '第 ${d.shot! + 1} 镜'}的素材 ${d.material}',
+    ];
+    if (decisions.isEmpty || missing.isNotEmpty) {
+      writeAgentRequestResult(
+        dataDir: dataDir,
+        taskId: widget.task.id,
+        id: request.id,
+        ok: false,
+        message: decisions.isEmpty
+            ? '一条决定都没有'
+            : '这一页上没有这些候选：${missing.join('、')}',
+      );
+      return;
+    }
+    setState(() {
+      for (final d in decisions) {
+        final key = '${d.unit}/${d.shot}/${d.material}';
+        d.keep ? _dropped.remove(key) : _dropped.add(key);
+      }
+      final what = keep ? '恢复' : '剔除';
+      _delegateNote = 'Agent $what了 ${decisions.length} 条，'
+          '按下面的「确认」才会落进方案';
+    });
+    // 滚到它动的最后一张，人的视线跟着走
+    final last = decisions.last;
+    _scrollToCard('${last.unit}/${last.shot}/${last.material}');
+    writeAgentRequestResult(
+      dataDir: dataDir,
+      taskId: widget.task.id,
+      id: request.id,
+      ok: true,
+      message: '已在界面上标记 ${decisions.length} 条，等人按确认',
+    );
+  }
+
+  void _followAgent(Directory dataDir) {
+    final now = readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
+    final was = _agent;
+    final changed = (was == null) != (now == null) ||
+        was?.action != now?.action ||
+        was?.focus?.materialId != now?.focus?.materialId;
+    if (!changed) return;
+    setState(() => _agent = now);
+    final focus = now?.focus;
+    if (focus?.materialId != null) {
+      _scrollToCard(
+          '${focus!.unitIndex ?? focus.lineIndex}/${focus.shotIndex}/'
+          '${focus.materialId}');
+    }
+    if (now != null && now.step > 0) {
+      // 真的展示完（滚动落定）才回执——Agent 靠它决定什么时候走下一步
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future<void>.delayed(const Duration(milliseconds: 320), () {
+          if (!mounted) return;
+          writeAgentAck(
+              dataDir: dataDir, taskId: widget.task.id, step: now.step);
+        });
+      });
+    }
+  }
+
+  void _scrollToCard(String key) {
+    final ctx = _cardKeys[key]?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+        duration: const Duration(milliseconds: 250),
+        alignment: 0.4,
+        curve: Curves.easeOut);
   }
 
   void _acquireSessionLock() {
@@ -104,7 +230,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     if (dataDir == null) return;
     final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
     if (!lock.acquire(_holder)) {
-      _blockedBy = lock.read()?.holder ?? '别人';
+      final holder = lock.read()?.holder;
+      // Agent 占着**不拦成空白页**：可视模式下人正是为了看它干活才打开
+      // 这一页的，拦掉等于把要看的东西挡在门外。转成只读跟随即可
+      // （见 [_followAgent]），它一收工这一页自动可操作
+      if (isGuiHolder(holder)) _blockedBy = holder ?? '别人';
       return;
     }
     _lock = lock;
@@ -190,6 +320,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
 
   @override
   void dispose() {
+    _agentPoll?.cancel();
     _lockHeartbeat?.cancel();
     _lock?.release(_holder);
     _hoverDebounce?.cancel();
@@ -262,6 +393,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   // ---- 交互 ----
 
   void _toggle(ReviewItem item) {
+    // Agent 正在动它——这时人点一下，两边会打架，而且它下一步就把界面
+    // 覆盖回去了。想插手就等它收工（或在 Agent 那头喊停）
+    if (_agent != null) return;
     final key = keyOf(item);
     setState(() {
       _dropped.contains(key) ? _dropped.remove(key) : _dropped.add(key);
@@ -385,7 +519,16 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ),
         body: _blockedBy != null
             ? _blockedState()
-            : (_items.isEmpty ? const _EmptyState() : _reviewBody()),
+            : (_items.isEmpty
+                ? const _EmptyState()
+                : Column(children: [
+                    // Agent 在干活 / 刚替人干完活：两种都要在最显眼处说出来。
+                    // 界面不说话，人只会以为软件自己乱跳
+                    if (_agent != null) _agentBanner(_agent!),
+                    if (_agent == null && _delegateNote != null)
+                      _delegateBanner(_delegateNote!),
+                    Expanded(child: _reviewBody()),
+                  ])),
         bottomNavigationBar:
             _items.isEmpty || _blockedBy != null ? null : _confirmBar(),
       );
@@ -596,7 +739,10 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           SpeedFit.factorFor(candidateMs: material!.durationMs!, slotMs: slotMs));
     }
 
-    return MouseRegion(
+    return KeyedSubtree(
+      // 位置锚点：Agent 动到哪张，就把哪张滚进视野
+      key: _cardKeys.putIfAbsent(key, GlobalKey.new),
+      child: MouseRegion(
       onEnter: (_) => _onHover(key, true,
           resolve: () => _resolveMaterial(item.material)),
       onExit: (_) => _onHover(key, false,
@@ -694,6 +840,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           ),
         ),
       ),
+      ),
     );
   }
 
@@ -736,7 +883,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               ),
               FilledButton(
                 key: const Key('review-confirm'),
-                onPressed: _confirm,
+                // Agent 正在动这一页时按不得：它下一步就把状态覆盖了
+                onPressed: _agent == null ? _confirm : null,
                 child: Text(_droppedCount == 0
                     ? '确认 · 全部保留'
                     : '确认 · 剔除 $_droppedCount 条'),
@@ -744,6 +892,66 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             ],
           ),
         ),
+      );
+
+  /// Agent 正在动这一页：说清它在做什么，并告诉人现在是只读。
+  ///
+  /// 「它在做什么」这一句是可视模式的全部意义——只说「有人占着」等于没说
+  Widget _agentBanner(AgentPresence agent) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+        color: AppColors.accentBlue.withValues(alpha: 0.14),
+        child: Row(children: [
+          const Icon(Icons.smart_toy_outlined,
+              size: 16, color: AppColors.accentBlue),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${agent.holder} 正在这一页上操作，当前为只读',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.textSecondary)),
+                if (agent.action.isNotEmpty)
+                  Text(agent.action,
+                      key: const Key('review-agent-action'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.body,
+                          color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ]),
+      );
+
+  /// Agent 替人点完了几张卡。**必须说清还没落盘**——不说的话人以为完事了，
+  /// 关掉窗口就白干
+  Widget _delegateBanner(String note) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+        color: AppColors.accentBlue.withValues(alpha: 0.10),
+        child: Row(children: [
+          const Icon(Icons.smart_toy_outlined,
+              size: 16, color: AppColors.accentBlue),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(note,
+                key: const Key('review-delegate-note'),
+                style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textPrimary)),
+          ),
+          TextButton(
+            onPressed: () => setState(() => _delegateNote = null),
+            child: const Text('知道了'),
+          ),
+        ]),
       );
 
   /// 进门时锁在别人手里。互斥与工作台同一套长相：说清是谁、给强制接管

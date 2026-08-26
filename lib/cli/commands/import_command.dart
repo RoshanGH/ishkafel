@@ -6,8 +6,11 @@ import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/ui_wake.dart';
 import '../../features/import_flow/import_service.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 
 /// `ishkafel import <视频> [--tag-groups <id,id>]`
@@ -21,6 +24,9 @@ Future<int> runImportCommand({
   required List<String> rest,
   required Directory dataDir,
   String? tagGroups,
+
+  /// 可视模式：软件弹出来说「正在导入」，建好之后把人带到新任务上
+  bool? visual,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -64,6 +70,15 @@ Future<int> runImportCommand({
         '后面挑替换素材时会没有标签可用。可用 ishkafel tag-groups 查看可选项');
   }
 
+  // 导入的时候任务还没建出来，挂在全局槽上——不然探时长、抽封面那几秒里，
+  // 界面上完全看不出软件在干什么
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: globalPresenceSlot,
+  );
+  await stage.begin('正在导入 ${p.basename(path)}');
+
   final task = await ImportService(
     repository: FileTaskRepository(dataDir),
     ffprobe: FfprobeService(),
@@ -74,6 +89,12 @@ Future<int> runImportCommand({
     unitTagGroups: groups,
     shotTagGroups: groups,
   );
+
+  stage.end();
+  // 建好了就把人带过去——可视模式下人在看着，落到新任务上才算「看得见」
+  if (stage.visual) {
+    writeUiWake(dataDir, task.id, review: false, module: 'workbench');
+  }
 
   emitJson({
     'id': task.id,

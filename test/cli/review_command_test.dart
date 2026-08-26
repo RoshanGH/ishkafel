@@ -84,3 +84,4 @@ void main() {
     expect(consumeUiWake(dir), isNull);
   });
 }
+
