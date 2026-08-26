@@ -16,10 +16,18 @@ class TaskLockBanner extends StatelessWidget {
   /// 用户确认强制接管之后调用
   final VoidCallback onTakeover;
 
+  /// 占着的那位**此刻在做什么**（人话）。
+  ///
+  /// 只说「有人占着」是不够的：人站在旁边看 Agent 干活，他要知道它这一步
+  /// 在动什么——那正是可视模式的意义。null = 不知道（比如占着的是另一个
+  /// 窗口的人，不是 Agent）
+  final String? action;
+
   const TaskLockBanner({
     super.key,
     required this.holder,
     required this.onTakeover,
+    this.action,
   });
 
   @override
@@ -35,12 +43,29 @@ class TaskLockBanner extends StatelessWidget {
                 size: 16, color: AppColors.orange),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
-              child: Text(
-                _explain(),
-                style: const TextStyle(
-                    fontSize: AppFontSize.body,
-                    height: 1.5,
-                    color: AppColors.textPrimary),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _explain(),
+                    style: const TextStyle(
+                        fontSize: AppFontSize.body,
+                        height: 1.5,
+                        color: AppColors.textPrimary),
+                  ),
+                  // 它这一步在动什么——人站在旁边看的就是这个
+                  if (action != null && action!.isNotEmpty)
+                    Text(
+                      action!,
+                      key: const Key('lock-action'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: AppFontSize.caption,
+                          color: AppColors.textSecondary),
+                    ),
+                ],
               ),
             ),
             const SizedBox(width: AppSpacing.md),

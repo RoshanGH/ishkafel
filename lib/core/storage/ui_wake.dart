@@ -16,20 +16,38 @@ import 'package:path/path.dart' as p;
 class UiWakeRequest {
   final String taskId;
 
-  /// true = 进审核模式；false = 进工作台
+  /// true = 进审核模式；false = 进工作台/编导台（按任务类型自动选）
   final bool review;
 
-  const UiWakeRequest({required this.taskId, required this.review});
+  /// 明确要去哪个模块：`workbench` / `director` / `review`。
+  ///
+  /// **这是全软件导航的那一层**：Agent 说去哪，界面负责怎么去——没开就
+  /// 拉起来、人停在别的页面就先退回来、再进目标模块。各模块只声明自己
+  /// 能被导航到哪儿，不给每个模块各写一套跳转。
+  /// null = 按老规矩来（review 标志 + 任务类型）
+  final String? module;
+
+  const UiWakeRequest({
+    required this.taskId,
+    required this.review,
+    this.module,
+  });
 }
 
 File _wakeFile(Directory dataDir) => File(p.join(dataDir.path, 'ui_wake.json'));
 
-void writeUiWake(Directory dataDir, String taskId, {required bool review}) {
+void writeUiWake(
+  Directory dataDir,
+  String taskId, {
+  required bool review,
+  String? module,
+}) {
   _wakeFile(dataDir)
     ..parent.createSync(recursive: true)
     ..writeAsStringSync(jsonEncode({
       'task': taskId,
       'review': review,
+      if (module != null) 'module': module,
       'at': DateTime.now().toIso8601String(),
     }));
 }
@@ -45,7 +63,11 @@ UiWakeRequest? consumeUiWake(Directory dataDir) {
     if (raw is! Map) return null;
     final task = raw['task'];
     if (task is! String || task.isEmpty) return null;
-    return UiWakeRequest(taskId: task, review: raw['review'] == true);
+    return UiWakeRequest(
+      taskId: task,
+      review: raw['review'] == true,
+      module: raw['module'] is String ? raw['module'] as String : null,
+    );
   } catch (_) {
     // 文件坏了就删掉当没有——留着它每次轮询都炸一遍
     try {

@@ -47,6 +47,7 @@ class AgentStage {
 
   int _step = 0;
   bool _appLaunched = false;
+  String? _lastModule;
 
   AgentStage({
     required this.mode,
@@ -64,7 +65,7 @@ class AgentStage {
   Future<void> begin(String action, {AgentFocus? focus}) async {
     if (!visual) return;
     clearAgentAck(dataDir: dataDir, taskId: taskId);
-    await _launchApp();
+    await _launchApp(module: focus?.module);
     await show(action, focus: focus);
   }
 
@@ -74,6 +75,13 @@ class AgentStage {
   /// 机器快的时候不白等，慢的时候也不会一闪而过没看清
   Future<void> show(String action, {AgentFocus? focus}) async {
     if (!visual) return;
+    // 换模块了就唤醒界面把人带过去——它可能停在任务列表、也可能停在
+    // 另一个模块。跨模块跳转走唤醒文件，模块内部的定位走在场状态
+    final module = focus?.module;
+    if (module != null && module != _lastModule) {
+      _lastModule = module;
+      writeUiWake(dataDir, taskId, review: module == 'review', module: module);
+    }
     _step++;
     writeAgentPresence(
       dataDir: dataDir,
@@ -120,15 +128,17 @@ class AgentStage {
     clearAgentAck(dataDir: dataDir, taskId: taskId);
   }
 
-  Future<void> _launchApp() async {
+  Future<void> _launchApp({String? module}) async {
     if (_appLaunched) return;
     _appLaunched = true;
+    _lastModule = module;
     final path = Platform.environment['ISHKAFEL_APP'] ?? defaultAppPath;
     try {
       // 「去哪个任务」走唤醒文件而不是 --args：启动参数只在冷启动时生效，
       // app 已经在跑时会被静默丢弃（`open` 命令那边真机撞到过——再点一次
       // 只是把窗口调到前台，什么都不发生）。文件冷热启动一条路
-      writeUiWake(dataDir, taskId, review: false);
+      writeUiWake(dataDir, taskId,
+          review: module == 'review', module: module);
       await _run('open', ['-a', path]);
     } catch (e) {
       AppLog.warn('拉起 app 失败（可视模式退化成静默）：$e');

@@ -84,6 +84,32 @@ void main() {
         reason: '状态还是要写——万一界面晚一点开起来，它能看到');
   });
 
+  test('换模块就把人带过去——他可能停在任务列表，也可能停在别的模块',
+      () async {
+    final s = stage(AgentStageMode.visual);
+    await s.begin('开工',
+        focus: const AgentFocus(module: 'director', lineIndex: 0));
+    File('${dir.path}/ui_wake.json').deleteSync(); // 界面消费掉了
+
+    await s.show('去工作台看候选',
+        focus: const AgentFocus(module: 'workbench', unitIndex: 3));
+    final wake =
+        File('${dir.path}/ui_wake.json').readAsStringSync();
+    expect(wake, contains('workbench'),
+        reason: '跨模块跳转走唤醒文件，模块内部定位走在场状态');
+  });
+
+  test('同一个模块里连着做几步：不重复唤醒（别把界面弹来弹去）', () async {
+    final s = stage(AgentStageMode.visual);
+    await s.begin('开工',
+        focus: const AgentFocus(module: 'director', lineIndex: 0));
+    File('${dir.path}/ui_wake.json').deleteSync();
+
+    await s.show('还在编导台',
+        focus: const AgentFocus(module: 'director', lineIndex: 5));
+    expect(File('${dir.path}/ui_wake.json').existsSync(), isFalse);
+  });
+
   test('收工：在场状态与回执都撤掉，人立刻能动手', () async {
     final s = stage(AgentStageMode.visual);
     await s.begin('开工');

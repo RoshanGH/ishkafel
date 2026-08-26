@@ -66,6 +66,7 @@ import 'workbench_body.dart';
 import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
 import '../export/export_dialog.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
 import 'task_lock_banner.dart';
 
@@ -161,6 +162,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   TaskLock? _lock;
   Timer? _lockTimer;
 
+  /// Agent 此刻在不在、在动哪个单元。**这套跟随是全软件共用的**：
+  /// 同一份在场状态，编导台按行滚、这里按单元把播放头挪过去——
+  /// 各模块只负责「我怎么把那个位置摆到眼前」，不各造一套协议
+  AgentPresence? _agent;
+  Timer? _agentPoll;
+
   /// 锁文件。**在 initState 里就存下来**：dispose 时要放锁，而那时候
   /// 已经不能再碰 ref（Riverpod 会抛 "Cannot use ref after disposed"）
   TaskLockFile? _lockFile;
@@ -196,6 +203,45 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
     poll();
     _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
+  }
+
+  /// 订阅 Agent 的在场状态，跟着它走：它看哪个单元，就把播放头挪过去。
+  /// 展示完这一帧再回执——Agent 靠它决定什么时候走下一步（不猜时间）
+  void _watchAgent() {
+    _agentPoll?.cancel();
+    _agentPoll = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      final dataDir = ref.read(dataDirProvider);
+      if (dataDir == null) return;
+      final now =
+          readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
+      final was = _agent;
+      if (was?.action == now?.action &&
+          was?.focus?.unitIndex == now?.focus?.unitIndex &&
+          (was == null) == (now == null)) {
+        return;
+      }
+      setState(() => _agent = now);
+      final unit = now?.focus?.unitIndex;
+      if (unit != null) _seekToUnit(unit);
+      if (now != null && now.step > 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Future<void>.delayed(const Duration(milliseconds: 320), () {
+            if (!mounted) return;
+            writeAgentAck(
+                dataDir: dataDir, taskId: widget.task.id, step: now.step);
+          });
+        });
+      }
+    });
+  }
+
+  /// 把播放头挪到第 [index] 个单元的起点——工作台是时间线式的，
+  /// 「看某个单元」就是把指针放到那儿
+  void _seekToUnit(int index) {
+    final units = _editor?.units ?? const [];
+    if (index < 0 || index >= units.length) return;
+    _playhead.value = units[index].startMs;
   }
 
   /// 离开工作台就放锁——不放的话，别人要等 60 秒超时才能接手
@@ -346,6 +392,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
     _syncPreviewAudio();
     _watchLock();
+    _watchAgent();
   }
 
   /// 变速切片的渲染器。没有数据目录（测试环境）就不做变速——
@@ -455,6 +502,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   @override
   void dispose() {
     _lockTimer?.cancel();
+    _agentPoll?.cancel();
     _releaseLock();
     _consequenceTimer?.cancel();
     _flushAutosaveOnDispose();
@@ -1558,7 +1606,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
             // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
             if (_lock case final lock?)
-              TaskLockBanner(holder: lock.holder, onTakeover: _takeoverLock),
+              TaskLockBanner(
+                holder: lock.holder,
+                action: _agent?.action,
+                onTakeover: _takeoverLock,
+              ),
             Expanded(
               child: WorkbenchBody(
                 // 整体替换后这一段在成片里多长——时间线上标出来

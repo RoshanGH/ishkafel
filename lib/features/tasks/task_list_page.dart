@@ -116,7 +116,20 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       // 人可能停在任意页面（编导台/工作台/审核页）：先收回列表再进目标。
       // push 的 await 不能占着 _handlingWake——那会把后续唤醒永远锁在门外
       // （真机撞到过：编导台开着时 `ishkafel open` 毫无反应）
-      if (wake.review) {
+      // Agent 明确说了去哪个模块就照办；没说才按老规矩（review 标志 +
+      // 任务类型）。这是全软件导航的落点：人停在任意页面都能被带到目标
+      final wantsReview = wake.module == 'review' || (wake.module == null && wake.review);
+      if (wake.module == 'director') {
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        unawaited(Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
+        ));
+      } else if (wake.module == 'workbench') {
+        Navigator.of(context).popUntil((r) => r.isFirst);
+        unawaited(Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
+        ));
+      } else if (wantsReview) {
         // 同一条任务的审核页已经开着时不再叠一层——Agent 重复跑 review
         // 只该把窗口带到前台
         if (_reviewOpenFor == task.id) return;
