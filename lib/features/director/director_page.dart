@@ -58,6 +58,8 @@ import 'script_panel.dart';
 import 'start_guide.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import 'export_readiness.dart';
+import '../../core/jianying/jianying_plan.dart';
+import '../../core/jianying/jianying_writer.dart';
 import 'script_export_dialog.dart';
 import 'subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
@@ -2958,6 +2960,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           _draftButton(),
           const SizedBox(width: AppSpacing.sm),
           _exportButton(),
+          const SizedBox(width: AppSpacing.sm),
+          _jianyingButton(),
           const SizedBox(width: AppSpacing.xs),
         ]),
       );
@@ -3003,6 +3007,191 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       label: label,
     );
   }
+
+  // ---- 剪映 ----
+
+  bool _jianyingBusy = false;
+
+  /// 「剪映」：把这一版方案写成剪映工程，用户自己在剪映里接着精修。
+  ///
+  /// 与「导出成片」互补——那边出的是**片子**（烧死，改个转场都要重来），
+  /// 这边出的是**工程**（原始素材 + 剪辑参数，都还能调）。永远是描边：
+  /// 一屏只有一个实心主角，那是「导出成片」/「自动铺一版」
+  Widget _jianyingButton() => OutlinedButton.icon(
+        key: const ValueKey('director-jianying'),
+        onPressed: _jianyingBusy || _exporting ? null : _generateJianyingDraft,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.textPrimary,
+          side: const BorderSide(color: AppColors.border),
+          padding:
+              const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
+          textStyle: const TextStyle(fontSize: AppFontSize.body),
+        ),
+        icon: const Icon(Icons.movie_outlined, size: 14),
+        label: Text(_jianyingBusy ? '生成中…' : '剪映'),
+      );
+
+  /// 生成剪映草稿：素材补齐 → 落地 → 写草稿。**不拉起剪映**——
+  /// 剪映没有给外部程序「打开指定草稿」的通道（实测详见 jianying_writer 注释），
+  /// 与其假装能替用户点开，不如把草稿名交代清楚
+  Future<void> _generateJianyingDraft() async {
+    _flushNow();
+    final cache = _mediaCache;
+    if (cache == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('当前环境没有素材下载器，生成不了剪映草稿。')));
+      return;
+    }
+    setState(() => _jianyingBusy = true);
+    _exportProgress.value = const ScriptExportProgress('准备中', 0);
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _ExportProgressDialog(
+          progress: _exportProgress, title: '正在生成剪映草稿'),
+    ));
+    // 素材先补齐——工程里少一段素材，用户要到剪映里才发现
+    while (true) {
+      final blocked = await _prepareMedia();
+      if (!mounted) return;
+      if (blocked.isEmpty) break;
+      Navigator.of(context, rootNavigator: true).pop();
+      final choice = await _askMediaBlocked(blocked);
+      if (!mounted) return;
+      if (choice == null) {
+        setState(() => _jianyingBusy = false);
+        return;
+      }
+      if (choice == 'drop-bgm') {
+        final drop = {for (final f in blocked) f.id};
+        _mutate((d) => d.withBgmSegments([
+              for (final seg in d.bgmSegments)
+                if (!drop.contains(seg.material.id)) seg,
+            ]));
+        _flushNow();
+        _pinBgm();
+      } else {
+        for (final f in blocked) {
+          (f.isBgm ? _bgmCache : _mediaCache)?.retry(f.id);
+        }
+      }
+      _exportProgress.value = const ScriptExportProgress('准备中', 0);
+      unawaited(showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => _ExportProgressDialog(
+            progress: _exportProgress, title: '正在生成剪映草稿'),
+      ));
+    }
+    try {
+      final writer = JianyingWriter(
+        sourceOf: (shot) =>
+            shot.localSource ?? cache.localPathOf(shot.materialId),
+        voiceOf: (line) {
+          final vo = line.voiceover;
+          return vo != null && File(vo.audioPath).existsSync()
+              ? vo.audioPath
+              : null;
+        },
+        bgmOf: (id) => _bgmCache?.localPathOf(id),
+      );
+      final result = await writer.write(
+        _doc,
+        taskName: _task.name,
+        onProgress: (done, total, what) => _exportProgress.value =
+            ScriptExportProgress(
+                '$what $done/$total', total <= 0 ? 0 : done / total),
+      );
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _jianyingBusy = false);
+      await _showJianyingDone(result);
+    } on JianyingPlanException catch (e) {
+      AppLog.warn('剪映草稿被拦：${e.message}');
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _jianyingBusy = false);
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('生成不了剪映草稿'),
+          content: Text(e.message),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
+    } catch (e) {
+      AppLog.warn('剪映草稿生成失败：$e');
+      if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
+      setState(() => _jianyingBusy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('生成剪映草稿失败，请稍后重试。')));
+    }
+  }
+
+  /// 生成完的交代：草稿叫什么、去哪儿开、剪映开着时为什么还看不到。
+  /// **不许只弹一句「成功」**——用户下一步要做什么必须说清楚
+  Future<void> _showJianyingDone(JianyingDraftResult result) => showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('剪映草稿已生成'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(result.name,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.body,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                  '${(result.totalMs / 1000).toStringAsFixed(1)} 秒 · '
+                  '${result.materialCount} 个素材',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+              const SizedBox(height: AppSpacing.md),
+              const Text('打开剪映，在「本地草稿」里找到它继续编辑。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.body,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.xs),
+              const Text('剪映如果已经开着，需要重启它才会出现在草稿列表里。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+              for (final note in result.notes) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text('· $note',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.orange)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Process.run('open', ['-R', result.folder]),
+              child: const Text('在访达中显示'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Process.run('open', ['-a', 'VideoFusion-macOS']);
+              },
+              child: const Text('打开剪映'),
+            ),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
 
   /// 「导出成片」与「生成草片」互补：草片还有活时退居描边，
   /// 全就绪后成为唯一的实心主角
@@ -3791,14 +3980,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 /// 导出进度对话框：一段一报，不许点掉——导出中改内容不会进这一版成片
 class _ExportProgressDialog extends StatelessWidget {
   final ValueListenable<ScriptExportProgress?> progress;
+  final String title;
 
-  const _ExportProgressDialog({required this.progress});
+  const _ExportProgressDialog(
+      {required this.progress, this.title = '正在导出成片'});
 
   @override
   Widget build(BuildContext context) => PopScope(
         canPop: false,
         child: AlertDialog(
-          title: const Text('正在导出成片'),
+          title: Text(title),
           content: ValueListenableBuilder<ScriptExportProgress?>(
             valueListenable: progress,
             builder: (_, value, _) =>
