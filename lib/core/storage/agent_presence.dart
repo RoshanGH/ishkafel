@@ -31,11 +31,19 @@ class AgentPresence {
   /// 界面该把哪儿摆到眼前；null = 它还没动到具体某一行（在读、在想）
   final AgentFocus? focus;
 
+  /// 第几步（每上报一次递增）。
+  ///
+  /// **可视模式的节奏靠它握手，不靠猜时间**：Agent 发出第 N 步，界面真的
+  /// 展示完（滚动停下、面板展开）才回执第 N 步，Agent 收到才走下一步。
+  /// 固定等几百毫秒是拍脑袋——机器快的时候白等，慢的时候还是没看清
+  final int step;
+
   const AgentPresence({
     required this.holder,
     required this.at,
     required this.action,
     this.focus,
+    this.step = 0,
   });
 
   bool isStale(DateTime now, {Duration staleAfter = defaultStaleAfter}) =>
@@ -45,6 +53,7 @@ class AgentPresence {
         'holder': holder,
         'at': at.toIso8601String(),
         'action': action,
+        'step': step,
         if (focus != null) 'focus': focus!.toJson(),
       };
 
@@ -59,6 +68,7 @@ class AgentPresence {
       holder: holder,
       at: at,
       action: raw['action'] is String ? raw['action'] as String : '',
+      step: raw['step'] is int ? raw['step'] as int : 0,
       focus: AgentFocus.tryFromJson(raw['focus']),
     );
   }
@@ -66,24 +76,39 @@ class AgentPresence {
 
 /// 界面该把哪儿摆到眼前
 class AgentFocus {
-  /// 哪一行（0 起）
+  /// 去哪个模块：`director`（编导台）/ `workbench`（工作台）/
+  /// `review`（审片台）/ `tasks`（任务列表）。
+  ///
+  /// **这一层是全软件的**：界面有一个统一的导航器负责「没开就拉起来、
+  /// 切到那个模块、打开那个任务、滚到位置、弹出那个面板」，各模块只声明
+  /// 自己能被导航到哪些位置——不给每个模块各写一套跟随
+  final String module;
+
+  /// 哪一行（0 起）。编导台用
   final int lineIndex;
 
   /// 哪一镜（0 起）；null = 整行，不针对某一镜
   final int? shotIndex;
 
+  /// 哪个语义单元（0 起）。工作台用
+  final int? unitIndex;
+
   /// 该展开哪个面板——**跟人自己点开时是同一个面板**，不另造只读展示
   final AgentPanel panel;
 
   const AgentFocus({
-    required this.lineIndex,
+    this.module = 'director',
+    this.lineIndex = 0,
     this.shotIndex,
+    this.unitIndex,
     this.panel = AgentPanel.none,
   });
 
   Map<String, dynamic> toJson() => {
+        'module': module,
         'lineIndex': lineIndex,
         if (shotIndex != null) 'shotIndex': shotIndex,
+        if (unitIndex != null) 'unitIndex': unitIndex,
         'panel': panel.name,
       };
 
@@ -92,8 +117,10 @@ class AgentFocus {
     final line = raw['lineIndex'];
     if (line is! int || line < 0) return null;
     return AgentFocus(
+      module: raw['module'] is String ? raw['module'] as String : 'director',
       lineIndex: line,
       shotIndex: raw['shotIndex'] is int ? raw['shotIndex'] as int : null,
+      unitIndex: raw['unitIndex'] is int ? raw['unitIndex'] as int : null,
       panel: AgentPanel.values.firstWhere(
         (p) => p.name == raw['panel'],
         orElse: () => AgentPanel.none,
@@ -118,6 +145,9 @@ enum AgentPanel {
 
   /// 配乐段
   bgm,
+
+  /// 找镜头面板（人点「添加分镜」弹出来的那个）
+  findShots,
 }
 
 File _presenceFile(Directory dataDir, String taskId) =>
@@ -171,4 +201,65 @@ void clearAgentPresence({
   } catch (e) {
     AppLog.warn('Agent 在场状态清除失败（$taskId）：$e');
   }
+}
+
+File _ackFile(Directory dataDir, String taskId) =>
+    File(p.join(dataDir.path, 'presence', '$taskId.ack.json'));
+
+/// 界面展示完第 [step] 步了。**这是可视模式的节拍器**——Agent 等到它才走
+/// 下一步，所以要在**真的展示完之后**再写（滚动停下、面板展开），
+/// 不是收到就写
+void writeAgentAck({
+  required Directory dataDir,
+  required String taskId,
+  required int step,
+}) {
+  try {
+    final f = _ackFile(dataDir, taskId);
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(
+        jsonEncode({'step': step, 'at': DateTime.now().toIso8601String()}));
+  } catch (e) {
+    AppLog.warn('展示回执写入失败（$taskId）：$e');
+  }
+}
+
+/// 界面展示到第几步了；读不到就是 -1（还没回过任何一步）
+int readAgentAck({required Directory dataDir, required String taskId}) {
+  try {
+    final f = _ackFile(dataDir, taskId);
+    if (!f.existsSync()) return -1;
+    final raw = jsonDecode(f.readAsStringSync());
+    return raw is Map && raw['step'] is int ? raw['step'] as int : -1;
+  } catch (_) {
+    return -1;
+  }
+}
+
+/// 等界面把第 [step] 步展示完。
+///
+/// 返回 true = 界面确实展示完了；false = 等到超时（**界面没开、崩了、
+/// 被关了都算**）。超时**不是错误**：可视只是给人看的，看不成也不该把
+/// Agent 的正事卡死——照常往下跑就是了
+Future<bool> waitForAck({
+  required Directory dataDir,
+  required String taskId,
+  required int step,
+  Duration timeout = const Duration(seconds: 5),
+  Duration poll = const Duration(milliseconds: 60),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (DateTime.now().isBefore(deadline)) {
+    if (readAgentAck(dataDir: dataDir, taskId: taskId) >= step) return true;
+    await Future<void>.delayed(poll);
+  }
+  return false;
+}
+
+/// 干完活把回执也撤掉，免得下一轮把上一轮的回执当成新的
+void clearAgentAck({required Directory dataDir, required String taskId}) {
+  try {
+    final f = _ackFile(dataDir, taskId);
+    if (f.existsSync()) f.deleteSync();
+  } catch (_) {}
 }

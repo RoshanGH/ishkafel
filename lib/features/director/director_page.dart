@@ -942,13 +942,34 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         if (focus != null && focus.lineIndex < _doc.lines.length) {
           _selected = focus.lineIndex;
           _expandedShot =
-              focus.panel == AgentPanel.shot && focus.shotIndex != null
+              (focus.panel == AgentPanel.shot ||
+                          focus.panel == AgentPanel.findShots) &&
+                      focus.shotIndex != null
                   ? (focus.lineIndex, focus.shotIndex!)
                   : null;
         }
       });
+      // **等这一帧真的画出来再回执**：Agent 靠它决定什么时候走下一步。
+      // 收到就回的话，人还没看清界面已经翻篇了——那还不如不做可视
+      if (now != null && now.step > 0) _ackAfterPainted(now.step);
       // 它干完走了：把它改的东西载进来——不载的话人随手一改就把它的活覆盖了
       if (leaving) unawaited(_reloadAfterAgent());
+    });
+  }
+
+  /// 等这一帧画完（滚动动画、面板展开都落定）再告诉 Agent「展示好了」。
+  ///
+  /// 节奏由界面决定而不是让 Agent 猜时间：机器快的时候它不白等，
+  /// 慢的时候也不会一闪而过没看清
+  void _ackAfterPainted(int step) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 滚动是有动画的（_ScrollIntoView 用 animateTo），再等一拍让它停下来
+      Future<void>.delayed(const Duration(milliseconds: 320), () {
+        if (!mounted) return;
+        final dataDir = ref.read(dataDirProvider);
+        if (dataDir == null) return;
+        writeAgentAck(dataDir: dataDir, taskId: _task.id, step: step);
+      });
     });
   }
 

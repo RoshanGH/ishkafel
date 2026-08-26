@@ -13,6 +13,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
+import '../agent_stage.dart';
 import '../script_apply.dart';
 
 /// `ishkafel script apply <shots|subtitles|alloc|bgm> <task> --file <json>`
@@ -28,6 +29,9 @@ Future<int> runScriptApplyCommand({
   required Directory dataDir,
   String? file,
   String holder = 'Agent',
+
+  /// 可视模式：把软件拉起来、每步等界面展示完（见 AgentStage）
+  bool? visual,
   Future<String> Function()? readStdin,
   StringSink? out,
   StringSink? err,
@@ -85,16 +89,27 @@ Future<int> runScriptApplyCommand({
         '等它结束，或在 app 里强制接管');
     return exitLocked;
   }
-  writeAgentPresence(
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    presence: AgentPresence(
-      holder: holder,
-      at: DateTime.now(),
-      action: _actionOf(what, payload),
-      focus: _focusOf(what, payload),
-    ),
+    holder: holder,
   );
+  // 可视模式下这一句会把软件拉起来、落到这个任务、等界面真的展示完
+  await stage.begin(_actionOf(what, payload), focus: _focusOf(what, payload));
+  if (!stage.visual) {
+    // 静默模式也要写在场状态：万一人正开着界面，至少知道有东西在动它
+    writeAgentPresence(
+      dataDir: dataDir,
+      taskId: task.id,
+      presence: AgentPresence(
+        holder: holder,
+        at: DateTime.now(),
+        action: _actionOf(what, payload),
+        focus: _focusOf(what, payload),
+      ),
+    );
+  }
 
   try {
     // 拿锁期间人可能改过：重读一遍再校验，别拿旧前提写新数据
@@ -136,7 +151,7 @@ Future<int> runScriptApplyCommand({
     }, out: out);
     return 0;
   } finally {
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
+    stage.end();
     lock.release(holder);
   }
 }

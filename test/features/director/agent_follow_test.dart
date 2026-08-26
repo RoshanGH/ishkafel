@@ -100,6 +100,26 @@ void main() {
         reason: '拦下来要说清怎么办，不能只是点了没反应');
   });
 
+  testWidgets('展示完这一步才回执——Agent 靠它决定什么时候走下一步',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    expect(readAgentAck(dataDir: dir, taskId: 't1'), -1);
+
+    report(AgentPresence(
+      holder: 'Agent',
+      at: DateTime.now(),
+      action: '正在看第 10 句',
+      step: 4,
+      focus: const AgentFocus(module: 'director', lineIndex: 9),
+    ));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(readAgentAck(dataDir: dir, taskId: 't1'), 4,
+        reason: '收到就回的话人还没看清界面已经翻篇了');
+  });
+
   testWidgets('心跳停了就当它走了——Agent 崩掉不能把界面永久锁住',
       (tester) async {
     final repo = _MemoryRepo();

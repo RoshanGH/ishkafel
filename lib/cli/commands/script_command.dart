@@ -33,6 +33,9 @@ Future<int> runScriptCommand({
   /// `export` 用：输出目录
   String? outputDir,
 
+  /// 可视模式：把软件拉起来，一步一步演给人看
+  bool? visual,
+
   /// 注入点：测试用假实现，真实环境走 miaoa CLI
   MiaoaContentService? content,
   MiaoaTagService? tags,
@@ -90,6 +93,7 @@ Future<int> runScriptCommand({
       rest: rest.sublist(1),
       dataDir: dataDir,
       file: file,
+      visual: visual,
       out: out,
       err: err,
     );
@@ -114,6 +118,7 @@ Future<int> runScriptCommand({
         rest: rest.sublist(1),
         dataDir: dataDir,
         file: file,
+        visual: visual,
         out: out,
         err: err,
       );

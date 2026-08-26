@@ -8,6 +8,8 @@ import 'package:ishkafel/cli/commands/apply_command.dart';
 import 'package:ishkafel/cli/commands/candidates_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
+import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/script_command.dart';
@@ -36,6 +38,10 @@ Future<void> main(List<String> args) async {
     ..addOption('shot', help: '镜头下标（从 0 开始）')
     ..addOption('line', help: 'script 用：行号（从 1 开始，与界面上一致）')
     ..addOption('voice', help: 'script voice 用：音色 id')
+    ..addFlag('visual',
+        negatable: false,
+        help: '可视模式：把 app 拉起来，一步一步演给人看'
+            '（也可以用 ISHKAFEL_VISUAL=1）')
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
@@ -84,6 +90,13 @@ Future<void> main(List<String> args) async {
     failWith(e.message, code: exitBadUsage);
   }
 
+  // 人在 Agent 那头喊停（Ctrl+C）时**立刻放手**：撤掉在场状态与锁。
+  //
+  // 不这么做的话，人按了停止还要干等一分钟心跳超时才能自己动手——
+  // 「随时插手」就成了一句空话。这正是站在实习生旁边最要紧的那件事：
+  // 你说停，他就得马上把手拿开
+  _installInterruptHandler(dataDir: dataDir, rest: rest);
+
   final code = switch (command) {
     'import' => await runImportCommand(
         rest: rest,
@@ -118,6 +131,7 @@ Future<void> main(List<String> args) async {
         file: parsed['file'] as String?,
         voiceId: parsed['voice'] as String?,
         outputDir: parsed['out'] as String?,
+        visual: parsed['visual'] as bool,
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),
@@ -193,3 +207,27 @@ ishkafel —— 成片翻新工具的命令行入口
 通用参数：
 ${parser.usage}
 ''';
+
+/// Ctrl+C / kill 时把这个任务的在场状态与锁撤干净，人立刻能接手。
+///
+/// 任务 id 从命令参数里认（`script apply shots <task>` 这类第二个位置），
+/// 认不出就只撤在场目录里跟本进程有关的那一份——宁可少撤，不要撤错别人的
+void _installInterruptHandler({
+  required Directory dataDir,
+  required List<String> rest,
+}) {
+  void bail(ProcessSignal signal) {
+    for (final id in rest.where((a) => !a.startsWith('-'))) {
+      try {
+        clearAgentPresence(dataDir: dataDir, taskId: id);
+        clearAgentAck(dataDir: dataDir, taskId: id);
+        TaskLockFile(dataDir: dataDir, taskId: id).release('Agent');
+      } catch (_) {}
+    }
+    stderr.writeln('已停止，界面可以动了。');
+    exit(130); // 130 = 被 SIGINT 中断，与 shell 的惯例一致
+  }
+
+  ProcessSignal.sigint.watch().listen(bail);
+  if (!Platform.isWindows) ProcessSignal.sigterm.watch().listen(bail);
+}
