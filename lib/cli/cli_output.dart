@@ -14,6 +14,10 @@ const int exitLocked = 4;
 /// 该把 stderr 的话转给人去补环境，而不是重试
 const int exitEnv = 5;
 
+/// 该做的事做了但没成：ASR 识别不出、TTS 念岔、ffmpeg 挂了。
+/// 与「用法不对」「找不到」区分开——这一类值得重试，那几类重试也没用
+const int exitFailed = 6;
+
 /// 一行一个 JSON，调用方按行读就行。
 ///
 /// 不缩进、不转义中文：这份输出既要给程序读，也要能被人一眼看懂——排查

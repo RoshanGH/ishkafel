@@ -7,6 +7,7 @@ import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../script_shot_context.dart';
 import 'script_apply_command.dart';
+import 'script_run_command.dart';
 import '../script_view.dart';
 
 /// `ishkafel script <子命令> <任务>` —— 脚本成片这条线的只读入口。
@@ -26,6 +27,12 @@ Future<int> runScriptCommand({
   /// `apply` 用：结果文件路径
   String? file,
 
+  /// `voice` 用：指定音色
+  String? voiceId,
+
+  /// `export` 用：输出目录
+  String? outputDir,
+
   /// 注入点：测试用假实现，真实环境走 miaoa CLI
   MiaoaContentService? content,
   MiaoaTagService? tags,
@@ -33,12 +40,50 @@ Future<int> runScriptCommand({
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
-  if (rest.length < 2) {
-    sink.writeln('用法：ishkafel script <show|shots|subtitles> <任务 id> '
-        '[--line <行号，从 1 起>]');
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script <子命令> …\n'
+        '  new <名字>                      建一个脚本任务\n'
+        '  extract <任务> <参考视频>        识别台词，生成脚本行\n'
+        '  voice <任务> [--line N]         生成配音\n'
+        '  show <任务> [--line N]          任务全貌 / 单行详情\n'
+        '  shots <任务> --line N           候选镜头与判断依据\n'
+        '  subtitles <任务> --line N       断句材料\n'
+        '  apply <what> <任务> --file f    回填（shots/subtitles/alloc/bgm）\n'
+        '  export <任务> [--out 目录]      导出成片');
+    return exitBadUsage;
+  }
+  if (rest.length < 2 &&
+      !['new'].contains(rest.first)) {
+    sink.writeln('要指定任务：ishkafel script ${rest.first} <任务 id>');
     return exitBadUsage;
   }
   final sub = rest[0];
+  // 执行类：建任务、提取、配音、导出（这几条不需要先解析任务）
+  switch (sub) {
+    case 'new':
+      return runScriptNewCommand(
+          rest: rest.sublist(1), dataDir: dataDir, out: out, err: err);
+    case 'extract':
+      return runScriptExtractCommand(
+          rest: rest.sublist(1), dataDir: dataDir, out: out, err: err);
+    case 'voice':
+      return runScriptVoiceCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        line: line,
+        voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'export':
+      return runScriptExportCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        outputDir: outputDir,
+        out: out,
+        err: err,
+      );
+  }
   // apply 多一层：script apply <what> <task>
   if (sub == 'apply') {
     return runScriptApplyCommand(
@@ -148,7 +193,8 @@ Future<int> runScriptCommand({
         return exitBadUsage;
       }
     default:
-      sink.writeln('不认识的子命令：$sub（可用：show / shots / subtitles / apply）');
+      sink.writeln('不认识的子命令：$sub'
+          '（可用：new / extract / voice / export / show / shots / subtitles / apply）');
       return exitBadUsage;
   }
 }

@@ -17,6 +17,7 @@ import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
 import 'app/flutter_error_bridge.dart';
 import 'app/service_wiring.dart';
+import 'core/script/script_service_wiring.dart';
 import 'features/director/director_providers.dart';
 import 'cli/commands/open_command.dart';
 import 'core/log/app_log.dart';

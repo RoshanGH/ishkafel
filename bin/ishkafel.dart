@@ -35,6 +35,7 @@ Future<void> main(List<String> args) async {
     ..addOption('unit', help: '单元下标（从 0 开始）')
     ..addOption('shot', help: '镜头下标（从 0 开始）')
     ..addOption('line', help: 'script 用：行号（从 1 开始，与界面上一致）')
+    ..addOption('voice', help: 'script voice 用：音色 id')
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
@@ -115,6 +116,8 @@ Future<void> main(List<String> args) async {
         dataDir: dataDir,
         line: int.tryParse(parsed['line'] as String? ?? ''),
         file: parsed['file'] as String?,
+        voiceId: parsed['voice'] as String?,
+        outputDir: parsed['out'] as String?,
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),
