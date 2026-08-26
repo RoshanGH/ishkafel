@@ -140,11 +140,9 @@ ScriptPlanResult buildScriptTrackPlan(
         source: sources[j].path,
         inMs: sources[j].inMs,
         // 这一镜的素材原声出多大——**画面轨不出声，这个数交给原声轨**。
-        // 配音行默认静音（原声会和口播叠成两份），全片或这一镜调大才响；
-        // 画面行本来就靠素材出声，所以是满音量，除非这一镜单独压过
-        volume: line.type == ScriptLineType.voiced
-            ? doc.sourceVolumeOf(shot)
-            : (shot.sourceVolume ?? 1.0),
+        // 两种行的默认不同（配音行跟全片、画面行满音量），但只此一处算：
+        // 界面上的滑杆读的是同一个数，不然会出现「显示静音、实际在响」
+        volume: doc.sourceVolumeFor(line, shot),
       ));
       // 画面行没有配音，用素材自己的声音（设计稿：画面行有画面有音乐
       // 或用分镜自己的声音）；配音行的声音轨在下面统一铺配音
@@ -175,7 +173,7 @@ ScriptPlanResult buildScriptTrackPlan(
           // 卡一下，但至少听得到
           source: mute ?? sources[j].path,
           inMs: mute == null ? sources[j].inMs : 0,
-          volume: mute == null ? (shot.sourceVolume ?? 1.0) : 1.0,
+          volume: mute == null ? doc.sourceVolumeFor(line, shot) : 1.0,
         ));
       }
       shotAt += shot.allocMs!;

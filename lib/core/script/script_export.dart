@@ -164,13 +164,12 @@ class ScriptExportRunner {
       final vo = line.voiceover;
       if (line.type == ScriptLineType.voiced && vo != null) {
         // 素材原声：分镜自带的声音里常有音效（喷雾声、开门声）。
-        // 全片默认静音（升级不该改变已有片子的声音），调大了就和口播
-        // 一起混进来；逐镜可以单独开小灶
-        // 配音行的原声音量：镜头上设过就听它的，否则跟随全片（默认 0）
+        // 配音行默认跟随全片基调（默认 0：原声会和口播叠成两份），
+        // 逐镜可以单独开小灶。音量只此一处算（见 sourceVolumeFor）
         final sourceTrack = await _lineSourceAudio(
           line: line,
           lineIndex: lineIndex,
-          volumeOf: doc.sourceVolumeOf,
+          volumeOf: (shot) => doc.sourceVolumeFor(line, shot),
           localPathOf: localPathOf,
         );
         if (sourceTrack == null) {
@@ -204,7 +203,7 @@ class ScriptExportRunner {
         final track = await _lineSourceAudio(
           line: line,
           lineIndex: lineIndex,
-          volumeOf: (shot) => shot.sourceVolume ?? 1.0,
+          volumeOf: (shot) => doc.sourceVolumeFor(line, shot),
           localPathOf: localPathOf,
         );
         if (track != null) {

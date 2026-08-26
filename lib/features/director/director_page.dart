@@ -45,6 +45,7 @@ import '../picking/picked_media_cache.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
+import '../tasks/task_id_badge.dart';
 import '../tasks/task_list_controller.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
@@ -1808,9 +1809,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         rate: rate,
         // 与排轨同一套规则：配音行跟随全片（默认静音），
         // 画面行本来就靠素材出声（除非这一镜单独压过）
-        sourceVolume: line.type == ScriptLineType.voiced
-            ? _doc.sourceVolumeOf(shot)
-            : (shot.sourceVolume ?? 1.0),
+        sourceVolume: _doc.sourceVolumeFor(line, shot),
         audioPath: vo?.audioPath,
         // 配音段 = 该镜在行时间轴上的区间（配音与行同轴）
         audioStartMs: segStartMs,
@@ -2707,7 +2706,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       onPlayShot: _playShotInline,
                       onTrimDone: _scheduleReplayShot,
                       subtitleStyleOf: _styleOf,
-                      docSourceVolume: _doc.sourceVolume,
+                      // 滑杆的「默认值」必须和播放用的是同一个：
+                      // 画面行满音量、配音行跟全片
+                      defaultSourceVolumeOf: _doc.defaultSourceVolumeFor,
                       onShotSourceVolume: (index, j, volume) {
                         final line = _doc.lines[index];
                         // 音量不改变编排，所以不重铺轨道；改完直接把新音量
@@ -2720,10 +2721,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         // 正在卡上播这一镜的话，当场跟着变——不然人拖着
                         // 滑杆听不到任何变化，只会以为没生效
                         if (_inlineKey == 'shot_${line.id}_$j') {
-                          unawaited(_inlinePlayer?.setVolume(volume ??
-                              (line.type == ScriptLineType.voiced
-                                  ? _doc.sourceVolume
-                                  : 1.0)));
+                          unawaited(_inlinePlayer?.setVolume(
+                              volume ?? _doc.defaultSourceVolumeFor(line)));
                         }
                       },
                       onScreenText: (index, screenIndex, text) {
@@ -2899,15 +2898,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             tooltip: '返回任务列表',
           ),
           const SizedBox(width: AppSpacing.xs),
-          if (_task.seq != null)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Text('#${_task.seq}',
-                  style: const TextStyle(
-                      fontSize: AppFontSize.emphasis,
-                      color: AppColors.textTertiary,
-                      fontFeatures: [FontFeature.tabularFigures()])),
-            ),
+          // 编号要看得见、点得动：人跟 Agent 说事情全靠它。
+          // 原来用最淡的 tertiary 写在这儿，等于没有
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.sm),
+            child: TaskIdBadge(task: _task),
+          ),
           Flexible(
             child: Text(_task.name,
                 maxLines: 1,

@@ -20,6 +20,7 @@ import '../../core/storage/agent_request.dart';
 import '../../core/storage/task_lock.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
+import '../tasks/task_id_badge.dart';
 import '../tasks/task_list_controller.dart';
 import 'review_hover_player.dart';
 
@@ -500,22 +501,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         appBar: AppBar(
           backgroundColor: AppColors.surface,
           titleSpacing: 0,
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('审核候选',
-                  style: TextStyle(
-                      fontSize: AppFontSize.emphasis,
-                      fontWeight: FontWeight.w600)),
-              Text(widget.task.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      fontSize: AppFontSize.micro,
-                      color: AppColors.textTertiary)),
-            ],
-          ),
+          title: Row(children: [
+            TaskIdBadge(task: widget.task),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(child: _titleText()),
+          ]),
         ),
         body: _blockedBy != null
             ? _blockedState()
@@ -532,6 +522,24 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         bottomNavigationBar:
             _items.isEmpty || _blockedBy != null ? null : _confirmBar(),
       );
+
+  Widget _titleText() => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('审核候选',
+                  style: TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      fontWeight: FontWeight.w600)),
+              Text(widget.task.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+            ],
+          );
 
   Widget _reviewBody() => Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,

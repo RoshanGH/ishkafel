@@ -69,7 +69,10 @@ class LineBoardHandlers {
       onShotSourceVolume;
 
   /// 整片的原声基调（这一镜没单独设时显示它）
-  final double docSourceVolume;
+  /// 这一行没单独设过时，原声该多大。**必须和播放用的是同一个数**——
+  /// 画面行满音量、配音行跟全片。以前这里直接塞全片基调，于是画面行
+  /// 显示「静音」却在满音量播，人一拖滑杆就把 0 写死了
+  final double Function(ScriptLine line) defaultSourceVolumeOf;
 
   /// 这一段配乐的曲子在本地的状态（null = 这段没配乐 / 没有下载器）
   final PickedMediaStatus? Function(int materialId) bgmStatus;
@@ -127,7 +130,7 @@ class LineBoardHandlers {
     required this.onScreenReset,
     required this.onFixTimings,
     required this.onShotSourceVolume,
-    required this.docSourceVolume,
+    required this.defaultSourceVolumeOf,
     required this.bgmStatus,
     required this.onRetryBgm,
     required this.onSubtitleCutHere,
@@ -1401,7 +1404,7 @@ class _LineBand extends StatelessWidget {
   Widget _shotSourceVolumeRow(int j) {
     final shot = line.shots[j];
     final own = shot.sourceVolume;
-    final value = own ?? handlers.docSourceVolume;
+    final value = own ?? handlers.defaultSourceVolumeOf(line);
     return Padding(
       padding: const EdgeInsets.only(top: 4),
       child: Row(children: [
@@ -1430,21 +1433,36 @@ class _LineBand extends StatelessWidget {
           width: 34,
           child: Text(value <= 0.001 ? '静音' : '${(value * 100).round()}%',
               textAlign: TextAlign.right,
-              style: const TextStyle(
+              style: TextStyle(
                   fontSize: AppFontSize.micro,
-                  color: AppColors.textTertiary,
-                  fontFeatures: [FontFeature.tabularFigures()])),
+                  // 静音是「这一镜听不见」，不是一个普通读数——用警示色，
+                  // 不然人翻半天也找不到自己哪一镜哑了
+                  color: value <= 0.001
+                      ? AppColors.orange
+                      : AppColors.textTertiary,
+                  fontFeatures: const [FontFeature.tabularFigures()])),
         ),
-        // 单独设过就标出来，并给一键回到整片基调
+        // 单独设过就标出来，并给一键回到默认。
+        //
+        // **这一格必须显眼**：真机上一条画面行被写死成 0.0，人调全片原声
+        // 怎么都救不回来（逐镜的设定压着全片），只能在这里点掉
         if (own != null) ...[
           const SizedBox(width: 6),
           InkWell(
             key: ValueKey('band-shot-volume-reset-$index-$j'),
             onTap: () => handlers.onShotSourceVolume(index, j, null),
-            child: const Text('跟随整片',
-                style: TextStyle(
-                    fontSize: AppFontSize.micro,
-                    color: AppColors.accentBlueLight)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: AppColors.accentBlue.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(AppRadius.xs),
+              ),
+              child: Text(
+                  line.type == ScriptLineType.voiced ? '跟随整片' : '恢复默认',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.accentBlueLight)),
+            ),
           ),
         ],
       ]),

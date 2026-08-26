@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
+import '../tasks/task_id_badge.dart';
 
 /// 「返回」时若有未确认的修改，弹窗让用户选择的三种处理方式
 enum LeaveAction { cancel, discard, saveDraft }
@@ -256,6 +257,12 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
             key: const Key('workbench-back-btn'),
             onPressed: onBack,
             icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary, size: 18),
+          ),
+          // 进到任务里也要一眼看见自己在第几号任务上——人跟 Agent 报的
+          // 就是这个号
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: TaskIdBadge(task: task),
           ),
           Expanded(
             child: Column(

@@ -1075,7 +1075,30 @@ class ScriptDoc {
       refVideoPath: refVideoPath,
       sourceVolume: next);
 
-  /// 这一镜实际该用多大的原声：镜头上设过就听它的，没设过跟随全片
+  /// 这一镜实际该用多大的原声。**全软件只此一处**——显示、预览、行内播放、
+  /// 成片必须是同一个数。
+  ///
+  /// 真机 bug 就出在有两处：画面行的滑杆按「跟随全片」显示（默认 0，写着
+  /// 「静音」），预览却按满音量播。界面撒谎，人就去拖那根滑杆想修好它，
+  /// 一拖就把一个显式的 0.0 写死在那一镜上——从此那一行真的哑了，
+  /// 而且调全片也救不回来。
+  double sourceVolumeFor(ScriptLine line, LineShot shot) =>
+      shot.sourceVolume ?? defaultSourceVolumeFor(line);
+
+  /// 没单独设过时，这一行的原声该多大。
+  ///
+  /// 两种行的默认不一样，因为它们的声音来路不一样：
+  ///
+  /// - **配音行**：原声会和口播叠成两份声音，所以默认跟随全片基调
+  ///   （基调本身默认 0 = 压住）
+  /// - **画面行**：没有口播，它本来就靠素材出声——默认满音量。
+  ///   **不跟随全片**：全片调到 0 是为了压住口播下的原声，
+  ///   不该顺手把整条画面行也弄哑
+  double defaultSourceVolumeFor(ScriptLine line) =>
+      line.type == ScriptLineType.voiced ? sourceVolume : 1.0;
+
+  /// 只按镜头看的旧入口（不知道行的类型时用）。
+  /// 新代码一律用 [sourceVolumeFor]——它才知道画面行和配音行的默认不同
   double sourceVolumeOf(LineShot shot) => shot.sourceVolume ?? sourceVolume;
 
   /// 按行 id 改某一镜的原声音量（null = 回到跟随全片）
