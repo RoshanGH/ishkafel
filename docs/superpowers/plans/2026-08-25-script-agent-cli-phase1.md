@@ -1,12 +1,11 @@
 # 编导台 Agent CLI 实现计划（第一期：读 + 判断类回填）
 
-> **状态：待执行**（2026-08-25 定稿归档，尚未开工。开工前先读一遍
-> `docs/superpowers/specs/2026-08-11-agent-cli-design.md`——这份计划的
-> 全部规矩都来自它。）
+> **状态：实施中**（2026-08-26 开工。规矩来自
+> `docs/superpowers/specs/2026-08-11-agent-cli-design.md`，读那份再动手。）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让 Agent 能读懂一个脚本成片任务，并接管其中全部「选哪个」的判断——挑镜头、字幕断句、分时长、配段配乐——每一次回填都过校验才落盘。
+**Goal:** 让 Agent 能读懂一个脚本成片任务，并接管其中全部「选哪个」的判断——挑镜头、字幕断句、分时长、配段配乐——每一次回填都过校验才落盘；**同时让它的每一步在界面上看得见**：它看哪一行，界面就滚到哪一行；它开哪个面板，界面就展开哪个面板。
 
 **Architecture:** 沿用 `docs/superpowers/specs/2026-08-11-agent-cli-design.md` 已经定下的全部规矩（输出可验证性划线、任务锁、`--json`、非零退出 + 中文 stderr）。脚本成片与成片翻新是同一个 `RenewTask` 的两个字段（`units` / `script`），因此复用同一套仓库、锁、输出层，只在 `ishkafel script <子命令>` 下开一层新的命名空间。
 
@@ -59,54 +58,144 @@
 
 ---
 
-### Task 0: GUI 在锁释放后自动重载（先做）
+### Task 0: Agent 操作实时可视化（先做）
 
-**排在最前是刻意的。** 锁与只读横幅在上一期（phase1 Task 4/5）已经做完了，
-缺的只是最后一下：Agent 放锁之后，GUI 得把它改的东西载进来。这一条不做，
-后面七个任务在「人在场」的场景下全是危险的——Agent 写得越多，被覆盖的越多。
+**排在最前是刻意的。** 这不只是"别让人和 Agent 打架"，而是用户明确要的一件事：
 
-场景（用户原话的用法）：人开着 GUI，让 Agent「把第 5 句换个镜头」。Agent 持锁 → GUI 只读 → Agent 写完放锁 → **GUI 里还是旧数据**。人随手改一下，自动保存把 Agent 刚做的活整个覆盖掉。
+> 让 Agent 的操作可视化，在 GUI 上能够展示出来。它选中第 10 行，那就跟人一样
+> 把第 10 行放到界面中间；它删了一个分镜，界面上就少一个；它去调某一镜的时长
+> 或变速，那个面板就打开——跟人自己点开去调的时候，界面是一样的。
+
+所以这一期的 GUI 侧不是"只读 + 事后刷新"，而是**跟着 Agent 走的一块屏**：
+人在旁边看着它干活，看得懂每一步在动什么。
 
 **Files:**
-- Modify: `lib/features/director/director_page.dart`（锁状态监听 + 重载）
-- Modify: `lib/core/storage/task_lock.dart`（如需要：暴露锁变化的通知）
-- Test: `test/features/director/director_lock_reload_test.dart`
+- Create: `lib/core/storage/agent_presence.dart` —— Agent 在场状态（谁、在干什么、焦点在哪）的读写与订阅
+- Modify: `lib/core/storage/task_lock.dart` —— 锁文件里带上 presence（同一份文件，一次读写）
+- Modify: `lib/features/director/director_page.dart` —— 订阅、跟随、只读态
+- Modify: `lib/cli/commands/script_apply_command.dart` —— 每一步操作前后上报焦点
+- Test: `test/core/storage/agent_presence_test.dart`、`test/features/director/agent_follow_test.dart`
 
 **Interfaces:**
-- Consumes: `TaskLockFile.read()`（已有），加一个轮询（2 秒一次，与心跳同量级）
+- Produces:
+  ```dart
+  /// Agent 此刻在这个任务上干什么。写进任务目录，GUI 订阅它
+  @immutable
+  class AgentPresence {
+    final String holder;        // 'Agent' / '人（编导台）'
+    final DateTime at;          // 心跳时刻——超时即视为不在场
+    final String action;        // 人话：'正在给第 10 句挑镜头'
+    final AgentFocus? focus;    // 焦点：界面要跟着它走
+  }
 
-**行为契约：**
+  /// 界面该把哪儿摆到眼前
+  @immutable
+  class AgentFocus {
+    final int lineIndex;        // 哪一行
+    final int? shotIndex;       // 哪一镜（null = 整行）
+    final AgentPanel panel;     // 该展开哪个面板
+  }
 
-| 状态变化 | GUI 表现 |
+  enum AgentPanel { none, shot, subtitle, voice, bgm }
+
+  /// 写：Agent 每做一步就更新一次
+  void writePresence(Directory dataDir, String taskId, AgentPresence p);
+
+  /// 读 + 订阅：GUI 侧每 500ms 拉一次（与心跳同量级，够跟手也不吃 CPU）
+  Stream<AgentPresence?> watchPresence(Directory dataDir, String taskId);
+  ```
+
+**GUI 的行为契约：**
+
+| Agent 那边 | 界面这边 |
 |---|---|
-| 无锁 → 有锁（别人拿走） | 切只读，顶部横幅「Agent 正在操作这个任务」 |
-| 有锁 → 无锁（对方放锁） | **重新从磁盘读任务**，恢复可编辑，提示「Agent 改动已载入」 |
-| 重载时本地有未落盘改动 | 先 `_flushNow()` 再读——本地改动优先落盘，避免自己的活丢了 |
+| 拿到锁 | 顶部横幅「Agent 正在操作这个任务」，整页切只读；横幅右侧「强制接管」 |
+| 焦点落到第 10 行 | 右栏**滚动到第 10 行并居中**，那一行高亮（跟人自己点选是同一个高亮） |
+| 焦点落到第 10 行第 3 镜、panel=shot | 展开那一镜的详情——**和人点开它时长得一模一样**（取段条、速度、原声、字幕屏都在） |
+| panel=subtitle | 展开字幕屏列表 |
+| 改了数据（删镜头/加镜头/改字幕） | 界面**当场跟着变**（数据变化本来就会重建，这里只要保证订阅到位） |
+| 放锁 | 恢复可编辑，提示「Agent 改动已载入」 |
+
+**为什么焦点要 Agent 主动上报**：光看数据变化推不出来它"正在看哪儿"——它可能读了半天才动手，也可能一次改好几行。人在旁边看的是**过程**，不是结果差异。
 
 **Steps:**
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: 写失败的测试（presence 的读写与自愈）**
 
 ```dart
-testWidgets('Agent 放锁后自动载入它的改动，不让人覆盖掉', (tester) async {
-  // 打开任务 → 外部进程拿锁 → 改磁盘上的任务 → 放锁
-  await pumpDirector(tester, wrap(repo, task));
-  lock.acquire('Agent');
-  await tester.pump(const Duration(seconds: 3));
-  expect(find.textContaining('正在操作'), findsOneWidget);
+test('写一次读一次：谁在、在干什么、焦点在哪', () {
+  writePresence(dir, 't1', AgentPresence(
+    holder: 'Agent', at: DateTime.now(),
+    action: '正在给第 10 句挑镜头',
+    focus: const AgentFocus(lineIndex: 9, shotIndex: 2, panel: AgentPanel.shot)));
+  final back = readPresence(dir, 't1')!;
+  expect(back.action, '正在给第 10 句挑镜头');
+  expect(back.focus!.lineIndex, 9);
+  expect(back.focus!.panel, AgentPanel.shot);
+});
 
-  await repo.save(taskWithAgentEdit);   // Agent 写入
-  lock.release('Agent');
-  await tester.pump(const Duration(seconds: 3));
+test('心跳超时就当它不在了——Agent 崩了不能把任务永久锁死', () {
+  writePresence(dir, 't1', AgentPresence(
+    holder: 'Agent',
+    at: DateTime.now().subtract(const Duration(seconds: 90)),
+    action: '挑镜头'));
+  expect(readPresence(dir, 't1'), isNull, reason: '60 秒没心跳就视为不在场');
+});
 
-  expect(find.text('Agent 改动已载入'), findsOneWidget);
-  expect(find.text('Agent 挑的镜头'), findsOneWidget,
-      reason: '不重载的话，人再改一下就把 Agent 的活覆盖了');
+test('文件损坏不炸——读不出来就当没人在', () {
+  File(p.join(dir.path, 'tasks', 't1.presence.json')).writeAsStringSync('{坏');
+  expect(readPresence(dir, 't1'), isNull);
 });
 ```
 
-- [ ] **Step 2-4: 跑测试 → 实现 → 真机验收**（两个终端：一个跑 CLI apply，一个开 GUI 看）
-- [ ] **Step 5: 提交**
+- [ ] **Step 2: 跑测试确认失败**
+
+- [ ] **Step 3: 实现 `agent_presence.dart`**
+
+- [ ] **Step 4: 写 GUI 跟随的测试**
+
+```dart
+testWidgets('Agent 把焦点落到第 10 行第 3 镜：界面滚过去并展开那一镜', (tester) async {
+  await pumpDirector(tester, wrap(repo, taskWith20Lines));
+  writePresence(dir, 't1', AgentPresence(
+    holder: 'Agent', at: DateTime.now(), action: '正在调第 10 句第 3 镜的时长',
+    focus: const AgentFocus(lineIndex: 9, shotIndex: 2, panel: AgentPanel.shot)));
+  await tester.pump(const Duration(seconds: 1));
+
+  expect(find.text('Agent 正在操作这个任务'), findsOneWidget);
+  expect(find.text('正在调第 10 句第 3 镜的时长'), findsOneWidget);
+  expect(find.byKey(const ValueKey('band-shot-9-2')), findsOneWidget,
+      reason: '那一镜的详情要展开——跟人自己点开时长得一模一样');
+  // 只读：这时候人点什么都不该改动数据
+  await tester.tap(find.byKey(const ValueKey('band-delete-shot-9-2')));
+  await tester.pump();
+  expect((await repo.findById('t1'))!.script!.lines[9].shots, hasLength(3));
+});
+
+testWidgets('Agent 放锁：恢复可编辑，并把它改的东西载进来', (tester) async {
+  // …（见原 Task 0）
+});
+```
+
+- [ ] **Step 5: 实现 GUI 侧的订阅与跟随**
+
+要点：
+- 订阅用 500ms 轮询（与心跳同量级）。文件监听在 macOS 上对"同一进程外的写入"不总触发，轮询更可靠
+- 滚动复用现成的 `_ScrollIntoView`（人点选行时就是它把行滚进视野的）
+- 展开镜头详情复用现成的 `_expandedShot` 状态——**不要另造一套只读的展示**，
+  两套长得不一样就失去了"跟人看到的一样"的意义
+- 人正在编辑（输入框有焦点）时不要抢滚动，等它失焦
+
+- [ ] **Step 6: CLI 侧上报焦点**
+
+每个 `script apply` 子命令在动手前后各写一次 presence：动手前写「正在做什么 + 焦点」，
+做完写「刚做了什么」。**心跳由命令自己维持**（长操作每 20 秒一次）。
+
+- [ ] **Step 7: 真机验收**
+
+两个终端：一边跑 `script apply shots`，一边开着 GUI 看它是不是滚过去、展开、数据跟着变。
+
+- [ ] **Step 8: 提交**
 
 ---
 
@@ -797,6 +886,8 @@ $B script show hlhivnohoo --json | jq '.blocking'   # 必须是 []
 
 并且：
 
+- **Agent 干活时人在旁边看得懂**：它把焦点落到第 10 行第 3 镜，界面就滚过去、
+  展开那一镜的详情——和人自己点开时长得一模一样；删了加了当场反映
 - Agent 持锁期间 GUI 只读、横幅说明谁占着；**放锁后 GUI 自动载入 Agent 的改动**
 - 任何一条 `apply` 提交非法数据都被整批拒绝，stderr 一次点全所有问题
 - 每一次写入在任务里留痕：谁做的、什么时候、改了哪几行
