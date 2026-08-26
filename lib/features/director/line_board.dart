@@ -74,6 +74,15 @@ class LineBoardHandlers {
   /// 显示「静音」却在满音量播，人一拖滑杆就把 0 写死了
   final double Function(ScriptLine line) defaultSourceVolumeOf;
 
+  /// 这一行**实际**用的音色与语速（行上没设就是本片基调）。
+  /// 界面显示的必须是有效值——显示行上的值，会让「跟随本片」的行看起来
+  /// 像是没设过音色
+  final String? Function(ScriptLine line) voiceIdOf;
+  final int Function(ScriptLine line) speechRateOf;
+
+  /// 这一行的配音新不新（拿有效值判定）
+  final LineVoiceState Function(ScriptLine line) voiceStateOf;
+
   /// 这一段配乐的曲子在本地的状态（null = 这段没配乐 / 没有下载器）
   final PickedMediaStatus? Function(int materialId) bgmStatus;
 
@@ -131,6 +140,9 @@ class LineBoardHandlers {
     required this.onFixTimings,
     required this.onShotSourceVolume,
     required this.defaultSourceVolumeOf,
+    required this.voiceIdOf,
+    required this.speechRateOf,
+    required this.voiceStateOf,
     required this.bgmStatus,
     required this.onRetryBgm,
     required this.onSubtitleCutHere,
@@ -155,6 +167,9 @@ class LineBoardHandlers {
 class LineBoard extends StatelessWidget {
   final ScriptDoc doc;
   final int selected;
+
+  /// 多选中的行（下标）。空 = 只选了 [selected] 那一行
+  final Set<int> multiSelected;
 
   /// 展开镜头详情的位置：(行下标, 镜头下标)；null = 都收着
   final (int, int)? expandedShot;
@@ -184,6 +199,7 @@ class LineBoard extends StatelessWidget {
     super.key,
     required this.doc,
     required this.selected,
+    this.multiSelected = const {},
     required this.expandedShot,
     required this.onExpandShot,
     required this.generatingLineIds,
@@ -210,7 +226,9 @@ class LineBoard extends StatelessWidget {
         child: _LineBand(
           index: i,
           line: doc.lines[i],
-          selected: i == selected,
+          selected: multiSelected.isEmpty
+              ? i == selected
+              : multiSelected.contains(i),
           expandedShot: expandedShot != null && expandedShot!.$1 == i
               ? expandedShot!.$2
               : null,
@@ -1660,10 +1678,15 @@ class _LineBand extends StatelessWidget {
 
   Widget _voiceRow() {
     final vo = line.voiceover;
-    final state = line.voiceState;
-    final voiceName = line.voiceId == null
+    final state = handlers.voiceStateOf(line);
+    // 显示**有效值**：行上没设就是本片基调。显示行上的 null 会让跟随
+    // 本片的行看起来像是没选过音色
+    final effectiveVoice = handlers.voiceIdOf(line);
+    final rate = handlers.speechRateOf(line);
+    final following = line.voiceId == null && effectiveVoice != null;
+    final voiceName = effectiveVoice == null
         ? null
-        : (VoiceCatalog.byId(line.voiceId!)?.ref.name ?? line.voiceId);
+        : (VoiceCatalog.byId(effectiveVoice)?.ref.name ?? effectiveVoice);
     return Row(children: [
       const Icon(Icons.graphic_eq, size: 12, color: AppColors.textTertiary),
       const SizedBox(width: AppSpacing.xs),
@@ -1681,17 +1704,17 @@ class _LineBand extends StatelessWidget {
         itemBuilder: (_) => [
           const PopupMenuItem(value: 'pick', height: 32, child: Text('更换音色')),
           const PopupMenuDivider(height: 8),
-          for (final (rate, label) in const [
+          for (final (r, label) in const [
             (-25, '语速 0.75x'),
             (0, '语速 1x'),
             (25, '语速 1.25x'),
             (50, '语速 1.5x'),
           ])
             PopupMenuItem(
-              value: '$rate',
+              value: '$r',
               height: 32,
               child: Row(children: [
-                if (line.speechRate == rate)
+                if (rate == r)
                   const Icon(Icons.check, size: 12, color: AppColors.accentBlue)
                 else
                   const SizedBox(width: 12),
@@ -1702,7 +1725,8 @@ class _LineBand extends StatelessWidget {
         ],
         child: Text(
             '${voiceName ?? '选择音色'}'
-            '${line.speechRate != 0 ? ' · ${1 + line.speechRate / 100}x' : ''}',
+            '${following ? '（本片）' : ''}'
+            '${rate != 0 ? ' · ${1 + rate / 100}x' : ''}',
             style: TextStyle(
                 fontSize: AppFontSize.caption,
                 color: voiceName == null
