@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:collection/collection.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
+import 'package:flutter/services.dart'
+    show HardwareKeyboard, LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -20,7 +21,9 @@ import '../../core/models/renew_task.dart';
 import '../../core/script/bgm_rail.dart';
 import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_cover.dart';
+import '../../core/script/playhead.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/voice_sweep.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
@@ -372,7 +375,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
     _playingSub = playback.playingStream.listen((playing) {
       if (mounted && _previewPlaying != playing) {
-        setState(() => _previewPlaying = playing);
+        // 一按暂停就把「人动过手」的标记清掉：他停下来多半就是要改东西，
+        // 改完再播，自动展开该重新跟上
+        setState(() {
+          _previewPlaying = playing;
+          if (!playing) _autoExpandPaused = false;
+        });
       }
     });
     final dataDir = ref.read(dataDirProvider);
@@ -391,6 +399,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       );
     }
     _schedulePreviewRebuild();
+    // 进门顺手收一次无主配音：换过音色的旧 mp3 没人引用了，但任务还活着，
+    // 孤儿清扫碰不到它们。**只能在这一刻收**——撤销栈这时必然是空的，
+    // 编辑当中删会让 ⌘Z 撤成死链（真机上出现过整行无声）
+    if (dataDir != null) {
+      final removed =
+          sweepUnusedVoices(dataDir: dataDir, taskId: _task.id, doc: _doc);
+      if (removed > 0) AppLog.info('回收无主配音 $removed 个（${_task.id}）');
+    }
   }
 
   /// 内容一变就排一次轨道重建（600ms 防抖）。画面轨没变时
@@ -591,13 +607,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 播放位置落在哪一行，右栏就点亮哪一行（预览是主角，行块跟着它走）。
   /// 只在换行时 setState——位置流每帧都来，不能每帧重建行带板
   void _syncPreviewLine(int ms) {
-    int? current;
-    var bestStart = -1;
-    for (final e in _planResult.lineStarts.entries) {
-      if (e.value <= ms && e.value > bestStart) {
-        bestStart = e.value;
-        current = e.key;
-      }
+    // 播到哪一镜就把哪一镜的操作栏摊开：人看着片子播过去，手边就是那一镜
+    // 的取段、速度、原声，不用先暂停、再找到那一行、再点开
+    final at = shotAt(_doc, _planResult.lineStarts, ms);
+    final current = at?.$1;
+    if (at != null && !_autoExpandPaused && _previewPlaying) {
+      final want = at.$2 == null ? null : (at.$1, at.$2!);
+      if (want != _expandedShot) setState(() => _expandedShot = want);
     }
     if (current == _previewLineIndex) return;
     final previous = _previewLineIndex;
@@ -2066,6 +2082,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _toast('${agent.holder} 正在操作这个任务——要自己改，先点上面的「我来接手」。');
       return;
     }
+    // 人正在改东西：自动展开这一轮让开。不让的话，他改着第 3 行，
+    // 播放头走到第 5 行就把他手上那一栏收起来了
+    if (_previewPlaying) _autoExpandPaused = true;
     _undoStack.add(_doc);
     if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
     _redoStack.clear();
@@ -2644,6 +2663,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
             unawaited(_seekPreview((_positionMs.value + 1000).clamp(
                 0, _planResult.plan.totalMs))),
+        const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () =>
+            setState(() => _multiSelected
+              ..clear()
+              ..addAll([for (var i = 0; i < _doc.lines.length; i++) i])),
+        const SingleActivator(LogicalKeyboardKey.escape): () =>
+            setState(_multiSelected.clear),
         const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
         const SingleActivator(LogicalKeyboardKey.keyZ,
             meta: true, shift: true): _redo,
@@ -2717,11 +2742,17 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               Expanded(
                 child: Container(
                   color: AppColors.surface,
-                  child: LineBoard(
+                  child: Column(children: [
+                    Expanded(child: LineBoard(
                     doc: _doc,
                     selected: _selected,
+                    multiSelected: _multiSelected,
                     expandedShot: _expandedShot,
-                    onExpandShot: (v) => setState(() => _expandedShot = v),
+                    onExpandShot: (v) => setState(() {
+                      _expandedShot = v;
+                      // 人自己点开/收起了某一镜：这一轮播放别再抢他的面板
+                      _autoExpandPaused = true;
+                    }),
                     generatingLineIds: _generatingLineIds,
                     playingLineId: _playingLineId,
                     previewLineIndex: _previewLineIndex,
@@ -2882,7 +2913,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         return _refThumbs['${line.id}_$segIndex'];
                       },
                     ),
-                  ),
+                    )),
+                    // 只在多选时出现，选回一行就收走
+                    if (_multiSelected.length > 1) _multiSelectBar(),
+                  ]),
                 ),
               ),
             ],
@@ -2896,7 +2930,30 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 点块 = 「你正看着这一行」：左栏行选中 + 预览跳播到该行起点
   void _focusLine(int index) {
+    final keys = HardwareKeyboard.instance;
+    // Shift = 选到这一行为止的一段；⌘ = 加选/取消这一行。
+    // 都是 macOS 通用手势，不用教
+    if (keys.isShiftPressed && _doc.lines.isNotEmpty) {
+      final from = _selected < index ? _selected : index;
+      final to = _selected < index ? index : _selected;
+      setState(() {
+        _multiSelected
+          ..clear()
+          ..addAll([for (var i = from; i <= to; i++) i]);
+        _expandedShot = null;
+      });
+      return;
+    }
+    if (keys.isMetaPressed) {
+      setState(() {
+        if (_multiSelected.isEmpty) _multiSelected.add(_selected);
+        if (!_multiSelected.remove(index)) _multiSelected.add(index);
+        _expandedShot = null;
+      });
+      return;
+    }
     setState(() {
+      _multiSelected.clear();
       _selected = index;
       _expandedShot = null;
     });
@@ -2904,6 +2961,208 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (start != null) {
       unawaited(_playback?.seekMs(start));
     }
+  }
+
+  /// 选中的那几行（没多选时就是当前这一行）
+  List<int> get _targetLines {
+    if (_multiSelected.isEmpty) return [_selected];
+    return _multiSelected.toList()..sort();
+  }
+
+  /// 选中多行时浮出来的操作条。
+  ///
+  /// **不是「批量模式」**：就像 Finder，选一个和选十个用的是同一套操作，
+  /// 只是作用对象多了几个。所以它只在多选时出现，选回一行就收走。
+  ///
+  /// 只放三件事——音色、语速、删除。它们的共同点是**一行行点特别痛**：
+  /// 字幕样式已经有「整片」了；配乐是段的概念、不是行；时长每行都不同，
+  /// 批量设没有意义
+  Widget _multiSelectBar() {
+    final lines = _targetLines;
+    final voiced = [
+      for (final i in lines)
+        if (_doc.lines[i].type == ScriptLineType.voiced) i,
+    ];
+    final totalMs = lines.fold<int>(
+        0, (a, i) => a + (ShotAllocation.rootMsOf(_doc.lines[i]) ?? 0));
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg, vertical: AppSpacing.sm),
+      decoration: const BoxDecoration(
+        color: AppColors.surfaceRaised,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(children: [
+        Text(
+            '已选 ${lines.length} 行'
+            '${totalMs > 0 ? ' · ${(totalMs / 1000).toStringAsFixed(1)} 秒' : ''}',
+            style: const TextStyle(
+                fontSize: AppFontSize.caption,
+                color: AppColors.textSecondary)),
+        const SizedBox(width: AppSpacing.sm),
+        TextButton(
+          key: const Key('multi-clear'),
+          onPressed: () => setState(_multiSelected.clear),
+          child: const Text('取消选择'),
+        ),
+        const Spacer(),
+        // 画面行没有配音，音色/语速对它们无意义——一个都没有就禁掉，
+        // 而不是点了以后悄悄什么都不做
+        TextButton.icon(
+          key: const Key('multi-voice'),
+          onPressed: voiced.isEmpty ? null : () => _multiPickVoice(voiced),
+          icon: const Icon(Icons.record_voice_over_outlined, size: 15),
+          label: const Text('音色'),
+        ),
+        _multiSpeedButton(voiced),
+        const SizedBox(width: AppSpacing.xs),
+        TextButton.icon(
+          key: const Key('multi-delete'),
+          onPressed: () => _multiDelete(lines),
+          icon: const Icon(Icons.delete_outline, size: 15),
+          style: TextButton.styleFrom(foregroundColor: AppColors.red),
+          label: const Text('删除'),
+        ),
+      ]),
+    );
+  }
+
+  Widget _multiSpeedButton(List<int> voiced) => PopupMenuButton<int>(
+        key: const Key('multi-speed'),
+        enabled: voiced.isNotEmpty,
+        tooltip: '语速',
+        onSelected: (rate) => _multiSetSpeechRate(voiced, rate),
+        itemBuilder: (_) => [
+          for (final (rate, label) in const [
+            (-25, '语速 0.75x'),
+            (0, '语速 1x'),
+            (25, '语速 1.25x'),
+            (50, '语速 1.5x'),
+          ])
+            PopupMenuItem(value: rate, height: 32, child: Text(label)),
+        ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm, vertical: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.speed,
+                size: 15,
+                color: voiced.isEmpty
+                    ? AppColors.textTertiary
+                    : AppColors.accentBlueLight),
+            const SizedBox(width: 4),
+            Text('语速',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: voiced.isEmpty
+                        ? AppColors.textTertiary
+                        : AppColors.accentBlueLight)),
+          ]),
+        ),
+      );
+
+  /// 给选中的这几行换音色。
+  ///
+  /// 这里写的是**逐行覆盖**而不是本片基调：人特意挑了这几行，说明其他行
+  /// 不该跟着变。要改全片，用顶栏那个「本片」
+  Future<void> _multiPickVoice(List<int> lines) async {
+    final picked = await showVoiceSelectDialog(context,
+        selected: _doc.voiceIdOf(_doc.lines[lines.first]),
+        allowApplyAll: false);
+    if (picked == null || !mounted) return;
+    final voiceId = picked.$1;
+    _mutate((d) {
+      var next = d;
+      for (final i in lines) {
+        next = next.setVoiceId(i, voiceId);
+      }
+      return next;
+    });
+    await _offerRegenerate(lines);
+  }
+
+  Future<void> _multiSetSpeechRate(List<int> lines, int rate) async {
+    _mutate((d) {
+      var next = d;
+      for (final i in lines) {
+        next = next.setSpeechRate(i, rate);
+      }
+      return next;
+    });
+    await _offerRegenerate(lines);
+  }
+
+  /// 改完音色/语速，已经配过音的那几句就过期了——问一句要不要现在重配。
+  /// 不问的话，人以为改完了，实际听到的还是旧的
+  Future<void> _offerRegenerate(List<int> lines) async {
+    final stale = [
+      for (final i in lines)
+        if (i < _doc.lines.length &&
+            _doc.voiceStateOf(_doc.lines[i]) == LineVoiceState.stale)
+          _doc.lines[i].id,
+    ];
+    if (stale.isEmpty || !mounted) return;
+    final redo = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('这 ${stale.length} 句要重新配音吗？'),
+        content: const Text('改过的这几句现在还是旧的声音，'
+            '不重新生成的话，预览和成片听到的都是改之前的。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('先留着')),
+          FilledButton(
+              key: const Key('multi-regen-confirm'),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: Text('重新生成这 ${stale.length} 句')),
+        ],
+      ),
+    );
+    if (redo != true || !mounted) return;
+    await _regenerateVoices(stale);
+  }
+
+  /// 批量删行。**要说清删掉的是什么**：其中几句已经配好音，删掉就真没了
+  Future<void> _multiDelete(List<int> lines) async {
+    final withVoice =
+        lines.where((i) => _doc.lines[i].voiceover != null).length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('删掉这 ${lines.length} 行？'),
+        content: Text(withVoice == 0
+            ? '删掉之后可以按 ⌘Z 撤销。'
+            : '其中 $withVoice 句已经配好音，删掉这些配音也一并没了。'
+                '删错了可以按 ⌘Z 撤销。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('取消')),
+          FilledButton(
+              key: const Key('multi-delete-confirm'),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.red),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('删除')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    // 从后往前删：从前往后删会让后面的下标全部错位
+    final descending = [...lines]..sort((a, b) => b.compareTo(a));
+    _mutate((d) {
+      var next = d;
+      for (final i in descending) {
+        next = next.removeAt(i);
+      }
+      return next;
+    });
+    setState(() {
+      _multiSelected.clear();
+      _selected = _selected.clamp(0, (_doc.lines.length - 1).clamp(0, 9999));
+    });
   }
 
   /// 顶栏：返回 + 身份（#编号 · 名字 · 模块徽标）+ 保存状态。
@@ -3506,6 +3765,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 人按了取消——正在跑的这一句做完就停，已生成的保留
   bool _cancelBatchVoice = false;
 
+  /// 多选中的行（下标）。空 = 只有 [_selected] 那一行。
+  ///
+  /// 改 5 句不该点 5 次——这是编导台最痛的一处。选择用的是所有人都会的
+  /// 手势（Shift 选范围、⌘ 加选、⌘A 全选），**不新增「批量模式」这种概念**：
+  /// 就像 Finder 里选一个文件和选十个文件，操作是同一套
+  final Set<int> _multiSelected = {};
+
+  /// 人动手了，自动展开先让路。
+  ///
+  /// 不停的话，人正改着第 3 行，播放头走到第 5 行就把他手上那一栏收起来了
+  /// ——这个功能会从「顺手」变成「骚扰」。暂停播放时解除
+  bool _autoExpandPaused = false;
+
   /// 声音区：**三条轨的混音台**——原声 / 配音 / 配乐。
   ///
   /// 用户的心智就是一张混音台：三条轨可能同时响，也可能只调其中一条、
@@ -3527,7 +3799,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           onMute: () => _mixCommit(mix.withSourceMuted(!mix.sourceMuted)),
         ),
         _mixRow(
-          label: '配音',
+          // 叫「口播」不叫「配音」：和「原声」并排时，「配音」太泛，
+          // 人分不清哪个是素材自带的声音、哪个是念台词的
+          label: '口播',
           slot: 'voice',
           value: mix.voice,
           muted: mix.voiceMuted,

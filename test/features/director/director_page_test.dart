@@ -1030,6 +1030,75 @@ void main() {
       expect(saved!.script!.defaultVoiceId, other.ref.id);
     });
 
+    testWidgets('⌘ 加选两行 → 操作条出现，说清选了几行', (tester) async {
+      final repo = _MemoryRepo();
+      final doc = docWith(['一', '二', '三']);
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('multi-voice')), findsNothing,
+          reason: '只选一行时不该有操作条——那是「批量模式」的味道');
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.meta);
+      await tester.tap(find.byKey(ValueKey('band-${doc.lines[1].id}')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.meta);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已选 2 行'), findsOneWidget);
+      expect(find.byKey(const Key('multi-voice')), findsOneWidget);
+    });
+
+    testWidgets('Shift 选一段：中间的行也在内', (tester) async {
+      final repo = _MemoryRepo();
+      final doc = docWith(['一', '二', '三', '四']);
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+      await tester.tap(find.byKey(ValueKey('band-${doc.lines[2].id}')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('已选 3 行'), findsOneWidget,
+          reason: '从当前行选到点的那一行，中间的都算上');
+    });
+
+    testWidgets('批量删除要说清删掉的是什么——已配好音的那几句', (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['一', '二', '三']);
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+            audioPath: '/v/a.mp3',
+            durationMs: 3000,
+            sourceText: '一',
+            voiceId: 'v',
+            speechRate: 0,
+          ));
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+      await tester.tap(find.byKey(ValueKey('band-${doc.lines[1].id}')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('multi-delete')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 句已经配好音'), findsOneWidget,
+          reason: '只说「删除 2 行」等于没交代——配音删掉就真没了');
+
+      await tester.tap(find.byKey(const Key('multi-delete-confirm')));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.lines, hasLength(1));
+      expect(saved.script!.lines.single.text, '三');
+    });
+
     testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {
       final repo = _MemoryRepo();
       var doc = docWith(['台词']);

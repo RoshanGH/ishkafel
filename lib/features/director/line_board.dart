@@ -168,6 +168,9 @@ class LineBoard extends StatelessWidget {
   final ScriptDoc doc;
   final int selected;
 
+  /// 多选中的行（下标）。空 = 只选了 [selected] 那一行
+  final Set<int> multiSelected;
+
   /// 展开镜头详情的位置：(行下标, 镜头下标)；null = 都收着
   final (int, int)? expandedShot;
   final ValueChanged<(int, int)?> onExpandShot;
@@ -196,6 +199,7 @@ class LineBoard extends StatelessWidget {
     super.key,
     required this.doc,
     required this.selected,
+    this.multiSelected = const {},
     required this.expandedShot,
     required this.onExpandShot,
     required this.generatingLineIds,
@@ -222,7 +226,9 @@ class LineBoard extends StatelessWidget {
         child: _LineBand(
           index: i,
           line: doc.lines[i],
-          selected: i == selected,
+          selected: multiSelected.isEmpty
+              ? i == selected
+              : multiSelected.contains(i),
           expandedShot: expandedShot != null && expandedShot!.$1 == i
               ? expandedShot!.$2
               : null,
