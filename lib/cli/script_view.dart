@@ -168,3 +168,63 @@ int _lineSpanMs(ScriptLine line) {
 }
 
 String _sec(int ms) => (ms / 1000).toStringAsFixed(1);
+
+/// 断句要用的全部材料。
+///
+/// 断句是这条线上**最值得外包**的一步：现在软件里的自动分屏是「标点优先 →
+/// 停顿次之 → 字数兜底」的启发式，本质是在猜；而断句是纯语言判断，LLM 比
+/// 规则强。切点又完全可验证（词序号，三条约束一查即知），符合外包的判据。
+///
+/// 没有逐字时间就**直接拒绝**，不给一份假材料让它白算一场。
+Map<String, dynamic> scriptSubtitleMaterial(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    throw ArgumentError('第 ${lineIndex + 1} 行不存在（脚本共 ${doc.lines.length} 行）');
+  }
+  final line = doc.lines[lineIndex];
+  final vo = line.voiceover;
+  final words = vo?.words ?? const <VoiceWord>[];
+  if (words.isEmpty) {
+    throw ArgumentError('第 ${lineIndex + 1} 行的配音没有逐字时间，断不了句——'
+        '重新生成配音后才能断');
+  }
+  final style = line.subtitleOverride ?? doc.subtitle;
+  var span = 0;
+  final boundaries = <Map<String, dynamic>>[];
+  for (var j = 0; j < line.shots.length; j++) {
+    final alloc = line.shots[j].allocMs ?? 0;
+    boundaries.add({'shotIndex': j, 'startMs': span, 'endMs': span + alloc});
+    span += alloc;
+  }
+  if (span <= 0) span = vo!.durationMs;
+  return {
+    'lineIndex': lineIndex,
+    'text': line.text,
+    'lineSpanMs': span,
+    'maxCharsPerScreen': style.maxCharsPerScreen,
+    'hasWordTimings': true,
+    'words': [
+      for (var i = 0; i < words.length; i++)
+        {
+          'index': i,
+          'text': words[i].text,
+          'startMs': words[i].startMs,
+          'endMs': words[i].endMs,
+        },
+    ],
+    // 一屏跨在两个镜头的接缝上时，观感是字幕在画面切换的瞬间换了一半。
+    // **事实给出来，避不避让由 Agent 判断**——软件不替它决定（spec 第一节）
+    'shotBoundaries': boundaries,
+    'current': {
+      'manual': line.subtitleScreens != null,
+      'cuts': [
+        for (final s in line.subtitleScreens ?? const <SubtitleScreen>[])
+          if (s.startWord > 0) s.startWord,
+      ],
+      'screens': [
+        for (final s
+            in line.subtitleScreensAt(maxChars: style.maxCharsPerScreen))
+          {'startMs': s.startMs, 'endMs': s.endMs, 'text': s.text},
+      ],
+    },
+  };
+}

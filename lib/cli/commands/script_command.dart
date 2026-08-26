@@ -6,6 +6,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../script_shot_context.dart';
+import 'script_apply_command.dart';
 import '../script_view.dart';
 
 /// `ishkafel script <子命令> <任务>` —— 脚本成片这条线的只读入口。
@@ -38,6 +39,16 @@ Future<int> runScriptCommand({
     return exitBadUsage;
   }
   final sub = rest[0];
+  // apply 多一层：script apply <what> <task>
+  if (sub == 'apply') {
+    return runScriptApplyCommand(
+      rest: rest.sublist(1),
+      dataDir: dataDir,
+      file: file,
+      out: out,
+      err: err,
+    );
+  }
   final id = rest[1];
   final task = await resolveTaskRef(FileTaskRepository(dataDir), id);
   if (task == null) {
@@ -52,6 +63,15 @@ Future<int> runScriptCommand({
   }
 
   switch (sub) {
+    case 'apply':
+      // script apply <what> <task> …：把 apply 之后的参数原样递过去
+      return runScriptApplyCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        file: file,
+        out: out,
+        err: err,
+      );
     case 'show':
       try {
         // --line 给的是**人看的行号**（从 1 起），内部一律 0 起
@@ -115,8 +135,20 @@ Future<int> runScriptCommand({
         sink.writeln('${e.message}');
         return exitBadUsage;
       }
+    case 'subtitles':
+      if (line == null) {
+        sink.writeln('要指定行号：ishkafel script subtitles <任务> --line <行号>');
+        return exitBadUsage;
+      }
+      try {
+        emitJson(scriptSubtitleMaterial(doc, line - 1), out: out);
+        return 0;
+      } on ArgumentError catch (e) {
+        sink.writeln('${e.message}');
+        return exitBadUsage;
+      }
     default:
-      sink.writeln('不认识的子命令：$sub（可用：show / shots）');
+      sink.writeln('不认识的子命令：$sub（可用：show / shots / subtitles / apply）');
       return exitBadUsage;
   }
 }

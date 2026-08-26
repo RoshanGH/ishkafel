@@ -1209,6 +1209,12 @@ class ScriptDoc {
         index, (line) => line.cutSubtitleAt(atMs, maxChars: maxChars));
   }
 
+  /// 按行 id 直接给定这一行的字幕屏（Agent 断句回填走这里）
+  ScriptDoc setScreensById(String lineId, List<SubtitleScreen> screens) {
+    final index = lines.indexWhere((l) => l.id == lineId);
+    return _update(index, (line) => line.withSubtitleScreens(screens));
+  }
+
   /// 按行 id 让字幕恢复全自动（清掉切点与改字）
   ScriptDoc resetScreensById(String lineId) {
     final index = lines.indexWhere((l) => l.id == lineId);
