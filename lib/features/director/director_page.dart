@@ -1100,33 +1100,84 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 给某行挑音色。选完只是记下——生成才花钱
   Future<void> _pickVoice(int index) async {
     final line = _doc.lines[index];
-    // 预填：本行已选的，其次全文档最近一次用过的（连着几行同一个声音是常态）
-    final fallback = _doc.lines
-        .lastWhere((l) => l.voiceId != null, orElse: () => line)
-        .voiceId;
     final voicedCount =
         _doc.lines.where((l) => l.type == ScriptLineType.voiced).length;
     final picked = await showVoiceSelectDialog(context,
-        selected: line.voiceId ?? fallback, allowApplyAll: voicedCount > 1);
+        // 预填有效值：行上没设就是本片基调
+        selected: _doc.voiceIdOf(line), allowApplyAll: voicedCount > 1);
     if (picked == null || !mounted) return;
     final (voiceId, applyAll) = picked;
     if (!applyAll) {
       _mutate((d) => d.setVoiceId(index, voiceId));
       return;
     }
-    // 整片换声：一次改完；旧配音自然标黄，「自动铺一版」一键全部重配
-    _mutate((d) {
-      var next = d;
-      for (var i = 0; i < next.lines.length; i++) {
-        if (next.lines[i].type == ScriptLineType.voiced) {
-          next = next.setVoiceId(i, voiceId);
-        }
-      }
-      return next;
-    });
+    await _unifyVoice(voiceId);
+  }
+
+  /// 把某个音色定成**本片基调**：新生成的都用它，各行单独设过的一并清掉。
+  ///
+  /// 这是「在某一行试出满意的音色，推广到全片」那条路径的落点——
+  /// 用户实际就是这么用的：随便找一行反复生成试听，满意了推给其他行
+  Future<void> _unifyVoice(String voiceId) async {
+    _mutate((d) => d.unifyVoice(voiceId));
     final name = VoiceCatalog.byId(voiceId)?.ref.name ?? voiceId;
+    // 已经生成的那些现在是旧音色了。**不问就是错**：前几句旧音色、
+    // 后几句新音色，混出一条前后不一样的片子，最容易一路漏到成片
+    final stale = _doc.staleVoiceLines;
+    if (stale.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('本片音色定为「$name」，之后生成的都用它。')));
+      return;
+    }
+    if (!mounted) return;
+    final redo = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: Text('本片音色改为「$name」'),
+        content: Text('已经生成的 ${stale.length} 句还是旧音色。'
+            '不重新生成的话，这条片子前后会是两个人的声音。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('先留着'),
+          ),
+          FilledButton(
+            key: const Key('voice-unify-redo'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('重新生成这 ${stale.length} 句'),
+          ),
+        ],
+      ),
+    );
+    if (redo != true || !mounted) return;
+    await _regenerateVoices([for (final l in stale) l.id]);
+  }
+
+  /// 批量重配这几行。**要有进度、要能取消**——十几句就是分钟级的活，
+  /// 点下去以后软件假死两分钟是不能接受的
+  Future<void> _regenerateVoices(List<String> lineIds) async {
+    _cancelBatchVoice = false;
+    var failed = 0;
+    for (var i = 0; i < lineIds.length; i++) {
+      if (!mounted || _cancelBatchVoice) break;
+      final line = _doc.lines.where((l) => l.id == lineIds[i]).firstOrNull;
+      if (line == null) continue; // 期间被删了
+      setState(() => _batchVoiceProgress = (i + 1, lineIds.length, line.text));
+      final voiceId = _doc.voiceIdOf(line);
+      if (voiceId == null) continue;
+      if (!await _generateVoiceCore(line.id, voiceId)) failed++;
+    }
+    if (!mounted) return;
+    final stopped = _cancelBatchVoice;
+    setState(() => _batchVoiceProgress = null);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('整片音色换成「$name」了——点「自动铺一版」一键全部重新配音。')));
+        content: Text(stopped
+            ? '已停下。生成好的那几句保留着，其余仍是旧音色。'
+            : failed == 0
+                ? '${lineIds.length} 句都换好了。'
+                : '$failed 句没生成成功，可以单独点那几句重试。')));
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
@@ -1164,7 +1215,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         lineId: lineId,
         text: line.text,
         voiceId: voiceId,
-        speechRate: line.speechRate,
+        speechRate: _doc.speechRateOf(line),
       );
       if (!mounted) return false;
       _mutate((d) => d.setVoiceoverById(lineId, vo));
@@ -2275,12 +2326,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           content: Text('尚未配置 AI 服务（语音合成），铺不了。')));
       return;
     }
-    // 默认音色：全片最近用过的，其次目录第一个——批量时绝不弹 27 次选择器
-    final defaultVoice = _doc.lines
-            .lastWhere((l) => l.voiceId != null,
-                orElse: () => _doc.lines.first)
-            .voiceId ??
-        VoiceCatalog.all.first.ref.id;
+    // 本片音色还没定过就**先卡住让人选**：拿目录里第一个撞运气去配 27 句，
+    // 不对就白烧一轮 TTS（真机上就是这么浪费掉的）
+    if (_doc.defaultVoiceId == null && needVoice.isNotEmpty) {
+      final picked = await showVoiceSelectDialog(context,
+          selected: VoiceCatalog.all.first.ref.id, allowApplyAll: false);
+      if (picked == null || !mounted) return;
+      _mutate((d) => d.withDefaultVoiceId(picked.$1));
+    }
+    // 批量时绝不弹 27 次选择器：全片一个基调，逐句要改在行内改
+    final defaultVoice = _doc.defaultVoiceId ?? VoiceCatalog.all.first.ref.id;
     final defaultVoiceName =
         VoiceCatalog.byId(defaultVoice)?.ref.name ?? defaultVoice;
     final go = await showDialog<bool>(
@@ -2712,6 +2767,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       // 滑杆的「默认值」必须和播放用的是同一个：
                       // 画面行满音量、配音行跟全片
                       defaultSourceVolumeOf: _doc.defaultSourceVolumeFor,
+                      voiceIdOf: _doc.voiceIdOf,
+                      speechRateOf: _doc.speechRateOf,
+                      voiceStateOf: _doc.voiceStateOf,
                       onShotSourceVolume: (index, j, volume) {
                         final line = _doc.lines[index];
                         // 音量不改变编排，所以不重铺轨道；改完直接把新音量
@@ -2930,6 +2988,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     color: AppColors.accentBlueLight)),
           ),
           const Spacer(),
+          _voiceBaselineChip(),
+          const SizedBox(width: AppSpacing.sm),
           Text(_saving ? '保存中…' : '更改已自动保存',
               style: const TextStyle(
                   fontSize: AppFontSize.caption,
@@ -3141,6 +3201,52 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ),
       );
     }
+    // 批量重配进行中：**必须能停**。十几句是分钟级的活，点下去以后
+    // 软件假死两分钟是不能接受的；停下来时已经生成好的要保留
+    if (_batchVoiceProgress case (final done, final total, final text)) {
+      return Container(
+        color: AppColors.stageWell,
+        padding: const EdgeInsets.all(AppSpacing.xl),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              SizedBox(
+                width: 44,
+                height: 44,
+                child: CircularProgressIndicator(
+                  value: total == 0 ? null : done / total,
+                  strokeWidth: 3,
+                  color: AppColors.accentBlue,
+                  backgroundColor: AppColors.surfaceCard,
+                ),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              Text('正在重新配音 $done / $total',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.sm),
+              Text('「${text.length > 24 ? '${text.substring(0, 24)}…' : text}」',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary,
+                      height: 1.5)),
+              const SizedBox(height: AppSpacing.md),
+              TextButton(
+                key: const Key('batch-voice-cancel'),
+                onPressed: _cancelBatchVoice
+                    ? null
+                    : () => setState(() => _cancelBatchVoice = true),
+                child: Text(_cancelBatchVoice ? '正在停下…' : '停下'),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
     // 草片流水线进行中：舞台交给进度——用户看着自己的片子一句句长出来，
     // 而不是对着死黑块等
     if (_draftProgress case (final stage, final text, final done, final total)) {
@@ -3338,8 +3444,67 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 在同一视线里——不再用弹窗盖住唯一能看出效果的地方。
   /// 跟着**当前这一句**走（播到哪句就是哪句，否则是选中的那句）；
   /// 样式粒度 = 句，右端「整片」把这套提升为全局基调
+  /// 顶栏的**本片基调**：这个片子的音色与语速。
+  ///
+  /// 常驻在顶栏，因为它是「这片子听起来是谁在说话」这件事的唯一出处——
+  /// 藏进某一行的菜单里，人就只会一行行去点。点开可改；改了之后新生成的
+  /// 都用它，已经生成的会被问一句要不要一起换
+  Widget _voiceBaselineChip() {
+    final id = _doc.defaultVoiceId;
+    final name = id == null
+        ? '未定音色'
+        : (VoiceCatalog.byId(id)?.ref.name ?? id);
+    final rate = _doc.defaultSpeechRate;
+    return Tooltip(
+      message: '本片基调：新生成的配音用这个音色与语速。\n单句要不一样，在那一行改',
+      child: InkWell(
+        key: const Key('director-voice-baseline'),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        onTap: _editVoiceBaseline,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: id == null
+                ? AppColors.orange.withValues(alpha: 0.14)
+                : AppColors.surfaceCard,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.record_voice_over_outlined,
+                size: 13,
+                color: id == null
+                    ? AppColors.orange
+                    : AppColors.textSecondary),
+            const SizedBox(width: 4),
+            Text(
+                '本片 · $name${rate != 0 ? ' · ${1 + rate / 100}x' : ''}',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: id == null
+                        ? AppColors.orange
+                        : AppColors.textSecondary)),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editVoiceBaseline() async {
+    final picked = await showVoiceSelectDialog(context,
+        selected: _doc.defaultVoiceId, allowApplyAll: false);
+    if (picked == null || !mounted) return;
+    // 从顶栏改就是改全片——这里没有「只改这一行」的语义
+    await _unifyVoice(picked.$1);
+  }
+
   /// 拖动中的混音台（松手才落盘：每动一下就重建轨道会卡）
   SoundMix? _mixDraft;
+
+  /// 批量重配进度：(第几句, 共几句, 这句台词)；null = 没在跑
+  (int, int, String)? _batchVoiceProgress;
+
+  /// 人按了取消——正在跑的这一句做完就停，已生成的保留
+  bool _cancelBatchVoice = false;
 
   /// 声音区：**三条轨的混音台**——原声 / 配音 / 配乐。
   ///

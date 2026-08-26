@@ -537,8 +537,10 @@ class ScriptLine {
   /// 这一行选定的音色 id（VoiceCatalog）。null = 还没选
   final String? voiceId;
 
-  /// 语速（火山口径：0 = 原速，100 = 2 倍速，-50 = 0.5 倍速）
-  final int speechRate;
+  /// 这一行单独设的语速（火山口径：0 = 原速，100 = 2 倍速，-50 = 0.5 倍速）。
+  /// **null = 没设过、跟随本片基调**——0 是「就要原速」，两者不是一回事，
+  /// 否则单独把某一句调回原速就做不到（见 [ScriptDoc.speechRateOf]）
+  final int? speechRate;
 
   /// 已生成的配音产物；null = 还没生成过
   final LineVoiceover? voiceover;
@@ -562,7 +564,7 @@ class ScriptLine {
     this.manualMs,
     List<String> tags = const [],
     this.voiceId,
-    this.speechRate = 0,
+    this.speechRate,
     this.voiceover,
     List<LineShot> shots = const [],
     this.reference,
@@ -587,11 +589,21 @@ class ScriptLine {
       text.trim().isEmpty ? ScriptLineType.visual : ScriptLineType.voiced;
 
   /// 配音状态（派生）：产物快照与当前台词/音色/语速逐项对比
-  LineVoiceState get voiceState {
+  /// 只按行自己判断的旧入口（不知道本片基调时用）。
+  /// **新代码一律用 [ScriptDoc.voiceStateOf]**——基调换了，行上没单独设过的
+  /// 那些配音就该算过期，不然会混出一条前后音色不一样的片子
+  LineVoiceState get voiceState => voiceStateAgainst(
+      voiceId: voiceId ?? voiceover?.voiceId,
+      speechRate: speechRate ?? voiceover?.speechRate ?? 0);
+
+  /// 拿一组**有效值**来判定这一行的配音新不新
+  LineVoiceState voiceStateAgainst({
+    required String? voiceId,
+    required int speechRate,
+  }) {
     final vo = voiceover;
     if (vo == null) return LineVoiceState.none;
-    final current = text.trim();
-    final fresh = vo.sourceText == current &&
+    final fresh = vo.sourceText == text.trim() &&
         vo.voiceId == (voiceId ?? vo.voiceId) &&
         vo.speechRate == speechRate;
     return fresh ? LineVoiceState.fresh : LineVoiceState.stale;
@@ -602,7 +614,7 @@ class ScriptLine {
     Object? manualMs = _unset,
     List<String>? tags,
     Object? voiceId = _unset,
-    int? speechRate,
+    Object? speechRate = _unset,
     Object? voiceover = _unset,
     List<LineShot>? shots,
     Object? subtitleOverride = _unset,
@@ -614,7 +626,8 @@ class ScriptLine {
         manualMs: manualMs == _unset ? this.manualMs : manualMs as int?,
         tags: tags ?? this.tags,
         voiceId: voiceId == _unset ? this.voiceId : voiceId as String?,
-        speechRate: speechRate ?? this.speechRate,
+        speechRate:
+            speechRate == _unset ? this.speechRate : speechRate as int?,
         voiceover:
             voiceover == _unset ? this.voiceover : voiceover as LineVoiceover?,
         shots: shots ?? this.shots,
@@ -637,7 +650,8 @@ class ScriptLine {
 
   ScriptLine withVoiceId(String? id) => _copy(voiceId: id);
 
-  ScriptLine withSpeechRate(int rate) => _copy(speechRate: rate);
+  /// null = 回到跟随本片基调
+  ScriptLine withSpeechRate(int? rate) => _copy(speechRate: rate);
 
   /// 挂上新生成的配音。**不清旧文件**——旧音频的删除由调用方负责
   /// （生成成功后才删旧的，失败时旧配音还能听）
@@ -896,7 +910,7 @@ class ScriptLine {
         if (manualMs != null) 'manualMs': manualMs,
         if (tags.isNotEmpty) 'tags': tags,
         if (voiceId != null) 'voiceId': voiceId,
-        if (speechRate != 0) 'speechRate': speechRate,
+        if (speechRate != null) 'speechRate': speechRate,
         if (voiceover != null) 'voiceover': voiceover!.toJson(),
         if (shots.isNotEmpty) 'shots': [for (final s in shots) s.toJson()],
         if (reference != null) 'reference': reference!.toJson(),
@@ -959,7 +973,8 @@ class ScriptLine {
             if (t is String) t,
       ],
       voiceId: raw['voiceId'] is String ? raw['voiceId'] as String : null,
-      speechRate: raw['speechRate'] is int ? raw['speechRate'] as int : 0,
+      // null = 没设过、跟随本片基调（0 是「就要原速」，不是没设过）
+      speechRate: raw['speechRate'] is int ? raw['speechRate'] as int : null,
       voiceover: LineVoiceover.tryFromJson(raw['voiceover']),
       shots: [
         if (raw['shots'] is List)
@@ -1036,8 +1051,17 @@ class ScriptDoc {
   /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
   final String? refVideoPath;
 
-  /// 三条声音轨的总控（原声 / 配音 / 配乐）与闪避设置。见 [SoundMix]
+  /// 三条声音轨的总控（原声 / 口播 / 配乐）与闪避设置。见 [SoundMix]
   final SoundMix mix;
+
+  /// 本片默认音色。**null = 还没设过**——这正是「生成第一句配音前先卡住
+  /// 让人选」的判据：撞运气用系统默认，不对就白烧一次 TTS。
+  ///
+  /// 与字幕样式同一个模式：行上没设就跟随它，设过就以行为准
+  final String? defaultVoiceId;
+
+  /// 本片默认语速（火山口径：0 = 原速）
+  final int defaultSpeechRate;
 
   /// 口播段落把原声压到多少。
   ///
@@ -1052,6 +1076,8 @@ class ScriptDoc {
     List<ScriptBgmSegment> bgmSegments = const [],
     this.refVideoPath,
     this.mix = const SoundMix(),
+    this.defaultVoiceId,
+    this.defaultSpeechRate = 0,
   })  : lines = List.unmodifiable(lines),
         bgmSegments = List.unmodifiable(bgmSegments);
 
@@ -1063,20 +1089,26 @@ class ScriptDoc {
       subtitle: subtitle,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      mix: mix);
+      mix: mix,
+      defaultVoiceId: defaultVoiceId,
+      defaultSpeechRate: defaultSpeechRate);
 
   ScriptDoc withSubtitle(SubtitleStyle next) => ScriptDoc(lines,
       subtitle: next,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      mix: mix);
+      mix: mix,
+      defaultVoiceId: defaultVoiceId,
+      defaultSpeechRate: defaultSpeechRate);
 
   /// 换三条轨的总控
   ScriptDoc withMix(SoundMix next) => ScriptDoc(lines,
       subtitle: subtitle,
       bgmSegments: bgmSegments,
       refVideoPath: refVideoPath,
-      mix: next);
+      mix: next,
+      defaultVoiceId: defaultVoiceId,
+      defaultSpeechRate: defaultSpeechRate);
 
   /// 换「口播时原声压到多少」。老调用点仍在用这个名字
   ScriptDoc withSourceVolume(double next) =>
@@ -1093,7 +1125,60 @@ class ScriptDoc {
       mix.effectiveSource *
       (shot.sourceVolume ?? defaultSourceVolumeFor(line));
 
-  /// 配音轨该出多大（整轨一个数：口播段落之间不需要各自不同）
+  /// 这一行实际用哪个音色。**全软件只此一处**：显示、生成、过期判定
+  /// 读的都是它
+  String? voiceIdOf(ScriptLine line) => line.voiceId ?? defaultVoiceId;
+
+  /// 这一行实际用多快的语速。行上设成 0 是「就要原速」，压过基调
+  int speechRateOf(ScriptLine line) => line.speechRate ?? defaultSpeechRate;
+
+  /// 这一行的配音新不新——拿**有效值**比。
+  ///
+  /// 基调换了，行上没单独设过的那些配音就该算过期。不这么判的话，
+  /// 改完默认音色，前 10 句还是旧音色、后 18 句是新的，混出一条
+  /// 前后不一样的片子，而且最容易一路漏到成片
+  LineVoiceState voiceStateOf(ScriptLine line) => line.voiceStateAgainst(
+      voiceId: voiceIdOf(line), speechRate: speechRateOf(line));
+
+  /// 换本片默认音色
+  ScriptDoc withDefaultVoiceId(String? next) => ScriptDoc(lines,
+      subtitle: subtitle,
+      bgmSegments: bgmSegments,
+      refVideoPath: refVideoPath,
+      mix: mix,
+      defaultVoiceId: next,
+      defaultSpeechRate: defaultSpeechRate);
+
+  /// **统一全片音色**：设成基调，并清掉各行单独设过的。
+  ///
+  /// 只设基调不清覆盖的话，之前单独试过音色的那几行会留在旧音色上，
+  /// 混出一条前后不一样的片子——而人点的明明是「全片」
+  ScriptDoc unifyVoice(String voiceId) => withDefaultVoiceId(voiceId)
+      ._withLines([for (final l in lines) l.withVoiceId(null)]);
+
+  /// 统一全片语速，规则同 [unifyVoice]
+  ScriptDoc unifySpeechRate(int rate) => withDefaultSpeechRate(rate)
+      ._withLines([for (final l in lines) l.withSpeechRate(null)]);
+
+  /// 配音已经过期、需要重新生成的那些行（画面行不算——它本来就没有配音）。
+  ///
+  /// 换完基调要拿它去问人「已经生成的这几句要不要一起换」：不问的话，
+  /// 前几句旧音色、后几句新音色，最容易一路漏到成片
+  List<ScriptLine> get staleVoiceLines => [
+        for (final l in lines)
+          if (voiceStateOf(l) == LineVoiceState.stale) l,
+      ];
+
+  /// 换本片默认语速
+  ScriptDoc withDefaultSpeechRate(int next) => ScriptDoc(lines,
+      subtitle: subtitle,
+      bgmSegments: bgmSegments,
+      refVideoPath: refVideoPath,
+      mix: mix,
+      defaultVoiceId: defaultVoiceId,
+      defaultSpeechRate: next);
+
+  /// 口播轨该出多大（整轨一个数：口播段落之间不需要各自不同）
   double get voiceVolume => mix.effectiveVoice;
 
   /// 这一段配乐该出多大：**段上设的是相对值**，乘在配乐轨总音量上——
@@ -1290,6 +1375,8 @@ class ScriptDoc {
         // 老字段照写：旧版本打开这份档，声音行为和以前完全一致
         if (sourceVolume > 0) 'sourceVolume': sourceVolume,
         if (mix.toJson().isNotEmpty) 'soundMix': mix.toJson(),
+        if (defaultVoiceId != null) 'defaultVoiceId': defaultVoiceId,
+        if (defaultSpeechRate != 0) 'defaultSpeechRate': defaultSpeechRate,
       };
 
   /// 宽松解析；整体坏掉退回空脚本（打不开任务比丢一份草稿更糟）
@@ -1335,6 +1422,12 @@ class ScriptDoc {
       refVideoPath: raw['refVideoPath'] is String
           ? raw['refVideoPath'] as String
           : null,
+      // 老档没有基调：读出来是「还没设过」，行为和以前一样
+      defaultVoiceId:
+          raw['defaultVoiceId'] is String ? raw['defaultVoiceId'] as String : null,
+      defaultSpeechRate: raw['defaultSpeechRate'] is int
+          ? raw['defaultSpeechRate'] as int
+          : 0,
     );
   }
 }

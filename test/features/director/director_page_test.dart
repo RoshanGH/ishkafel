@@ -804,6 +804,12 @@ void main() {
 
       await tester.tap(find.byKey(const ValueKey('director-draft')));
       await tester.pumpAndSettle();
+      // 本片音色还没定过：先卡住让人选，别拿目录第一个撞运气配 27 句
+      expect(find.byKey(const ValueKey('voice-option-'
+          '${'zh_female_vv_uranus_bigtts'}')), findsWidgets,
+          reason: '铺之前要先定本片音色，否则不对就白烧一轮 TTS');
+      await tester.tap(find.text('就用这个'));
+      await tester.pumpAndSettle();
       expect(find.textContaining('照着参考片'), findsOneWidget,
           reason: '要说清依据的是什么，不然人读不出这跟参考片有什么关系');
       await tester.tap(find.byKey(const ValueKey('draft-confirm')));
@@ -839,6 +845,9 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('director-draft')));
+      await tester.pumpAndSettle();
+      // 同上：本片音色未定，先卡住选一次
+      await tester.tap(find.text('就用这个'));
       await tester.pumpAndSettle();
       expect(find.textContaining('没有参考片可依据'), findsOneWidget,
           reason: '不铺就要说清为什么、下一步去哪儿做');
@@ -969,9 +978,56 @@ void main() {
       await tester.pumpAndSettle();
 
       final saved = await repo.findById('t1');
-      final ids = saved!.script!.lines.map((l) => l.voiceId).toSet();
+      final doc2 = saved!.script!;
+      // 「应用到整片」定的是**本片基调**，不是逐行写死：之后新加的行
+      // 也跟着走，不会留在旧音色上
+      expect(doc2.defaultVoiceId, VoiceCatalog.all.first.ref.id);
+      expect(doc2.lines.every((l) => l.voiceId == null), isTrue,
+          reason: '各行单独设过的一并清掉，全片才是真的统一');
+      final ids = doc2.lines.map(doc2.voiceIdOf).toSet();
       expect(ids, {VoiceCatalog.all.first.ref.id},
-          reason: '勾了「应用到整片」，三句音色一致');
+          reason: '勾了「应用到整片」，三句有效音色一致');
+    });
+
+    testWidgets('改本片音色时，已经生成的那几句要被问一句——不问就会音色分裂',
+        (tester) async {
+      final repo = _MemoryRepo();
+      var doc = docWith(['第一句', '第二句']);
+      doc = doc.withDefaultVoiceId('zh_female_vv_uranus_bigtts');
+      doc = doc.setVoiceoverById(
+          doc.lines.first.id,
+          LineVoiceover(
+            audioPath: '/v/a.mp3',
+            durationMs: 3000,
+            sourceText: '第一句',
+            voiceId: 'zh_female_vv_uranus_bigtts',
+            speechRate: 0,
+          ));
+      await pumpDirector(tester, wrap(repo, scriptTask(doc: doc)));
+      await tester.pumpAndSettle();
+
+      // 从顶栏改本片基调
+      await tester.tap(find.byKey(const Key('director-voice-baseline')));
+      await tester.pumpAndSettle();
+      final other = VoiceCatalog.all
+          .firstWhere((v) => v.ref.id != 'zh_female_vv_uranus_bigtts');
+      await tester.tap(find.byKey(ValueKey('voice-option-${other.ref.id}')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('就用这个'));
+      await tester.pumpAndSettle();
+
+      // 已经生成的那一句现在是旧音色——必须问，不能默默留着
+      expect(find.textContaining('还是旧音色'), findsOneWidget);
+      expect(find.textContaining('前后会是两个人的声音'), findsOneWidget);
+      expect(find.byKey(const Key('voice-unify-redo')), findsOneWidget);
+
+      // 选「先留着」也要如实落盘基调
+      await tester.tap(find.text('先留着'));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 900));
+      await tester.pumpAndSettle();
+      final saved = await repo.findById('t1');
+      expect(saved!.script!.defaultVoiceId, other.ref.id);
     });
 
     testWidgets('全部就绪时不再花钱，直接提示看草片', (tester) async {

@@ -224,8 +224,8 @@ Future<int> runScriptVoiceCommand({
         final vo = await service.generate(
           lineId: lineId,
           text: target.text,
-          voiceId: target.voiceId ?? defaultVoice,
-          speechRate: target.speechRate,
+          voiceId: doc.voiceIdOf(target) ?? defaultVoice,
+          speechRate: doc.speechRateOf(target),
         );
         doc = doc.setVoiceoverById(lineId, vo);
         if (target.voiceId == null) {
