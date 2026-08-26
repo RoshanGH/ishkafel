@@ -162,6 +162,10 @@ class LineBoard extends StatelessWidget {
   /// 预览播放位置当前落在的行：块点亮并自动滚到可见（预览是主角）
   final int? previewLineIndex;
 
+  /// 要把哪一行滚到眼前（Agent 干活时界面跟着它走）。
+  /// 给了就压过 [previewLineIndex]——人得看见 Agent 正在动哪一行
+  final int? focusLineIndex;
+
   /// 正在原位播放的卡（'ref_行id' / 'shot_行id_镜下标'）与共享播放器
   /// 画面——谁在播，画面就挂到谁的卡上
   final String? inlineKey;
@@ -182,6 +186,7 @@ class LineBoard extends StatelessWidget {
     required this.generatingLineIds,
     required this.playingLineId,
     this.previewLineIndex,
+    this.focusLineIndex,
     this.inlineKey,
     this.inlineVideo,
     this.inlinePosition,
@@ -198,7 +203,7 @@ class LineBoard extends StatelessWidget {
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) => _ScrollIntoView(
         key: ValueKey('band-${doc.lines[i].id}'),
-        active: i == previewLineIndex,
+        active: i == (focusLineIndex ?? previewLineIndex),
         child: _LineBand(
           index: i,
           line: doc.lines[i],

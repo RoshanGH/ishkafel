@@ -21,6 +21,7 @@ import '../../core/script/bgm_rail.dart';
 import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/script_transcriber.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
 import 'dart:io';
@@ -128,6 +129,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 展开详情的镜头：(行下标, 镜头下标)。展开发生在块内，一次一个
   (int, int)? _expandedShot;
+
+  /// Agent 此刻在不在、在干什么。非空 = 界面跟着它的焦点走，且人改不动
+  AgentPresence? _agent;
+  Timer? _agentPoll;
 
   /// 参考段缩略图：行 id → 本地 jpg（抽一帧缓存一帧）
   final Map<String, String> _refThumbs = {};
@@ -312,6 +317,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _bgmCache?.addListener(_onMediaCache);
     _pinBgm();
     _pinAllShots();
+    _watchAgent();
     _setupPreview();
   }
 
@@ -909,6 +915,87 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   static String get _holder => '人（编导台）';
 
   /// 与工作台/审核页同一套会话级互斥：谁先进谁处理
+  /// 订阅 Agent 的在场状态。
+  ///
+  /// 用轮询而不是文件监听：这份文件是**另一个进程**写的，macOS 上的文件
+  /// 事件对跨进程写入不总触发。500ms 一次与心跳同量级，跟得上手也不吃 CPU。
+  void _watchAgent() {
+    _agentPoll?.cancel();
+    _agentPoll = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      final dataDir = ref.read(dataDirProvider);
+      if (dataDir == null) return;
+      final now = readAgentPresence(dataDir: dataDir, taskId: _task.id);
+      final was = _agent;
+      final leaving = was != null && now == null;
+      final focusChanged = now?.focus?.lineIndex != was?.focus?.lineIndex ||
+          now?.focus?.shotIndex != was?.focus?.shotIndex ||
+          now?.focus?.panel != was?.focus?.panel;
+      if (was?.action == now?.action && !focusChanged && !leaving) return;
+
+      setState(() {
+        _agent = now;
+        // 跟着它走：它看哪一行，界面就把哪一行摆到眼前；它开哪个面板，
+        // 界面就展开哪个——**跟人自己点开时是同一套状态**，不另造展示
+        final focus = now?.focus;
+        if (focus != null && focus.lineIndex < _doc.lines.length) {
+          _selected = focus.lineIndex;
+          _expandedShot =
+              focus.panel == AgentPanel.shot && focus.shotIndex != null
+                  ? (focus.lineIndex, focus.shotIndex!)
+                  : null;
+        }
+      });
+      // 它干完走了：把它改的东西载进来——不载的话人随手一改就把它的活覆盖了
+      if (leaving) unawaited(_reloadAfterAgent());
+    });
+  }
+
+  /// Agent 收工后重新读盘。**先把本地未落盘的改动冲掉**，免得人自己的活丢了
+  Future<void> _reloadAfterAgent() async {
+    _flushNow();
+    final fresh = await _repo.findById(_task.id);
+    final script = fresh?.script;
+    if (!mounted || script == null) return;
+    setState(() {
+      _doc = script;
+      _undoStack.clear();
+      _redoStack.clear();
+    });
+    _pinAllShots();
+    _pinBgm();
+    _schedulePreviewRebuild();
+    _toast('Agent 的改动已载入。');
+  }
+
+  /// 人要抢回来：撤掉在场状态，Agent 之后的写入会被锁拒掉
+  Future<void> _takeoverFromAgent() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('接手这个任务？'),
+        content: const Text('Agent 正在做的这一步会被打断，它之后的写入会被'
+            '拒绝。已经改好的部分会保留。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('让它继续')),
+          FilledButton(
+              key: const ValueKey('agent-takeover-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('我来接手')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir != null) {
+      clearAgentPresence(dataDir: dataDir, taskId: _task.id);
+    }
+    setState(() => _agent = null);
+    await _reloadAfterAgent();
+  }
+
   void _acquireLock() {
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
@@ -970,6 +1057,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     unawaited(_positionSub?.cancel());
     unawaited(_playingSub?.cancel());
     _replayDebounce?.cancel();
+    _agentPoll?.cancel();
     unawaited(_inlineLoop?.cancel());
     unawaited(_inlinePosSub?.cancel());
     _inlinePositionMs.dispose();
@@ -1895,6 +1983,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 听感就是声音忽大忽小、严重时卡住反复念同几个字（真机反馈）。
   /// 字幕是画在预览层上的 widget，`setState` 就够，不必动轨道。
   void _mutate(ScriptDoc Function(ScriptDoc) f, {bool affectsTracks = true}) {
+    // Agent 干活时人改不动：两边同时写会把彼此的活覆盖掉，而且只有软件
+    // 看得见两个写入方（spec 第六节）。**所有数据改动都从这里过**，
+    // 拦这一处胜过给几十个控件各包一层只读
+    final agent = _agent;
+    if (agent != null) {
+      _toast('${agent.holder} 正在操作这个任务——要自己改，先点上面的「我来接手」。');
+      return;
+    }
     _undoStack.add(_doc);
     if (_undoStack.length > _undoLimit) _undoStack.removeAt(0);
     _redoStack.clear();
@@ -2458,6 +2554,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       body: Column(children: [
         _topBar(),
         const Divider(height: 1, thickness: 1, color: AppColors.border),
+        // Agent 在场：**不做全页阻断**——人要能看着它干活，那正是这块屏的
+        // 意义。改不动是在 _mutate 那一处拦的
+        if (_agent != null) _agentBanner(_agent!),
         Expanded(
           child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // 左：脚本——唯一的真相
@@ -2525,6 +2624,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     generatingLineIds: _generatingLineIds,
                     playingLineId: _playingLineId,
                     previewLineIndex: _previewLineIndex,
+                    focusLineIndex: _agent?.focus?.lineIndex,
                     inlineKey: _inlineKey,
                     inlineVideo: _inlineVideo,
                     inlinePosition: _inlinePositionMs,
@@ -2704,6 +2804,45 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 顶栏：返回 + 身份（#编号 · 名字 · 模块徽标）+ 保存状态。
   /// 自动保存要**说出来**——用户不问「存了没」是因为界面一直在回答
+  /// Agent 在场的横幅：谁在、正在做什么、以及「我来接手」
+  Widget _agentBanner(AgentPresence agent) => Container(
+        width: double.infinity,
+        color: AppColors.accentBlue.withValues(alpha: 0.16),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.lg, vertical: AppSpacing.xs),
+        child: Row(children: [
+          const SizedBox(
+              width: 11,
+              height: 11,
+              child: CircularProgressIndicator(strokeWidth: 1.4)),
+          const SizedBox(width: AppSpacing.sm),
+          Text('${agent.holder} 正在操作这个任务',
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+          if (agent.action.isNotEmpty) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Flexible(
+              child: Text(agent.action,
+                  key: const ValueKey('agent-action'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+            ),
+          ],
+          const Spacer(),
+          TextButton(
+            key: const ValueKey('agent-takeover'),
+            onPressed: _takeoverFromAgent,
+            child: const Text('我来接手',
+                style: TextStyle(fontSize: AppFontSize.caption)),
+          ),
+        ]),
+      );
+
   Widget _topBar() => Container(
         height: 48,
         color: AppColors.surface,
