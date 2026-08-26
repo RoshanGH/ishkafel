@@ -19,6 +19,7 @@ import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/bgm_rail.dart';
 import '../../core/script/preview_voice_normalizer.dart';
+import '../../core/script/script_cover.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
@@ -2024,9 +2025,31 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _task = _task.copyWith(script: _doc, updatedAt: DateTime.now());
     unawaited(_repo.save(_task).then((_) {
       if (mounted) setState(() => _saving = false);
+      // 顺手把封面对上：脚本任务的封面是成片第一帧（第一行第一镜）。
+      // 没有它，列表页上一条排好的片子和一个空任务长得一模一样
+      unawaited(_refreshCover());
     }).catchError((Object e) {
       AppLog.warn('脚本落库失败（taskId=${_task.id}）：$e');
     }));
+  }
+
+  /// 更新封面。按内容指纹缓存，第一镜没换就不重抽。
+  ///
+  /// **销毁后不许再碰 ref**：dispose 里会落一次盘，那时页面已经没了，
+  /// 再去读 provider 会抛 StateError
+  Future<void> _refreshCover() async {
+    if (!mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final cover = await ensureScriptCover(
+      doc: _doc,
+      dataDir: dataDir,
+      taskId: _task.id,
+      localPathOf: (id) => _mediaCache?.localPathOf(id),
+    );
+    if (cover == null || cover == _task.coverPath || !mounted) return;
+    _task = _task.copyWith(coverPath: cover);
+    unawaited(_repo.save(_task));
   }
 
   bool get _scriptIsPristine =>

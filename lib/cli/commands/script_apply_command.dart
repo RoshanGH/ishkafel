@@ -2,7 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/audio/bgm_plan.dart';
+import 'package:path/path.dart' as p;
+
 import '../../core/script/bgm_rail.dart';
+import '../../core/script/script_cover.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/storage/agent_presence.dart';
@@ -110,7 +113,21 @@ Future<int> runScriptApplyCommand({
     }
 
     final next = _apply(what, doc, payload);
-    await repository.save(fresh!.copyWith(script: next));
+    // 封面 = 成片第一帧。Agent 挑完镜头，列表页上这条片子就该有画面了，
+    // 不然它和一个空任务长得一模一样
+    final cover = await ensureScriptCover(
+      doc: next,
+      dataDir: dataDir,
+      taskId: task.id,
+      localPathOf: (id) {
+        final f = File(p.join(dataDir.path, 'material_cache', '$id.mp4'));
+        return f.existsSync() ? f.path : null;
+      },
+    );
+    await repository.save(fresh!.copyWith(
+      script: next,
+      coverPath: cover ?? fresh.coverPath,
+    ));
     emitJson({
       'ok': true,
       'what': what,
