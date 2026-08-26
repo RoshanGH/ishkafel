@@ -1,6 +1,7 @@
 # 编导台 Agent CLI 实现计划（第一期：读 + 判断类回填）
 
-> **状态：实施中**（2026-08-26 开工。规矩来自
+> **状态：第一期已完成**（2026-08-26 落地。九个任务全部做完，验收串在真机
+> 跑通；下一期见文末「不在这一期」。规矩来自
 > `docs/superpowers/specs/2026-08-11-agent-cli-design.md`，读那份再动手。）
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
