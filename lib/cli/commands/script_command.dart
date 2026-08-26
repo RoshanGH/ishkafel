@@ -1,8 +1,11 @@
 import 'dart:io';
 
+import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
+import '../script_shot_context.dart';
 import '../script_view.dart';
 
 /// `ishkafel script <子命令> <任务>` —— 脚本成片这条线的只读入口。
@@ -18,6 +21,13 @@ Future<int> runScriptCommand({
   required List<String> rest,
   required Directory dataDir,
   int? line,
+
+  /// `apply` 用：结果文件路径
+  String? file,
+
+  /// 注入点：测试用假实现，真实环境走 miaoa CLI
+  MiaoaContentService? content,
+  MiaoaTagService? tags,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -55,8 +65,82 @@ Future<int> runScriptCommand({
         sink.writeln('${e.message}');
         return exitBadUsage;
       }
+    case 'shots':
+      if (line == null) {
+        sink.writeln('要指定行号：ishkafel script shots <任务> --line <行号>');
+        return exitBadUsage;
+      }
+      try {
+        final ctx = scriptShotContext(doc, line - 1);
+        // 候选走**与界面完全同一条路**：参考镜打过标就按它的画面描述搜。
+        // 绝不退回「拿台词搜画面描述」——那个错配 0.1.45 刚砍掉，
+        // 台词是一句话、画面描述是一幅画，不在一个维度上
+        final refShots = ctx['reference'] as List;
+        final description = refShots.isEmpty
+            ? ''
+            : '${refShots.first['description']}'.trim();
+        if (description.isEmpty) {
+          emitJson({...ctx, 'candidates': const []}, out: out);
+          return 0;
+        }
+        final services = content ?? MiaoaContentService();
+        final tagIds = await _tagIdsOf(
+          tags: (refShots.first['tags'] as List).cast<String>(),
+          groups: [...task.shotTagGroups, ...task.unitTagGroups],
+          service: tags,
+        );
+        final page = await services.searchByDescription(
+          keyword: description,
+          tagIds: tagIds,
+          projectIds: [if (task.project != null) task.project!.id],
+          pageSize: 20,
+        );
+        emitJson({
+          ...ctx,
+          'candidates': [
+            for (final m in page.items)
+              {
+                'materialId': m.id,
+                'name': m.name,
+                'sceneDescription': m.sceneDescription,
+                'voiceover': m.voiceover,
+                'tags': m.tags,
+                if (m.thumbnailUrl != null) 'thumbnailUrl': m.thumbnailUrl,
+                if (m.fileKey != null) 'fileKey': m.fileKey,
+              },
+          ],
+        }, out: out);
+        return 0;
+      } on ArgumentError catch (e) {
+        sink.writeln('${e.message}');
+        return exitBadUsage;
+      }
     default:
-      sink.writeln('不认识的子命令：$sub（可用：show）');
+      sink.writeln('不认识的子命令：$sub（可用：show / shots）');
       return exitBadUsage;
+  }
+}
+
+/// 参考镜的画面标签 → 标签 id（检索约束）。拉不到就不带约束，不挡路
+Future<List<int>> _tagIdsOf({
+  required List<String> tags,
+  required List<dynamic> groups,
+  MiaoaTagService? service,
+}) async {
+  if (tags.isEmpty) return const [];
+  try {
+    final svc = service ?? MiaoaTagService();
+    final all = await svc.listGroups();
+    final wanted = {for (final g in groups) g.id as int};
+    final ids = <int>[];
+    for (final g in all) {
+      if (!wanted.contains(g.id)) continue;
+      for (final t in await svc.listTags(g.id)) {
+        if (tags.contains(t.name)) ids.add(t.id);
+      }
+    }
+    return ids;
+  } catch (_) {
+    return const [];
   }
 }

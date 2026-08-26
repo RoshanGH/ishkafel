@@ -114,6 +114,7 @@ Future<void> main(List<String> args) async {
         rest: rest,
         dataDir: dataDir,
         line: int.tryParse(parsed['line'] as String? ?? ''),
+        file: parsed['file'] as String?,
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),

@@ -2,7 +2,6 @@ import '../core/models/renew_task.dart';
 import '../core/script/script_doc.dart';
 import '../core/script/shot_allocation.dart';
 import '../core/script/shot_coverage.dart';
-import '../core/subtitle/subtitle_style.dart';
 
 /// 脚本成片任务 → JSON。
 ///
