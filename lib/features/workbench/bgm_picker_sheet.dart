@@ -27,12 +27,18 @@ sealed class BgmChoice {
 class BgmPicked extends BgmChoice {
   final List<BgmMaterial> materials;
 
+  /// 这一段管第几句到第几句（0 起，闭区间）。null = 范围不变。
+  /// 只有编导台会用：整片被若干刀切成连续段，想把中间几句换首曲子，
+  /// 与其「切一刀、再切一刀、再选曲」，不如直接把范围改掉
+  final (int, int)? range;
+
   /// 预览播的是第几首。预览只能放一个，导出会把备选都用上
   final int previewIndex;
   final double volume;
 
   const BgmPicked(
     this.materials, {
+    this.range,
     this.previewIndex = 0,
     this.volume = BgmSegment.defaultVolume,
   });
@@ -63,6 +69,13 @@ Future<BgmChoice?> showBgmPicker(
   List<BgmMaterial> initialMaterials = const [],
   int initialPreviewIndex = 0,
 
+  /// 这一段当前管第几句到第几句（0 起，闭区间）。给了就在面板顶部
+  /// 摆出范围调整——改完连同选曲一起返回
+  (int, int)? range,
+
+  /// 整片共几句（范围调整的上界）
+  int lineCount = 0,
+
   /// 只能选一首。
   ///
   /// 成片翻新那条线一个任务要导出好几条片子、每条配不同的曲子，所以那边
@@ -77,6 +90,8 @@ Future<BgmChoice?> showBgmPicker(
         rangeLabel: rangeLabel,
         canClear: canClear,
         singleSelect: singleSelect,
+        range: range,
+        lineCount: lineCount,
         projectIds: projectIds,
         initialVolume: initialVolume,
         initialMaterials: initialMaterials,
@@ -95,6 +110,10 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
   /// 只能选一首（编导台是一条片子，一段配乐就一首曲子）
   final bool singleSelect;
 
+  /// 这一段管第几句到第几句；null = 不给改
+  final (int, int)? range;
+  final int lineCount;
+
   /// 这一段当前的音量。改这一段时带进来，用户看到的是现在的值而不是默认值
   final double initialVolume;
 
@@ -110,6 +129,8 @@ class _BgmPickerDialog extends ConsumerStatefulWidget {
     this.initialPreviewIndex = 0,
     required this.canClear,
     this.singleSelect = false,
+    this.range,
+    this.lineCount = 0,
     this.projectIds = const [],
   });
 
@@ -130,6 +151,53 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
   late final List<BgmMaterial> _picked =
       List<BgmMaterial>.from(widget.initialMaterials);
   late int _previewIndex = widget.initialPreviewIndex;
+
+  /// 这一段管第几句到第几句（0 起，闭区间）
+  late (int, int)? _range = widget.range;
+
+  /// 「这段配乐管第几句到第几句」——想把中间几句换首曲子，直接在这里
+  /// 把范围改掉就行，不用先切两刀再选曲
+  Widget _rangeRow() {
+    final (start, end) = _range!;
+    final total = widget.lineCount;
+    Widget picker(String label, int value, void Function(int) onPick) =>
+        Row(mainAxisSize: MainAxisSize.min, children: [
+          Text(label,
+              style: const TextStyle(
+                  fontSize: AppFontSize.caption,
+                  color: AppColors.textSecondary)),
+          const SizedBox(width: 4),
+          DropdownButton<int>(
+            key: Key('bgm-range-$label'),
+            value: value,
+            isDense: true,
+            underline: const SizedBox.shrink(),
+            style: const TextStyle(
+                fontSize: AppFontSize.caption, color: AppColors.textPrimary),
+            dropdownColor: AppColors.surfaceCard,
+            items: [
+              for (var i = 0; i < total; i++)
+                DropdownMenuItem(value: i, child: Text('第 ${i + 1} 句')),
+            ],
+            onChanged: (v) => v == null ? null : setState(() => onPick(v)),
+          ),
+        ]);
+    return Row(children: [
+      picker('从', start, (v) {
+        _range = (v, v > end ? v : end);
+      }),
+      const SizedBox(width: AppSpacing.sm),
+      picker('到', end, (v) {
+        _range = (v < start ? v : start, v);
+      }),
+      const SizedBox(width: AppSpacing.sm),
+      const Expanded(
+        child: Text('改了范围，相邻几段会跟着让位',
+            style: TextStyle(
+                fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
+      ),
+    ]);
+  }
 
   void _toggle(BgmMaterial m) {
     setState(() {
@@ -206,6 +274,10 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                   style: const TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: AppFontSize.caption)),
+              if (_range != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                _rangeRow(),
+              ],
               const SizedBox(height: AppSpacing.sm),
               TextField(
                 key: const Key('bgm-search'),
@@ -264,6 +336,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                 ? null
                 : () => Navigator.of(context).pop(BgmPicked(
                       List.unmodifiable(_picked),
+                      range: _range,
                       previewIndex: _previewIndex,
                       volume: _volume,
                     )),

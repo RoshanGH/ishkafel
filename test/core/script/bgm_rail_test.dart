@@ -85,4 +85,85 @@ void main() {
     expect(merged, hasLength(1));
     expect(merged.single.endLine, 9);
   });
+
+  group('把中间几句换成另一首（改范围，相邻段让位）', () {
+    test('从两段里挖出中间三句：前后各留一段，中间成为新的一段', () {
+      // 20 句、两首曲子各管一半；想把第 8~10 句换成第三首
+      final rail = bgmRail([
+        ScriptBgmSegment(
+            startLine: 0,
+            endLine: 9,
+            material: mat(1), volume: 0.25),
+        ScriptBgmSegment(
+            startLine: 10,
+            endLine: 19,
+            material: mat(2), volume: 0.25),
+      ], 20);
+
+      final next = setRailRange(rail, 7, 9,
+          mat(3), 0.3);
+
+      expect(next.map((s) => (s.startLine, s.endLine, s.material?.name)), [
+        (0, 6, '曲1'),
+        (7, 9, '曲3'),
+        (10, 19, '曲2'),
+      ], reason: '中间挖出来独立成段，前后各自缩短，整片仍然连续铺满');
+      expect(next[1].volume, 0.3);
+    });
+
+    test('新范围跨过整段：被完全盖住的段消失', () {
+      final rail = bgmRail([
+        ScriptBgmSegment(
+            startLine: 0,
+            endLine: 4,
+            material: mat(1), volume: 0.25),
+        ScriptBgmSegment(
+            startLine: 5,
+            endLine: 9,
+            material: mat(2), volume: 0.25),
+        ScriptBgmSegment(
+            startLine: 10,
+            endLine: 19,
+            material: mat(3), volume: 0.25),
+      ], 20);
+
+      final next = setRailRange(rail, 3, 12,
+          mat(9), 0.5);
+
+      expect(next.map((s) => (s.startLine, s.endLine, s.material?.name)), [
+        (0, 2, '曲1'),
+        (3, 12, '曲9'),
+        (13, 19, '曲3'),
+      ], reason: '整段被盖住就没了，不留空壳');
+    });
+
+    test('铺满全片：只剩一段', () {
+      final rail = bgmRail([
+        ScriptBgmSegment(
+            startLine: 0,
+            endLine: 9,
+            material: mat(1), volume: 0.25),
+        ScriptBgmSegment(
+            startLine: 10,
+            endLine: 19,
+            material: mat(2), volume: 0.25),
+      ], 20);
+      final next = setRailRange(rail, 0, 19,
+          mat(7), 0.4);
+      expect(next, hasLength(1));
+      expect(next.single.material?.name, '曲7');
+    });
+
+    test('范围颠倒时按小的当起点——不许产出一条乱掉的轨', () {
+      final rail = bgmRail([
+        ScriptBgmSegment(
+            startLine: 0,
+            endLine: 9,
+            material: mat(1), volume: 0.25),
+      ], 10);
+      final next = setRailRange(rail, 6, 3,
+          mat(2), 0.3);
+      expect(next.map((s) => (s.startLine, s.endLine)), [(0, 2), (3, 6), (7, 9)]);
+    });
+  });
 }

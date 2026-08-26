@@ -1287,17 +1287,35 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 编导台是一条片子，一段配乐就一首曲子——多选出来的其余几首
       // 根本不会被用到（代码里一直只取第一首），摆出来只会误导
       singleSelect: true,
+      // 想把中间几句换首曲子，直接在面板里改范围——不用先切两刀再选曲
+      range: (seg.startLine, seg.endLine),
+      lineCount: _doc.lines.length,
     );
     if (choice == null || !mounted) return;
-    final updated = switch (choice) {
-      BgmPicked(materials: final ms, volume: final v) => seg.copyWith(
-          material: ms.isEmpty ? null : ms.first, volume: v),
-      _ => seg.copyWith(material: null),
-    };
-    final next = [
-      for (var i = 0; i < rail.length; i++)
-        if (i == segIndex) updated else rail[i],
-    ];
+    // 改了范围就整条轨重排（相邻段让位）；没改就只换这一段的曲子与音量
+    final List<BgmRailSegment> next;
+    if (choice is BgmPicked &&
+        choice.range != null &&
+        choice.range != (seg.startLine, seg.endLine)) {
+      final (from, to) = choice.range!;
+      next = setRailRange(
+        rail,
+        from,
+        to,
+        choice.materials.isEmpty ? null : choice.materials.first,
+        choice.volume,
+      );
+    } else {
+      final updated = switch (choice) {
+        BgmPicked(materials: final ms, volume: final v) => seg.copyWith(
+            material: ms.isEmpty ? null : ms.first, volume: v),
+        _ => seg.copyWith(material: null),
+      };
+      next = [
+        for (var i = 0; i < rail.length; i++)
+          if (i == segIndex) updated else rail[i],
+      ];
+    }
     _mutate((d) => d.withBgmSegments(railToSegments(next)));
     _pinBgm();
   }

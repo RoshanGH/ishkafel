@@ -137,3 +137,54 @@ List<BgmRailSegment> moveRailBoundary(
     ...rail.sublist(segIndex + 1),
   ];
 }
+
+/// 把第 [start]~[end] 句（0 起，闭区间）整段换成 [material]。
+///
+/// **为什么需要它**：配乐轨的模型是「整片被若干刀切成连续段、铺满全片」。
+/// 想把中间三句换首曲子，靠切刀就得「在这儿切一刀、在那儿再切一刀、再点
+/// 中间那段选曲」——三步，而且中间那两刀切在哪很容易点错（真机反馈：
+/// 「我就只能一个一个换了吗？」）。直接给出新范围要自然得多。
+///
+/// 相邻的段自动让位：被新范围盖住一半的缩短，被完全盖住的消失。
+/// 结果仍然是连续铺满全片的一条轨。
+List<BgmRailSegment> setRailRange(
+  List<BgmRailSegment> rail,
+  int start,
+  int end,
+  BgmMaterial? material,
+  double volume,
+) {
+  if (rail.isEmpty) return rail;
+  final total = rail.last.endLine + 1;
+  // 顺序颠倒的照小的算——宁可猜他的意思，也不要产出一条乱掉的轨
+  var from = start <= end ? start : end;
+  var to = start <= end ? end : start;
+  from = from.clamp(0, total - 1);
+  to = to.clamp(0, total - 1);
+
+  final out = <BgmRailSegment>[];
+  for (final seg in rail) {
+    // 完全在新范围之前/之后：原样留下
+    if (seg.endLine < from || seg.startLine > to) {
+      out.add(seg);
+      continue;
+    }
+    // 左边露出来的部分
+    if (seg.startLine < from) {
+      out.add(seg.copyWith(endLine: from - 1));
+    }
+    // 右边露出来的部分
+    if (seg.endLine > to) {
+      out.add(seg.copyWith(startLine: to + 1));
+    }
+    // 完全被盖住的：不留空壳
+  }
+  out.add(BgmRailSegment(
+    startLine: from,
+    endLine: to,
+    material: material,
+    volume: volume,
+  ));
+  out.sort((a, b) => a.startLine.compareTo(b.startLine));
+  return List.unmodifiable(out);
+}
