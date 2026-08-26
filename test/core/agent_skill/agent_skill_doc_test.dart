@@ -9,13 +9,26 @@ import 'package:ishkafel/core/agent_skill/agent_skill_doc.dart';
 /// 新命令，报错还不知道为什么。这条测试就是为了让「改了 md 忘了重新生成」
 /// 立刻失败，而不是等包发出去。
 void main() {
-  test('内嵌的手册和 docs/AGENT_SKILL.md 一字不差', () {
-    final source = File('docs/AGENT_SKILL.md').readAsStringSync();
-    expect(
-      agentSkillMarkdown,
-      source,
-      reason: '改完 docs/AGENT_SKILL.md 要跑：dart run tool/gen_agent_skill.dart',
-    );
+  test('内嵌的手册包含两份来源，一字不差', () {
+    final main = File('docs/AGENT_SKILL.md').readAsStringSync().trimRight();
+    final script =
+        File('docs/agent/SCRIPT_SKILL.md').readAsStringSync().trimRight();
+    expect(agentSkillMarkdown, startsWith(main),
+        reason: '改完 docs/AGENT_SKILL.md 要跑：dart run tool/gen_agent_skill.dart');
+    expect(agentSkillMarkdown, endsWith('\n'));
+    expect(agentSkillMarkdown, contains(script),
+        reason: '脚本成片那条线必须一起交付——它原来没有任何交付通道，'
+            'Agent 装完技能手册里 ishkafel script 一个字都没有');
+  });
+
+  test('脚本成片的命令要在手册里出现——否则那条线对 Agent 不存在', () {
+    for (final command in [
+      'ishkafel script show',
+      'ishkafel script apply',
+      'ishkafel script voice',
+    ]) {
+      expect(agentSkillMarkdown, contains(command), reason: '缺 $command');
+    }
   });
 
   test('自举段必须是「跑命令装」——落盘由软件保证，不靠 Agent 自觉存文件', () {

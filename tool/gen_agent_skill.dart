@@ -1,6 +1,6 @@
 import 'dart:io';
 
-/// 把 `docs/AGENT_SKILL.md` 编成一个 Dart 常量。
+/// 把 `docs/AGENT_SKILL.md` + `docs/agent/SCRIPT_SKILL.md` 编成一个 Dart 常量。
 ///
 ///   dart run tool/gen_agent_skill.dart
 ///
@@ -18,7 +18,24 @@ void main() {
     stderr.writeln('找不到 docs/AGENT_SKILL.md');
     exit(1);
   }
-  final markdown = source.readAsStringSync();
+  // 脚本成片那条线**必须一起交付**：它的 14 个子命令原来只写在
+  // docs/agent/SCRIPT_SKILL.md 里，而那份文件没有任何交付通道——
+  // Agent 装完技能，手册里 `ishkafel script` 一个字都没有，
+  // 整条线对它等于不存在（真机上就是这个状态）
+  final script = File('docs/agent/SCRIPT_SKILL.md');
+  if (!script.existsSync()) {
+    stderr.writeln('找不到 docs/agent/SCRIPT_SKILL.md');
+    exit(1);
+  }
+  final markdown = '${source.readAsStringSync().trimRight()}\n'
+      '\n---\n\n'
+      '# 脚本成片（编导台）\n'
+      '\n'
+      '上面讲的是**成片翻新**：有一条原片，替换里面的镜头。\n'
+      '下面这条线不一样——**从台词开始造一条新片子**，没有原片。\n'
+      '两条线的命令、数据、界面都是分开的，别混着用。\n'
+      '\n'
+      '${script.readAsStringSync().trimRight()}\n';
   if (markdown.contains("'''")) {
     // 内嵌用的是 r'''…'''，正文里出现三引号会把字符串截断
     stderr.writeln('AGENT_SKILL.md 里出现了三引号，没法安全内嵌。换个写法。');

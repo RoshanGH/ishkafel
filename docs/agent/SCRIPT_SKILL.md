@@ -38,12 +38,58 @@ ISHKAFEL_VISUAL=1 ishkafel script apply shots <任务> --file p.json
 ```bash
 ishkafel script new "8月新品口播"                    # 建任务
 ishkafel script extract <任务> ~/参考片.mp4          # 识别台词，生成脚本行
+ishkafel script apply baseline <任务> --file b.json # ★ 先定本片音色，再配音
 ishkafel script voice <任务>                        # 给所有句子配音
 # …挑镜头、断句、分时长、配乐（见下文）…
 ishkafel script export <任务>                       # 导出成片
+ishkafel script jianying <任务>                     # 或者：交给剪映自己精修
 ```
 
 手写脚本（没有参考片）就跳过 extract，用 `apply lines` 一行行写。
+
+**★ 那一步不能省**：`show` 里 `defaultVoiceId` 是 null 就说明这个片子还没定
+音色。这时直接 `voice` 会拿系统默认音色去配全片——不对就白烧一轮 TTS，
+而且人还得再等一轮重配。**没定过就先问人要哪个音色**（`ishkafel voices`
+列可选项），别自己挑一个。
+
+## 一点六、这个片子听起来是什么样
+
+三件事，**分清楚各自的作用范围**：
+
+```bash
+# ① 本片基调：行上没单独设的都跟着它走。新加的行也跟着
+ishkafel script apply baseline <任务> --file b.json
+#    {"voiceId": "云希", "speechRate": 25}
+#    默认会同时清掉各行单独设过的（真正统一全片）。
+#    只想改基调、保留各行的单独设定，加 {"unify": false}
+
+# ② 某几行单独改：其他行不受影响
+ishkafel script apply line-voice <任务> --file v.json
+#    {"lines": [{"lineIndex": 2, "voiceId": "晓晓"},
+#               {"lineIndex": 5, "speechRate": 50}]}
+
+# ③ 三条声音轨的总音量
+ishkafel script apply mix <任务> --file m.json
+#    {"sound": {"bgm": 0.4, "sourceMuted": true}}
+#    只给要动的那几项，其余保持现状
+```
+
+**三条轨是什么**（`show` 里的 `sound`）：
+
+| 轨 | 是什么 |
+|---|---|
+| `source` 原声 | 素材视频**自己带的**声音：喷雾声、模特原话、环境音 |
+| `voice` 口播 | TTS 念你写的台词 |
+| `bgm` 配乐 | 背景音乐 |
+
+`duckSourceUnderVoice` 是「有口播的段落把原声压到 `duckedSourceVolume`」——
+原声和口播叠在一起是两份声音，默认压到 0。
+
+逐镜的原声音量走 `apply shot-edit` 的 `volume`（相对值，乘在 `sound.source` 上）。
+
+**改完音色或语速，已经生成的配音就过期了**：`show` 里那几行的
+`voice.state` 会变成 `stale`。**必须重新 `voice` 一遍再导出**——不然成片里
+前几句是旧音色、后几句是新的，人一听就是两个人在说话。
 
 ## 二、先看清楚，再动手
 
@@ -190,6 +236,21 @@ ishkafel script apply screen-text <任务> --file t.json
 - **一次做一件事**，别把十行的改动塞进一次提交——人看不清你在干什么
 - 干完就收工（命令自己会撤销在场状态），别占着不放
 
+## 八点五、交给剪映
+
+人想自己精修就用这个，不必非得由软件导出成片：
+
+```bash
+ishkafel script jianying <任务>
+```
+
+把这一版方案写成一份**剪映草稿**：画面段、字幕屏、口播、配乐、素材库全部
+就位，素材都落到本地。返回 `draftName`。
+
+**不会替人打开剪映**——剪映没有给外部程序「打开指定草稿」的通道。
+所以正确的话术是「草稿已生成，去剪映草稿列表里打开『XXX』」；剪映启动时会
+扫一遍（8 秒内认领），运行中每隔几分钟扫一次，没看到让人重启一下剪映。
+
 ## 九、收工前
 
 ```bash
@@ -197,3 +258,14 @@ ishkafel script show <任务> --json | jq '.blocking'
 ```
 
 **必须是 `[]`**。不是的话，这个片子人点导出会被拦下来，而你已经走了。
+
+再看一眼这个：
+
+```bash
+ishkafel script show <任务> --json | jq '[.lines[] | select(.voice.state=="stale")] | length'
+```
+
+**也必须是 0**。它是「配音过期」——改过音色或语速、改过台词，但没重新生成。
+这一条**不会拦住导出**，所以更危险：片子照样导得出来，只是里面前几句是旧
+音色、后几句是新的，或者念的还是改之前的台词。人拿到成片才发现，而你
+已经报告完成了。有 stale 就重新 `ishkafel script voice <任务>` 一遍。

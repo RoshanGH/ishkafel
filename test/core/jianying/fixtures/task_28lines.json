@@ -1,0 +1,4326 @@
+{
+ "id": "hlhivnohoo",
+ "name": "脚本 08-19 18:37",
+ "seq": 2,
+ "sourcePath": null,
+ "script": {
+  "lines": [
+   {
+    "id": "lmt8ln7kl0",
+    "text": "",
+    "tags": [
+     "外壳"
+    ],
+    "shots": [
+     {
+      "materialId": 114791,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82493860822018",
+      "voiceover": "来过我家的朋友都说厨房干净的像不做饭一样。我只不过是每次做完饭会用这个清洁剂顺手搞下卫生，你非得说我家请了保洁阿姨。是谁做完饭还要花半小时打扫卫生的？今天只要记住我这个方法，轻松搞定厨房里的油污油垢，也不用学网上没用的小妙招了。",
+      "sceneDescription": "在厨房场景中，先展示整洁的厨房全景。随后，一只手持滴露清洁喷雾向脏污的玻璃锅盖喷洒，并用蓝色抹布擦拭。接着，手持白色抹布擦拭黑色燃气灶台面。然后，向黑色抽油烟机喷洒清洁剂并用蓝色抹布擦拭。最后，用蓝色抹布擦拭玻璃油壶。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/a82a772b3b924ae1a394592e50ba87b6.snapshot.jpg?sign=1787658471-09c60c3290644f6bb436c513016d162d-0-c53bb95cea1b3c313cc90fe0157194b5",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/a82a772b3b924ae1a394592e50ba87b6.mp4",
+      "durationMs": 15000,
+      "allocMs": 15000,
+      "sourceVolume": 0.47300048271714357
+     }
+    ]
+   },
+   {
+    "id": "lmt0drx2w0",
+    "text": "再不买就恢复69.9一瓶了。",
+    "tags": [
+     "促单"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w0_1787219247950.mp3",
+     "durationMs": 3048,
+     "sourceText": "再不买就恢复69.9一瓶了。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "再",
+       "startMs": 330,
+       "endMs": 490
+      },
+      {
+       "text": "不",
+       "startMs": 490,
+       "endMs": 690
+      },
+      {
+       "text": "买",
+       "startMs": 690,
+       "endMs": 890
+      },
+      {
+       "text": "就",
+       "startMs": 890,
+       "endMs": 1130
+      },
+      {
+       "text": "恢",
+       "startMs": 1130,
+       "endMs": 1290
+      },
+      {
+       "text": "复",
+       "startMs": 1290,
+       "endMs": 1410
+      },
+      {
+       "text": "69.91",
+       "startMs": 1410,
+       "endMs": 2330
+      },
+      {
+       "text": "瓶",
+       "startMs": 2330,
+       "endMs": 2490
+      },
+      {
+       "text": "了",
+       "startMs": 2530,
+       "endMs": 2730
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105310,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892474939398",
+      "sceneDescription": "在现代厨房中，一只右手在镜头前举着一瓶透明的滴露（Dettol）清爽白茶系列家居清洁除菌喷雾。瓶身标签清晰显示“99.9%”、“除菌成分来源于植物”及“净含量:500ml”等信息。背景虚化，可见一名红棕发女子在后方灶台前烹饪，灶台上有黑色锅具，右侧有白色电饭煲。手持动作持续，突出前景产品。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/516114016bec40a18f1a872297a79dee.snapshot.jpg?sign=1787196321-f034251dda2346e4bba49fdbb9c68f0a-0-888b6d90cd76eafbd133782acdc3e3e6",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/516114016bec40a18f1a872297a79dee.mp4",
+      "durationMs": 3240,
+      "allocMs": 3048
+     }
+    ],
+    "reference": {
+     "startMs": 80,
+     "endMs": 2600
+    }
+   },
+   {
+    "id": "lmt0drx2w1",
+    "text": "如果你觉得有点贵，那就趁现在活动赶紧买，不用10瓶8瓶的买，现在拍一到手这么多，还送随身杀菌湿巾。",
+    "tags": [
+     "冰箱玻璃板",
+     "实拍",
+     "人物喷",
+     "常规清洁"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w1_1787293863336.mp3",
+     "durationMs": 8880,
+     "sourceText": "如果你觉得有点贵，那就趁现在活动赶紧买，不用10瓶8瓶的买，现在拍一到手这么多，还送随身杀菌湿巾。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "如",
+       "startMs": 280,
+       "endMs": 400
+      },
+      {
+       "text": "果",
+       "startMs": 400,
+       "endMs": 520
+      },
+      {
+       "text": "你",
+       "startMs": 520,
+       "endMs": 640
+      },
+      {
+       "text": "觉",
+       "startMs": 640,
+       "endMs": 760
+      },
+      {
+       "text": "得",
+       "startMs": 760,
+       "endMs": 880
+      },
+      {
+       "text": "有",
+       "startMs": 880,
+       "endMs": 1000
+      },
+      {
+       "text": "点",
+       "startMs": 1000,
+       "endMs": 1160
+      },
+      {
+       "text": "贵",
+       "startMs": 1160,
+       "endMs": 1440
+      },
+      {
+       "text": "那",
+       "startMs": 1560,
+       "endMs": 1760
+      },
+      {
+       "text": "就",
+       "startMs": 1760,
+       "endMs": 1920
+      },
+      {
+       "text": "趁",
+       "startMs": 1920,
+       "endMs": 2120
+      },
+      {
+       "text": "现",
+       "startMs": 2120,
+       "endMs": 2280
+      },
+      {
+       "text": "在",
+       "startMs": 2280,
+       "endMs": 2480
+      },
+      {
+       "text": "活",
+       "startMs": 2480,
+       "endMs": 2680
+      },
+      {
+       "text": "动",
+       "startMs": 2680,
+       "endMs": 2800
+      },
+      {
+       "text": "赶",
+       "startMs": 2840,
+       "endMs": 3040
+      },
+      {
+       "text": "紧",
+       "startMs": 3040,
+       "endMs": 3160
+      },
+      {
+       "text": "买",
+       "startMs": 3160,
+       "endMs": 3440
+      },
+      {
+       "text": "不",
+       "startMs": 3600,
+       "endMs": 3800
+      },
+      {
+       "text": "用",
+       "startMs": 3800,
+       "endMs": 3920
+      },
+      {
+       "text": "十",
+       "startMs": 3920,
+       "endMs": 4120
+      },
+      {
+       "text": "瓶",
+       "startMs": 4120,
+       "endMs": 4280
+      },
+      {
+       "text": "八",
+       "startMs": 4320,
+       "endMs": 4480
+      },
+      {
+       "text": "瓶",
+       "startMs": 4480,
+       "endMs": 4600
+      },
+      {
+       "text": "的",
+       "startMs": 4680,
+       "endMs": 4720
+      },
+      {
+       "text": "买",
+       "startMs": 4800,
+       "endMs": 5000
+      },
+      {
+       "text": "现",
+       "startMs": 5280,
+       "endMs": 5480
+      },
+      {
+       "text": "在",
+       "startMs": 5480,
+       "endMs": 5600
+      },
+      {
+       "text": "拍",
+       "startMs": 5640,
+       "endMs": 5840
+      },
+      {
+       "text": "一",
+       "startMs": 5840,
+       "endMs": 6040
+      },
+      {
+       "text": "到",
+       "startMs": 6040,
+       "endMs": 6240
+      },
+      {
+       "text": "手",
+       "startMs": 6240,
+       "endMs": 6360
+      },
+      {
+       "text": "这",
+       "startMs": 6360,
+       "endMs": 6520
+      },
+      {
+       "text": "么",
+       "startMs": 6520,
+       "endMs": 6600
+      },
+      {
+       "text": "多",
+       "startMs": 6600,
+       "endMs": 6840
+      },
+      {
+       "text": "还",
+       "startMs": 6960,
+       "endMs": 7200
+      },
+      {
+       "text": "送",
+       "startMs": 7200,
+       "endMs": 7440
+      },
+      {
+       "text": "随",
+       "startMs": 7440,
+       "endMs": 7640
+      },
+      {
+       "text": "身",
+       "startMs": 7640,
+       "endMs": 7760
+      },
+      {
+       "text": "杀",
+       "startMs": 7800,
+       "endMs": 8000
+      },
+      {
+       "text": "菌",
+       "startMs": 8000,
+       "endMs": 8120
+      },
+      {
+       "text": "湿",
+       "startMs": 8200,
+       "endMs": 8360
+      },
+      {
+       "text": "巾",
+       "startMs": 8360,
+       "endMs": 8560
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105378,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986639",
+      "sceneDescription": "在明亮的室内桌面环境中，背景可见百叶窗光影、装饰画、绿植和一摞白色卷纸。一只手提着一个带白色提手的透明塑料包，包内装着两瓶绿色的滴露（Dettol）自然清新抑菌洗手液。瓶身标签清晰显示“有效抑菌99.9%”和“净含量500g”等卖点。手提着包在画面中央持续展示产品。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/618ea175ada8480c844824db91a4e7aa.snapshot.jpg?sign=1787196301-62be8710e2b14fdca856c5669b353560-0-14550420e12319166bafe7d589cee845",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/618ea175ada8480c844824db91a4e7aa.mp4",
+      "durationMs": 2067,
+      "speed": 0.5,
+      "allocMs": 2898,
+      "sourceVolume": 0.35
+     },
+     {
+      "materialId": 105357,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892696052747",
+      "sceneDescription": "在现代厨房中，一双佩戴手链的手在镜头前同时举起两瓶透明包装的滴露多效除菌喷雾。双手持续平稳握持产品，展示其白色喷头及绿色标签，标签印有青苹果图案、“99.9%”除菌字样与“清甜青苹果”标识，净含量500ml。背景可见白色橱柜、黑色灶台及花朵装饰。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/18a3946561f249caa089fe8a285c27dd.snapshot.jpg?sign=1787198670-dcfafb470d814afbb1dc4c234b5d6182-0-3d7b7497c3dae1fe0e4b4b357a395ec7",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/18a3946561f249caa089fe8a285c27dd.mp4",
+      "durationMs": 2560,
+      "allocMs": 1969,
+      "sourceVolume": 0.0
+     },
+     {
+      "materialId": 105361,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892696052751",
+      "sceneDescription": "在现代厨房中，一双戴着红色串珠手链的手举着两瓶500ml的滴露清甜青苹果味除菌喷雾。透明瓶身贴有绿色标签，突出“99.9%有效杀灭肠道致病菌”卖点。左手将一瓶喷雾向前微推并向左倾斜，右手持另一瓶保持平稳，背景可见黑色灶具与白色橱柜。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/60e67201459b46ceb5aa8063cb9315ce.snapshot.jpg?sign=1787198670-e70c6dc6ce814f789267e779d04c1e73-0-ca40a56ee10ef46446e3057de760c899",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/60e67201459b46ceb5aa8063cb9315ce.mp4",
+      "durationMs": 2040,
+      "allocMs": 2040
+     },
+     {
+      "materialId": 105372,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986633",
+      "sceneDescription": "在摆有毛绒玩具、台灯和绿植的背景前，白色木质置物架上放着两瓶500ml滴露清香白松味除菌喷雾。一只戴戒指的右手伸出，连续按压左侧喷雾瓶的白色喷头，向空中喷洒出细密水雾。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/4da941f4939d48b08dc60d64af79423e.snapshot.jpg?sign=1787198670-2b98b6511628465da20ff54a3b6717d4-0-1456ac5722b8e6090a3e2d6a785f81c7",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/4da941f4939d48b08dc60d64af79423e.mp4",
+      "durationMs": 1973,
+      "allocMs": 1973
+     }
+    ],
+    "reference": {
+     "startMs": 2680,
+     "endMs": 10640,
+     "cuts": [
+      3913,
+      5947,
+      9080
+     ],
+     "shotMeta": [
+      {
+       "startMs": 2680,
+       "description": "镜头在厨房内，前景一只手拿着滴露消毒喷雾瓶，背景中一名穿围裙的人站在打开的冰箱旁，呈现使用滴露进行清洁的相关画面",
+       "tags": [
+        "冰箱门板",
+        "实拍",
+        "人物喷"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w1_0/f0.jpg"
+      },
+      {
+       "startMs": 3913,
+       "description": "这个镜头记录了对冰箱玻璃门板进行清洁的过程，依次呈现喷洒清洁剂、擦拭清洁，最终呈现清洁后干净的冰箱内部及门板的状态",
+       "tags": [
+        "冰箱玻璃板",
+        "实拍",
+        "人物喷",
+        "常规清洁"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w1_1/f0.jpg"
+      },
+      {
+       "startMs": 5947,
+       "description": "在厨房的灶台外台面上，依次展示多瓶滴露清洁喷雾，从部分露出到全部摆放，呈现产品数量",
+       "tags": [
+        "灶台外台面",
+        "实拍",
+        "常规清洁"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w1_2/f0.jpg"
+      },
+      {
+       "startMs": 9080,
+       "description": "在厨房操作台上，一只手提着装有滴露清洁喷雾和随身杀菌湿巾的透明袋子，展示该清洁产品套装",
+       "tags": [
+        "灶台外台面",
+        "实拍",
+        "常规清洁"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w1_3/f0.jpg"
+      }
+     ]
+    },
+    "subtitleScreens": [
+     {
+      "startWord": 0,
+      "text": "如果你觉得有点贵"
+     },
+     {
+      "startWord": 26
+     },
+     {
+      "startWord": 35
+     }
+    ]
+   },
+   {
+    "id": "lmt0drx2w2",
+    "text": "你宁愿冰箱发霉有异味，也不愿意试试这个滴露除菌喷雾吗？",
+    "tags": [
+     "痛点",
+     "促单"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w2_1787541713636.mp3",
+     "durationMs": 5064,
+     "sourceText": "你宁愿冰箱发霉有异味，也不愿意试试这个滴露除菌喷雾吗？",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "你",
+       "startMs": 240,
+       "endMs": 520
+      },
+      {
+       "text": "宁",
+       "startMs": 560,
+       "endMs": 720
+      },
+      {
+       "text": "愿",
+       "startMs": 720,
+       "endMs": 880
+      },
+      {
+       "text": "冰",
+       "startMs": 1000,
+       "endMs": 1160
+      },
+      {
+       "text": "箱",
+       "startMs": 1160,
+       "endMs": 1360
+      },
+      {
+       "text": "发",
+       "startMs": 1360,
+       "endMs": 1600
+      },
+      {
+       "text": "霉",
+       "startMs": 1600,
+       "endMs": 1800
+      },
+      {
+       "text": "有",
+       "startMs": 1800,
+       "endMs": 2040
+      },
+      {
+       "text": "异",
+       "startMs": 2040,
+       "endMs": 2160
+      },
+      {
+       "text": "味",
+       "startMs": 2160,
+       "endMs": 2400
+      },
+      {
+       "text": "也",
+       "startMs": 2560,
+       "endMs": 2760
+      },
+      {
+       "text": "不",
+       "startMs": 2760,
+       "endMs": 2920
+      },
+      {
+       "text": "愿",
+       "startMs": 2920,
+       "endMs": 3000
+      },
+      {
+       "text": "意",
+       "startMs": 3000,
+       "endMs": 3120
+      },
+      {
+       "text": "试",
+       "startMs": 3120,
+       "endMs": 3240
+      },
+      {
+       "text": "试",
+       "startMs": 3320,
+       "endMs": 3400
+      },
+      {
+       "text": "这",
+       "startMs": 3400,
+       "endMs": 3520
+      },
+      {
+       "text": "个",
+       "startMs": 3520,
+       "endMs": 3600
+      },
+      {
+       "text": "滴",
+       "startMs": 3680,
+       "endMs": 3720
+      },
+      {
+       "text": "露",
+       "startMs": 3880,
+       "endMs": 3920
+      },
+      {
+       "text": "除",
+       "startMs": 4000,
+       "endMs": 4160
+      },
+      {
+       "text": "菌",
+       "startMs": 4160,
+       "endMs": 4320
+      },
+      {
+       "text": "喷",
+       "startMs": 4360,
+       "endMs": 4520
+      },
+      {
+       "text": "雾",
+       "startMs": 4520,
+       "endMs": 4640
+      },
+      {
+       "text": "吗",
+       "startMs": 4640,
+       "endMs": 4880
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114796,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494018628608",
+      "voiceover": "再脏的冰箱也怕这个东西。如果孩子总说肚子难受，老公经常跑厕所，一打开冰箱还一股味的，那你真的不要再忽视了，因为你家冰箱已经成了李斯特菌、沙门氏菌的游乐场，就算再怎么费劲擦也是擦不干净的。",
+      "sceneDescription": "厨房内，手持两瓶滴露冰箱清洁喷雾。紫外线灯照射冰箱隔板，食物旁显现蓝色荧光污渍。黑衣男子坐马桶捂肚子，粉衣女子开冰箱门捂鼻。随后，手将滴露喷洒在脏污的冰箱玻璃隔板上，污渍起泡后用蓝色抹布擦净。最后抹布擦拭冰箱底部，紫外线灯照射处出现绿色细菌动画。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/8de22f1ccd3e4dc7ac91619738058c9f.snapshot.jpg?sign=1787192598-0d8492c5beee4d4db3a948de5e55697e-0-d414aceccfda1c23849443b0c0c61a73",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/8de22f1ccd3e4dc7ac91619738058c9f.mp4",
+      "durationMs": 14930,
+      "allocMs": 5064
+     }
+    ],
+    "reference": {
+     "startMs": 10800,
+     "endMs": 15280,
+     "cuts": [
+      11800,
+      12700
+     ],
+     "shotMeta": [
+      {
+       "startMs": 10800,
+       "description": "在厨房环境中，一位身着粉色条纹睡衣的女性，依次做出拉冰箱门、打开冰箱门、凑近冰箱内部的动作，展示冰箱内的物品及状态。",
+       "tags": [
+        "冰箱门板",
+        "酱油瓶",
+        "实拍",
+        "打开电器",
+        "闻臭"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w2_0/f0.jpg"
+      }
+     ]
+    }
+   },
+   {
+    "id": "lmt0drx2w3",
+    "text": "它虽然贵，但冰箱微波炉里的细菌异味怕它。",
+    "tags": [
+     "痛点",
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w3_1787541715870.mp3",
+     "durationMs": 4656,
+     "sourceText": "它虽然贵，但冰箱微波炉里的细菌异味怕它。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "它",
+       "startMs": 350,
+       "endMs": 390
+      },
+      {
+       "text": "虽",
+       "startMs": 470,
+       "endMs": 630
+      },
+      {
+       "text": "然",
+       "startMs": 630,
+       "endMs": 750
+      },
+      {
+       "text": "贵",
+       "startMs": 790,
+       "endMs": 1110
+      },
+      {
+       "text": "但",
+       "startMs": 1310,
+       "endMs": 1590
+      },
+      {
+       "text": "冰",
+       "startMs": 1670,
+       "endMs": 1910
+      },
+      {
+       "text": "箱",
+       "startMs": 1910,
+       "endMs": 2110
+      },
+      {
+       "text": "微",
+       "startMs": 2230,
+       "endMs": 2390
+      },
+      {
+       "text": "波",
+       "startMs": 2390,
+       "endMs": 2510
+      },
+      {
+       "text": "炉",
+       "startMs": 2550,
+       "endMs": 2710
+      },
+      {
+       "text": "里",
+       "startMs": 2710,
+       "endMs": 2910
+      },
+      {
+       "text": "的",
+       "startMs": 2910,
+       "endMs": 3070
+      },
+      {
+       "text": "细",
+       "startMs": 3070,
+       "endMs": 3230
+      },
+      {
+       "text": "菌",
+       "startMs": 3230,
+       "endMs": 3390
+      },
+      {
+       "text": "异",
+       "startMs": 3470,
+       "endMs": 3590
+      },
+      {
+       "text": "味",
+       "startMs": 3590,
+       "endMs": 3750
+      },
+      {
+       "text": "怕",
+       "startMs": 3790,
+       "endMs": 4070
+      },
+      {
+       "text": "它",
+       "startMs": 4150,
+       "endMs": 4190
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114799,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576704",
+      "voiceover": "如果你以为它只能灭火李斯特菌，那你就错了！大肠杆菌，灭火沙门氏菌。灭火金黄色葡萄球菌。灭火！",
+      "sceneDescription": "紫光灯照射下，一只手持喷雾瓶依次向带有荧光斑点的冰箱抽屉、电饭煲内盖、微波炉及空气炸锅内胆喷洒液体。随后用蓝色抹布擦拭，擦拭后荧光斑点消失，呈现清洁前后对比。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/e9232297ed0c41e89b5e7f50de34e2a9.snapshot.jpg?sign=1787196070-fb355faeb91842599fd6cf9c035290eb-0-a7ac3c0ff98e67b88b2a5b7e35dfea9e",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/e9232297ed0c41e89b5e7f50de34e2a9.mp4",
+      "durationMs": 16300,
+      "allocMs": 4656,
+      "sourceVolume": 0.25
+     }
+    ],
+    "reference": {
+     "startMs": 15400,
+     "endMs": 18600
+    }
+   },
+   {
+    "id": "lmt0drx2w4",
+    "text": "它虽然真的贵，但是厨房厨垫上的油渍污垢也是真的怕它。",
+    "tags": [
+     "痛点",
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w4_1787541718360.mp3",
+     "durationMs": 4848,
+     "sourceText": "它虽然真的贵，但是厨房厨垫上的油渍污垢也是真的怕它。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "它",
+       "startMs": 380,
+       "endMs": 420
+      },
+      {
+       "text": "虽",
+       "startMs": 500,
+       "endMs": 660
+      },
+      {
+       "text": "然",
+       "startMs": 660,
+       "endMs": 780
+      },
+      {
+       "text": "真",
+       "startMs": 780,
+       "endMs": 940
+      },
+      {
+       "text": "的",
+       "startMs": 940,
+       "endMs": 1060
+      },
+      {
+       "text": "贵",
+       "startMs": 1060,
+       "endMs": 1340
+      },
+      {
+       "text": "但",
+       "startMs": 1540,
+       "endMs": 1700
+      },
+      {
+       "text": "是",
+       "startMs": 1700,
+       "endMs": 1900
+      },
+      {
+       "text": "厨",
+       "startMs": 1980,
+       "endMs": 2180
+      },
+      {
+       "text": "房",
+       "startMs": 2180,
+       "endMs": 2340
+      },
+      {
+       "text": "厨",
+       "startMs": 2420,
+       "endMs": 2500
+      },
+      {
+       "text": "垫",
+       "startMs": 2620,
+       "endMs": 2700
+      },
+      {
+       "text": "上",
+       "startMs": 2780,
+       "endMs": 2900
+      },
+      {
+       "text": "的",
+       "startMs": 2900,
+       "endMs": 3060
+      },
+      {
+       "text": "油",
+       "startMs": 3060,
+       "endMs": 3220
+      },
+      {
+       "text": "渍",
+       "startMs": 3220,
+       "endMs": 3380
+      },
+      {
+       "text": "污",
+       "startMs": 3420,
+       "endMs": 3620
+      },
+      {
+       "text": "垢",
+       "startMs": 3620,
+       "endMs": 3740
+      },
+      {
+       "text": "也",
+       "startMs": 3780,
+       "endMs": 3940
+      },
+      {
+       "text": "是",
+       "startMs": 3940,
+       "endMs": 4060
+      },
+      {
+       "text": "真",
+       "startMs": 4060,
+       "endMs": 4180
+      },
+      {
+       "text": "的",
+       "startMs": 4180,
+       "endMs": 4260
+      },
+      {
+       "text": "怕",
+       "startMs": 4260,
+       "endMs": 4460
+      },
+      {
+       "text": "它",
+       "startMs": 4540,
+       "endMs": 4580
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114800,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576705",
+      "voiceover": "如果你以为它只能灭火李斯特菌，那你就错了，大肠杆菌。灭火沙门氏菌。灭火！金黄色葡萄球菌！灭火！",
+      "sceneDescription": "第一视角下，一只手持紫色喷雾瓶，依次向冰箱抽屉、电饭煲内盖、微波炉内部和空气炸锅内胆喷洒液体。这些表面在紫光下显示发光斑点。喷洒后，手用蓝色抹布擦拭，发光斑点消失。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/41f04f59c60946bd8608f788ef960514.snapshot.jpg?sign=1787196071-b7a441323fa848d59f00ff472e6eeb8f-0-f47b96f7228eb87b262af863e8fd29f9",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/41f04f59c60946bd8608f788ef960514.mp4",
+      "durationMs": 16300,
+      "allocMs": 2424
+     },
+     {
+      "materialId": -19954,
+      "name": "参考画面",
+      "sceneDescription": "参考片 20.0s~23.4s 处",
+      "durationMs": 3467,
+      "trimStartMs": 19953,
+      "allocMs": 2424,
+      "localSource": "<HOME>/JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427.mp4"
+     }
+    ],
+    "reference": {
+     "startMs": 19020,
+     "endMs": 23420,
+     "cuts": [
+      19953
+     ],
+     "shotMeta": [
+      {
+       "startMs": 19953,
+       "description": "这个镜头在厨房场景中，依次展示了给布满油污的电饭煲表面喷洒清洁剂、用蓝色抹布擦拭电饭煲、电饭煲被清洁后变得干净光亮的过程",
+       "tags": [
+        "电饭煲表面",
+        "实拍",
+        "人物喷",
+        "常规清洁"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2w4_1/f0.jpg"
+      }
+     ]
+    }
+   },
+   {
+    "id": "lmt0drx2w5",
+    "text": "它真的贵爆了，但是全家人的安全健康也是真的需要它。",
+    "tags": [
+     "痛点",
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w5_1787541720693.mp3",
+     "durationMs": 5064,
+     "sourceText": "它真的贵爆了，但是全家人的安全健康也是真的需要它。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "它",
+       "startMs": 330,
+       "endMs": 370
+      },
+      {
+       "text": "真",
+       "startMs": 490,
+       "endMs": 610
+      },
+      {
+       "text": "的",
+       "startMs": 610,
+       "endMs": 690
+      },
+      {
+       "text": "贵",
+       "startMs": 730,
+       "endMs": 890
+      },
+      {
+       "text": "爆",
+       "startMs": 1090,
+       "endMs": 1290
+      },
+      {
+       "text": "了",
+       "startMs": 1290,
+       "endMs": 1570
+      },
+      {
+       "text": "但",
+       "startMs": 1770,
+       "endMs": 2010
+      },
+      {
+       "text": "是",
+       "startMs": 2010,
+       "endMs": 2210
+      },
+      {
+       "text": "全",
+       "startMs": 2210,
+       "endMs": 2450
+      },
+      {
+       "text": "家",
+       "startMs": 2450,
+       "endMs": 2650
+      },
+      {
+       "text": "人",
+       "startMs": 2650,
+       "endMs": 2810
+      },
+      {
+       "text": "的",
+       "startMs": 2810,
+       "endMs": 2970
+      },
+      {
+       "text": "安",
+       "startMs": 2970,
+       "endMs": 3130
+      },
+      {
+       "text": "全",
+       "startMs": 3130,
+       "endMs": 3290
+      },
+      {
+       "text": "健",
+       "startMs": 3290,
+       "endMs": 3530
+      },
+      {
+       "text": "康",
+       "startMs": 3530,
+       "endMs": 3690
+      },
+      {
+       "text": "也",
+       "startMs": 3690,
+       "endMs": 3850
+      },
+      {
+       "text": "是",
+       "startMs": 3850,
+       "endMs": 4010
+      },
+      {
+       "text": "真",
+       "startMs": 4010,
+       "endMs": 4130
+      },
+      {
+       "text": "的",
+       "startMs": 4130,
+       "endMs": 4250
+      },
+      {
+       "text": "需",
+       "startMs": 4250,
+       "endMs": 4410
+      },
+      {
+       "text": "要",
+       "startMs": 4410,
+       "endMs": 4530
+      },
+      {
+       "text": "它",
+       "startMs": 4610,
+       "endMs": 4690
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114801,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576706",
+      "voiceover": "它真的很丑，但冰箱里耐低温的李斯特菌怕它，微波炉里的大肠杆菌怕它，连厨房里的葡萄球菌也怕它。一喷一擦，无需二次水洗。",
+      "sceneDescription": "厨房环境中，展示多瓶滴露青苹果味表面清洁剂。一只手持清洁剂，依次在冰箱内脏污玻璃隔板、微波炉脏污底盘、空气炸锅油腻底盘及电饭煲顶部排气孔区域喷洒，并用抹布擦拭，擦拭后各表面均变得干净整洁。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/8e9bcb4e642c4bdea82a4529027314ea.snapshot.jpg?sign=1787196072-4e01ec1f95b14805ae8aedaea892d320-0-95c0b23b1b48f838bce396e17679a60f",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/8e9bcb4e642c4bdea82a4529027314ea.mp4",
+      "durationMs": 11261,
+      "allocMs": 5064
+     }
+    ],
+    "reference": {
+     "startMs": 23620,
+     "endMs": 27180,
+     "cuts": [
+      24587
+     ]
+    }
+   },
+   {
+    "id": "lmt0drx2w6",
+    "text": "而且现在不贵了，因为我带着宠粉福利来了。",
+    "tags": [
+     "促单"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w6_1787541723080.mp3",
+     "durationMs": 3072,
+     "sourceText": "而且现在不贵了，因为我带着宠粉福利来了。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "而",
+       "startMs": 230,
+       "endMs": 390
+      },
+      {
+       "text": "且",
+       "startMs": 390,
+       "endMs": 510
+      },
+      {
+       "text": "现",
+       "startMs": 510,
+       "endMs": 630
+      },
+      {
+       "text": "在",
+       "startMs": 630,
+       "endMs": 710
+      },
+      {
+       "text": "不",
+       "startMs": 710,
+       "endMs": 870
+      },
+      {
+       "text": "贵",
+       "startMs": 870,
+       "endMs": 1070
+      },
+      {
+       "text": "了",
+       "startMs": 1070,
+       "endMs": 1270
+      },
+      {
+       "text": "因",
+       "startMs": 1310,
+       "endMs": 1430
+      },
+      {
+       "text": "为",
+       "startMs": 1430,
+       "endMs": 1550
+      },
+      {
+       "text": "我",
+       "startMs": 1550,
+       "endMs": 1710
+      },
+      {
+       "text": "带",
+       "startMs": 1710,
+       "endMs": 1830
+      },
+      {
+       "text": "着",
+       "startMs": 1830,
+       "endMs": 1950
+      },
+      {
+       "text": "宠",
+       "startMs": 1990,
+       "endMs": 2150
+      },
+      {
+       "text": "粉",
+       "startMs": 2150,
+       "endMs": 2350
+      },
+      {
+       "text": "福",
+       "startMs": 2350,
+       "endMs": 2510
+      },
+      {
+       "text": "利",
+       "startMs": 2510,
+       "endMs": 2590
+      },
+      {
+       "text": "来",
+       "startMs": 2590,
+       "endMs": 2790
+      },
+      {
+       "text": "了",
+       "startMs": 2790,
+       "endMs": 2910
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105376,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986637",
+      "sceneDescription": "在室内环境中，背景有粉色毛绒玩具、百褶台灯和绿植。画面右侧伸出一只穿着紫色袖子的手，依次将三瓶透明瓶身、带白色喷头的滴露（Dettol）多用途清洁喷雾放置在白色条板架上。瓶身绿色标签清晰显示“99.9%除菌”和“净含量:500ml”字样。三瓶喷雾呈品字形摆放，完成产品亮相。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/21f9293032c2458bb43e58399a1c6a4c.snapshot.jpg?sign=1787196457-c9567b78aa4847f39964aaef5e4c9049-0-844af11f4925e07344244e0fa42ae39f",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/21f9293032c2458bb43e58399a1c6a4c.mp4",
+      "durationMs": 1323,
+      "speed": 0.5,
+      "allocMs": 1586
+     },
+     {
+      "materialId": 106707,
+      "name": "滴露_植源喷雾_姚瑶_20260710_81517920777217",
+      "voiceover": "世界上只有两种人不给",
+      "sceneDescription": "在冰箱内部场景中，上层摆放着水果保鲜盒，中层放有红绿两色的Bundaberg玻璃瓶饮料。一只穿着白色毛绒袖子的右手伸入冰箱，从固定在置物架下方的白色悬挂式收纳架中，向外抽出一听浅蓝色的RIO微醺易拉罐。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260710/ae4500ce89df49d7a9f49924ef729e16.snapshot.jpg?sign=1787198555-089d1121e2794476adee7820eb541e2b-0-6048a01ecd9d1620024a27d9f6ce2c3f",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260710/ae4500ce89df49d7a9f49924ef729e16.mp4",
+      "durationMs": 1486,
+      "allocMs": 1486
+     }
+    ],
+    "reference": {
+     "startMs": 27460,
+     "endMs": 30140
+    }
+   },
+   {
+    "id": "lmt0drx2w7",
+    "text": "看一个女人爱不爱干净，不要看她的厨房，要看她的冰箱。",
+    "tags": [
+     "痛点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w7_1787541725477.mp3",
+     "durationMs": 4848,
+     "sourceText": "看一个女人爱不爱干净，不要看她的厨房，要看她的冰箱。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "看",
+       "startMs": 240,
+       "endMs": 480
+      },
+      {
+       "text": "一",
+       "startMs": 480,
+       "endMs": 600
+      },
+      {
+       "text": "个",
+       "startMs": 600,
+       "endMs": 720
+      },
+      {
+       "text": "女",
+       "startMs": 720,
+       "endMs": 880
+      },
+      {
+       "text": "人",
+       "startMs": 880,
+       "endMs": 1000
+      },
+      {
+       "text": "爱",
+       "startMs": 1000,
+       "endMs": 1160
+      },
+      {
+       "text": "不",
+       "startMs": 1160,
+       "endMs": 1320
+      },
+      {
+       "text": "爱",
+       "startMs": 1320,
+       "endMs": 1480
+      },
+      {
+       "text": "干",
+       "startMs": 1480,
+       "endMs": 1680
+      },
+      {
+       "text": "净",
+       "startMs": 1680,
+       "endMs": 1840
+      },
+      {
+       "text": "不",
+       "startMs": 2040,
+       "endMs": 2240
+      },
+      {
+       "text": "要",
+       "startMs": 2240,
+       "endMs": 2360
+      },
+      {
+       "text": "看",
+       "startMs": 2360,
+       "endMs": 2560
+      },
+      {
+       "text": "她",
+       "startMs": 2600,
+       "endMs": 2640
+      },
+      {
+       "text": "的",
+       "startMs": 2680,
+       "endMs": 2840
+      },
+      {
+       "text": "厨",
+       "startMs": 2840,
+       "endMs": 3080
+      },
+      {
+       "text": "房",
+       "startMs": 3080,
+       "endMs": 3280
+      },
+      {
+       "text": "要",
+       "startMs": 3480,
+       "endMs": 3720
+      },
+      {
+       "text": "看",
+       "startMs": 3720,
+       "endMs": 3920
+      },
+      {
+       "text": "她",
+       "startMs": 3960,
+       "endMs": 4000
+      },
+      {
+       "text": "的",
+       "startMs": 4000,
+       "endMs": 4200
+      },
+      {
+       "text": "冰",
+       "startMs": 4200,
+       "endMs": 4360
+      },
+      {
+       "text": "箱",
+       "startMs": 4360,
+       "endMs": 4560
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114797,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494018628609",
+      "voiceover": "再脏的微波炉也怕这个东西。如果孩子总说肚子难受，老公经常跑厕所，一打开微波炉还一股味的，那你真的不要再忽视了，因为你家微波炉已经成了李斯特菌、沙门氏菌的游乐场，就算再怎么费劲擦也是擦不干净的。",
+      "sceneDescription": "厨房中单手展示滴露清洁喷雾。微波炉内污渍在紫光灯下显现荧光点与动画细菌。红衣男坐马桶捂肚子。粉衣女端盘打开微波炉，闻后嫌弃挥手。将滴露喷洒在微波炉污渍上，戴蓝手套的手用蓝布擦净。最后用蓝布擦拭玻璃转盘，紫光灯下显现动画细菌并持续擦拭。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/f8e3983b4644470c81941575b1daf1f7.snapshot.jpg?sign=1787196073-87d79bc269cb4e608ac08d3d32ff2bfb-0-6e3f203dc7051d9349ffb98ecdef169f",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/f8e3983b4644470c81941575b1daf1f7.mp4",
+      "durationMs": 14930,
+      "allocMs": 4848
+     }
+    ],
+    "reference": {
+     "startMs": 30450,
+     "endMs": 33570
+    }
+   },
+   {
+    "id": "lmt0drx2w8",
+    "text": "甭管你平时多懒，这冰箱一定得定期清洁收拾的。",
+    "tags": [
+     "痛点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w8_1787541727676.mp3",
+     "durationMs": 4440,
+     "sourceText": "甭管你平时多懒，这冰箱一定得定期清洁收拾的。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "甭",
+       "startMs": 390,
+       "endMs": 470
+      },
+      {
+       "text": "管",
+       "startMs": 590,
+       "endMs": 790
+      },
+      {
+       "text": "你",
+       "startMs": 790,
+       "endMs": 990
+      },
+      {
+       "text": "平",
+       "startMs": 990,
+       "endMs": 1150
+      },
+      {
+       "text": "时",
+       "startMs": 1150,
+       "endMs": 1230
+      },
+      {
+       "text": "多",
+       "startMs": 1230,
+       "endMs": 1470
+      },
+      {
+       "text": "懒",
+       "startMs": 1470,
+       "endMs": 1710
+      },
+      {
+       "text": "这",
+       "startMs": 1830,
+       "endMs": 2110
+      },
+      {
+       "text": "冰",
+       "startMs": 2110,
+       "endMs": 2270
+      },
+      {
+       "text": "箱",
+       "startMs": 2270,
+       "endMs": 2470
+      },
+      {
+       "text": "一",
+       "startMs": 2470,
+       "endMs": 2590
+      },
+      {
+       "text": "定",
+       "startMs": 2590,
+       "endMs": 2750
+      },
+      {
+       "text": "得",
+       "startMs": 2750,
+       "endMs": 2910
+      },
+      {
+       "text": "定",
+       "startMs": 2910,
+       "endMs": 3110
+      },
+      {
+       "text": "期",
+       "startMs": 3110,
+       "endMs": 3310
+      },
+      {
+       "text": "清",
+       "startMs": 3310,
+       "endMs": 3510
+      },
+      {
+       "text": "洁",
+       "startMs": 3510,
+       "endMs": 3630
+      },
+      {
+       "text": "收",
+       "startMs": 3670,
+       "endMs": 3830
+      },
+      {
+       "text": "拾",
+       "startMs": 3830,
+       "endMs": 3950
+      },
+      {
+       "text": "的",
+       "startMs": 3990,
+       "endMs": 4150
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114798,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494018628610",
+      "voiceover": "再脏的微波炉也怕这个东西。如果孩子总说肚子难受，老公经常跑厕所，一打开微波炉还一股味的，那你真的不要再忽视了，因为你家微波炉已经成了李斯特菌、沙门氏菌的游乐场，就算再怎么费劲擦也是擦不干净的。",
+      "sceneDescription": "厨房内，手持一瓶透明滴露除菌喷雾。随后展示微波炉内黄色污渍及细菌动画。接着红衣男子坐马桶捂肚子，粉衣女子打开微波炉闻到异味。随后，手向微波炉污渍喷洒清洁剂，用蓝色抹布擦拭，污渍被擦净。最后在紫光灯下擦拭玻璃转盘，细菌动画消失。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/426e412e3b6442cfb9e2081b9030237d.snapshot.jpg?sign=1787196074-4967d3457b244fae8ff40673fa7bd5ad-0-28a3536bd55fcca92f7905b6e354e7fa",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/426e412e3b6442cfb9e2081b9030237d.mp4",
+      "durationMs": 14933,
+      "allocMs": 4440
+     }
+    ],
+    "reference": {
+     "startMs": 33930,
+     "endMs": 36890
+    }
+   },
+   {
+    "id": "lmt0drx2w9",
+    "text": "看看啊，看看啊。",
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2w9_1787541729479.mp3",
+     "durationMs": 1872,
+     "sourceText": "看看啊，看看啊。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "看",
+       "startMs": 340,
+       "endMs": 460
+      },
+      {
+       "text": "看",
+       "startMs": 540,
+       "endMs": 620
+      },
+      {
+       "text": "啊",
+       "startMs": 740,
+       "endMs": 820
+      },
+      {
+       "text": "看",
+       "startMs": 1100,
+       "endMs": 1220
+      },
+      {
+       "text": "看",
+       "startMs": 1260,
+       "endMs": 1340
+      },
+      {
+       "text": "啊",
+       "startMs": 1460,
+       "endMs": 1540
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105377,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986638",
+      "sceneDescription": "在客厅环境中，白色大理石纹理桌面上原本放置着两瓶透明瓶身、绿色标签的滴露（Dettol）多用途除菌喷雾，标签上印有“99.9%”字样。随后，一只右手从画面右侧进入，拿着第三瓶相同的滴露除菌喷雾，将其放置在桌面上两瓶喷雾的前方中间位置，随后手部离开画面。背景可见浅色沙发、两个毛绒玩具和一盆红色植物盆栽。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/db5d7eef89ba4084b47678a43233de06.snapshot.jpg?sign=1787196075-c60b49ff84c5430fb13187dd680cae52-0-e899827baeca070ce8db804e988fc3d5",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/db5d7eef89ba4084b47678a43233de06.mp4",
+      "durationMs": 1933,
+      "allocMs": 936
+     },
+     {
+      "materialId": 105373,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986634",
+      "sceneDescription": "在明亮的客厅环境中，大理石纹理的桌面上原本放着两瓶透明的滴露（Dettol）除菌喷雾。一只做了法式美甲的右手从画面右侧伸出，将第三瓶相同的滴露除菌喷雾放置在桌面上，与另外两瓶并排。随后手部离开画面，三瓶带有绿色标签、标有“99.9%”字样的滴露喷雾静置在桌面上。背景可见浅色沙发、毛绒玩具和红色花朵装饰。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/495f59ac8c4346e69c35350f72f2d5b7.snapshot.jpg?sign=1787198566-9175a45151aa4dc08ef991fab56c1ce7-0-30d9d248a7e8eff280d95657745233c7",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/495f59ac8c4346e69c35350f72f2d5b7.mp4",
+      "durationMs": 2000,
+      "allocMs": 936
+     }
+    ],
+    "reference": {
+     "startMs": 37010,
+     "endMs": 38130
+    }
+   },
+   {
+    "id": "lmt0drx2wa",
+    "text": "哇塞！",
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wa_1787541731670.mp3",
+     "durationMs": 1224,
+     "sourceText": "哇塞！",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "哇",
+       "startMs": 260,
+       "endMs": 460
+      },
+      {
+       "text": "塞",
+       "startMs": 500,
+       "endMs": 700
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105682,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80903451839496",
+      "sceneDescription": "在冰箱内部，一只手拿着蓝色抹布，在布满水雾的玻璃隔板上持续擦拭。随着擦拭动作，原本模糊的玻璃迅速变得清晰透明，直观显露出下方摆放的可口可乐、斑马精酿易拉罐、鲜米饭及奇亚籽等食品饮料。画面带有文字提示。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/ba5e7325d1f14ab6871ff42da20c65fa.snapshot.jpg?sign=1787196076-13cf8056846b4db3a77f98ca3e314bd3-0-3f1163c36ac7a6cd85b4c8419d7d1e6b",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/ba5e7325d1f14ab6871ff42da20c65fa.mp4",
+      "durationMs": 3854,
+      "allocMs": 1224
+     }
+    ],
+    "reference": {
+     "startMs": 38530,
+     "endMs": 39050
+    }
+   },
+   {
+    "id": "lmt0drx2wb",
+    "text": "世界上只有两种人不用冰箱清洁剂，一种是不爱干净的人。",
+    "tags": [
+     "痛点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wb_1787541733632.mp3",
+     "durationMs": 5064,
+     "sourceText": "世界上只有两种人不用冰箱清洁剂，一种是不爱干净的人。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "世",
+       "startMs": 300,
+       "endMs": 500
+      },
+      {
+       "text": "界",
+       "startMs": 500,
+       "endMs": 620
+      },
+      {
+       "text": "上",
+       "startMs": 620,
+       "endMs": 820
+      },
+      {
+       "text": "只",
+       "startMs": 820,
+       "endMs": 1020
+      },
+      {
+       "text": "有",
+       "startMs": 1020,
+       "endMs": 1180
+      },
+      {
+       "text": "两",
+       "startMs": 1180,
+       "endMs": 1340
+      },
+      {
+       "text": "种",
+       "startMs": 1340,
+       "endMs": 1500
+      },
+      {
+       "text": "人",
+       "startMs": 1500,
+       "endMs": 1660
+      },
+      {
+       "text": "不",
+       "startMs": 1660,
+       "endMs": 1860
+      },
+      {
+       "text": "用",
+       "startMs": 1860,
+       "endMs": 2020
+      },
+      {
+       "text": "冰",
+       "startMs": 2060,
+       "endMs": 2220
+      },
+      {
+       "text": "箱",
+       "startMs": 2220,
+       "endMs": 2380
+      },
+      {
+       "text": "清",
+       "startMs": 2460,
+       "endMs": 2620
+      },
+      {
+       "text": "洁",
+       "startMs": 2620,
+       "endMs": 2740
+      },
+      {
+       "text": "剂",
+       "startMs": 2780,
+       "endMs": 2980
+      },
+      {
+       "text": "一",
+       "startMs": 3300,
+       "endMs": 3500
+      },
+      {
+       "text": "种",
+       "startMs": 3500,
+       "endMs": 3620
+      },
+      {
+       "text": "是",
+       "startMs": 3620,
+       "endMs": 3820
+      },
+      {
+       "text": "不",
+       "startMs": 3820,
+       "endMs": 4020
+      },
+      {
+       "text": "爱",
+       "startMs": 4020,
+       "endMs": 4220
+      },
+      {
+       "text": "干",
+       "startMs": 4220,
+       "endMs": 4380
+      },
+      {
+       "text": "净",
+       "startMs": 4380,
+       "endMs": 4500
+      },
+      {
+       "text": "的",
+       "startMs": 4500,
+       "endMs": 4660
+      },
+      {
+       "text": "人",
+       "startMs": 4660,
+       "endMs": 4860
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105325,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892474939413",
+      "sceneDescription": "第一视角下，一只手在画面前景举着一瓶透明的滴露（Dettol）表面清洁喷雾，瓶身带有绿色标签，清晰展示“99.9%”字样和青苹果图案。背景中，一名穿着格子裙的女性正站在打开的双开门冰箱前，用一块蓝色的抹布持续擦拭冰箱内部的隔板。冰箱侧门和内部摆放着多罐饮料。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/c22f8760bfb141a79c7aee232cef5de0.snapshot.jpg?sign=1787196448-73a7c8a8e3394a478e66e98a6bde8ae3-0-ab38691cdad4ec09098d639c41d08636",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/c22f8760bfb141a79c7aee232cef5de0.mp4",
+      "durationMs": 2920,
+      "allocMs": 2532
+     },
+     {
+      "materialId": 105683,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80904026833920",
+      "sceneDescription": "第一视角展示布满黄色污渍的冰箱内部。首先，一只手持喷雾瓶向内壁和玻璃隔板的污渍处喷洒清洁剂；接着，手持蓝色抹布依次擦拭喷洒处。擦拭后脏污表面瞬间变得洁白干净，并带有闪光特效，呈现出强烈的清洁前后对比。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/4f04bd782eef4005be6d959dd1e5a636.snapshot.jpg?sign=1787198574-386879304e6d4e9199b06c12937771d0-0-928ae0c0c9c3660f891c5254b0efe9c8",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/4f04bd782eef4005be6d959dd1e5a636.mp4",
+      "durationMs": 4853,
+      "allocMs": 2532
+     }
+    ],
+    "reference": {
+     "startMs": 39410,
+     "endMs": 42650
+    }
+   },
+   {
+    "id": "lmt0drx2wc",
+    "text": "还有一种是没用过滴露冰箱清洁剂的人，我就想问问这玩意是犯了天条吗？",
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wc_1787541736319.mp3",
+     "durationMs": 6432,
+     "sourceText": "还有一种是没用过滴露冰箱清洁剂的人，我就想问问这玩意是犯了天条吗？",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "还",
+       "startMs": 370,
+       "endMs": 570
+      },
+      {
+       "text": "有",
+       "startMs": 570,
+       "endMs": 690
+      },
+      {
+       "text": "一",
+       "startMs": 690,
+       "endMs": 850
+      },
+      {
+       "text": "种",
+       "startMs": 850,
+       "endMs": 1010
+      },
+      {
+       "text": "是",
+       "startMs": 1010,
+       "endMs": 1210
+      },
+      {
+       "text": "没",
+       "startMs": 1210,
+       "endMs": 1450
+      },
+      {
+       "text": "用",
+       "startMs": 1450,
+       "endMs": 1570
+      },
+      {
+       "text": "过",
+       "startMs": 1570,
+       "endMs": 1730
+      },
+      {
+       "text": "滴",
+       "startMs": 1850,
+       "endMs": 1890
+      },
+      {
+       "text": "露",
+       "startMs": 2010,
+       "endMs": 2050
+      },
+      {
+       "text": "冰",
+       "startMs": 2170,
+       "endMs": 2290
+      },
+      {
+       "text": "箱",
+       "startMs": 2290,
+       "endMs": 2450
+      },
+      {
+       "text": "清",
+       "startMs": 2490,
+       "endMs": 2650
+      },
+      {
+       "text": "洁",
+       "startMs": 2650,
+       "endMs": 2770
+      },
+      {
+       "text": "剂",
+       "startMs": 2810,
+       "endMs": 2970
+      },
+      {
+       "text": "的",
+       "startMs": 2970,
+       "endMs": 3130
+      },
+      {
+       "text": "人",
+       "startMs": 3130,
+       "endMs": 3370
+      },
+      {
+       "text": "我",
+       "startMs": 3650,
+       "endMs": 3890
+      },
+      {
+       "text": "就",
+       "startMs": 3890,
+       "endMs": 4090
+      },
+      {
+       "text": "想",
+       "startMs": 4090,
+       "endMs": 4290
+      },
+      {
+       "text": "问",
+       "startMs": 4290,
+       "endMs": 4410
+      },
+      {
+       "text": "问",
+       "startMs": 4490,
+       "endMs": 4610
+      },
+      {
+       "text": "这",
+       "startMs": 4610,
+       "endMs": 4850
+      },
+      {
+       "text": "玩",
+       "startMs": 4850,
+       "endMs": 4970
+      },
+      {
+       "text": "意",
+       "startMs": 4970,
+       "endMs": 5090
+      },
+      {
+       "text": "是",
+       "startMs": 5130,
+       "endMs": 5330
+      },
+      {
+       "text": "犯",
+       "startMs": 5330,
+       "endMs": 5490
+      },
+      {
+       "text": "了",
+       "startMs": 5490,
+       "endMs": 5610
+      },
+      {
+       "text": "天",
+       "startMs": 5610,
+       "endMs": 5810
+      },
+      {
+       "text": "条",
+       "startMs": 5810,
+       "endMs": 6010
+      },
+      {
+       "text": "吗",
+       "startMs": 6050,
+       "endMs": 6250
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114795,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82493860822022",
+      "voiceover": "世界上只有两种人不用滴露冰箱清洁剂。一种是不爱干净的人，还有一种是没用过滴露冰箱清洁剂的人。",
+      "sceneDescription": "在冰箱内，一只手拉开装满贴标保鲜盒的抽屉。接着，手持喷瓶向装有果蔬的抽屉脏污透明盖板喷洒清洁剂，用蓝色抹布擦净，露出果蔬。最后，手从冰箱门置物架拿起一瓶“Dettol滴露”冰箱清洁剂，旁有郁金香。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/166c4695d3964a3aa4e246c807eba920.snapshot.jpg?sign=1787196079-534d594f7e474c248c765d0290bb4f87-0-33e68e29d659b6f20c6601207f7f7a92",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/166c4695d3964a3aa4e246c807eba920.mp4",
+      "durationMs": 6292,
+      "speed": 0.97,
+      "allocMs": 6432
+     }
+    ],
+    "reference": {
+     "startMs": 42910,
+     "endMs": 46750
+    }
+   },
+   {
+    "id": "lmt0drx2wd",
+    "text": "这么好用怎么就没人知道？",
+    "tags": [
+     "辅助卖点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wd_1787541738428.mp3",
+     "durationMs": 2448,
+     "sourceText": "这么好用怎么就没人知道？",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "这",
+       "startMs": 300,
+       "endMs": 500
+      },
+      {
+       "text": "么",
+       "startMs": 500,
+       "endMs": 620
+      },
+      {
+       "text": "好",
+       "startMs": 620,
+       "endMs": 860
+      },
+      {
+       "text": "用",
+       "startMs": 860,
+       "endMs": 1100
+      },
+      {
+       "text": "怎",
+       "startMs": 1100,
+       "endMs": 1220
+      },
+      {
+       "text": "么",
+       "startMs": 1220,
+       "endMs": 1340
+      },
+      {
+       "text": "就",
+       "startMs": 1340,
+       "endMs": 1460
+      },
+      {
+       "text": "没",
+       "startMs": 1460,
+       "endMs": 1620
+      },
+      {
+       "text": "人",
+       "startMs": 1620,
+       "endMs": 1780
+      },
+      {
+       "text": "知",
+       "startMs": 1780,
+       "endMs": 1980
+      },
+      {
+       "text": "道",
+       "startMs": 1980,
+       "endMs": 2140
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105450,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80900650510338",
+      "voiceover": "这个",
+      "sceneDescription": "在厨房环境中，背景可见黑色燃气灶、白色瓷砖墙面以及一瓶白黄相间的雏菊。画面中央，一只手拿着一瓶透明的滴露（Dettol）清香白茶多效除菌喷雾。随后，一根带有浅蓝色手柄的金属指示棒从画面右下方伸出，精准指向喷雾瓶身绿色标签上醒目的“99.9%”和“除菌”字样，持续展示产品的核心数据。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/ebbc4a40e89f4a4abad806fe5a53d9bb.snapshot.jpg?sign=1787196427-9a35635ebf9c4962bd4b2531b5d9b7a0-0-d3b79828ca2a48aa5ecb57b3f0f17467",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/ebbc4a40e89f4a4abad806fe5a53d9bb.mp4",
+      "durationMs": 1137,
+      "allocMs": 1137
+     },
+     {
+      "materialId": 106696,
+      "name": "滴露_植源喷雾_姚瑶_20260710_81517706109955",
+      "voiceover": "一年能帮你省一辆车子。",
+      "sceneDescription": "在明亮的厨房白色台面和黑色水槽上，静置着大量光洁的不锈钢锅具。镜头从右向左缓慢平移，持续扫过这些堆叠的厨具，依次展现带有木制手柄的炒锅、黑色塑料手柄的奶锅、玻璃盖的汤锅及红边平底锅。所有锅具表面极度光亮并反射光线，全程无人物出镜。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260710/dbc15111f23547b8bc63db4b87288e64.snapshot.jpg?sign=1787198588-093ece154a90437ea4fbf9d19ae2e203-0-ea4bc8614012342a47339e05258b2fd4",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260710/dbc15111f23547b8bc63db4b87288e64.mp4",
+      "durationMs": 1765,
+      "allocMs": 1311
+     }
+    ],
+    "reference": {
+     "startMs": 46950,
+     "endMs": 48230
+    }
+   },
+   {
+    "id": "lmt0drx2we",
+    "text": "现在我们家每个月都有定期清理冰箱的好习惯，不然里面的食物只会越放越脏。",
+    "tags": [
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2we_1787541741691.mp3",
+     "durationMs": 6048,
+     "sourceText": "现在我们家每个月都有定期清理冰箱的好习惯，不然里面的食物只会越放越脏。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "现",
+       "startMs": 330,
+       "endMs": 490
+      },
+      {
+       "text": "在",
+       "startMs": 490,
+       "endMs": 650
+      },
+      {
+       "text": "我",
+       "startMs": 650,
+       "endMs": 770
+      },
+      {
+       "text": "们",
+       "startMs": 770,
+       "endMs": 890
+      },
+      {
+       "text": "家",
+       "startMs": 890,
+       "endMs": 1090
+      },
+      {
+       "text": "每",
+       "startMs": 1090,
+       "endMs": 1250
+      },
+      {
+       "text": "个",
+       "startMs": 1250,
+       "endMs": 1330
+      },
+      {
+       "text": "月",
+       "startMs": 1330,
+       "endMs": 1490
+      },
+      {
+       "text": "都",
+       "startMs": 1490,
+       "endMs": 1610
+      },
+      {
+       "text": "有",
+       "startMs": 1610,
+       "endMs": 1770
+      },
+      {
+       "text": "定",
+       "startMs": 1770,
+       "endMs": 1930
+      },
+      {
+       "text": "期",
+       "startMs": 1930,
+       "endMs": 2130
+      },
+      {
+       "text": "清",
+       "startMs": 2130,
+       "endMs": 2290
+      },
+      {
+       "text": "理",
+       "startMs": 2290,
+       "endMs": 2450
+      },
+      {
+       "text": "冰",
+       "startMs": 2450,
+       "endMs": 2610
+      },
+      {
+       "text": "箱",
+       "startMs": 2610,
+       "endMs": 2770
+      },
+      {
+       "text": "的",
+       "startMs": 2770,
+       "endMs": 2930
+      },
+      {
+       "text": "好",
+       "startMs": 2930,
+       "endMs": 3130
+      },
+      {
+       "text": "习",
+       "startMs": 3130,
+       "endMs": 3250
+      },
+      {
+       "text": "惯",
+       "startMs": 3250,
+       "endMs": 3410
+      },
+      {
+       "text": "不",
+       "startMs": 3730,
+       "endMs": 3930
+      },
+      {
+       "text": "然",
+       "startMs": 3930,
+       "endMs": 4050
+      },
+      {
+       "text": "里",
+       "startMs": 4090,
+       "endMs": 4210
+      },
+      {
+       "text": "面",
+       "startMs": 4210,
+       "endMs": 4330
+      },
+      {
+       "text": "的",
+       "startMs": 4330,
+       "endMs": 4490
+      },
+      {
+       "text": "食",
+       "startMs": 4490,
+       "endMs": 4650
+      },
+      {
+       "text": "物",
+       "startMs": 4650,
+       "endMs": 4810
+      },
+      {
+       "text": "只",
+       "startMs": 4810,
+       "endMs": 4970
+      },
+      {
+       "text": "会",
+       "startMs": 4970,
+       "endMs": 5130
+      },
+      {
+       "text": "越",
+       "startMs": 5130,
+       "endMs": 5290
+      },
+      {
+       "text": "放",
+       "startMs": 5290,
+       "endMs": 5450
+      },
+      {
+       "text": "越",
+       "startMs": 5450,
+       "endMs": 5610
+      },
+      {
+       "text": "脏",
+       "startMs": 5610,
+       "endMs": 5850
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 106720,
+      "name": "滴露_植源喷雾_姚瑶_20260710_81518373937158",
+      "sceneDescription": "在明亮整洁的冰箱内，一只穿浅色长袖的右手拉开底部标有“MIRAFRESH”的抽屉。冰箱上层摆放牛奶果汁等饮品，中层有鸡蛋收纳盒与蛋糕，下层透明收纳盒装有橘子、青苹果和西瓜。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260710/5129a8447d5b4d6ba0e96df4820d80cb.snapshot.jpg?sign=1787196433-d864beba4d504c56a96788c75b47fcc3-0-45f84253ef9e392f1ba2e8231e5afdac",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260710/5129a8447d5b4d6ba0e96df4820d80cb.mp4",
+      "durationMs": 1207,
+      "speed": 0.75,
+      "allocMs": 1609
+     },
+     {
+      "materialId": 114803,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576708",
+      "voiceover": "不仅是看得见的油污，像微波炉烤箱里看不见的金黄色葡萄球菌、大肠杆菌都能给你有效杀灭。不得不说，我这些年的厨房清洁都算是白做了，要像这样才称得上干净明亮嘛。",
+      "sceneDescription": "厨房中，手向油污烤箱喷洒清洁剂并用蓝布擦拭。随后手持滴露清洁剂向油污博世燃气灶喷洒，用紫布擦拭干净。带有细菌图文提示。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/153445f929af4d1d989e5da26f61358f.snapshot.jpg?sign=1787552079-3cc8795ab1244651b248f4ebb2bc604a-0-7034cc0540d197dddf4015d35004b3a2",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/153445f929af4d1d989e5da26f61358f.mp4",
+      "durationMs": 9729,
+      "allocMs": 4439
+     }
+    ],
+    "reference": {
+     "startMs": 48430,
+     "endMs": 52550,
+     "cuts": [
+      50963,
+      51397,
+      51663,
+      52063
+     ],
+     "shotMeta": [
+      {
+       "startMs": 50963,
+       "description": "该镜头拍摄的是清洁冰箱门胶条的过程，先展示带有污垢的冰箱门胶条，随后用蓝色抹布擦拭该部位",
+       "tags": [
+        "冰箱胶条",
+        "实拍",
+        "常规清洁"
+       ],
+       "framePath": "<DATA>/script_refs/hlhivnohoo/tag_lmt0drx2we_1/f0.jpg"
+      }
+     ]
+    }
+   },
+   {
+    "id": "lmt0drx2wf",
+    "text": "直接喷上等待溶解，几分钟后刷一刷。",
+    "tags": [
+     "使用方法"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wf_1787541743798.mp3",
+     "durationMs": 3864,
+     "sourceText": "直接喷上等待溶解，几分钟后刷一刷。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "直",
+       "startMs": 330,
+       "endMs": 530
+      },
+      {
+       "text": "接",
+       "startMs": 530,
+       "endMs": 650
+      },
+      {
+       "text": "喷",
+       "startMs": 690,
+       "endMs": 890
+      },
+      {
+       "text": "上",
+       "startMs": 890,
+       "endMs": 1170
+      },
+      {
+       "text": "等",
+       "startMs": 1210,
+       "endMs": 1410
+      },
+      {
+       "text": "待",
+       "startMs": 1410,
+       "endMs": 1570
+      },
+      {
+       "text": "溶",
+       "startMs": 1610,
+       "endMs": 1810
+      },
+      {
+       "text": "解",
+       "startMs": 1810,
+       "endMs": 2010
+      },
+      {
+       "text": "几",
+       "startMs": 2330,
+       "endMs": 2570
+      },
+      {
+       "text": "分",
+       "startMs": 2570,
+       "endMs": 2690
+      },
+      {
+       "text": "钟",
+       "startMs": 2690,
+       "endMs": 2810
+      },
+      {
+       "text": "后",
+       "startMs": 2810,
+       "endMs": 3050
+      },
+      {
+       "text": "刷",
+       "startMs": 3050,
+       "endMs": 3250
+      },
+      {
+       "text": "一",
+       "startMs": 3250,
+       "endMs": 3410
+      },
+      {
+       "text": "刷",
+       "startMs": 3450,
+       "endMs": 3570
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 115995,
+      "name": "滴露_植源喷雾_姚瑶_20260727_83032121126913",
+      "sceneDescription": "在厨房白色瓷砖台面上，一只左手拿着白色喷雾瓶，向立着的一个布满黄色油污的带木柄玻璃锅盖持续喷洒液体。静置后油污溶解向下流淌，接着一只右手拿着蓝色抹布擦拭锅盖，最后锅盖变得干净透明。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260727/78da4689329d4158a60dd5dadb7612ae.snapshot.jpg?sign=1787196440-a7f299e19f2a4a6290744940ca2110f9-0-7468c21628efd6a992701109c48c57f6",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260727/78da4689329d4158a60dd5dadb7612ae.mp4",
+      "durationMs": 4250,
+      "allocMs": 3864
+     }
+    ],
+    "reference": {
+     "startMs": 52710,
+     "endMs": 54990
+    }
+   },
+   {
+    "id": "lmt0drx2wg",
+    "text": "附着在上面的细菌就不见了。",
+    "tags": [
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wg_1787541745829.mp3",
+     "durationMs": 2448,
+     "sourceText": "附着在上面的细菌就不见了。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "附",
+       "startMs": 360,
+       "endMs": 400
+      },
+      {
+       "text": "着",
+       "startMs": 520,
+       "endMs": 560
+      },
+      {
+       "text": "在",
+       "startMs": 640,
+       "endMs": 800
+      },
+      {
+       "text": "上",
+       "startMs": 800,
+       "endMs": 920
+      },
+      {
+       "text": "面",
+       "startMs": 920,
+       "endMs": 1040
+      },
+      {
+       "text": "的",
+       "startMs": 1040,
+       "endMs": 1200
+      },
+      {
+       "text": "细",
+       "startMs": 1200,
+       "endMs": 1320
+      },
+      {
+       "text": "菌",
+       "startMs": 1320,
+       "endMs": 1480
+      },
+      {
+       "text": "就",
+       "startMs": 1480,
+       "endMs": 1680
+      },
+      {
+       "text": "不",
+       "startMs": 1680,
+       "endMs": 1800
+      },
+      {
+       "text": "见",
+       "startMs": 1800,
+       "endMs": 1960
+      },
+      {
+       "text": "了",
+       "startMs": 1960,
+       "endMs": 2160
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114802,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576707",
+      "voiceover": "主持人方琼果然没骗我！这个能去除厨房里的油渍污渍是真的，这个能去除冰箱里的细菌霉斑也是真的，这个能解决家里的各种清洁问题，真的可以信！",
+      "sceneDescription": "居家环境中，穿绿色卫衣的短发女士双手各持一瓶滴露多用途清洁喷雾讲话。随后，一只手依次将清洁剂喷洒在布满油污的微波炉内壁、有霉斑的冰箱隔板及脏污的白色小狗皮质凳子上，并用抹布擦拭干净。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/a24da0f2491b4bc78aa9b0625d6a638a.snapshot.jpg?sign=1787196081-0b7f8f11bf5c42868c06f54f8b68c224-0-a9eede17f2cda78e5cb8ea596ba4b47b",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/a24da0f2491b4bc78aa9b0625d6a638a.mp4",
+      "durationMs": 12167,
+      "allocMs": 2448
+     }
+    ],
+    "reference": {
+     "startMs": 55400,
+     "endMs": 56800
+    }
+   },
+   {
+    "id": "lmt0drx2wh",
+    "text": "99.9%的除菌率，植物除菌成分，用的安全放心。",
+    "tags": [
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wh_1787541747935.mp3",
+     "durationMs": 4848,
+     "sourceText": "99.9%的除菌率，植物除菌成分，用的安全放心。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "99.9%",
+       "startMs": 290,
+       "endMs": 1490
+      },
+      {
+       "text": "的",
+       "startMs": 1490,
+       "endMs": 1650
+      },
+      {
+       "text": "除",
+       "startMs": 1650,
+       "endMs": 1770
+      },
+      {
+       "text": "菌",
+       "startMs": 1850,
+       "endMs": 1930
+      },
+      {
+       "text": "率",
+       "startMs": 1970,
+       "endMs": 2210
+      },
+      {
+       "text": "植",
+       "startMs": 2370,
+       "endMs": 2570
+      },
+      {
+       "text": "物",
+       "startMs": 2570,
+       "endMs": 2690
+      },
+      {
+       "text": "除",
+       "startMs": 2730,
+       "endMs": 2850
+      },
+      {
+       "text": "菌",
+       "startMs": 2890,
+       "endMs": 3010
+      },
+      {
+       "text": "成",
+       "startMs": 3090,
+       "endMs": 3250
+      },
+      {
+       "text": "分",
+       "startMs": 3250,
+       "endMs": 3370
+      },
+      {
+       "text": "用",
+       "startMs": 3530,
+       "endMs": 3730
+      },
+      {
+       "text": "的",
+       "startMs": 3730,
+       "endMs": 3850
+      },
+      {
+       "text": "安",
+       "startMs": 3890,
+       "endMs": 4010
+      },
+      {
+       "text": "全",
+       "startMs": 4010,
+       "endMs": 4170
+      },
+      {
+       "text": "放",
+       "startMs": 4170,
+       "endMs": 4370
+      },
+      {
+       "text": "心",
+       "startMs": 4370,
+       "endMs": 4570
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114803,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82494117576708",
+      "voiceover": "不仅是看得见的油污，像微波炉烤箱里看不见的金黄色葡萄球菌、大肠杆菌都能给你有效杀灭。不得不说，我这些年的厨房清洁都算是白做了，要像这样才称得上干净明亮嘛。",
+      "sceneDescription": "厨房中，手向油污烤箱喷洒清洁剂并用蓝布擦拭。随后手持滴露清洁剂向油污博世燃气灶喷洒，用紫布擦拭干净。带有细菌图文提示。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/153445f929af4d1d989e5da26f61358f.snapshot.jpg?sign=1787196082-b5bf107120414213881cf9cc3047bc86-0-75132e783d0ef46398d86baa8c9e69fb",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/153445f929af4d1d989e5da26f61358f.mp4",
+      "durationMs": 9729,
+      "allocMs": 4848
+     }
+    ],
+    "reference": {
+     "startMs": 57000,
+     "endMs": 60640
+    }
+   },
+   {
+    "id": "lmt0drx2wi",
+    "text": "不管油腻腻的灶台油烟机，还是和食物接触的微波炉烤箱，各种平时难清理的地方，用它喷一喷。",
+    "tags": [
+     "痛点",
+     "使用方法"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wi_1787541751299.mp3",
+     "durationMs": 8712,
+     "sourceText": "不管油腻腻的灶台油烟机，还是和食物接触的微波炉烤箱，各种平时难清理的地方，用它喷一喷。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "不",
+       "startMs": 240,
+       "endMs": 440
+      },
+      {
+       "text": "管",
+       "startMs": 440,
+       "endMs": 640
+      },
+      {
+       "text": "油",
+       "startMs": 680,
+       "endMs": 880
+      },
+      {
+       "text": "腻",
+       "startMs": 920,
+       "endMs": 1000
+      },
+      {
+       "text": "腻",
+       "startMs": 1120,
+       "endMs": 1160
+      },
+      {
+       "text": "的",
+       "startMs": 1200,
+       "endMs": 1400
+      },
+      {
+       "text": "灶",
+       "startMs": 1400,
+       "endMs": 1600
+      },
+      {
+       "text": "台",
+       "startMs": 1600,
+       "endMs": 1840
+      },
+      {
+       "text": "油",
+       "startMs": 1920,
+       "endMs": 2120
+      },
+      {
+       "text": "烟",
+       "startMs": 2120,
+       "endMs": 2320
+      },
+      {
+       "text": "机",
+       "startMs": 2320,
+       "endMs": 2600
+      },
+      {
+       "text": "还",
+       "startMs": 2800,
+       "endMs": 3000
+      },
+      {
+       "text": "是",
+       "startMs": 3000,
+       "endMs": 3160
+      },
+      {
+       "text": "和",
+       "startMs": 3160,
+       "endMs": 3360
+      },
+      {
+       "text": "食",
+       "startMs": 3360,
+       "endMs": 3520
+      },
+      {
+       "text": "物",
+       "startMs": 3520,
+       "endMs": 3640
+      },
+      {
+       "text": "接",
+       "startMs": 3680,
+       "endMs": 3880
+      },
+      {
+       "text": "触",
+       "startMs": 3880,
+       "endMs": 4000
+      },
+      {
+       "text": "的",
+       "startMs": 4000,
+       "endMs": 4240
+      },
+      {
+       "text": "微",
+       "startMs": 4240,
+       "endMs": 4400
+      },
+      {
+       "text": "波",
+       "startMs": 4440,
+       "endMs": 4560
+      },
+      {
+       "text": "炉",
+       "startMs": 4600,
+       "endMs": 4800
+      },
+      {
+       "text": "烤",
+       "startMs": 4880,
+       "endMs": 5160
+      },
+      {
+       "text": "箱",
+       "startMs": 5160,
+       "endMs": 5400
+      },
+      {
+       "text": "各",
+       "startMs": 5720,
+       "endMs": 5920
+      },
+      {
+       "text": "种",
+       "startMs": 5920,
+       "endMs": 6040
+      },
+      {
+       "text": "平",
+       "startMs": 6040,
+       "endMs": 6240
+      },
+      {
+       "text": "时",
+       "startMs": 6240,
+       "endMs": 6360
+      },
+      {
+       "text": "难",
+       "startMs": 6360,
+       "endMs": 6600
+      },
+      {
+       "text": "清",
+       "startMs": 6600,
+       "endMs": 6800
+      },
+      {
+       "text": "理",
+       "startMs": 6800,
+       "endMs": 6920
+      },
+      {
+       "text": "的",
+       "startMs": 6920,
+       "endMs": 7080
+      },
+      {
+       "text": "地",
+       "startMs": 7080,
+       "endMs": 7240
+      },
+      {
+       "text": "方",
+       "startMs": 7240,
+       "endMs": 7360
+      },
+      {
+       "text": "用",
+       "startMs": 7480,
+       "endMs": 7720
+      },
+      {
+       "text": "它",
+       "startMs": 7720,
+       "endMs": 7840
+      },
+      {
+       "text": "喷",
+       "startMs": 7880,
+       "endMs": 8080
+      },
+      {
+       "text": "一",
+       "startMs": 8080,
+       "endMs": 8240
+      },
+      {
+       "text": "喷",
+       "startMs": 8240,
+       "endMs": 8400
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 116010,
+      "name": "滴露_植源喷雾_姚瑶_20260727_83032278502404",
+      "sceneDescription": "厨房台面上，一只手持绿色清洁喷雾，向布满黄色油污的微波炉内门持续喷洒白色泡沫。静置后油污溶解成黄褐色液体滴落。随后，手持蓝色抹布擦拭微波炉门，油腻表面变得干净透亮并伴有闪光特效，背景可见咖啡机等电器。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260727/cdeff5c1c4a342b89156d90d7905def0.snapshot.jpg?sign=1787196419-8738a26f57df48b382c65b3ecca3475b-0-edbec357e80f454b2b02498e10aedf87",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260727/cdeff5c1c4a342b89156d90d7905def0.mp4",
+      "durationMs": 3708,
+      "allocMs": 2178
+     },
+     {
+      "materialId": 104687,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80790158949382",
+      "sceneDescription": "在厨房台面上，一只手拿喷壶，先向布满褐色油污的白色Galanz微波炉顶部喷洒清洁剂。随后用蓝色抹布擦拭，迅速将油污擦净，表面恢复洁白。背景可见Dettol洗手液和相框。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/33eff614ea534448a4cca28e6c1d601e.snapshot.jpg?sign=1787198600-d17d4e8642744049b0d42018acaaf0b4-0-e9b24a829ce6d000afe27a91d09fe62a",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/33eff614ea534448a4cca28e6c1d601e.mp4",
+      "durationMs": 3367,
+      "allocMs": 2178
+     },
+     {
+      "materialId": 104785,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80790619264014",
+      "sceneDescription": "厨房燃气灶前，左手持透明喷壶向布满油污的黑色玻璃灶台喷洒白色泡沫清洁剂。随后右手拿蓝色抹布在泡沫区域来回擦拭。擦拭后灶台光洁如新，清晰倒影出墙面的卡通贴纸，并出现闪光特效。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/27de15dc479f4961871b1924463f9351.snapshot.jpg?sign=1787198600-51ae43d186a742a288cccf6412f6d932-0-829eac354c160338b17b1b0b21211695",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/27de15dc479f4961871b1924463f9351.mp4",
+      "durationMs": 3715,
+      "allocMs": 2178
+     },
+     {
+      "materialId": 104726,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80790359874566",
+      "sceneDescription": "厨房台面上，白色Gala微波炉上方放着红色“福”字装饰和粉色旺仔饮料。一只手持绿色标签喷雾清洁剂，向布满黄色油污的微波炉内壁喷洒液体。随后，该手用蓝色抹布擦拭内壁，迅速将油污擦净，微波炉内部恢复洁白。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/8335f9ea631647b3b9062ebe694c4143.snapshot.jpg?sign=1787198600-109f639ebc5e429b98fb7b3213165a10-0-01c84bf133b558e6a7cff51499fdc7b8",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/8335f9ea631647b3b9062ebe694c4143.mp4",
+      "durationMs": 4923,
+      "allocMs": 2178
+     }
+    ],
+    "reference": {
+     "startMs": 60920,
+     "endMs": 66760
+    }
+   },
+   {
+    "id": "lmt0drx2wj",
+    "text": "而且不用二次水洗，不光不用二次水洗，还是去污、杀菌、养护、除臭多效合一的。",
+    "tags": [
+     "主卖点解决方案"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wj_1787541754319.mp3",
+     "durationMs": 7872,
+     "sourceText": "而且不用二次水洗，不光不用二次水洗，还是去污、杀菌、养护、除臭多效合一的。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "而",
+       "startMs": 270,
+       "endMs": 390
+      },
+      {
+       "text": "且",
+       "startMs": 390,
+       "endMs": 550
+      },
+      {
+       "text": "不",
+       "startMs": 550,
+       "endMs": 670
+      },
+      {
+       "text": "用",
+       "startMs": 670,
+       "endMs": 830
+      },
+      {
+       "text": "二",
+       "startMs": 830,
+       "endMs": 990
+      },
+      {
+       "text": "次",
+       "startMs": 990,
+       "endMs": 1110
+      },
+      {
+       "text": "水",
+       "startMs": 1110,
+       "endMs": 1350
+      },
+      {
+       "text": "洗",
+       "startMs": 1350,
+       "endMs": 1630
+      },
+      {
+       "text": "不",
+       "startMs": 1910,
+       "endMs": 2150
+      },
+      {
+       "text": "光",
+       "startMs": 2150,
+       "endMs": 2430
+      },
+      {
+       "text": "不",
+       "startMs": 2430,
+       "endMs": 2630
+      },
+      {
+       "text": "用",
+       "startMs": 2630,
+       "endMs": 2750
+      },
+      {
+       "text": "二",
+       "startMs": 2750,
+       "endMs": 2910
+      },
+      {
+       "text": "次",
+       "startMs": 2910,
+       "endMs": 3070
+      },
+      {
+       "text": "水",
+       "startMs": 3070,
+       "endMs": 3270
+      },
+      {
+       "text": "洗",
+       "startMs": 3270,
+       "endMs": 3510
+      },
+      {
+       "text": "还",
+       "startMs": 3670,
+       "endMs": 3910
+      },
+      {
+       "text": "是",
+       "startMs": 3910,
+       "endMs": 4190
+      },
+      {
+       "text": "去",
+       "startMs": 4270,
+       "endMs": 4470
+      },
+      {
+       "text": "污",
+       "startMs": 4510,
+       "endMs": 4750
+      },
+      {
+       "text": "杀",
+       "startMs": 4950,
+       "endMs": 5230
+      },
+      {
+       "text": "菌",
+       "startMs": 5270,
+       "endMs": 5510
+      },
+      {
+       "text": "养",
+       "startMs": 5710,
+       "endMs": 5990
+      },
+      {
+       "text": "护",
+       "startMs": 5990,
+       "endMs": 6230
+      },
+      {
+       "text": "除",
+       "startMs": 6350,
+       "endMs": 6590
+      },
+      {
+       "text": "臭",
+       "startMs": 6590,
+       "endMs": 6830
+      },
+      {
+       "text": "多",
+       "startMs": 6830,
+       "endMs": 7030
+      },
+      {
+       "text": "效",
+       "startMs": 7030,
+       "endMs": 7230
+      },
+      {
+       "text": "合",
+       "startMs": 7230,
+       "endMs": 7390
+      },
+      {
+       "text": "一",
+       "startMs": 7390,
+       "endMs": 7550
+      },
+      {
+       "text": "的",
+       "startMs": 7550,
+       "endMs": 7790
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114716,
+      "name": "灶台常规清洁 (3)_C82488766675968",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/59a6dda581df4b25a25669f5de8bb5e1.snapshot.jpg?sign=1787196411-e71dde0dd5f64a0bba75d9fb3f5b68bc-0-3af43000348b91c9ce31e58145c06e18",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/59a6dda581df4b25a25669f5de8bb5e1.mp4",
+      "durationMs": 3622,
+      "allocMs": 1968
+     },
+     {
+      "materialId": 105741,
+      "name": "滴露_植源喷雾_姚瑶_20260706_81141540682752",
+      "sceneDescription": "在带有大理石纹理的桌面上，背景摆放着红色新年装饰和多罐饮料。画面中央是一个布满褐色油污的白色电水壶。一只做了红色美甲的手拿着白色喷雾瓶，向水壶表面持续喷洒白色泡沫清洁剂。画面加速显示泡沫溶解污渍并向下滑落。随后，一只戴黑色手环的手使用蓝色抹布擦拭水壶，先擦去表面污渍，后展示水壶完全恢复洁白光亮的状态。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260706/a69cfcf5882e4de6b41252bb885c4929.snapshot.jpg?sign=1787198607-030a13efebb441d4abdb1fc1c4d96976-0-95db4333fde011b9fbfda718cb36b9a2",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260706/a69cfcf5882e4de6b41252bb885c4929.mp4",
+      "durationMs": 4760,
+      "allocMs": 1968
+     },
+     {
+      "materialId": 104795,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791142539268",
+      "sceneDescription": "画面特写带有蜡笔小新图案的玻璃面板下方布满黄色油污的缝隙。一只手持喷壶向油污处持续喷洒清洁液，随后用蓝色海绵反复擦拭该区域。擦拭后，原本充满油污的表面变得光洁如新，并出现闪光特效。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/43435866dc894ea98ec3da950da8af1f.snapshot.jpg?sign=1787198607-704be4d073714717bde85c754c9848b6-0-dff19cdd3501a6bd3374237d030bcebc",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/43435866dc894ea98ec3da950da8af1f.mp4",
+      "durationMs": 3715,
+      "allocMs": 1968
+     },
+     {
+      "materialId": 104834,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791681146881",
+      "sceneDescription": "在厨房灶台旁，右手拿着透明绿色的滴露多效除菌清洁喷雾，向白色大理石台面的棕色油污处持续喷洒。静置后，右手先用蓝色抹布擦拭台面污渍，后换粉色抹布擦拭黑色燃气灶边缘，最后台面光洁如新。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/b8dfdaae49c94a07a7e4355fb872d2cf.snapshot.jpg?sign=1787198607-2501cb6e93d04f9c9ad3b2cd9e3ec164-0-4b64fd8653c6c1e5a6cd191b3f217403",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/b8dfdaae49c94a07a7e4355fb872d2cf.mp4",
+      "durationMs": 6120,
+      "allocMs": 1968
+     }
+    ],
+    "reference": {
+     "startMs": 67190,
+     "endMs": 72230
+    }
+   },
+   {
+    "id": "lmt0drx2wk",
+    "text": "绵密的泡沫会深入各种缝隙角落，清理躲藏的细菌。",
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wk_1787541756757.mp3",
+     "durationMs": 5064,
+     "sourceText": "绵密的泡沫会深入各种缝隙角落，清理躲藏的细菌。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "绵",
+       "startMs": 370,
+       "endMs": 450
+      },
+      {
+       "text": "密",
+       "startMs": 570,
+       "endMs": 690
+      },
+      {
+       "text": "的",
+       "startMs": 690,
+       "endMs": 890
+      },
+      {
+       "text": "泡",
+       "startMs": 890,
+       "endMs": 1130
+      },
+      {
+       "text": "沫",
+       "startMs": 1130,
+       "endMs": 1290
+      },
+      {
+       "text": "会",
+       "startMs": 1330,
+       "endMs": 1610
+      },
+      {
+       "text": "深",
+       "startMs": 1610,
+       "endMs": 1770
+      },
+      {
+       "text": "入",
+       "startMs": 1770,
+       "endMs": 1970
+      },
+      {
+       "text": "各",
+       "startMs": 1970,
+       "endMs": 2170
+      },
+      {
+       "text": "种",
+       "startMs": 2170,
+       "endMs": 2290
+      },
+      {
+       "text": "缝",
+       "startMs": 2330,
+       "endMs": 2530
+      },
+      {
+       "text": "隙",
+       "startMs": 2570,
+       "endMs": 2610
+      },
+      {
+       "text": "角",
+       "startMs": 2770,
+       "endMs": 3010
+      },
+      {
+       "text": "落",
+       "startMs": 3010,
+       "endMs": 3170
+      },
+      {
+       "text": "清",
+       "startMs": 3530,
+       "endMs": 3730
+      },
+      {
+       "text": "理",
+       "startMs": 3730,
+       "endMs": 3890
+      },
+      {
+       "text": "躲",
+       "startMs": 3930,
+       "endMs": 4130
+      },
+      {
+       "text": "藏",
+       "startMs": 4130,
+       "endMs": 4290
+      },
+      {
+       "text": "的",
+       "startMs": 4290,
+       "endMs": 4490
+      },
+      {
+       "text": "细",
+       "startMs": 4490,
+       "endMs": 4650
+      },
+      {
+       "text": "菌",
+       "startMs": 4650,
+       "endMs": 4810
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105687,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80904329872384",
+      "sceneDescription": "在厨房台面上，一只手拿着滴露（Dettol）多效除菌喷雾，持续向布满油污的美的（Midea）电饭煲表面喷洒出白色泡沫。静置后，手持蓝色抹布擦拭电饭煲表面，将泡沫与油污一并擦除，电饭煲恢复光洁。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/f601def1d761446db0816a768c774b96.snapshot.jpg?sign=1787196085-8fb3da01cc41430aaa96730187f8747b-0-3d6e8348a591a9fe49c538a7f3419f93",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/f601def1d761446db0816a768c774b96.mp4",
+      "durationMs": 4853,
+      "speed": 0.95,
+      "allocMs": 5064
+     }
+    ],
+    "reference": {
+     "startMs": 72390,
+     "endMs": 75590
+    }
+   },
+   {
+    "id": "lmt0drx2wl",
+    "text": "你们看看这个效果，都不需要请保洁阿姨了。",
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wl_1787541758937.mp3",
+     "durationMs": 3864,
+     "sourceText": "你们看看这个效果，都不需要请保洁阿姨了。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "你",
+       "startMs": 190,
+       "endMs": 350
+      },
+      {
+       "text": "们",
+       "startMs": 350,
+       "endMs": 470
+      },
+      {
+       "text": "看",
+       "startMs": 470,
+       "endMs": 630
+      },
+      {
+       "text": "看",
+       "startMs": 670,
+       "endMs": 750
+      },
+      {
+       "text": "这",
+       "startMs": 750,
+       "endMs": 910
+      },
+      {
+       "text": "个",
+       "startMs": 910,
+       "endMs": 1070
+      },
+      {
+       "text": "效",
+       "startMs": 1070,
+       "endMs": 1270
+      },
+      {
+       "text": "果",
+       "startMs": 1270,
+       "endMs": 1470
+      },
+      {
+       "text": "都",
+       "startMs": 1710,
+       "endMs": 1950
+      },
+      {
+       "text": "不",
+       "startMs": 1950,
+       "endMs": 2110
+      },
+      {
+       "text": "需",
+       "startMs": 2110,
+       "endMs": 2230
+      },
+      {
+       "text": "要",
+       "startMs": 2230,
+       "endMs": 2350
+      },
+      {
+       "text": "请",
+       "startMs": 2350,
+       "endMs": 2590
+      },
+      {
+       "text": "保",
+       "startMs": 2590,
+       "endMs": 2790
+      },
+      {
+       "text": "洁",
+       "startMs": 2790,
+       "endMs": 2910
+      },
+      {
+       "text": "阿",
+       "startMs": 2990,
+       "endMs": 3150
+      },
+      {
+       "text": "姨",
+       "startMs": 3150,
+       "endMs": 3310
+      },
+      {
+       "text": "了",
+       "startMs": 3310,
+       "endMs": 3590
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 104807,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791425683462",
+      "sceneDescription": "厨房燃气灶后的瓷砖墙面布满黄色油污。一只手持喷雾瓶向油污处喷洒清洁剂，画面出现时钟图标示意静置。随后，手持蓝色抹布擦拭墙面，轻松去除油污。墙面恢复光洁并带有闪光特效，呈现明显的清洁前后对比。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/1c2b2f9b68b445bf93fd9cc7bd2a848a.snapshot.jpg?sign=1787196086-93297e3c16eb4726b0527a686c53d841-0-4933a77313f265211192dc9ff37f723e",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/1c2b2f9b68b445bf93fd9cc7bd2a848a.mp4",
+      "durationMs": 3111,
+      "speed": 0.75,
+      "allocMs": 1288
+     },
+     {
+      "materialId": 105770,
+      "name": "滴露_植源喷雾_姚瑶_20260706_81154337174529",
+      "sceneDescription": "厨房中，布满厚重黄褐色油污的抽油烟机滤网被喷满白色泡沫。静置后，一只穿着黑色长袖的手拿着蓝色抹布擦拭滤网，轻松将泡沫与油污擦除。最终呈现出光亮如新的不锈钢滤网，下方摆放着“福”字贴纸、粉色盆栽和三罐饮料。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260706/accade28c00847cea6fc137c99613646.snapshot.jpg?sign=1787198660-c690b1273a2a4f6a95789fc7ea5078e2-0-e1cd3b60b1a79bda8f9e69dec609da9b",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260706/accade28c00847cea6fc137c99613646.mp4",
+      "durationMs": 5642,
+      "allocMs": 1288
+     },
+     {
+      "materialId": 114793,
+      "name": "滴露_植源喷雾_姚瑶_20260721_82493860822020",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/37d416a4365343a7acbca5e9dde9a15d.snapshot.jpg?sign=1787198660-5231f6a4de4b4ee6b907a171fe474268-0-660f10032b5dff3132874cff84049ac3",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/37d416a4365343a7acbca5e9dde9a15d.mp4",
+      "durationMs": 27098,
+      "allocMs": 1288
+     }
+    ],
+    "reference": {
+     "startMs": 75670,
+     "endMs": 78150
+    }
+   },
+   {
+    "id": "lmt0drx2wm",
+    "text": "不伤手不伤家电，不用担心有化学残留，也不像其他清洁剂味道呛鼻。",
+    "tags": [
+     "品类PK",
+     "辅助卖点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wm_1787541763122.mp3",
+     "durationMs": 6072,
+     "sourceText": "不伤手不伤家电，不用担心有化学残留，也不像其他清洁剂味道呛鼻。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "不",
+       "startMs": 200,
+       "endMs": 400
+      },
+      {
+       "text": "伤",
+       "startMs": 400,
+       "endMs": 560
+      },
+      {
+       "text": "手",
+       "startMs": 560,
+       "endMs": 760
+      },
+      {
+       "text": "不",
+       "startMs": 760,
+       "endMs": 960
+      },
+      {
+       "text": "伤",
+       "startMs": 960,
+       "endMs": 1120
+      },
+      {
+       "text": "家",
+       "startMs": 1120,
+       "endMs": 1360
+      },
+      {
+       "text": "电",
+       "startMs": 1360,
+       "endMs": 1520
+      },
+      {
+       "text": "不",
+       "startMs": 1800,
+       "endMs": 1960
+      },
+      {
+       "text": "用",
+       "startMs": 1960,
+       "endMs": 2120
+      },
+      {
+       "text": "担",
+       "startMs": 2120,
+       "endMs": 2280
+      },
+      {
+       "text": "心",
+       "startMs": 2280,
+       "endMs": 2400
+      },
+      {
+       "text": "有",
+       "startMs": 2400,
+       "endMs": 2640
+      },
+      {
+       "text": "化",
+       "startMs": 2640,
+       "endMs": 2840
+      },
+      {
+       "text": "学",
+       "startMs": 2840,
+       "endMs": 2960
+      },
+      {
+       "text": "残",
+       "startMs": 3000,
+       "endMs": 3160
+      },
+      {
+       "text": "留",
+       "startMs": 3160,
+       "endMs": 3360
+      },
+      {
+       "text": "也",
+       "startMs": 3600,
+       "endMs": 3800
+      },
+      {
+       "text": "不",
+       "startMs": 3800,
+       "endMs": 3960
+      },
+      {
+       "text": "像",
+       "startMs": 3960,
+       "endMs": 4160
+      },
+      {
+       "text": "其",
+       "startMs": 4160,
+       "endMs": 4360
+      },
+      {
+       "text": "他",
+       "startMs": 4360,
+       "endMs": 4440
+      },
+      {
+       "text": "清",
+       "startMs": 4480,
+       "endMs": 4640
+      },
+      {
+       "text": "洁",
+       "startMs": 4640,
+       "endMs": 4800
+      },
+      {
+       "text": "剂",
+       "startMs": 4800,
+       "endMs": 4960
+      },
+      {
+       "text": "味",
+       "startMs": 5040,
+       "endMs": 5200
+      },
+      {
+       "text": "道",
+       "startMs": 5200,
+       "endMs": 5280
+      },
+      {
+       "text": "呛",
+       "startMs": 5360,
+       "endMs": 5440
+      },
+      {
+       "text": "鼻",
+       "startMs": 5520,
+       "endMs": 5760
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 114712,
+      "name": "油烟机常规清洁 (2)_C82488752829440",
+      "sceneDescription": "厨房内，手持Deeyeo德佑清洁喷雾向油污抽油烟机喷洒泡沫。随后用蓝色抹布擦拭，瞬间去除油污，表面恢复光洁。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260721/8e60acfd81ef44b1a44ac5abba0b3e0d.snapshot.jpg?sign=1787196393-2097f9f0b34b415bab8f1d8ba9624852-0-a3d102351152b88d555a81aa68067c77",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260721/8e60acfd81ef44b1a44ac5abba0b3e0d.mp4",
+      "durationMs": 4458,
+      "allocMs": 2024
+     },
+     {
+      "materialId": 105774,
+      "name": "滴露_植源喷雾_姚瑶_20260706_81154401323009",
+      "sceneDescription": "在厨房灶台上，一只穿白色长袖的手正向布满污渍的黑色KONKA燃气灶喷洒白色泡沫清洁剂。接着，手持蓝色海绵擦拭燃气灶表面，将泡沫和污渍彻底擦净。最后呈现擦拭后光洁如新并带有闪光特效的燃气灶，背景可见绿色滴露洗手液。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260706/d27690a3b66d4b2e8e2726f542e9449d.snapshot.jpg?sign=1787198625-4314e2efe90b4fcbb3bae448c4a3082a-0-5a2575e4991d3545f659b95740105cbc",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260706/d27690a3b66d4b2e8e2726f542e9449d.mp4",
+      "durationMs": 3134,
+      "allocMs": 2024
+     },
+     {
+      "materialId": 104684,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80790158949379",
+      "sceneDescription": "在厨房环境中，一只手拿着蓝色喷壶，向布满褐色油污和圆形污渍的白色家电表面持续喷洒透明清洁液体。随后，一只手拿着蓝色抹布，在喷洒过液体的表面上来回擦拭。随着抹布的擦拭，原本顽固的油污被迅速去除，白色表面恢复光洁。画面右下角贴有带二维码的标签，背景边缘可见酱油瓶等厨房调料。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/2ccc499db17449249435990336b9d2a9.snapshot.jpg?sign=1787198625-aa7722488e5a44328115dd3449fc5103-0-5488c1a20526637ecf286058dd813750",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/2ccc499db17449249435990336b9d2a9.mp4",
+      "durationMs": 3300,
+      "allocMs": 2024
+     }
+    ],
+    "reference": {
+     "startMs": 78340,
+     "endMs": 82500
+    }
+   },
+   {
+    "id": "lmt0drx2wn",
+    "text": "家里有小孩宠物的可以放心用，洗完是淡淡的苹果香。",
+    "tags": [
+     "信任背书",
+     "辅助卖点"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wn_1787541765446.mp3",
+     "durationMs": 4440,
+     "sourceText": "家里有小孩宠物的可以放心用，洗完是淡淡的苹果香。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "家",
+       "startMs": 320,
+       "endMs": 440
+      },
+      {
+       "text": "里",
+       "startMs": 440,
+       "endMs": 560
+      },
+      {
+       "text": "有",
+       "startMs": 560,
+       "endMs": 720
+      },
+      {
+       "text": "小",
+       "startMs": 720,
+       "endMs": 880
+      },
+      {
+       "text": "孩",
+       "startMs": 880,
+       "endMs": 1040
+      },
+      {
+       "text": "宠",
+       "startMs": 1080,
+       "endMs": 1320
+      },
+      {
+       "text": "物",
+       "startMs": 1320,
+       "endMs": 1400
+      },
+      {
+       "text": "的",
+       "startMs": 1400,
+       "endMs": 1600
+      },
+      {
+       "text": "可",
+       "startMs": 1600,
+       "endMs": 1720
+      },
+      {
+       "text": "以",
+       "startMs": 1720,
+       "endMs": 1840
+      },
+      {
+       "text": "放",
+       "startMs": 1840,
+       "endMs": 2000
+      },
+      {
+       "text": "心",
+       "startMs": 2000,
+       "endMs": 2120
+      },
+      {
+       "text": "用",
+       "startMs": 2120,
+       "endMs": 2400
+      },
+      {
+       "text": "洗",
+       "startMs": 2640,
+       "endMs": 2840
+      },
+      {
+       "text": "完",
+       "startMs": 2840,
+       "endMs": 3040
+      },
+      {
+       "text": "是",
+       "startMs": 3040,
+       "endMs": 3280
+      },
+      {
+       "text": "淡",
+       "startMs": 3280,
+       "endMs": 3400
+      },
+      {
+       "text": "淡",
+       "startMs": 3480,
+       "endMs": 3560
+      },
+      {
+       "text": "的",
+       "startMs": 3560,
+       "endMs": 3720
+      },
+      {
+       "text": "苹",
+       "startMs": 3720,
+       "endMs": 3880
+      },
+      {
+       "text": "果",
+       "startMs": 3880,
+       "endMs": 4040
+      },
+      {
+       "text": "香",
+       "startMs": 4040,
+       "endMs": 4240
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105390,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986651",
+      "sceneDescription": "在铺着灰色毛绒地毯的室内，一只右手拉开白色抽屉。抽屉上方摆放着插满粉橘色玫瑰的白色花盒。随着抽屉被完全拉开，内部整齐排列着多瓶透明瓶身、白色喷头的滴露（Dettol）多效除菌喷雾，绿色标签上清晰可见“99.9%有效杀菌”和“青苹果香”等卖点字样。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/d1173223250d4dd8aa26f771b9e8398b.snapshot.jpg?sign=1787196368-691c92796c4348dfb3c8af540e173bf8-0-ba9c21746c649c104c121f471620ba74",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/d1173223250d4dd8aa26f771b9e8398b.mp4",
+      "durationMs": 2000,
+      "allocMs": 1480
+     },
+     {
+      "materialId": 105308,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892474939396",
+      "sceneDescription": "厨房场景中，左侧台面放着插有粉色花朵的花瓶，背景是一台贴着红色新年贴纸的白色冰箱。画面前景，一只手举着一瓶透明的滴露（Dettol）清香自然系列表面清洁喷雾，绿色标签印有“除菌99.9%”和“青苹果”字样。同时在背景处，一位穿粉色毛绒上衣的长发女子正拉开冰箱门向内查看。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/bf23ae34344146d896bf22f4235390ef.snapshot.jpg?sign=1787198633-baee36698c334393923d18ec6e66d19a-0-7d04919ca78fce9dae335f7c394f999b",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/bf23ae34344146d896bf22f4235390ef.mp4",
+      "durationMs": 4240,
+      "allocMs": 1480
+     },
+     {
+      "materialId": 105398,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80894314522626",
+      "sceneDescription": "在室内黑色雅马哈钢琴前，一只左手拿着一瓶透明的滴露（Dettol）净爽青苹果味多用途除菌喷雾，瓶身标签突出“除菌99.9%”字样。背景可见木质边桌、白色台灯和绿植。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/915b72046cd2413681cb7603d0a2c7f0.snapshot.jpg?sign=1787198633-15de9baf735f4ac484ffb2cf06002aa5-0-2039787d71d91e84a17b0e266bb322b4",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/915b72046cd2413681cb7603d0a2c7f0.mp4",
+      "durationMs": 3760,
+      "allocMs": 1480
+     }
+    ],
+    "reference": {
+     "startMs": 82620,
+     "endMs": 85580,
+     "cuts": [
+      84353
+     ]
+    }
+   },
+   {
+    "id": "lmt0drx2wo",
+    "text": "有这一瓶清洁剂，其他清洁产品我都看不上了。",
+    "tags": [
+     "品类PK"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wo_1787541767693.mp3",
+     "durationMs": 3864,
+     "sourceText": "有这一瓶清洁剂，其他清洁产品我都看不上了。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "有",
+       "startMs": 200,
+       "endMs": 440
+      },
+      {
+       "text": "这",
+       "startMs": 440,
+       "endMs": 600
+      },
+      {
+       "text": "一",
+       "startMs": 600,
+       "endMs": 720
+      },
+      {
+       "text": "瓶",
+       "startMs": 720,
+       "endMs": 880
+      },
+      {
+       "text": "清",
+       "startMs": 920,
+       "endMs": 1080
+      },
+      {
+       "text": "洁",
+       "startMs": 1080,
+       "endMs": 1240
+      },
+      {
+       "text": "剂",
+       "startMs": 1280,
+       "endMs": 1480
+      },
+      {
+       "text": "其",
+       "startMs": 1760,
+       "endMs": 1960
+      },
+      {
+       "text": "他",
+       "startMs": 1960,
+       "endMs": 2080
+      },
+      {
+       "text": "清",
+       "startMs": 2120,
+       "endMs": 2240
+      },
+      {
+       "text": "洁",
+       "startMs": 2240,
+       "endMs": 2400
+      },
+      {
+       "text": "产",
+       "startMs": 2400,
+       "endMs": 2560
+      },
+      {
+       "text": "品",
+       "startMs": 2560,
+       "endMs": 2680
+      },
+      {
+       "text": "我",
+       "startMs": 2680,
+       "endMs": 2800
+      },
+      {
+       "text": "都",
+       "startMs": 2800,
+       "endMs": 2960
+      },
+      {
+       "text": "看",
+       "startMs": 2960,
+       "endMs": 3080
+      },
+      {
+       "text": "不",
+       "startMs": 3080,
+       "endMs": 3200
+      },
+      {
+       "text": "上",
+       "startMs": 3200,
+       "endMs": 3360
+      },
+      {
+       "text": "了",
+       "startMs": 3360,
+       "endMs": 3600
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105306,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892474939394",
+      "sceneDescription": "在厨房环境中，第一视角下，一只右手在镜头前举着一瓶透明的滴露（Dettol）青苹果味除菌清洁喷雾，瓶身标签清晰显示“除菌99.9%”和“净除重度”等卖点字样，容量为500ml。背景处，一名留着黑色长发、身穿粉色毛绒上衣和黑色长裤的女子正背对镜头，站在打开的冰箱门前查看冰箱内部。前景的手持产品展示与背景的人物动作同时持续进行。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/7ae1ad986c8f4ffd8384a1a517119bd8.snapshot.jpg?sign=1787196361-172c4aef0a1c409395ea991a035fc020-0-e356088cd72c3551742c8e445a5a8b71",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/7ae1ad986c8f4ffd8384a1a517119bd8.mp4",
+      "durationMs": 3840,
+      "allocMs": 966
+     },
+     {
+      "materialId": 105380,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80893016986641",
+      "sceneDescription": "在厨房环境中，一台白色美的微波炉上方整齐摆放着三瓶透明的滴露（Dettol）多效去污液喷雾。瓶身标签上印有绿色盾牌Logo、“清甜青苹果”字样及“99.9%有效杀菌”卖点，净含量500ml。镜头从左向右缓慢平移，持续拍摄静止放置在微波炉顶部的三瓶清洁剂，背景可见红色花朵装饰画。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/6867b7818cc64969abdb375c22d92575.snapshot.jpg?sign=1787198641-74c1cae0f0784edb921e0c62a31909db-0-4e70f0e68b226a46cff99f3894e57b4f",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/6867b7818cc64969abdb375c22d92575.mp4",
+      "durationMs": 2033,
+      "allocMs": 966
+     },
+     {
+      "materialId": 105354,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892696052744",
+      "sceneDescription": "在厨房环境中，一只左手拿着一瓶透明的滴露（Dettol）自然清新系列多效表面除菌液喷雾。瓶身贴有绿色标签，印有青苹果图案，并醒目标注“除菌99.9%”和“净含量:500ml”字样。背景模糊可见燃气灶、一个带盖的锅具以及抽油烟机。手持喷雾瓶保持相对静止，微微转动以清晰展示产品正面标签信息。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/ccca2f57acc748739940dfba40bb5a53.snapshot.jpg?sign=1787198641-9feaa17a9f5b44e9af5480018d6387d7-0-51b688f67de52f56593c48bebb395bda",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/ccca2f57acc748739940dfba40bb5a53.mp4",
+      "durationMs": 3600,
+      "allocMs": 966
+     },
+     {
+      "materialId": 105350,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892696052740",
+      "sceneDescription": "在厨房操作台上，一双手拿着一瓶透明的滴露（Dettol）家居清洁除菌喷雾。左手食指依次指向瓶身标签上的“Dettol滴露”Logo、“99.9%除菌”字样以及底部的“净含量:500ml”。背景可见木质案板和装有红绿灯笼椒的碗。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/4277d0ebaf0449a6be4bbcb28a2d124a.snapshot.jpg?sign=1787198641-7ff5431f364140e0ba2c4517f4a621e0-0-a2a60780dbd812fca152e1e0c27ab9fa",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/4277d0ebaf0449a6be4bbcb28a2d124a.mp4",
+      "durationMs": 5160,
+      "allocMs": 966
+     }
+    ],
+    "reference": {
+     "startMs": 85740,
+     "endMs": 88300
+    }
+   },
+   {
+    "id": "lmt0drx2wp",
+    "text": "以前一个小时才能搞定的家务活，现在不到半小时就搞定了，真是后悔没早点知道它。",
+    "tags": [
+     "痛点",
+     "主卖点解决方案",
+     "促单"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wp_1787541770192.mp3",
+     "durationMs": 6648,
+     "sourceText": "以前一个小时才能搞定的家务活，现在不到半小时就搞定了，真是后悔没早点知道它。",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "以",
+       "startMs": 320,
+       "endMs": 440
+      },
+      {
+       "text": "前",
+       "startMs": 440,
+       "endMs": 560
+      },
+      {
+       "text": "一",
+       "startMs": 560,
+       "endMs": 720
+      },
+      {
+       "text": "个",
+       "startMs": 720,
+       "endMs": 840
+      },
+      {
+       "text": "小",
+       "startMs": 840,
+       "endMs": 1000
+      },
+      {
+       "text": "时",
+       "startMs": 1000,
+       "endMs": 1120
+      },
+      {
+       "text": "才",
+       "startMs": 1120,
+       "endMs": 1280
+      },
+      {
+       "text": "能",
+       "startMs": 1280,
+       "endMs": 1440
+      },
+      {
+       "text": "搞",
+       "startMs": 1440,
+       "endMs": 1600
+      },
+      {
+       "text": "定",
+       "startMs": 1600,
+       "endMs": 1680
+      },
+      {
+       "text": "的",
+       "startMs": 1680,
+       "endMs": 1880
+      },
+      {
+       "text": "家",
+       "startMs": 1880,
+       "endMs": 2040
+      },
+      {
+       "text": "务",
+       "startMs": 2040,
+       "endMs": 2160
+      },
+      {
+       "text": "活",
+       "startMs": 2160,
+       "endMs": 2440
+      },
+      {
+       "text": "现",
+       "startMs": 2600,
+       "endMs": 2800
+      },
+      {
+       "text": "在",
+       "startMs": 2800,
+       "endMs": 2920
+      },
+      {
+       "text": "不",
+       "startMs": 2920,
+       "endMs": 3080
+      },
+      {
+       "text": "到",
+       "startMs": 3080,
+       "endMs": 3240
+      },
+      {
+       "text": "半",
+       "startMs": 3240,
+       "endMs": 3480
+      },
+      {
+       "text": "小",
+       "startMs": 3480,
+       "endMs": 3640
+      },
+      {
+       "text": "时",
+       "startMs": 3640,
+       "endMs": 3760
+      },
+      {
+       "text": "就",
+       "startMs": 3760,
+       "endMs": 3960
+      },
+      {
+       "text": "搞",
+       "startMs": 3960,
+       "endMs": 4120
+      },
+      {
+       "text": "定",
+       "startMs": 4120,
+       "endMs": 4280
+      },
+      {
+       "text": "了",
+       "startMs": 4280,
+       "endMs": 4520
+      },
+      {
+       "text": "真",
+       "startMs": 4680,
+       "endMs": 4880
+      },
+      {
+       "text": "是",
+       "startMs": 4880,
+       "endMs": 5040
+      },
+      {
+       "text": "后",
+       "startMs": 5040,
+       "endMs": 5160
+      },
+      {
+       "text": "悔",
+       "startMs": 5160,
+       "endMs": 5320
+      },
+      {
+       "text": "没",
+       "startMs": 5320,
+       "endMs": 5520
+      },
+      {
+       "text": "早",
+       "startMs": 5520,
+       "endMs": 5680
+      },
+      {
+       "text": "点",
+       "startMs": 5680,
+       "endMs": 5800
+      },
+      {
+       "text": "知",
+       "startMs": 5800,
+       "endMs": 5960
+      },
+      {
+       "text": "道",
+       "startMs": 5960,
+       "endMs": 6080
+      },
+      {
+       "text": "它",
+       "startMs": 6160,
+       "endMs": 6240
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 106637,
+      "name": "滴露_植源喷雾_谢昌鑫_20260710_81512517666820",
+      "sceneDescription": "在厨房环境中，一只戴着银色手表的右手拿着白色喷壶，向燃气灶上一个布满褐色污渍的玻璃养生壶持续喷洒清洁剂。画面上方出现闹钟图标和提示文字。随后，右手拿着一块蓝色抹布擦拭养生壶，原本脏污的壶身瞬间变得干净透明。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260710/31633a8660084dd0a76bbac546722ebb.snapshot.jpg?sign=1787196354-5aac40c17def4323934552ecb30bd3b8-0-487072ce0113418a9ecb1362b640cf98",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260710/31633a8660084dd0a76bbac546722ebb.mp4",
+      "durationMs": 3901,
+      "allocMs": 1676
+     },
+     {
+      "materialId": 104812,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791425683467",
+      "sceneDescription": "在厨房抽油烟机下方的白色瓷砖墙面上，布满大量黄色流淌状重油污。一只戴着金色手镯的右手拿着透明喷壶，向油污墙面持续喷洒液体。随后，该手拿蓝色抹布在墙面上快速擦拭。经过加速擦拭后，原本布满油污的墙面变得光洁如新，并带有闪光特效。画面右下角隐约可见一瓶带有黄色标签的棕色瓶子。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/486f13b36a854d8bbc029c06d669c6fc.snapshot.jpg?sign=1787198650-43ccc67d8b8545e4a93b0b85f9a9d8dc-0-c83254213097fe320c5d3a76b61c74e2",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/486f13b36a854d8bbc029c06d669c6fc.mp4",
+      "durationMs": 3668,
+      "allocMs": 1662
+     },
+     {
+      "materialId": 104854,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791759505410",
+      "sceneDescription": "在厨房环境中，一只手先持透明喷瓶向黑色燃气灶旁布满黄色油污的白色台面上持续喷洒清洁剂，随后用一块蓝色抹布在喷洒区域来回擦拭，擦拭后原本脏污的台面立刻恢复洁白干净。背景可见数个调料瓶。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/b9df25340f8441ffaa81bb06bb489e67.snapshot.jpg?sign=1787198650-313b4d5497b2472ab9c27316a3664bf9-0-8d943e124de263199d05eb85951aed61",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/b9df25340f8441ffaa81bb06bb489e67.mp4",
+      "durationMs": 1648,
+      "allocMs": 1648
+     },
+     {
+      "materialId": 104794,
+      "name": "滴露_植源喷雾_姚瑶_20260702_80791142539267",
+      "sceneDescription": "在厨房环境中，镜头特写布满油污的黑色燃气灶台及后方附着黄色厚重油垢的白色瓷砖墙面。随后，一只手拿着蓝色抹布从右侧入画，贴着墙面从右向左擦拭。随着抹布持续擦过，墙面上的黄色油垢被瞬间清除，露出原本干净的白色瓷砖，形成强烈的清洁前后对比。画面上方全程带有文字提示。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260702/49377fa17e51485380b6ff869d4ca65e.snapshot.jpg?sign=1787198650-fd77c657480d4958999b3e2591939997-0-5fa0fd6c0821ac0364cd625b7be33615",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260702/49377fa17e51485380b6ff869d4ca65e.mp4",
+      "durationMs": 2484,
+      "allocMs": 1662
+     }
+    ],
+    "reference": {
+     "startMs": 88380,
+     "endMs": 93060
+    }
+   },
+   {
+    "id": "lmt0drx2wq",
+    "text": "趁着现在有活动，为了家人健康，赶紧试试吧！",
+    "tags": [
+     "促单"
+    ],
+    "voiceId": "zh_female_vv_uranus_bigtts",
+    "voiceover": {
+     "audioPath": "<DATA>/voices/hlhivnohoo/lmt0drx2wq_1787541772897.mp3",
+     "durationMs": 4056,
+     "sourceText": "趁着现在有活动，为了家人健康，赶紧试试吧！",
+     "voiceId": "zh_female_vv_uranus_bigtts",
+     "speechRate": 0,
+     "words": [
+      {
+       "text": "趁",
+       "startMs": 290,
+       "endMs": 450
+      },
+      {
+       "text": "着",
+       "startMs": 450,
+       "endMs": 610
+      },
+      {
+       "text": "现",
+       "startMs": 610,
+       "endMs": 730
+      },
+      {
+       "text": "在",
+       "startMs": 730,
+       "endMs": 850
+      },
+      {
+       "text": "有",
+       "startMs": 850,
+       "endMs": 1050
+      },
+      {
+       "text": "活",
+       "startMs": 1050,
+       "endMs": 1250
+      },
+      {
+       "text": "动",
+       "startMs": 1250,
+       "endMs": 1410
+      },
+      {
+       "text": "为",
+       "startMs": 1610,
+       "endMs": 1810
+      },
+      {
+       "text": "了",
+       "startMs": 1810,
+       "endMs": 1930
+      },
+      {
+       "text": "家",
+       "startMs": 1930,
+       "endMs": 2090
+      },
+      {
+       "text": "人",
+       "startMs": 2090,
+       "endMs": 2290
+      },
+      {
+       "text": "健",
+       "startMs": 2290,
+       "endMs": 2450
+      },
+      {
+       "text": "康",
+       "startMs": 2450,
+       "endMs": 2650
+      },
+      {
+       "text": "赶",
+       "startMs": 2930,
+       "endMs": 3130
+      },
+      {
+       "text": "紧",
+       "startMs": 3130,
+       "endMs": 3250
+      },
+      {
+       "text": "试",
+       "startMs": 3250,
+       "endMs": 3410
+      },
+      {
+       "text": "试",
+       "startMs": 3490,
+       "endMs": 3570
+      },
+      {
+       "text": "吧",
+       "startMs": 3570,
+       "endMs": 3810
+      }
+     ]
+    },
+    "shots": [
+     {
+      "materialId": 105309,
+      "name": "滴露_植源喷雾_姚瑶_20260703_80892474939397",
+      "sceneDescription": "在居家环境中，前景一只手举着一瓶透明的滴露（Dettol）多效除菌液喷雾，瓶身带有绿色标签、青苹果图案及99.9%字样。背景中，一位穿着粉色毛绒外套的长发女士正打开一台贴着新年福字贴纸的白色冰箱门，向内查看。",
+      "thumbnailUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_storyboard/20260703/d831855bf72c479d9bbed92d134162b0.snapshot.jpg?sign=1787196336-cdc0b4620c684802a729187aef013878-0-e091ff64a44b93c605ec960497218239",
+      "fileKey": "prod/tenant-19/project-100038/material_storyboard/20260703/d831855bf72c479d9bbed92d134162b0.mp4",
+      "durationMs": 4040,
+      "speed": 0.99,
+      "allocMs": 4056
+     }
+    ],
+    "reference": {
+     "startMs": 93300,
+     "endMs": 96020
+    }
+   }
+  ],
+  "subtitle": {
+   "bottomRatio": 0.16623673067748115,
+   "fontRatio": 0.034,
+   "preset": "whiteOutline"
+  },
+  "bgmSegments": [
+   {
+    "startLine": 0,
+    "endLine": 4,
+    "material": {
+     "id": 108,
+     "name": "快乐的尤克里里_C83737177381888",
+     "durationMs": 122540,
+     "previewUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_audio/20260804/3297bf1c607d46bfbdd418e29594eac7.MP3?sign=1787222115-dec999f3629846eabcb9e1e6f9d6e0e7-0-f404c6023a6fffe8d83f4f7be872622b",
+     "tags": [],
+     "hasSpeech": false
+    },
+    "volume": 0.65
+   },
+   {
+    "startLine": 5,
+    "endLine": 5,
+    "material": {
+     "id": 108,
+     "name": "快乐的尤克里里_C83737177381888",
+     "durationMs": 122540,
+     "previewUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_audio/20260804/3297bf1c607d46bfbdd418e29594eac7.MP3?sign=1787222115-dec999f3629846eabcb9e1e6f9d6e0e7-0-f404c6023a6fffe8d83f4f7be872622b",
+     "tags": [],
+     "hasSpeech": false
+    },
+    "volume": 0.65
+   },
+   {
+    "startLine": 6,
+    "endLine": 10,
+    "material": {
+     "id": 107,
+     "name": "捕捉风掠过的瞬息_C83737076827136",
+     "durationMs": 152058,
+     "previewUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_audio/20260804/6bc99a5ed13042778b58cd1165336d79.MP3?sign=1787573325-02720a576f624113b215e7e52918299b-0-426f9a3ad92ec8159db4c6fbae11f638",
+     "tags": [],
+     "hasSpeech": false
+    },
+    "volume": 0.55
+   },
+   {
+    "startLine": 11,
+    "endLine": 19,
+    "material": {
+     "id": 107,
+     "name": "捕捉风掠过的瞬息_C83737076827136",
+     "durationMs": 152058,
+     "previewUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_audio/20260804/6bc99a5ed13042778b58cd1165336d79.MP3?sign=1787573325-02720a576f624113b215e7e52918299b-0-426f9a3ad92ec8159db4c6fbae11f638",
+     "tags": [],
+     "hasSpeech": false
+    },
+    "volume": 0.55
+   },
+   {
+    "startLine": 20,
+    "endLine": 27,
+    "material": {
+     "id": 108,
+     "name": "快乐的尤克里里_C83737177381888",
+     "durationMs": 122540,
+     "previewUrl": "https://cdn-jichuangmeiao-miaoa.mininglamp.com/prod/tenant-19/project-100038/material_audio/20260804/3297bf1c607d46bfbdd418e29594eac7.MP3?sign=1787629379-21f2c1b9269d43e4abd898a4f2e1e75b-0-7e417ce944d4068e173e5b1fb7351c68",
+     "tags": [],
+     "hasSpeech": false
+    },
+    "volume": 0.55
+   }
+  ],
+  "refVideoPath": "<HOME>/JC_滴露_植源喷雾_XCT_SQ1&YY6_CH_千川直播_M66028501_0427.mp4"
+ },
+ "miaoaVideoId": null,
+ "videoInfo": null,
+ "coverPath": "<DATA>/covers/hlhivnohoo.jpg",
+ "status": "ready",
+ "createdAt": "2026-08-19T18:37:38.516616",
+ "updatedAt": "2026-08-26T20:16:55.245900",
+ "units": null,
+ "asrSentences": null,
+ "unitTagGroups": [
+  {
+   "id": 1261,
+   "name": "植源分子库"
+  }
+ ],
+ "shotTagGroups": [
+  {
+   "id": 978,
+   "name": "植源场景"
+  },
+  {
+   "id": 977,
+   "name": "植源镜头类别"
+  },
+  {
+   "id": 976,
+   "name": "植源动作"
+  }
+ ],
+ "unitTagGroup": {
+  "id": 1261,
+  "name": "植源分子库"
+ },
+ "shotTagGroup": {
+  "id": 978,
+  "name": "植源场景"
+ },
+ "project": {
+  "id": 146,
+  "name": "植源AI"
+ },
+ "vocalsPath": null,
+ "backgroundPath": null,
+ "unitTagPrompt": "",
+ "shotTagPrompt": "",
+ "analysisError": null,
+ "replacements": null,
+ "pickedMaterials": [],
+ "exports": [],
+ "bgm": [],
+ "voices": [],
+ "firstReadyMs": null,
+ "aiUsage": {
+  "byModel": {},
+  "byService": {}
+ }
+}

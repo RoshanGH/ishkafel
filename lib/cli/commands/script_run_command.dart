@@ -20,6 +20,9 @@ import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
+import '../../core/jianying/jianying_writer.dart';
+import '../../core/jianying/jianying_plan.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
@@ -336,6 +339,113 @@ Future<int> runScriptExportCommand({
   } finally {
     heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
+    lock.release(holder);
+  }
+}
+
+/// `ishkafel script jianying <task>` —— 把这条片子写成一份**剪映草稿**。
+///
+/// 界面上那个「剪映」按钮做的是同一件事。Agent 也要能做：人说「给我导进
+/// 剪映我自己精修」时，它不该回一句「只能你自己去点」。
+///
+/// **不拉起剪映**：剪映没有给外部程序「打开指定草稿」的通道（实测详见
+/// jianying_writer 的注释）。所以返回的是**草稿名**——人去剪映草稿列表里
+/// 按这个名字打开。
+Future<int> runScriptJianyingCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String holder = 'Agent',
+  bool? visual,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script jianying <任务 id>');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final doc = task.script;
+  if (doc == null) {
+    sink.writeln('「${task.name}」不是脚本成片任务');
+    return exitBadUsage;
+  }
+
+  // 生成草稿不写任务数据，但要占锁：素材落地期间人在界面上换素材，
+  // 草稿会拿到一半新一半旧
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
+  if (!lock.acquire(holder)) {
+    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
+    return exitLocked;
+  }
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder,
+  );
+  await stage.begin('正在生成剪映草稿',
+      focus: const AgentFocus(module: 'director'));
+  final heartbeat =
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+  try {
+    final writer = JianyingWriter(
+      sourceOf: (shot) {
+        final local = shot.localSource;
+        if (local != null && File(local).existsSync()) return local;
+        final f =
+            File(p.join(dataDir.path, 'material_cache', '${shot.materialId}.mp4'));
+        return f.existsSync() ? f.path : null;
+      },
+      voiceOf: (line) {
+        final path = line.voiceover?.audioPath;
+        return path != null && File(path).existsSync() ? path : null;
+      },
+      bgmOf: (id) {
+        for (final ext in const ['mp3', 'm4a', 'wav']) {
+          final f = File(p.join(dataDir.path, 'bgm_cache', '$id.$ext'));
+          if (f.existsSync()) return f.path;
+        }
+        return null;
+      },
+    );
+    final result = await writer.write(
+      doc,
+      taskName: '#${task.seq ?? ''} ${task.name}'.trim(),
+      onProgress: (done, total, what) {
+        sink.writeln('[$done/$total] $what');
+        stage.heartbeat('生成剪映草稿：$what',
+            focus: const AgentFocus(module: 'director'));
+      },
+    );
+    emitJson({
+      'ok': true,
+      'draftName': result.name,
+      'draftDir': result.folder,
+      'totalMs': result.totalMs,
+      'materialCount': result.materialCount,
+      // 有话要说就说出来（比如某几镜的素材还没就绪、被跳过了）
+      if (result.notes.isNotEmpty) 'notes': result.notes,
+      // 剪映不认外部的「打开这份草稿」请求，只能让人自己去列表里点
+      'next': '去剪映的草稿列表里打开「${result.name}」'
+          '（剪映启动时会扫一遍，运行中每隔几分钟扫一次；'
+          '没看到就重启一下剪映）',
+    }, out: out);
+    return 0;
+  } on JianyingPlanException catch (e) {
+    sink.writeln(e.message);
+    return exitBadUsage;
+  } catch (e) {
+    sink.writeln('生成剪映草稿失败：$e');
+    return exitFailed;
+  } finally {
+    heartbeat.cancel();
+    stage.end();
     lock.release(holder);
   }
 }

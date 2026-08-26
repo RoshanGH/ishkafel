@@ -15,50 +15,36 @@ import 'package:path/path.dart' as p;
 /// 不让 CI 因为别人机器上没有这份数据而红。
 void main() {
   final home = Platform.environment['HOME'] ?? '';
-  final dataDir = p.join(home, 'Library', 'Application Support',
-      'com.jichuang.ishkafel', 'ishkafel_data');
-  final taskFile = File(p.join(dataDir, 'tasks', 'hlhivnohoo.json'));
+  // **读固定下来的 fixture，不读本机的活数据**。
+  //
+  // 这条测试原来直接读 `~/Library/.../tasks/<id>.json`——用户在界面上动一下
+  // 那条片子，它就红一次（真机上就是这么挂的：字幕从 62 屏变成 60 屏）。
+  // 而且它在别人机器上会 skip，等于只在一台机器上有效。
+  //
+  // 现在数据固定进仓库，素材用临时目录里的假文件顶上：断言锁的是**这份
+  // 数据**算出来的结果，谁改自己的任务都不影响，同事机器上也真的会跑。
+  final fixture =
+      File(p.join('test', 'core', 'jianying', 'fixtures', 'task_28lines.json'));
 
-  test('2 号任务（28 行 / 143.76 秒）能完整生成草稿', () async {
-    if (!taskFile.existsSync()) {
-      markTestSkipped('本机没有 2 号任务的数据，跳过');
-      return;
-    }
-    final task = jsonDecode(taskFile.readAsStringSync()) as Map<String, dynamic>;
+  test('28 行 / 143.76 秒的真实方案能完整生成草稿', () async {
+    final task = jsonDecode(fixture.readAsStringSync()) as Map<String, dynamic>;
     final doc = ScriptDoc.fromJson(task['script']);
     expect(doc.lines, hasLength(28));
 
-    // 素材：miaoa 素材在 material_cache/<id>.*，本地源直接用它自己的路径
-    String? sourceOf(LineShot shot) {
-      final local = shot.localSource;
-      if (local != null) return File(local).existsSync() ? local : null;
-      final dir = Directory(p.join(dataDir, 'material_cache'));
-      if (!dir.existsSync()) return null;
-      for (final f in dir.listSync()) {
-        if (p.basenameWithoutExtension(f.path) == '${shot.materialId}') {
-          return f.path;
-        }
-      }
-      return null;
+    // 素材、配音、配乐都用临时目录里的占位文件：草稿生成只搬运路径、
+    // 不解码内容，所以内容是什么不影响这条测试要验的东西
+    final assets = Directory.systemTemp.createTempSync('jy_assets_');
+    addTearDown(() => assets.deleteSync(recursive: true));
+    String fake(String name) {
+      final f = File(p.join(assets.path, name))
+        ..writeAsBytesSync(List.filled(64, 0));
+      return f.path;
     }
 
-    // 配音：voices/<task>/<lineId>_<时间戳>.mp3，同一行取最新一次
-    String? voiceOf(ScriptLine line) {
-      final vo = line.voiceover;
-      if (vo == null) return null;
-      return File(vo.audioPath).existsSync() ? vo.audioPath : null;
-    }
-
-    String? bgmOf(int materialId) {
-      final dir = Directory(p.join(dataDir, 'bgm_cache'));
-      if (!dir.existsSync()) return null;
-      for (final f in dir.listSync()) {
-        if (p.basenameWithoutExtension(f.path) == '$materialId') {
-          return f.path;
-        }
-      }
-      return null;
-    }
+    String? sourceOf(LineShot shot) => fake('m${shot.materialId}.mp4');
+    String? voiceOf(ScriptLine line) =>
+        line.voiceover == null ? null : fake('${line.id}.mp3');
+    String? bgmOf(int materialId) => fake('bgm$materialId.mp3');
 
     final out = Directory.systemTemp.createTempSync('jy_real_');
     addTearDown(() => out.deleteSync(recursive: true));
@@ -86,12 +72,15 @@ void main() {
             as Map<String, dynamic>;
 
     expect((trackOf('video')['segments'] as List), hasLength(55));
-    // 62 屏 = `subtitleScreensAt` 在这份数据上的结果，与界面预览逐屏一致。
-    // （早先的验证脚本走 subtitle_overlay 的老规则、固定 18 字上限，出 65 屏；
-    //  这里的 15 字上限是由本方案的字号 fontRatio 0.034 推导出来的）
-    expect((trackOf('text')['segments'] as List), hasLength(62));
+    // 60 屏 = `subtitleScreensAt` 在**这份 fixture** 上的结果，与界面预览
+    // 逐屏一致。字数上限 15 由本方案的字号 fontRatio 0.034 推导而来
+    // （早先的验证脚本走 subtitle_overlay 的老规则、固定 18 字上限，出 65 屏）。
+    //
+    // 这个数字跟着 fixture 走：断句规则改了它就该变，那时连同 fixture
+    // 一起更新——但**不该因为谁在界面上动了自己的片子而变**
+    expect((trackOf('text')['segments'] as List), hasLength(60));
     expect((trackOf('audio')['segments'] as List), hasLength(27));
-    expect((trackOf('audio', skip: 1)['segments'] as List), hasLength(4));
+    expect((trackOf('audio', skip: 1)['segments'] as List), hasLength(5));
 
     // 字幕：一律无标点（原片字幕就是无标点的堆字风格）
     final texts = (info['materials'] as Map)['texts'] as List;

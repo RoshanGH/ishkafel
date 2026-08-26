@@ -1,4 +1,5 @@
 import '../core/script/script_doc.dart';
+import '../core/script/sound_mix.dart';
 import '../core/script/shot_allocation.dart';
 
 /// 一条校验失败：**面向调用方的中文原因** + 定位
@@ -510,4 +511,125 @@ List<ApplyIssue> validateScreenTexts({
     }
   }
   return issues;
+}
+
+/// 一行的音色/语速改动。null = 这一项不动
+typedef LineVoiceEdit = ({int lineIndex, String? voiceId, int? speechRate});
+
+/// 校验「改本片基调」。
+///
+/// 基调是这个片子听起来是谁在说话：行上没单独设的都跟着它走，
+/// 换了之后已经生成的配音会被判成过期（见 [ScriptDoc.voiceStateOf]）。
+List<ApplyIssue> validateBaselineSubmission({
+  required ScriptDoc doc,
+  required String? voiceId,
+  required int? speechRate,
+}) {
+  final issues = <ApplyIssue>[];
+  // 空提交不是「什么都不改」：多半是字段名写错了，当成成功更糟
+  if (voiceId == null && speechRate == null) {
+    return [
+      (lineIndex: null, shotIndex: null, message: '既没给音色也没给语速，这一批什么都没说')
+    ];
+  }
+  if (voiceId != null && voiceId.trim().isEmpty) {
+    issues.add((
+      lineIndex: null,
+      shotIndex: null,
+      message: '音色 id 是空的。要「回到没设过」请直接省掉这个字段，'
+          '空串会静默生效成一个不存在的音色'
+    ));
+  }
+  if (speechRate != null && (speechRate < -50 || speechRate > 100)) {
+    issues.add((
+      lineIndex: null,
+      shotIndex: null,
+      message: '语速要在 -50~100 之间（火山口径：0 = 原速、100 = 2 倍速、'
+          '-50 = 0.5 倍速），给的是 $speechRate'
+    ));
+  }
+  return issues;
+}
+
+/// 校验「改某几行的音色/语速」。
+///
+/// 与基调的区别：这里写的是**逐行覆盖**，其他行不受影响。人特意点了
+/// 这几行才用它；要改全片用基调。
+List<ApplyIssue> validateLineVoiceSubmission({
+  required ScriptDoc doc,
+  required List<LineVoiceEdit> edits,
+}) {
+  if (edits.isEmpty) {
+    return [(lineIndex: null, shotIndex: null, message: '一行都没给')];
+  }
+  final issues = <ApplyIssue>[];
+  for (final e in edits) {
+    if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '没有第 ${e.lineIndex + 1} 行（这个脚本共 ${doc.lines.length} 行）'
+      ));
+      continue;
+    }
+    final line = doc.lines[e.lineIndex];
+    if (line.type != ScriptLineType.voiced) {
+      // 静默忽略的话，人以为改了 8 行，实际只有 5 行生效
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行是画面行（没有台词、不生成配音），'
+            '改它的音色/语速没有意义'
+      ));
+      continue;
+    }
+    if (e.voiceId == null && e.speechRate == null) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行既没给音色也没给语速'
+      ));
+      continue;
+    }
+    if (e.voiceId != null && e.voiceId!.trim().isEmpty) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行的音色 id 是空的'
+      ));
+    }
+    final rate = e.speechRate;
+    if (rate != null && (rate < -50 || rate > 100)) {
+      issues.add((
+        lineIndex: e.lineIndex,
+        shotIndex: null,
+        message: '第 ${e.lineIndex + 1} 行的语速要在 -50~100 之间（给的是 $rate）'
+      ));
+    }
+  }
+  return issues;
+}
+
+/// 校验「改三轨混音台」。
+///
+/// 数值本身由 [SoundMix] 夹在 0~1，这里管的是**说得通吗**。
+List<ApplyIssue> validateMixSubmission({
+  required ScriptDoc doc,
+  required SoundMix mix,
+}) {
+  // 三条轨全关 = 一段哑片。这不该静默通过：真要哑片的人不会用这种方式做，
+  // 而搞错了的人会一路导到成片才发现
+  if (mix.effectiveSource <= 0.001 &&
+      mix.effectiveVoice <= 0.001 &&
+      mix.effectiveBgm <= 0.001) {
+    return [
+      (
+        lineIndex: null,
+        shotIndex: null,
+        message: '原声、口播、配乐三条轨都被关掉了——这样导出来是一段哑片。'
+            '确认是要这样的话，单独把想留的那条打开'
+      )
+    ];
+  }
+  return const [];
 }

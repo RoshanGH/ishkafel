@@ -51,8 +51,11 @@ Future<int> runScriptCommand({
         '  show <任务> [--line N]          任务全貌 / 单行详情\n'
         '  shots <任务> --line N           候选镜头与判断依据\n'
         '  subtitles <任务> --line N       断句材料\n'
-        '  apply <what> <任务> --file f    回填（shots/subtitles/alloc/bgm）\n'
-        '  export <任务> [--out 目录]      导出成片');
+        '  apply <what> <任务> --file f    回填（shots/subtitles/alloc/bgm/\n'
+        '                                  lines/shot-edit/screen-text/\n'
+        '                                  baseline/line-voice/mix）\n'
+        '  export <任务> [--out 目录]      导出成片\n'
+        '  jianying <任务>                 写成剪映草稿，去剪映里精修');
     return exitBadUsage;
   }
   if (rest.length < 2 &&
@@ -75,6 +78,14 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'jianying':
+      return runScriptJianyingCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        visual: visual,
         out: out,
         err: err,
       );

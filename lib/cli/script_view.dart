@@ -30,6 +30,22 @@ Map<String, dynamic> scriptTaskJson(RenewTask task) {
     'name': task.name,
     'kind': 'script',
     if (doc.refVideoPath != null) 'refVideo': doc.refVideoPath,
+    // 本片基调：这个片子听起来是谁在说话。null = 还没定过，
+    // 该先问人再去生成配音（撞运气用系统默认，不对就白烧一轮 TTS）
+    'defaultVoiceId': doc.defaultVoiceId,
+    'defaultSpeechRate': doc.defaultSpeechRate,
+    // 三条声音轨的总控。逐镜原声、逐段配乐是相对值，乘在这上面
+    'sound': {
+      'source': doc.mix.source,
+      'voice': doc.mix.voice,
+      'bgm': doc.mix.bgm,
+      if (doc.mix.sourceMuted) 'sourceMuted': true,
+      if (doc.mix.voiceMuted) 'voiceMuted': true,
+      if (doc.mix.bgmMuted) 'bgmMuted': true,
+      'duckSourceUnderVoice': doc.mix.duckSourceUnderVoice,
+      'duckedSourceVolume': doc.mix.duckedSourceVolume,
+    },
+    // 老字段名，等同 sound.duckedSourceVolume（口播时原声压到多少）
     'sourceVolume': doc.sourceVolume,
     'totalMs': totalMs,
     'lines': [
@@ -88,9 +104,21 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
     'text': line.text,
     if (line.tags.isNotEmpty) 'tags': line.tags,
     if (root != null) 'rootMs': root,
+    // 这一行**实际**会用的音色与语速（行上没设就是本片基调）。
+    // 给有效值，Agent 才知道生成出来会是谁在说话
+    'voiceId': doc.voiceIdOf(line),
+    'speechRate': doc.speechRateOf(line),
+    // 但要说清是不是跟随来的：跟随的行会随基调变，单独设过的不会
+    if (line.voiceId == null && doc.defaultVoiceId != null)
+      'voiceFollowsDoc': true,
+    if (line.speechRate == null && doc.defaultSpeechRate != 0)
+      'speechRateFollowsDoc': true,
     if (vo != null)
       'voice': {
-        'state': line.voiceState.name,
+        // **拿有效值判定**：本片基调换了，跟随基调的那些配音就该报 stale。
+        // 用 line.voiceState 会漏掉基调变化——界面说要重配、CLI 说新鲜，
+        // Agent 就会拿旧音色直接导出去（静默出错，最要命的那种）
+        'state': doc.voiceStateOf(line).name,
         if (vo.voiceId.isNotEmpty) 'voiceId': vo.voiceId,
         'durationMs': vo.durationMs,
         'speechRate': vo.speechRate,

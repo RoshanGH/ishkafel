@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../core/script/bgm_rail.dart';
 import '../../core/script/script_cover.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/sound_mix.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
@@ -40,6 +41,7 @@ Future<int> runScriptApplyCommand({
   const supported = [
     'shots', 'subtitles', 'alloc', 'bgm',
     'lines', 'shot-edit', 'screen-text',
+    'baseline', 'line-voice', 'mix',
   ];
   if (rest.length < 2) {
     sink.writeln('用法：ishkafel script apply <${supported.join('|')}> '
@@ -156,6 +158,45 @@ Future<int> runScriptApplyCommand({
   }
 }
 
+String? _str(Object? v) => v is String ? v : null;
+int? _int(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
+double? _dbl(Object? v) => v is num ? v.toDouble() : null;
+
+List<LineVoiceEdit> _lineVoices(Map<String, dynamic> payload) {
+  final raw = payload['lines'];
+  if (raw is! List) return const [];
+  return [
+    for (final e in raw)
+      if (e is Map && e['lineIndex'] is int)
+        (
+          lineIndex: e['lineIndex'] as int,
+          voiceId: _str(e['voiceId']),
+          speechRate: _int(e['speechRate']),
+        ),
+  ];
+}
+
+/// 混音台是**增量改**：只给要动的那几项，其余保持现状。
+/// 全量覆盖的话，Agent 想只调配乐就得先把另外两条读出来再原样写回去，
+/// 中间人改了就被它覆盖掉了
+SoundMix _mixOf(ScriptDoc doc, Map<String, dynamic> payload) {
+  final m = payload['sound'] is Map
+      ? Map<String, dynamic>.from(payload['sound'] as Map)
+      : payload;
+  return doc.mix.copyWith(
+    source: _dbl(m['source']),
+    voice: _dbl(m['voice']),
+    bgm: _dbl(m['bgm']),
+    sourceMuted: m['sourceMuted'] is bool ? m['sourceMuted'] as bool : null,
+    voiceMuted: m['voiceMuted'] is bool ? m['voiceMuted'] as bool : null,
+    bgmMuted: m['bgmMuted'] is bool ? m['bgmMuted'] as bool : null,
+    duckSourceUnderVoice: m['duckSourceUnderVoice'] is bool
+        ? m['duckSourceUnderVoice'] as bool
+        : null,
+    duckedSourceVolume: _dbl(m['duckedSourceVolume']),
+  );
+}
+
 Future<String> _readStdin() async =>
     await stdin.transform(utf8.decoder).join();
 
@@ -192,6 +233,15 @@ List<ApplyIssue> _validate(
       return validateShotEdits(doc: doc, edits: _shotEdits(payload));
     case 'screen-text':
       return validateScreenTexts(doc: doc, edits: _screenTexts(payload));
+    case 'baseline':
+      return validateBaselineSubmission(
+          doc: doc,
+          voiceId: _str(payload['voiceId']),
+          speechRate: _int(payload['speechRate']));
+    case 'line-voice':
+      return validateLineVoiceSubmission(doc: doc, edits: _lineVoices(payload));
+    case 'mix':
+      return validateMixSubmission(doc: doc, mix: _mixOf(doc, payload));
     default:
       return const [];
   }
@@ -285,6 +335,32 @@ ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
                     ShotAllocation.distribute(shots, root), root)
                 : shots);
       }
+    case 'baseline':
+      final voiceId = _str(payload['voiceId']);
+      final rate = _int(payload['speechRate']);
+      // 「统一全片」= 设基调 + 清各行覆盖；只设基调则保留各行单独设过的。
+      // 默认走统一——人说「全片换成云希」时，之前单独试过音色的那几行
+      // 留在旧音色上就是错的
+      final unify = payload['unify'] != false;
+      if (voiceId != null) {
+        next = unify ? next.unifyVoice(voiceId) : next.withDefaultVoiceId(voiceId);
+      }
+      if (rate != null) {
+        next = unify
+            ? next.unifySpeechRate(rate)
+            : next.withDefaultSpeechRate(rate);
+      }
+      return next;
+    case 'line-voice':
+      for (final e in _lineVoices(payload)) {
+        if (e.voiceId != null) next = next.setVoiceId(e.lineIndex, e.voiceId);
+        if (e.speechRate != null) {
+          next = next.setSpeechRate(e.lineIndex, e.speechRate!);
+        }
+      }
+      return next;
+    case 'mix':
+      return next.withMix(_mixOf(next, payload));
     case 'screen-text':
       for (final e in _screenTexts(payload)) {
         final line = next.lines[e.lineIndex];
@@ -422,6 +498,9 @@ String _actionOf(String what, Map<String, dynamic> payload) => switch (what) {
       'lines' => '正在改台词',
       'shot-edit' => '正在调${_lineLabel(payload, 'shots')}的镜头',
       'screen-text' => '正在改${_lineLabel(payload, 'screens')}的字幕文字',
+      'baseline' => '正在定本片的音色与语速',
+      'line-voice' => '正在改${_lineLabel(payload, 'lines')}的音色/语速',
+      'mix' => '正在调三条声音轨的音量',
       _ => '正在操作',
     };
 
@@ -445,6 +524,7 @@ AgentFocus? _focusOf(String what, Map<String, dynamic> payload) {
     'shot-edit' => 'shots',
     'screen-text' => 'screens',
     'lines' => 'lines',
+    'line-voice' => 'lines',
     _ => null,
   };
   if (key == null) return null;
