@@ -12,6 +12,7 @@ import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
+import 'package:ishkafel/cli/commands/ui_command.dart';
 import 'package:ishkafel/cli/commands/script_command.dart';
 import 'package:ishkafel/cli/commands/skill_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
@@ -43,6 +44,8 @@ Future<void> main(List<String> args) async {
         help: '可视模式：把 app 拉起来，一步一步演给人看'
             '（也可以用 ISHKAFEL_VISUAL=1）')
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
+    ..addOption('mode',
+        help: 'ui new-task 用：script / renew / blank')
     ..addOption('items',
         help: 'review drop/keep 用：要动的候选，单元:镜头:素材（逗号分隔），'
             '整体替换的候选镜头位写 `-`')
@@ -117,6 +120,13 @@ Future<void> main(List<String> args) async {
         rest: rest,
         install: parsed['install'] as bool,
         dir: parsed['dir'] as String?,
+      ),
+    'ui' => await runUiCommand(
+        rest: rest,
+        dataDir: dataDir,
+        mode: parsed['mode'] as String?,
+        file: parsed['file'] as String?,
+        tagGroups: parsed['tag-groups'] as String?,
       ),
     'review' => await runReviewCommand(
         rest: rest,
@@ -204,6 +214,9 @@ ishkafel —— 成片翻新工具的命令行入口
   open <id>        把 app 弹出来并落到这个任务的工作台
   review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
                    确认后 task <id> 里的方案就是最终结果，等用户发话再继续
+  ui new-task --mode <script|renew|blank> --tag-groups <id,id> [--file <原片>]
+                   **当着人的面**新建任务：软件弹出来、向导打开、字段填上、
+                   点创建。人在旁边看着时用它；人不在场用 script new 更快
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
   review drop <id> --items 0:-:100,1:2:202
                    替人剔掉这几条——人在审片台看着说「删掉哪几条」时用它

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 
 import 'package:collection/collection.dart';
@@ -7,6 +8,10 @@ import '../../app/theme/app_colors.dart';
 import '../../core/build_mode.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/agent_request.dart';
+import '../../core/storage/ui_action.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
+import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/tasks_watch.dart';
 import '../../core/storage/ui_wake.dart';
 import '../review/review_page.dart';
@@ -23,6 +28,7 @@ import '../settings/settings_page.dart';
 import '../director/director_page.dart';
 import '../workbench/workbench_page.dart';
 import 'new_task_wizard/new_task_wizard.dart';
+import 'new_task_wizard/wizard_providers.dart';
 import 'environment_banner.dart';
 import 'source_availability.dart';
 import 'task_card.dart';
@@ -109,9 +115,142 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       _pollWake();
       _pollGlobalAgent();
       _pollTasksChanged();
+      _pollUiAction();
     });
     // 冷启动的第一条请求不等第一个周期
     WidgetsBinding.instance.addPostFrameCallback((_) => _pollWake());
+  }
+
+  /// Agent 请界面执行一个动作。**界面真的去做**，不是演一遍——
+  /// 向导真的弹出来、字段真的填上、创建真的走人走的那条路。
+  ///
+  /// 演一套写一套的话，两边迟早对不上（这个项目已经栽过三次）
+  bool _handlingAction = false;
+
+  void _pollUiAction() {
+    if (_handlingAction || !mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final req = consumeAgentRequest(dataDir: dataDir, taskId: globalPresenceSlot);
+    if (req == null) return;
+    _handlingAction = true;
+    unawaited(_runUiAction(dataDir, req).whenComplete(() {
+      _handlingAction = false;
+    }));
+  }
+
+  Future<void> _runUiAction(Directory dataDir, AgentRequest req) async {
+    void reply(bool ok, String message) => writeAgentRequestResult(
+        dataDir: dataDir, taskId: globalPresenceSlot,
+        id: req.id, ok: ok, message: message);
+
+    final action = UiAction.parse(req.kind);
+    if (action == null) {
+      reply(false, '认不出这个动作：${req.kind}');
+      return;
+    }
+    switch (action) {
+      case UiAction.wizardOpen:
+      case UiAction.wizardFill:
+      case UiAction.wizardSubmit:
+        // 三步合成一次：向导是个模态对话框，开着的时候拿不到后续请求
+        // ——真要一步一停，得把向导拆成非模态的，那是另一件事。
+        // 现在的做法是**当着人的面把向导打开、填上、创建**，人看得见
+        // 全过程，只是不能在中间插话
+        await _runWizardForAgent(dataDir, req, reply);
+      case UiAction.wizardCancel:
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+        reply(true, '已关掉新建任务');
+    }
+  }
+
+  Future<void> _runWizardForAgent(
+    Directory dataDir,
+    AgentRequest req,
+    void Function(bool ok, String message) reply,
+  ) async {
+    final p = req.payload;
+    final mode = WizardMode.parse('${p['mode']}');
+    if (mode == null) {
+      reply(false, 'mode 要是 script / renew / blank 之一，给的是 ${p['mode']}');
+      return;
+    }
+    final ids = [
+      for (final v in (p['tagGroupIds'] as List? ?? const [])) ?_asInt(v),
+    ];
+    final filePath = p['filePath'] is String ? p['filePath'] as String : null;
+    final issues = validateWizardFill(
+        mode: mode, filePath: filePath, tagGroupIds: ids);
+    if (issues.isNotEmpty) {
+      reply(false, issues.join('；'));
+      return;
+    }
+    if (!mounted) {
+      reply(false, '界面已经关了');
+      return;
+    }
+    // 报出在场状态：人看到横幅才知道这一下是 Agent 干的
+    writeAgentPresence(
+      dataDir: dataDir,
+      taskId: globalPresenceSlot,
+      presence: AgentPresence(
+        holder: 'Agent',
+        at: DateTime.now(),
+        action: '正在新建任务（${mode.wire}）',
+      ),
+    );
+    try {
+      final groups = await _resolveTagGroups(ids);
+      if (groups.length != ids.length) {
+        reply(false, '这些标签组在当前企业下找不到：'
+            '${ids.where((i) => !groups.any((g) => g.id == i)).join('、')}');
+        return;
+      }
+      if (!mounted) {
+        reply(false, '界面已经关了');
+        return;
+      }
+      // **真的把向导打开**，字段预填好，让人看见
+      final result = await showNewTaskWizard(
+        context,
+        prefillUnitGroups: groups,
+        prefillShotGroups: groups,
+        prefillUnitPrompt: '${p['unitTagPrompt'] ?? ''}',
+        prefillShotPrompt: '${p['shotTagPrompt'] ?? ''}',
+        autoSubmit: (
+          mode: mode.wire,
+          filePath: filePath,
+        ),
+      );
+      if (result == null) {
+        reply(false, '向导被关掉了（人取消，或者参数不足以创建）');
+        return;
+      }
+      if (!mounted) {
+        reply(false, '界面已经关了');
+        return;
+      }
+      await _createFromWizard(ref, context, result);
+      reply(true, '任务已经建好了');
+    } catch (e) {
+      reply(false, '新建任务失败：$e');
+    } finally {
+      clearAgentPresence(dataDir: dataDir, taskId: globalPresenceSlot);
+    }
+  }
+
+  static int? _asInt(Object? v) =>
+      v is int ? v : (v is num ? v.toInt() : int.tryParse('$v'));
+
+  Future<List<TagGroupRef>> _resolveTagGroups(List<int> ids) async {
+    if (ids.isEmpty) return const [];
+    final all = await MiaoaTagService().listGroups();
+    return [
+      for (final g in all)
+        if (ids.contains(g.id)) TagGroupRef(id: g.id, name: g.name),
+    ];
   }
 
   /// 盘上的任务清单变了就重读。
@@ -240,6 +379,17 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       prefillProject: recent?.project,
     );
     if (result == null) return;
+    await _createFromWizard(ref, context, result);
+  }
+
+  /// 拿到向导结果之后怎么建。**人和 Agent 共用这一段**——
+  /// Agent 那条路要是另写一份，两边迟早会不一样（这个项目已经因为
+  /// 「同一个东西两处算」栽过三次）
+  Future<void> _createFromWizard(
+    WidgetRef ref,
+    BuildContext context,
+    NewTaskWizardResult result,
+  ) async {
     if (result.script) {
       // 脚本成片：没有原片、不走分析，建出来直接进编导台开写
       final task = await ref.read(taskListProvider.notifier).createScriptTask(

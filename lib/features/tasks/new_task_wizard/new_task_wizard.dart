@@ -25,6 +25,7 @@ Future<NewTaskWizardResult?> showNewTaskWizard(
   String prefillUnitPrompt = '',
   String prefillShotPrompt = '',
   ProjectRef? prefillProject,
+  ({String mode, String? filePath})? autoSubmit,
 }) =>
     showDialog<NewTaskWizardResult>(
       context: context,
@@ -34,6 +35,7 @@ Future<NewTaskWizardResult?> showNewTaskWizard(
         prefillUnitPrompt: prefillUnitPrompt,
         prefillShotPrompt: prefillShotPrompt,
         prefillProject: prefillProject,
+        autoSubmit: autoSubmit,
       ),
     );
 
@@ -45,6 +47,13 @@ class NewTaskWizard extends ConsumerStatefulWidget {
   final String prefillShotPrompt;
   final ProjectRef? prefillProject;
 
+  /// Agent 在驱动它：把来源选好、字段填好，然后**当着人的面点创建**。
+  ///
+  /// 为什么是真的走一遍向导而不是后台直接建：可视模式的意义就是让人
+  /// 看见每一步。严格交付的活儿，前面走错一两步后面差很远——人得看着
+  /// 它稳稳跑过很多次，才会放心切到静默模式
+  final ({String mode, String? filePath})? autoSubmit;
+
   const NewTaskWizard({
     super.key,
     this.prefillUnitGroups = const [],
@@ -52,6 +61,7 @@ class NewTaskWizard extends ConsumerStatefulWidget {
     this.prefillUnitPrompt = '',
     this.prefillShotPrompt = '',
     this.prefillProject,
+    this.autoSubmit,
   });
 
   @override
@@ -78,6 +88,29 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   void initState() {
     super.initState();
     _loadGroups();
+    final auto = widget.autoSubmit;
+    if (auto != null) {
+      // 先把来源选上（人看得见选中了哪一个），停一拍再点创建——
+      // 「唰」地一下闪过去等于没演
+      _script = auto.mode == 'script';
+      _blank = auto.mode == 'blank';
+      _filePath = auto.filePath;
+      _autoSubmitAfterGroups = true;
+    }
+  }
+
+  /// 标签组一到位就自动提交（Agent 驱动时）。
+  /// 要等它们加载完——没有标签组时创建按钮本来就是灰的
+  bool _autoSubmitAfterGroups = false;
+
+  void _maybeAutoSubmit() {
+    if (!_autoSubmitAfterGroups || !mounted) return;
+    if (_missing.isNotEmpty) return;
+    _autoSubmitAfterGroups = false;
+    // 停一拍：让人看清向导里填了什么，再看着它被提交
+    Future<void>.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) _start();
+    });
   }
 
   /// 拉标签组列表。失败只翻译成中文引导展示，**不自动重试**——401 自动重试
@@ -96,6 +129,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
       final groups = await ref.read(miaoaTagServiceProvider).listGroups();
       if (!mounted) return;
       setState(() => _groups = groups);
+      // Agent 驱动时：标签组到位了才谈得上创建
+      _maybeAutoSubmit();
     } catch (e) {
       AppLog.warn('读取 miaoa 标签组失败：$e');
       if (!mounted) return;
