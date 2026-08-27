@@ -13,7 +13,7 @@ void main() {
     final out = StringBuffer();
     final code = await runSkillCommand(rest: const [], out: out);
     expect(code, 0);
-    expect(out.toString(), contains('用 ishkafel CLI 做成片翻新'));
+    expect(out.toString(), contains('用 ishkafel CLI 做竖屏口播短视频'));
     expect(out.toString(), contains('ishkafel candidates'));
   });
 

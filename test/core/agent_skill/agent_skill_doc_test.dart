@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/agent_skill/agent_skill_doc.dart';
+import 'package:ishkafel/core/agent_skill/skill_installer.dart';
 
 /// 手册正文是**生成**进二进制的（tool/gen_agent_skill.dart）。
 ///
@@ -19,6 +20,15 @@ void main() {
     expect(agentSkillMarkdown, contains(script),
         reason: '脚本成片那条线必须一起交付——它原来没有任何交付通道，'
             'Agent 装完技能手册里 ishkafel script 一个字都没有');
+  });
+
+  /// 技能的 description 决定 Agent **什么时候会想起用它**。
+  /// 只写「成片翻新」的话，用户说「帮我做条口播视频」它根本不会联想过来
+  test('技能描述要覆盖两类场景，不能只提翻新', () {
+    final desc = SkillInstaller.describeForFrontmatter();
+    expect(desc, contains('翻新'));
+    expect(desc, anyOf(contains('脚本'), contains('口播'), contains('台词')),
+        reason: '从台词造新片也是这个工具干的事，描述里不写就等于没有');
   });
 
   test('脚本成片的命令要在手册里出现——否则那条线对 Agent 不存在', () {

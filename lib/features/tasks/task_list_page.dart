@@ -7,6 +7,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/build_mode.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/tasks_watch.dart';
 import '../../core/storage/ui_wake.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
@@ -98,13 +99,38 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 不然导入时软件弹出来却一片安静，人不知道它在干什么
   AgentPresence? _globalAgent;
 
+  /// 上一次看到的任务清单指纹。变了就重读列表——**Agent 在外面建的任务、
+  /// 改完的任务，界面要自己发现**。此前列表只在进页面那一刻读一次，
+  /// CLI 建好的任务在界面上根本不出现，人只能退出去重进
+  String? _tasksPrint;
+
   void _startWakeWatcher() {
     _wakeTimer ??= Timer.periodic(const Duration(milliseconds: 700), (_) {
       _pollWake();
       _pollGlobalAgent();
+      _pollTasksChanged();
     });
     // 冷启动的第一条请求不等第一个周期
     WidgetsBinding.instance.addPostFrameCallback((_) => _pollWake());
+  }
+
+  /// 盘上的任务清单变了就重读。
+  ///
+  /// 不是可视模式才需要：静默模式下人回头来看，也该看得到新任务。
+  /// 用指纹而不是目录监听——任务落盘走的是「写临时文件再 rename」，
+  /// macOS 的目录监听对这种原子替换容易漏事件
+  void _pollTasksChanged() {
+    if (!mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final now = tasksFingerprint(dataDir);
+    if (_tasksPrint == null) {
+      _tasksPrint = now;
+      return;
+    }
+    if (now == _tasksPrint) return;
+    _tasksPrint = now;
+    unawaited(ref.read(taskListProvider.notifier).reload());
   }
 
   void _pollGlobalAgent() {
