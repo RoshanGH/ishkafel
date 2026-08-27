@@ -202,6 +202,42 @@ ishkafel script apply screen-text <任务> --file t.json
 
 倍速限定 0.5~2.0：再快听不清，再慢像卡带。
 
+## 四点七、划词建镜（一句话过好几个画面时用这个）
+
+一句话配好几个镜头时，**别自己去猜每一镜多长**。选中台词里的几个字，
+那一镜的时长就是这几个字的朗读时长：
+
+```bash
+# 1) 先看这一句每个字落在哪、哪些字已经被占住
+ishkafel script show <任务> --line 3 --json | jq '{words, takenWords, canPickWords}'
+
+# 2) 给「如果你觉得有点贵」这 8 个字配一个画面
+ishkafel script apply word-shots <任务> --file w.json
+```
+
+```json
+{
+  "picks": [{"lineIndex": 2, "startWord": 0, "endWord": 8, "materialId": 105378}],
+  "offered": [ ... ishkafel script shots 返回过的候选 ... ]
+}
+```
+
+**规则（和界面上完全一致）**：
+
+- `startWord` / `endWord` 是**字**的序号，`[起, 止)` 左闭右开。
+  `words` 数组的下标就是它——数组里一个元素通常就是一个字
+  （数字和英文会并成一个不可拆的整体，比如 `69.91`）
+- **已经被占住的字不能再划**（`takenWords` 列出来了）。要改就先用
+  `apply shot-edit` 的 `remove` 删掉那一镜，那几个字自动恢复可划
+- **可以不连续**：划头、划尾，中间那段留给普通镜头（用 `apply shots` 加）。
+  中间不管放几个镜头，加起来永远等于「配音总长 − 各划词镜之和」
+- **这一句必须已经有配音**，否则算不出「这几个字读多久」
+- 提交的素材必须来自 `script shots` 返回过的候选，不许凭空造 id
+
+**为什么值得用它**：时长是**现算的**，不是存的。换音色、重新配音之后
+朗读长短全变，切点不变、时长自动跟上——你不用回头再调一遍。
+而且字幕会跟着划词的边界切，画面切到哪儿字幕就换到哪儿。
+
 ## 五、分时长
 
 一行分到几个镜头之后，每镜各占多久是创作判断：哪一镜该多停一会儿、
@@ -210,11 +246,42 @@ ishkafel script apply screen-text <任务> --file t.json
 **硬约束**：总和必须等于这一行的配音时长（`rootMs`）。差一点点就会让画面与
 声音错位——这条软件盯得很死（差 60ms 以上就拒）。
 
+```bash
+ishkafel script apply alloc <任务> --file a.json
+```
+
+```json
+{"alloc": [{"lineIndex": 2, "allocMs": [1280, 2040, 2780, 2780]}]}
+```
+
+一行给一组，数组长度要等于那一行的镜头数、总和等于 `rootMs`。
+
+**划词建的镜不用管**：它们的时长是从字区间现算的，你只需要给普通镜头分。
+真要改，就改字区间（`apply word-shots` 前先删掉那一镜）。
+
 ## 六、配乐
 
 配乐轨的模型是**整片被若干刀切成连续段、铺满全片**，不是「标几段就行」。
 提交时所有段首尾相接、覆盖 0 到最后一行，不留空档也不重叠。
 某几行不要配乐，也要显式占一段（不给 materialId）。
+
+```bash
+ishkafel script apply bgm <任务> --file b.json
+```
+
+```json
+{
+  "bgm": [
+    {"startLine": 0, "endLine": 5, "materialId": 8801, "volume": 0.35},
+    {"startLine": 6, "endLine": 9},
+    {"startLine": 10, "endLine": 27, "materialId": 8802}
+  ],
+  "offered": [ ... 候选曲子 ... ]
+}
+```
+
+中间那段不给 `materialId` = 这几行不铺配乐。`volume` 是**相对值**，
+乘在配乐轨总音量上（见 `apply mix`）。
 
 ## 七、读错误
 
@@ -269,3 +336,13 @@ ishkafel script show <任务> --json | jq '[.lines[] | select(.voice.state=="sta
 这一条**不会拦住导出**，所以更危险：片子照样导得出来，只是里面前几句是旧
 音色、后几句是新的，或者念的还是改之前的台词。人拿到成片才发现，而你
 已经报告完成了。有 stale 就重新 `ishkafel script voice <任务>` 一遍。
+
+还有一条也是「导得出来但片子是坏的」：
+
+```bash
+ishkafel script show <任务> --json | jq '[.blocking[] | select(.kind=="subtitle-too-short")]'
+```
+
+手写的字幕明显盖不住那一屏的语音时会出现在这里（比如一屏要念 26 个字、
+4.7 秒，字幕却只有 8 个字——那段配音在响，字幕停着不动）。
+把那一屏切开，或者把字幕补齐。

@@ -1,0 +1,43 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/cli/commands/script_apply_command.dart';
+import 'package:ishkafel/core/agent_skill/agent_skill_doc.dart';
+
+/// **人能干的，Agent 都要能干。**
+///
+/// 这条原则一直靠人记得，于是漏了三次：
+/// - 三轨混音台、本片基调、剪映做完了，Agent 侧空着（0.1.60 才补）
+/// - 脚本成片整条线的手册根本没有交付通道，Agent 装完技能看不到
+///   `ishkafel script`（同上）
+/// - 划词建镜做完了，Agent 读不到词区间、也提交不了（0.1.67 才补）
+///
+/// 所以把它变成测试：新增一类 apply 而忘了写手册，这里当场红。
+/// 拦不住「功能做了但没做 CLI」，但拦得住「做了 CLI 却没人知道」——
+/// 后者恰恰是三次里的两次。
+void main() {
+  test('每一类 apply 都要在手册里出现——写不进手册等于没做', () {
+    for (final what in scriptApplyKinds) {
+      expect(agentSkillMarkdown, contains('apply $what'),
+          reason: '新增了 apply $what 却没写进 docs/agent/SCRIPT_SKILL.md。'
+              'Agent 看不到的能力等于不存在');
+    }
+  });
+
+  test('划词建镜这条线在手册里说得完整', () {
+    for (final key in const [
+      'startWord',
+      'endWord',
+      'takenWords',
+      'word-shots',
+    ]) {
+      expect(agentSkillMarkdown, contains(key), reason: '手册里缺 $key');
+    }
+  });
+
+  test('会静默毁掉成片的两条自查必须在手册里', () {
+    // 这两条都「不拦导出」，所以更危险：片子导得出来，但里面是坏的
+    expect(agentSkillMarkdown, contains('stale'),
+        reason: '配音过期不拦导出——会混出一条前后两个人说话的片子');
+    expect(agentSkillMarkdown, contains('subtitle-too-short'),
+        reason: '字幕盖不住语音不拦导出——配音在念、字幕停着不动');
+  });
+}

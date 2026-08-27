@@ -9,6 +9,7 @@ import '../../core/script/script_cover.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/shot_allocation.dart';
+import '../../core/script/word_shot_insert.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
@@ -17,6 +18,15 @@ import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../agent_stage.dart';
 import '../script_apply.dart';
+
+/// Agent 能提交的所有改动类型。**新增一类就要同步写进手册**——
+/// 有架构测试盯着（见 test/architecture/agent_parity_test.dart）：
+/// Agent 看不到的能力等于不存在，这个坑已经踩过三次
+const List<String> scriptApplyKinds = [
+  'shots', 'subtitles', 'alloc', 'bgm',
+  'lines', 'shot-edit', 'screen-text',
+  'baseline', 'line-voice', 'mix', 'word-shots',
+];
 
 /// `ishkafel script apply <shots|subtitles|alloc|bgm> <task> --file <json>`
 ///
@@ -39,11 +49,7 @@ Future<int> runScriptApplyCommand({
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
-  const supported = [
-    'shots', 'subtitles', 'alloc', 'bgm',
-    'lines', 'shot-edit', 'screen-text',
-    'baseline', 'line-voice', 'mix',
-  ];
+  const supported = scriptApplyKinds;
   if (rest.length < 2) {
     sink.writeln('用法：ishkafel script apply <${supported.join('|')}> '
         '<任务 id> --file <结果.json>');
@@ -162,6 +168,25 @@ String? _str(Object? v) => v is String ? v : null;
 int? _int(Object? v) => v is int ? v : (v is num ? v.toInt() : null);
 double? _dbl(Object? v) => v is num ? v.toDouble() : null;
 
+List<WordShotPick> _wordShots(Map<String, dynamic> payload) {
+  final raw = payload['picks'];
+  if (raw is! List) return const [];
+  return [
+    for (final e in raw)
+      if (e is Map &&
+          e['lineIndex'] is int &&
+          e['startWord'] is int &&
+          e['endWord'] is int &&
+          e['materialId'] is int)
+        (
+          lineIndex: e['lineIndex'] as int,
+          startWord: e['startWord'] as int,
+          endWord: e['endWord'] as int,
+          materialId: e['materialId'] as int,
+        ),
+  ];
+}
+
 List<LineVoiceEdit> _lineVoices(Map<String, dynamic> payload) {
   final raw = payload['lines'];
   if (raw is! List) return const [];
@@ -242,6 +267,11 @@ List<ApplyIssue> _validate(
       return validateLineVoiceSubmission(doc: doc, edits: _lineVoices(payload));
     case 'mix':
       return validateMixSubmission(doc: doc, mix: _mixOf(doc, payload));
+    case 'word-shots':
+      return validateWordShotSubmission(
+          doc: doc,
+          picks: _wordShots(payload),
+          offered: _offeredMaterials(payload).keys.toSet());
     default:
       return const [];
   }
@@ -357,6 +387,19 @@ ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
         if (e.speechRate != null) {
           next = next.setSpeechRate(e.lineIndex, e.speechRate!);
         }
+      }
+      return next;
+    case 'word-shots':
+      final offered = _offeredMaterials(payload);
+      // 按字序插入而不是追加：Agent 也可能先划句尾再划句首，
+      // 追加会让镜头顺序和台词顺序反过来
+      for (final p in _wordShots(payload)) {
+        final line = next.lines[p.lineIndex];
+        final shot = offered[p.materialId]!
+            .copyWith(startWord: p.startWord, endWord: p.endWord);
+        final shots = [...line.shots];
+        shots.insert(insertIndexForWords(shots, p.startWord), shot);
+        next = next.setShotsById(line.id, reallocShots(line, shots));
       }
       return next;
     case 'mix':
@@ -501,6 +544,7 @@ String _actionOf(String what, Map<String, dynamic> payload) => switch (what) {
       'baseline' => '正在定本片的音色与语速',
       'line-voice' => '正在改${_lineLabel(payload, 'lines')}的音色/语速',
       'mix' => '正在调三条声音轨的音量',
+      'word-shots' => '正在给选中的字配画面',
       _ => '正在操作',
     };
 
@@ -525,6 +569,7 @@ AgentFocus? _focusOf(String what, Map<String, dynamic> payload) {
     'screen-text' => 'screens',
     'lines' => 'lines',
     'line-voice' => 'lines',
+    'word-shots' => 'picks',
     _ => null,
   };
   if (key == null) return null;

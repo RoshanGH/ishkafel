@@ -115,6 +115,18 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
     'text': line.text,
     if (line.tags.isNotEmpty) 'tags': line.tags,
     if (root != null) 'rootMs': root,
+    // 划词建镜要用的三样：每个字落在哪、哪些字已经被占住、现在能不能划。
+    // 人在界面上是用眼睛看的，Agent 得有等价的东西
+    'canPickWords': (vo?.words ?? const []).isNotEmpty,
+    if ((vo?.words ?? const []).isNotEmpty)
+      'words': [
+        for (final w in vo!.words)
+          {'text': w.text, 'startMs': w.startMs, 'endMs': w.endMs},
+      ],
+    'takenWords': [
+      for (final s in line.shots)
+        if (s.boundToWords) {'start': s.startWord, 'end': s.endWord},
+    ],
     // 这一行**实际**会用的音色与语速（行上没设就是本片基调）。
     // 给有效值，Agent 才知道生成出来会是谁在说话
     'voiceId': doc.voiceIdOf(line),
@@ -138,7 +150,8 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
         if (line.voiceDefectText != null) 'defect': line.voiceDefectText,
       },
     'shots': [
-      for (var j = 0; j < line.shots.length; j++) _shotJson(line.shots[j], j),
+      for (var j = 0; j < line.shots.length; j++)
+        _shotJson(line.shots[j], j, words: vo?.words ?? const []),
     ],
     if (root != null)
       'shortfallMs': ShotAllocation.shortfallMs(line.shots, root),
@@ -155,7 +168,9 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
   };
 }
 
-Map<String, dynamic> _shotJson(LineShot shot, int index) => {
+Map<String, dynamic> _shotJson(LineShot shot, int index,
+        {List<VoiceWord> words = const []}) =>
+    {
       'index': index,
       'materialId': shot.materialId,
       'name': shot.name,
@@ -170,7 +185,22 @@ Map<String, dynamic> _shotJson(LineShot shot, int index) => {
       if (shot.durationMs != null) 'availableMs': shot.availableMs,
       if (shot.localSource != null) 'localSource': shot.localSource,
       if (shot.sourceVolume != null) 'sourceVolume': shot.sourceVolume,
+      // 划词建的镜：绑住台词的哪几个字。时长是**从这个区间算出来的**，
+      // 不是存的——换音色、重配音之后朗读长短全变，切点不变、时长自动跟上
+      if (shot.boundToWords) ...{
+        'startWord': shot.startWord,
+        'endWord': shot.endWord,
+        // 连文字一起给：不然 Agent 还得自己去拼词，而词表和原文常有出入
+        'boundText': _wordsText(words, shot.startWord!, shot.endWord!),
+      },
     };
+
+String _wordsText(List<VoiceWord> words, int from, int to) => [
+      for (var i = from.clamp(0, words.length);
+          i < to.clamp(0, words.length);
+          i++)
+        words[i].text,
+    ].join();
 
 Map<String, dynamic> _referenceJson(LineRef ref) {
   final segments = ref.segments;

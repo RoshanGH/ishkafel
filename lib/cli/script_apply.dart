@@ -633,3 +633,100 @@ List<ApplyIssue> validateMixSubmission({
   }
   return const [];
 }
+
+/// 一次划词建镜：给这一行的第 `[startWord, endWord)` 个字配一个画面
+typedef WordShotPick = ({
+  int lineIndex,
+  int startWord,
+  int endWord,
+  int materialId,
+});
+
+/// 校验划词建镜。**人在界面上能干的，Agent 要能干同一件事**。
+///
+/// 界面那边是「已经被占住的字划不动」——选中它根本不出按钮，人不做无效
+/// 操作。Agent 这边没有界面挡着，所以规则要在这里说清并拒绝，
+/// 而且要点名该先删哪一镜。
+List<ApplyIssue> validateWordShotSubmission({
+  required ScriptDoc doc,
+  required List<WordShotPick> picks,
+  required Set<int> offered,
+}) {
+  if (picks.isEmpty) {
+    return [(lineIndex: null, shotIndex: null, message: '一个都没给')];
+  }
+  final issues = <ApplyIssue>[];
+  // 同一批里的区间也要互相查：一次提交两段重叠的，落盘后同样是坏结构
+  final claimed = <int, List<({int start, int end})>>{};
+
+  for (final p in picks) {
+    if (p.lineIndex < 0 || p.lineIndex >= doc.lines.length) {
+      issues.add((
+        lineIndex: p.lineIndex,
+        shotIndex: null,
+        message: '没有第 ${p.lineIndex + 1} 行（这个脚本共 ${doc.lines.length} 行）'
+      ));
+      continue;
+    }
+    final line = doc.lines[p.lineIndex];
+    final words = line.voiceover?.words ?? const <VoiceWord>[];
+    if (words.isEmpty) {
+      // 没有逐字时间就算不出「这几个字读多久」，这一镜的时长无从谈起
+      issues.add((
+        lineIndex: p.lineIndex,
+        shotIndex: null,
+        message: '第 ${p.lineIndex + 1} 行还没有配音（或配音没有逐字时间），'
+            '划词建镜要靠它算时长——先 ishkafel script voice 生成配音'
+      ));
+      continue;
+    }
+    if (p.startWord < 0 ||
+        p.endWord > words.length ||
+        p.endWord <= p.startWord) {
+      issues.add((
+        lineIndex: p.lineIndex,
+        shotIndex: null,
+        message: '第 ${p.lineIndex + 1} 行的字区间 [${p.startWord}, ${p.endWord}) '
+            '不成立（这一句共 ${words.length} 个字，起点要小于终点）'
+      ));
+      continue;
+    }
+    if (!offered.contains(p.materialId)) {
+      issues.add((
+        lineIndex: p.lineIndex,
+        shotIndex: null,
+        message: '素材 ${p.materialId} 不在候选里。'
+            '只能用 ishkafel script shots 返回过的素材，不要凭空造 id'
+      ));
+      continue;
+    }
+    // 和已经在盘上的划词镜比
+    for (var j = 0; j < line.shots.length; j++) {
+      final s = line.shots[j];
+      if (!s.boundToWords) continue;
+      if (p.startWord < s.endWord! && s.startWord! < p.endWord) {
+        issues.add((
+          lineIndex: p.lineIndex,
+          shotIndex: j,
+          message: '第 ${p.lineIndex + 1} 行的 [${p.startWord}, ${p.endWord}) '
+              '和第 ${j + 1} 镜的 [${s.startWord}, ${s.endWord}) 重叠了。'
+              '同一个字不能既属于这一镜又属于那一镜——'
+              '先删掉第 ${j + 1} 镜（apply shot-edit 的 remove）再划'
+        ));
+        break;
+      }
+    }
+    // 再和同一批里前面几条比
+    final mine = claimed[p.lineIndex] ??= [];
+    if (mine.any((r) => p.startWord < r.end && r.start < p.endWord)) {
+      issues.add((
+        lineIndex: p.lineIndex,
+        shotIndex: null,
+        message: '这一批里第 ${p.lineIndex + 1} 行有两段字区间互相重叠了'
+      ));
+      continue;
+    }
+    mine.add((start: p.startWord, end: p.endWord));
+  }
+  return issues;
+}
