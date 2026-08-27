@@ -4,6 +4,12 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
+import '../../core/ffmpeg/thumbnail_service.dart';
+import '../agent_frames.dart';
+import 'package:path/path.dart' as p;
+import '../../core/ffmpeg/process_runner.dart';
+import '../../core/miaoa/material_downloader.dart';
+import '../../core/storage/task_media.dart';
 import '../cli_output.dart';
 import '../script_shot_context.dart';
 import 'script_apply_command.dart';
@@ -33,6 +39,9 @@ Future<int> runScriptCommand({
   /// 没有参考镜时，自己给一句**画面描述**去搜（不是台词）
   String? keyword,
 
+  /// script peek 用：要看哪几条素材
+  String? materials,
+
   /// `export` 用：输出目录
   String? outputDir,
 
@@ -58,6 +67,7 @@ Future<int> runScriptCommand({
         '                                  lines/shot-edit/screen-text/\n'
         '                                  baseline/line-voice/mix）\n'
         '  export <任务> [--out 目录]      导出成片\n'
+        '  peek <任务> --materials <id,id> 把候选的画面抽到本地，亲眼看看\n'
         '  jianying <任务>                 写成剪映草稿，去剪映里精修');
     return exitBadUsage;
   }
@@ -81,6 +91,14 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'peek':
+      return runScriptPeekCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        materials: materials,
         out: out,
         err: err,
       );
@@ -155,7 +173,37 @@ Future<int> runScriptCommand({
         return exitBadUsage;
       }
       try {
-        final ctx = scriptShotContext(doc, line - 1);
+        // 先给参考镜抽本地首帧：**让 Agent 真的看见要复刻的是什么画面**，
+        // 而不是只读一句别人总结的描述。抽过的直接用，不重跑 ffmpeg
+        final refVideo = doc.lines[line - 1].reference?.videoPath;
+        final refSegs =
+            doc.lines[line - 1].reference?.segments ?? const <(int, int)>[];
+        final frames = <int, String>{};
+        if (refVideo != null && File(refVideo).existsSync()) {
+          for (var k = 0; k < refSegs.length; k++) {
+            final (a, b) = refSegs[k];
+            // 取中点：两端常踩在转场上，抽出来是糊的
+            final at = a + (b - a) ~/ 2;
+            final got = await ensureFrame(
+              dataDir: dataDir,
+              videoPath: refVideo,
+              atMs: at,
+              extract: (video, out, ms) async {
+                Directory(p.dirname(out)).createSync(recursive: true);
+                await ThumbnailService(run: const ResolvingProcessRunner().call)
+                    .extractCover(
+                  videoPath: video,
+                  outPath: out,
+                  atSeconds: ms / 1000,
+                );
+                return true;
+              },
+            );
+            if (got != null) frames[k] = got;
+          }
+        }
+        final ctx = scriptShotContext(doc, line - 1,
+            refFrameOf: (k) => frames[k]);
         // 候选走**与界面完全同一条路**：参考镜打过标就按它的画面描述搜。
         // 绝不退回「拿台词搜画面描述」——那个错配 0.1.45 刚砍掉，
         // 台词是一句话、画面描述是一幅画，不在一个维度上
@@ -207,6 +255,10 @@ Future<int> runScriptCommand({
                 if (m.fileKey != null) 'fileKey': m.fileKey,
               },
           ],
+          // 想**亲眼看**某几条候选长什么样，用这条把它们的画面抽到本地：
+          // 一条几十兆，所以不在这里替你全下——你先按描述和标签筛一轮，
+          // 拿不准的那几条再看图
+          'peek': 'ishkafel script peek <任务> --materials <id,id>',
         }, out: out);
         return 0;
       } on ArgumentError catch (e) {
@@ -254,4 +306,82 @@ Future<List<int>> _tagIdsOf({
   } catch (_) {
     return const [];
   }
+}
+
+/// `ishkafel script peek <task> --materials <id,id>` ——
+/// 把这几条候选素材的画面抽到本地，返回图片路径。
+///
+/// 用户要的能力：「**就像人看到这个东西一样，Agent 也要看到这个东西**，
+/// 然后拿这个东西去搜索出对应的分镜。」
+///
+/// 光看 `sceneDescription` 是看别人（打标 AI）总结过的二手信息，
+/// 判断「这一镜像不像参考片那一镜」得看图。
+///
+/// **按需下载**：一条素材几十兆，不能在列候选时就全下。先按描述和标签
+/// 筛一轮，拿不准的那几条再 peek。
+Future<int> runScriptPeekCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String? materials,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script peek <任务 id> --materials <素材 id，逗号分隔>');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final ids = <int>[
+    for (final piece in (materials ?? '').split(','))
+      ?int.tryParse(piece.trim()),
+  ];
+  if (ids.isEmpty) {
+    sink.writeln('没说要看哪几条：--materials 12345,12346');
+    return exitBadUsage;
+  }
+
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+  final downloader = MaterialDownloader(
+    content: MiaoaContentService(),
+    cacheDir: media.materialsDir,
+  );
+  final frames = <Map<String, dynamic>>[];
+  final failed = <String>[];
+  for (final id in ids) {
+    try {
+      final local = media.localMaterial(id) ?? await downloader.fetch(id);
+      final frame = await ensureFrame(
+        dataDir: dataDir,
+        videoPath: local,
+        atMs: 1000, // 第 1 秒：开头常有转场/黑帧
+        extract: (video, outPath, ms) async {
+          Directory(p.dirname(outPath)).createSync(recursive: true);
+          await ThumbnailService(run: const ResolvingProcessRunner().call)
+              .extractCover(
+                  videoPath: video, outPath: outPath, atSeconds: ms / 1000);
+          return true;
+        },
+      );
+      if (frame == null) {
+        failed.add('$id（抽帧失败）');
+        continue;
+      }
+      frames.add({'materialId': id, 'framePath': frame, 'videoPath': local});
+    } catch (e) {
+      // 一条失败不挡其余：Agent 拿到能看的那几条照样能往下判断
+      failed.add('$id（$e）');
+    }
+  }
+  emitJson({
+    'frames': frames,
+    if (failed.isNotEmpty) 'failed': failed,
+    'next': '直接打开 framePath 看图，像人一样判断这一镜像不像',
+  }, out: out);
+  return frames.isEmpty ? exitFailed : 0;
 }

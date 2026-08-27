@@ -11,7 +11,13 @@ import '../core/script/shot_allocation.dart';
 /// - `usedElsewhere`：整片已用的素材，避免几句话撞同一条（同一批素材
 ///   常有微调版，撞了会让片子看着像卡带）
 /// - `slotMs`：这一行要铺多长，决定素材够不够
-Map<String, dynamic> scriptShotContext(ScriptDoc doc, int lineIndex) {
+Map<String, dynamic> scriptShotContext(
+  ScriptDoc doc,
+  int lineIndex, {
+  /// 参考片这一镜的**本地首帧**（Agent 拿它去「看」画面）。
+  /// 返回 null 表示这一镜没抽到帧——不给假路径
+  String? Function(int shotIndex)? refFrameOf,
+}) {
   if (lineIndex < 0 || lineIndex >= doc.lines.length) {
     throw ArgumentError('第 ${lineIndex + 1} 行不存在（脚本共 ${doc.lines.length} 行）');
   }
@@ -30,6 +36,10 @@ Map<String, dynamic> scriptShotContext(ScriptDoc doc, int lineIndex) {
           'description': meta?.description ?? '',
           'tags': meta?.tags ?? const <String>[],
           'asr': ref.segmentText(k, ''),
+          // 本地首帧：**让 Agent 真的看见这一镜长什么样**，
+          // 而不是只读一句画面描述。描述是别人（打标 AI）总结的，
+          // 看图才是第一手
+          if (refFrameOf?.call(k) case final f?) 'framePath': f,
         };
       }(),
   ];
