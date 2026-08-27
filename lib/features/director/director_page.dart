@@ -329,7 +329,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _pinBgm();
     _pinAllShots();
     _watchAgent();
-    _setupPreview();
+    // **等第一帧画完再建播放器**，不要在 initState 里同步建。
+    //
+    // 真机崩了四次，栈一字不差：mpv_render_context_create 里的断言失败、
+    // 整个 app abort。规律是验收 Agent 用四轮数据定死的：
+    //
+    // | 场景 | 结果 |
+    // |---|---|
+    // | `ui new-task` 建本进程**首个**编导台 | 崩 |
+    // | `ui new-task` 时已经开过编导台 | 不崩 |
+    // | `open` 建本进程首个编导台（含冷启动） | 不崩 |
+    //
+    // 差别在路径本身：`ui new-task` 中间隔着一个**模态对话框**，它关闭
+    // 时界面正在重建，这一刻去建 mpv 的 GL 纹理就撞上了；`open` 那条
+    // 直接 push，界面是稳的。之前两次都猜错了方向（先猜冷启动竞态、
+    // 再猜两个上下文并存），都被数据反证。
+    //
+    // 挪到 postFrame 之后，两条路进来时界面都已经画完一帧、稳定了
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _setupPreview();
+    });
   }
 
   PickedMediaCache? _buildBgmCache() {

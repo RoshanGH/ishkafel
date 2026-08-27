@@ -21,6 +21,7 @@ void main() {
       {String? mode,
       String? file,
       String? tagGroups,
+      String? name,
       StringSink? out,
       StringSink? err,
       Duration? wait}) =>
@@ -30,6 +31,7 @@ void main() {
         mode: mode,
         file: file,
         tagGroups: tagGroups,
+        name: name,
         env: const {},
         waitForUi: wait ?? const Duration(milliseconds: 300),
         // 测试里不真的等冷启动那几秒
@@ -143,6 +145,21 @@ void main() {
     expect(json['seq'], 9);
     expect(json['next'], contains('new1'),
         reason: '直接给出下一条命令，省得调用方自己拼');
+  });
+
+  test('--name 要真的传到界面那头——上一轮我说做了却没接上线', () async {
+    final f = Future(() => run(['new-task'],
+        mode: 'script', tagGroups: '1', name: '验证-复刻滴露'));
+    AgentRequest? got;
+    for (var i = 0; i < 40 && got == null; i++) {
+      got = consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot);
+      if (got == null) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    }
+    expect(got!.payload['name'], '验证-复刻滴露',
+        reason: '只跑 analyze 不验行为，参数没接上线也看不出来');
+    await f;
   });
 
   test('认不出的子命令给用法', () async {

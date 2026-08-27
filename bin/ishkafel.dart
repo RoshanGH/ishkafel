@@ -66,7 +66,7 @@ Future<void> main(List<String> args) async {
         defaultsTo: 'or', help: 'candidates 用：标签检索 and（全满足）| or（任一）')
     ..addOption('dir',
         help: 'skill --install 用：装到指定技能目录（不认默认目录的 Agent 自报）')
-    ..addOption('name', help: 'blank create 用：任务名')
+    ..addOption('name', help: 'blank create / ui new-task 用：任务名')
     ..addOption('resolution', help: 'export 用：短边 480/720/1080/1440/2160')
     ..addOption('fps', help: 'export 用：24/25/30/50/60')
     ..addOption('bitrate',
@@ -129,6 +129,8 @@ Future<void> main(List<String> args) async {
         install: parsed['install'] as bool,
         dir: parsed['dir'] as String?,
       ),
+    'task-rename' => await runTaskRenameCommand(
+        rest: rest, dataDir: dataDir, name: parsed['name'] as String?),
     'task-delete' => await runTaskDeleteCommand(
         rest: rest, dataDir: dataDir, yes: parsed['yes'] as bool),
     'ui' => await runUiCommand(
@@ -137,6 +139,7 @@ Future<void> main(List<String> args) async {
         mode: parsed['mode'] as String?,
         file: parsed['file'] as String?,
         tagGroups: parsed['tag-groups'] as String?,
+        name: parsed['name'] as String?,
       ),
     'review' => await runReviewCommand(
         rest: rest,
@@ -228,6 +231,7 @@ ishkafel —— 成片翻新工具的命令行入口
   open <id>        把 app 弹出来并落到这个任务的工作台
   review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
                    确认后 task <id> 里的方案就是最终结果，等用户发话再继续
+  task-rename <id> --name "新名字"     给任务改名
   task-delete <id> --yes
                    删掉一条任务，连同它的素材/配音/预览产物。不可逆
   ui new-task --mode <script|renew|blank> --tag-groups <id,id> [--file <原片>]

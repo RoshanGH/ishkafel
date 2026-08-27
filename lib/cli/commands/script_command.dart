@@ -10,6 +10,8 @@ import 'package:path/path.dart' as p;
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/miaoa/material_downloader.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/miaoa/candidate_probe.dart';
+import '../../core/audio/bgm_library.dart';
 import '../cli_output.dart';
 import '../search_modes.dart';
 import '../script_shot_context.dart';
@@ -73,6 +75,7 @@ Future<int> runScriptCommand({
         '                                  baseline/line-voice/mix）\n'
         '  export <任务> [--out 目录]      导出成片\n'
         '  peek <任务> --materials <id,id> 把候选的画面抽到本地，亲眼看看\n'
+        '  bgm-candidates <任务> [--keyword 轻快]  有哪些配乐可选\n'
         '  jianying <任务>                 写成剪映草稿，去剪映里精修');
     return exitBadUsage;
   }
@@ -96,6 +99,14 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'bgm-candidates':
+      return runScriptBgmCandidatesCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        keyword: keyword,
         out: out,
         err: err,
       );
@@ -290,6 +301,24 @@ Future<int> runScriptCommand({
               projectIds: projectIds,
               sink: sink),
         };
+        // **必须带上时长**：提交时校验要拿它算「这一镜够不够铺」。
+        //
+        // 不给的话照手册原样带回来的候选一律算成 0 秒，整批被拒——
+        // 真机上验收 Agent 21 行全废，而它完全是照手册做的。
+        // 界面那边一直是拿 previewUrl 现探（见 CandidateProbe），
+        // 只是 CLI 这条路漏了这一步。miaoa 的搜索结果本身不带时长
+        // ResolvingProcessRunner 自己会把 ffprobe 解析到真实路径
+        // （GUI 进程的 PATH 不含 Homebrew 目录，这一层早就处理过）
+        final probe = CandidateProbe(run: const ResolvingProcessRunner().call);
+        final specs = <int, CandidateSpec>{};
+        await Future.wait([
+          for (final m in page.items)
+            probe
+                .probe(materialId: m.id, previewUrl: m.previewUrl)
+                .then((spec) {
+              if (spec != null) specs[m.id] = spec;
+            }),
+        ]);
         emitJson({
           ...ctx,
           'candidates': [
@@ -300,6 +329,11 @@ Future<int> runScriptCommand({
                 'sceneDescription': m.sceneDescription,
                 'voiceover': m.voiceover,
                 'tags': m.tags,
+                // 这条素材有多长、还能出多少成片时长。提交时原样带回来
+                if (specs[m.id] case final spec?) ...{
+                  'durationMs': spec.durationMs,
+                  'availableMs': spec.durationMs,
+                },
                 if (m.thumbnailUrl != null) 'thumbnailUrl': m.thumbnailUrl,
                 if (m.fileKey != null) 'fileKey': m.fileKey,
               },
@@ -458,4 +492,58 @@ Future<CandidatePage> _searchLikeImage({
   }
   return services.searchByImage(
       fileKey: key, tagIds: tagIds, projectIds: projectIds, pageSize: 20);
+}
+
+/// `ishkafel script bgm-candidates <task> [--keyword 轻快]` ——
+/// 有哪些配乐可选。
+///
+/// 之前这条命令**不存在**：手册的提交样例里有个 `offered`（候选曲子），
+/// 但全文没有一句说它从哪来。`script shots` 搜的是视频素材、`script show`
+/// 里 `bgm` 是空的——验收 Agent 找遍了也拿不到候选，配乐这一步整个断掉，
+/// 成片只能没有 BGM。
+Future<int> runScriptBgmCandidatesCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String? keyword,
+  BgmLibrary? library,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script bgm-candidates <任务 id> [--keyword 轻快]');
+    return exitBadUsage;
+  }
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  try {
+    final page = await (library ?? BgmLibrary()).search(
+      keyword: keyword,
+      projectIds: [if (task.project != null) task.project!.id],
+      pageSize: 30,
+    );
+    emitJson({
+      'taskId': task.id,
+      if (page.widenedFromProject)
+        'notice': '这个项目下没搜到，已经放开到全库——曲子可能不贴这条片子的调性',
+      'candidates': [
+        for (final m in page.items)
+          {
+            'materialId': m.id,
+            'name': m.name,
+            'durationMs': m.durationMs,
+            if (m.tags.isNotEmpty) 'tags': m.tags,
+          },
+      ],
+      'next': '把这里的 materialId 填进 apply bgm 的 offered 与各段；'
+          '某几行不铺配乐的话，那一段把 materialId 整个省掉',
+    }, out: out);
+    return 0;
+  } on MiaoaException catch (e) {
+    sink.writeln(e.message);
+    return exitEnv;
+  }
 }

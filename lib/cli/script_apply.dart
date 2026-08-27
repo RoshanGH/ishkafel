@@ -266,11 +266,18 @@ List<ApplyIssue> validateBgmSubmission({
             '（脚本共 $total 行）'
       ));
     }
-    if (!offered.contains(seg.materialId)) {
+    // materialId < 0 = **这几行不铺配乐**，是合法的一段。
+    //
+    // 配乐轨的模型是「整片被切成连续段、铺满全片」，所以「不铺」也要
+    // 占一段说出来。原来这里拿 -1 去查候选，于是空段必定被拒——
+    // 手册明写允许，实际提交不了（验收 Agent 撞上：连空段都过不去）
+    if (seg.materialId >= 0 && !offered.contains(seg.materialId)) {
       issues.add((
         lineIndex: seg.startLine,
         shotIndex: null,
-        message: '配乐 ${seg.materialId} 不在候选里'
+        message: '配乐 ${seg.materialId} 不在候选里。'
+            '曲子要从 ishkafel script bgm-candidates 拿；'
+            '这几行不想铺配乐的话，把 materialId 整个省掉'
       ));
     }
     if (seg.volume < 0 || seg.volume > 1) {

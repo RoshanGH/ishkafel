@@ -20,6 +20,7 @@ const List<String> topLevelCommands = [
   'tag-groups',
   'task',
   'task-delete',
+  'task-rename',
   'tasks',
   'todo',
   'ui',

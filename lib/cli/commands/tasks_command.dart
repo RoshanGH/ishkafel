@@ -90,3 +90,34 @@ Future<int> runTaskDeleteCommand({
   }, out: out);
   return 0;
 }
+
+
+/// `ishkafel task-rename <id> --name "新名字"` —— 给任务改名。
+///
+/// 界面上人能改（任务卡的 ⋯ 菜单里），Agent 之前不能。验收 Agent 撞上：
+/// 它按要求给任务起名，`ui new-task --name` 那时还没接上，事后又没有
+/// 改名的路，于是那条任务永远叫「脚本 08-27 21:52」。
+Future<int> runTaskRenameCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String? name,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty || (name ?? '').trim().isEmpty) {
+    sink.writeln('用法：ishkafel task-rename <任务 id> --name "新名字"');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final next = name!.trim();
+  await repository.save(task.copyWith(name: next, updatedAt: DateTime.now()));
+  emitJson({'ok': true, 'id': task.id, 'name': next, 'was': task.name},
+      out: out);
+  return 0;
+}

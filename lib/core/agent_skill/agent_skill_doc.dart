@@ -860,6 +860,7 @@ ishkafel script apply alloc <任务> --file a.json
 某几行不要配乐，也要显式占一段（不给 materialId）。
 
 ```bash
+ishkafel script bgm-candidates <任务> [--keyword 轻快]   # 先看有哪些曲子
 ishkafel script apply bgm <任务> --file b.json
 ```
 
@@ -874,8 +875,11 @@ ishkafel script apply bgm <任务> --file b.json
 }
 ```
 
-中间那段不给 `materialId` = 这几行不铺配乐。`volume` 是**相对值**，
+中间那段**不给 `materialId` = 这几行不铺配乐**——配乐轨的模型是「整片切成
+连续段、铺满全片」，所以「不铺」也要占一段说出来。`volume` 是**相对值**，
 乘在配乐轨总音量上（见 `apply mix`）。
+
+`offered` 里填 `bgm-candidates` 返回的 materialId；不铺的那几段不用管。
 
 ## 七、读错误
 
