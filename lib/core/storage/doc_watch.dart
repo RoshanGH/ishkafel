@@ -23,3 +23,21 @@ String taskFingerprint(Directory dataDir, String taskId) {
     return 'error';
   }
 }
+
+/// 界面现在能安全地把内存里的数据整份写回去吗。
+///
+/// [loadedPrint] 是界面**上次读到这份数据时**的指纹。对得上说明这期间
+/// 没人动过盘，可以写；对不上说明外面（Agent）改过，照写就会盖掉别人
+/// 刚写的东西。
+///
+/// 为什么不用「Agent 在场时不写」来挡：那个「在场」是 500ms 轮询出来的，
+/// 窗口里界面照写不误。真机连着两轮都栽在这儿——第二轮更狠，
+/// 把**已经落盘很久**的一句台词回滚没了，而 CLI 全程 `ok:true`。
+///
+/// 按内容判定不依赖任何时序，这是它比「看在场状态」可靠的地方。
+bool canOverwrite(Directory dataDir, String taskId, String? loadedPrint) {
+  if (loadedPrint == null) return true; // 还没读过，谈不上被人改
+  final now = taskFingerprint(dataDir, taskId);
+  if (now == 'none') return true; // 文件还不存在：这是第一次落盘
+  return now == loadedPrint;
+}

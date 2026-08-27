@@ -127,8 +127,24 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 演一套写一套的话，两边迟早对不上（这个项目已经栽过三次）
   bool _handlingAction = false;
 
+  /// 这一页起来的时刻。**冷启动后要缓一下再接单**——
+  ///
+  /// `ui new-task` 会先 `open -a` 把软件拉起来，然后立刻下单。app 冷启动
+  /// 时界面 1.5 秒就能起来接单，接着弹向导、建任务、进编导台初始化 mpv，
+  /// 而这时 media_kit 的全局状态还没稳：真机连着两次在
+  /// `mpv_render_context_create` 里断言失败、整个 app abort
+  /// （用户看到的是「ishkafel 意外退出，是否重新打开」）。
+  ///
+  /// 崩了以后更麻烦：后面所有带 `--visual` 的命令都 exit 5「打不开 app」，
+  /// 而手册说 exit 5 别重试——人不在场就是死局。
+  ///
+  /// 单不会丢，只是晚几秒执行
+  final DateTime _pageOpenedAt = DateTime.now();
+  static const _warmUp = Duration(seconds: 4);
+
   void _pollUiAction() {
     if (_handlingAction || !mounted) return;
+    if (DateTime.now().difference(_pageOpenedAt) < _warmUp) return;
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
     final req = consumeAgentRequest(dataDir: dataDir, taskId: globalPresenceSlot);

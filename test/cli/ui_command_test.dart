@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -31,9 +32,15 @@ void main() {
         tagGroups: tagGroups,
         env: const {},
         waitForUi: wait ?? const Duration(milliseconds: 300),
+        // 测试里不真的等冷启动那几秒
+        coldStartWait: Duration.zero,
         out: out,
         err: err,
-        run: (_, __) async => ProcessResult(0, 0, '', ''),
+        run: (bin, args) async =>
+            // pgrep 返回非零 = app 没在跑；open 照常成功
+            bin == 'pgrep'
+                ? ProcessResult(0, 1, '', '')
+                : ProcessResult(0, 0, '', ''),
       );
 
   test('参数不对时**不弹向导**——让人看着窗口弹出来又关掉，比不弹更糟', () async {
@@ -102,6 +109,40 @@ void main() {
     }
     expect(await f, isNot(0));
     expect(err.toString(), contains('人把向导关掉了'));
+  });
+
+  test('建成之后要报出是哪一条任务——不然调用方只能去列表里猜', () async {
+    // 先放一条任务在盘上，模拟界面刚建好的那一条
+    Directory('${dir.path}/tasks').createSync(recursive: true);
+    File('${dir.path}/tasks/new1.json').writeAsStringSync(jsonEncode({
+      'id': 'new1',
+      'name': '刚建的',
+      'seq': 9,
+      'status': 'ready',
+      'createdAt': DateTime.now().toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+      'units': <dynamic>[],
+    }));
+    final out = StringBuffer();
+    final f = Future(() => run(['new-task'],
+        mode: 'script', tagGroups: '1', out: out,
+        wait: const Duration(seconds: 2)));
+    for (var i = 0; i < 60; i++) {
+      final req = consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot);
+      if (req != null) {
+        writeAgentRequestResult(
+            dataDir: dir, taskId: globalPresenceSlot, id: req.id,
+            ok: true, message: '任务已经建好了');
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(await f, 0);
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json['id'], 'new1');
+    expect(json['seq'], 9);
+    expect(json['next'], contains('new1'),
+        reason: '直接给出下一条命令，省得调用方自己拼');
   });
 
   test('认不出的子命令给用法', () async {

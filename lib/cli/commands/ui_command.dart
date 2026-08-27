@@ -1,6 +1,9 @@
 import 'dart:io';
 
+import 'package:collection/collection.dart';
+
 import '../../core/storage/agent_request.dart';
+import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_action.dart';
 import '../agent_stage.dart';
@@ -27,6 +30,9 @@ Future<int> runUiCommand({
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
   Duration waitForUi = const Duration(seconds: 90),
+
+  /// 冷启动后等多久再下单。界面那头也有一道同样的缓冲
+  Duration coldStartWait = const Duration(seconds: 6),
   StringSink? out,
   StringSink? err,
 }) async {
@@ -62,10 +68,19 @@ Future<int> runUiCommand({
   // 界面没开就先拉起来——这条命令的意义就是让人看见
   final appPath = (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
   final exec = run ?? Process.run;
+  // 冷启动的话，界面要几秒才起得来。先探一眼它在不在，好决定等多久
+  final wasRunning = await _appIsRunning(exec, appPath);
   final launched = await exec('open', ['-a', appPath]);
   if (launched.exitCode != 0) {
     sink.writeln('打不开 app（$appPath）：${'${launched.stderr}'.trim()}');
     return exitEnv;
+  }
+  if (!wasRunning) {
+    // 刚拉起来的软件不能立刻使唤：界面 1.5 秒就能接单，但那时播放器的
+    // 底层还没初始化完，建完任务一进编导台就会整个 abort（真机撞过两次）。
+    // 界面那头也有一道缓冲，这里是第二道——两边都等，别指望其中一边
+    sink.writeln('软件刚启动，等它就绪…');
+    await Future<void>.delayed(coldStartWait);
   }
 
   final id = writeAgentRequest(
@@ -91,6 +106,34 @@ Future<int> runUiCommand({
     sink.writeln('没有建成：${result.message}');
     return exitFailed;
   }
-  emitJson({'ok': true, 'via': 'ui', 'message': result.message}, out: out);
+  // 把新任务报出来：调用方得知道接下来对谁操作。
+  // 不给的话只能去 tasks 里翻最后一条猜——两个 Agent 同时建就猜错了
+  // findAll 给的是不可变列表，先复制再排
+  final tasks = [...await FileTaskRepository(dataDir).findAll()]
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  final created = tasks.firstOrNull;
+  emitJson({
+    'ok': true,
+    'via': 'ui',
+    'message': result.message,
+    if (created != null) ...{
+      'id': created.id,
+      if (created.seq != null) 'seq': created.seq,
+      'name': created.name,
+      'next': 'ishkafel script show ${created.id}',
+    },
+  }, out: out);
   return 0;
+}
+
+/// app 是不是已经在跑。冷启动和已运行要等的时间差很多
+Future<bool> _appIsRunning(
+    Future<ProcessResult> Function(String, List<String>) exec,
+    String appPath) async {
+  try {
+    final r = await exec('pgrep', ['-f', '$appPath/Contents/MacOS/']);
+    return r.exitCode == 0 && '${r.stdout}'.trim().isNotEmpty;
+  } catch (_) {
+    return false;
+  }
 }

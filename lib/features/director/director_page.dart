@@ -403,6 +403,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ),
       );
     }
+    _dataDir = dataDir;
+    _docPrint = dataDir == null ? null : taskFingerprint(dataDir, _task.id);
     _schedulePreviewRebuild();
     // 进门顺手收一次无主配音：换过音色的旧 mp3 没人引用了，但任务还活着，
     // 孤儿清扫碰不到它们。**只能在这一刻收**——撤销栈这时必然是空的，
@@ -944,17 +946,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 盘上这个任务的指纹。Agent 写盘之后它会变，界面据此重读
   String? _docPrint;
 
+  /// 数据目录的缓存。**dispose 里读不到 ref**，而落盘检查在那时也要跑
+  Directory? _dataDir;
+
   /// Agent 改了盘上的数据 → 这一页立刻显示新内容。
   ///
   /// 只在 Agent 在场时做：人自己编辑的时候，内存里的才是最新的，
   /// 反过来读盘会把人正在打的字冲掉
-  void _followDocOnDisk(Directory dataDir) {
+  void _followDocOnDisk(Directory dataDir, {bool force = false}) {
     final now = taskFingerprint(dataDir, _task.id);
-    if (_docPrint == null) {
+    if (_docPrint == null && !force) {
       _docPrint = now;
       return;
     }
-    if (now == _docPrint) return;
+    if (now == _docPrint && !force) return;
     _docPrint = now;
     unawaited(_repo.findById(_task.id).then((fresh) {
       final doc = fresh?.script;
@@ -2252,11 +2257,31 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 而且它比「报失败」更危险：那个会重试，这个会带着错往前走）。
     //
     // 这时人本来也改不动（_mutate 拦着），所以没有要保存的东西
-    // 这里不 setState：Agent 在场时本来就没有「正在保存」这回事，
-    // 多一次重建只会把动画重新拉起来
-    if (_agent != null) return;
+    // **写之前先看一眼盘上被别人动过没有**。
+    //
+    // 这一页写盘写的是内存里的整份 doc。Agent 在外面也在写同一个文件，
+    // 谁后写谁赢——真机连着两轮栽在这儿：先是 Agent 刚写的被界面盖掉
+    // （CLI 报 ok、盘上没变），后来更狠，**已经落盘很久的一句台词被
+    // 回滚没了**，而 CLI 全程 ok:true。
+    //
+    // 上一版靠「Agent 在场时不写」挡，但「在场」是 500ms 轮询出来的，
+    // 那个窗口里界面照写不误。改成按内容判定，不依赖任何时序
+    // 用缓存的 dataDir 而不是 ref.read——**dispose 里也会调这个方法**，
+    // 那时候 ref 已经不能用了，一读就抛，而异常会打断 dispose 后面的
+    // timer 取消，留下一堆跑着的定时器（测试当场抓到）
+    final dataDir = _dataDir;
+    if (dataDir != null && !canOverwrite(dataDir, _task.id, _docPrint)) {
+      AppLog.info('盘上这份任务被外面改过，这次不覆盖（${_task.id}）');
+      // **这里不能去重读**：dispose 里也会调 flush，那时再拉起重建预览
+      // 就会在树都拆了之后新起一个 Timer。重读交给 _watchAgent 的轮询，
+      // 它自己会发现指纹变了
+      return;
+    }
     _task = _task.copyWith(script: _doc, updatedAt: DateTime.now());
     unawaited(_repo.save(_task).then((_) {
+      // 写完把基线对齐到刚写出去的那一版，否则下一次会误判成「被人动过」
+      final d = _dataDir;
+      if (d != null) _docPrint = taskFingerprint(d, _task.id);
       if (mounted) setState(() => _saving = false);
       // 顺手把封面对上：脚本任务的封面是成片第一帧（第一行第一镜）。
       // 没有它，列表页上一条排好的片子和一个空任务长得一模一样

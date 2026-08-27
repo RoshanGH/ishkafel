@@ -144,6 +144,10 @@ class _LineRow extends StatefulWidget {
 }
 
 class _LineRowState extends State<_LineRow> {
+  /// 用来判断「手是不是正在这一行上打字」。
+  /// 外部改动同步进来时不能碰正在编辑的那一行——光标会被拽回开头
+  final FocusNode _focus = FocusNode();
+
   late final TextEditingController _controller =
       TextEditingController(text: widget.line.text);
   bool _hovered = false;
@@ -151,14 +155,22 @@ class _LineRowState extends State<_LineRow> {
   @override
   void didUpdateWidget(covariant _LineRow old) {
     super.didUpdateWidget(old);
-    // 外部改动（提取脚本覆盖、恢复）同步进输入框；正常输入时不动光标
-    if (widget.line.text != _controller.text && widget.line.id != old.line.id) {
+    // 外部改动（Agent 写台词、提取脚本覆盖、撤销）同步进输入框。
+    //
+    // 原来还要求 `line.id` 变过才更新，于是**同一行内容被外面改了根本不
+    // 刷新**：真机上 Agent 写完台词，右栏的卡片变了、左栏这一列还是旧的，
+    // 同一个界面上同一行显示着两个版本（验收 Agent 截图实锤）。
+    //
+    // 正在打字时不能动：光标会被拽回开头。所以用「有没有焦点」判断——
+    // 手在这一行上就不碰，不在就同步
+    if (widget.line.text != _controller.text && !_focus.hasFocus) {
       _controller.text = widget.line.text;
     }
   }
 
   @override
   void dispose() {
+    _focus.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -250,6 +262,7 @@ class _LineRowState extends State<_LineRow> {
             Expanded(
               child: TextField(
                 controller: _controller,
+                focusNode: _focus,
                 maxLines: null,
                 autofocus: widget.autofocus,
                 textInputAction: TextInputAction.done,
