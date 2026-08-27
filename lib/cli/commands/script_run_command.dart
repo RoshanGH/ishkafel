@@ -19,6 +19,7 @@ import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
@@ -307,8 +308,7 @@ Future<int> runScriptExportCommand({
     final runner = ScriptExportRunner(
       workDir: Directory(p.join(dataDir.path, 'script_export', task.id)),
       localPathOf: (id) {
-        final f = File(p.join(dataDir.path, 'material_cache', '$id.mp4'));
-        return f.existsSync() ? f.path : null;
+        return TaskMedia(dataDir: dataDir, taskId: task.id).localMaterial(id);
       },
       localSourceOk: (path) => File(path).existsSync(),
       run: const ResolvingProcessRunner().call,
@@ -398,21 +398,15 @@ Future<int> runScriptJianyingCommand({
       sourceOf: (shot) {
         final local = shot.localSource;
         if (local != null && File(local).existsSync()) return local;
-        final f =
-            File(p.join(dataDir.path, 'material_cache', '${shot.materialId}.mp4'));
-        return f.existsSync() ? f.path : null;
+        return TaskMedia(dataDir: dataDir, taskId: task.id)
+            .localMaterial(shot.materialId);
       },
       voiceOf: (line) {
         final path = line.voiceover?.audioPath;
         return path != null && File(path).existsSync() ? path : null;
       },
-      bgmOf: (id) {
-        for (final ext in const ['mp3', 'm4a', 'wav']) {
-          final f = File(p.join(dataDir.path, 'bgm_cache', '$id.$ext'));
-          if (f.existsSync()) return f.path;
-        }
-        return null;
-      },
+      bgmOf: (id) =>
+          TaskMedia(dataDir: dataDir, taskId: task.id).localBgm(id),
     );
     final result = await writer.write(
       doc,

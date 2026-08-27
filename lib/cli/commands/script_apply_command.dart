@@ -12,6 +12,7 @@ import '../../core/script/shot_allocation.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../agent_stage.dart';
@@ -137,8 +138,7 @@ Future<int> runScriptApplyCommand({
       dataDir: dataDir,
       taskId: task.id,
       localPathOf: (id) {
-        final f = File(p.join(dataDir.path, 'material_cache', '$id.mp4'));
-        return f.existsSync() ? f.path : null;
+        return TaskMedia(dataDir: dataDir, taskId: task.id).localMaterial(id);
       },
     );
     await repository.save(fresh!.copyWith(

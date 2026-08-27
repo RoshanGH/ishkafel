@@ -68,6 +68,7 @@ import 'workbench_summary.dart';
 import '../export/export_dialog.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
@@ -1364,11 +1365,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (fetch == null || dataDir == null) return null;
     // 下完顺手转成预览代理——预览链路上每一段都是同一个规格，播放器在接缝处
     // 才不必重建解码器（见 [ProxySpec]）。**导出不走这里**，它读的是
-    // material_cache 里的原始下载
+    // materials/<taskId>/ 下的原始下载
     return PickedMediaCache(
       fetch: (id) async => _proxyBuilder(dataDir)
-          .build(path: await fetch(id), frameRate: _frameRateArg),
-      cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+          .build(path: await fetch(_task.id, id), frameRate: _frameRateArg),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: _task.id).materialsDir,
     );
   }
 
@@ -1416,9 +1417,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         if (material == null) {
           throw StateError('这首配乐已经不在方案里了');
         }
-        return fetch(material);
+        return fetch(_task.id, material);
       },
-      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: _task.id).bgmDir,
     );
   }
 

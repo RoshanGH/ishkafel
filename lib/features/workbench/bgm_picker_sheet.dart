@@ -13,10 +13,13 @@ import 'bgm_audition.dart';
 /// 音频库检索入口（缺省走真实 miaoa CLI；测试注入假实现）
 final bgmLibraryProvider = Provider<BgmLibrary>((ref) => BgmLibrary());
 
-/// 把一首配乐取到本地，返回本地路径。和预览/导出用的是同一份缓存
-/// （见 `main.dart`）。为 null 表示这台机器上没接（测试环境）。
+/// 把一首配乐取到**这个任务名下**，返回本地路径。
+///
+/// 带 taskId 的理由同 [materialFetcherProvider]：物料按项目存，
+/// 删任务时一起走。为 null 表示这台机器上没接（测试环境）。
 final bgmFetcherProvider =
-    Provider<Future<String> Function(BgmMaterial)?>((ref) => null);
+    Provider<Future<String> Function(String taskId, BgmMaterial)?>(
+        (ref) => null);
 
 /// 用户在配乐选择面板里的决定
 sealed class BgmChoice {

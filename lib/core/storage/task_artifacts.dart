@@ -34,6 +34,8 @@ class TaskArtifacts {
     'picked_thumbs', // 已选素材的首帧图
     'review_thumbs', // 审核页原片段落的首帧图
     'speed_fit', // 预览的变速切片（曾经不在清单里：任务删了目录还躺着）
+    'materials', // 这个任务用到的素材原始下载（**导出读这里**）
+    'bgm', // 这个任务用到的配乐
   ];
 
   /// **跨任务共享**的缓存目录：里面按内容指纹命名，同一份内容只存一次，
@@ -41,10 +43,11 @@ class TaskArtifacts {
   /// 但占的是同一块盘，必须计入占用
   static const sharedCacheDirNames = [
     'preview_proxy', // 预览代理（原片与候选素材共用，见 ProxySpec）
-    'material_cache', // 候选素材的原始下载。**导出读这里**，不能当缓存清掉
-    'bgm_cache', // 配乐
     'material_vocals', // 素材人声分离产物（曾经不在清单：32MB/条只增不减）
     'separator_models', // 人声分离模型下载
+    // 素材与配乐**不在这里了**：它们改成按任务存（materials/<id>、
+    // bgm/<id>），删任务时跟着一起走。共享缓存省了重复下载，代价是
+    // 任务删了没人收——盘上永远躺着一批不知道归谁的文件
   ];
 
   /// 已经废弃、但可能还躺在老用户盘上的目录。开机扫一遍清掉——

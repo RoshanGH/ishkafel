@@ -16,6 +16,7 @@ import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
@@ -136,7 +137,7 @@ Future<int> runExportCommand({
   final runner = ExportRunner(
     run: const ResolvingProcessRunner().call,
     workDir: Directory(p.join(dataDir.path, 'export_work', id)),
-    resolveBgm: bgmCache(dataDir).fetch,
+    resolveBgm: bgmCache(dataDir, task.id).fetch,
     probeDurationMs: (path) async =>
         (await FfprobeService(run: const ResolvingProcessRunner().call)
                 .probe(path))
@@ -144,7 +145,7 @@ Future<int> runExportCommand({
             .inMilliseconds,
     fetchMaterial: MaterialDownloader(
       content: MiaoaContentService(),
-      cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: task.id).materialsDir,
     ).fetch,
     // 整体替换的段落铺了配乐时用素材的纯人声——与 GUI 同一条规则
     separateMaterial: MaterialVocalCache(

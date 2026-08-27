@@ -12,6 +12,8 @@ import 'package:path_provider/path_provider.dart';
 import 'app/app.dart';
 import 'core/ai/ai_credentials.dart';
 import 'core/audio/bgm_cache_factory.dart';
+import 'core/storage/media_migration.dart';
+import 'core/storage/task_media.dart';
 import 'core/ffmpeg/ffprobe_service.dart';
 import 'core/ffmpeg/process_runner.dart';
 import 'core/ffmpeg/thumbnail_service.dart';
@@ -83,6 +85,18 @@ Future<void> main(List<String> args) async {
 
   // 开机扫一遍孤儿产物。删任务时清干净只解决一半问题——崩溃、手动删存档、
   // 开发期换机器总会留下没主的东西，它们只会一直躺在盘上占地方
+  // 先迁移再清扫：物料从共享缓存搬到各任务名下。
+  // 顺序不能反——清扫认的是新布局，先扫会把还在共享目录里的素材当孤儿删掉
+  try {
+    final migrated = await migrateSharedMediaToTasks(dataDir);
+    if (migrated.didSomething) {
+      AppLog.info('物料已按任务归位：搬 ${migrated.moved} 个、'
+          '清掉 ${migrated.orphansRemoved} 个没人引用的');
+    }
+  } catch (e) {
+    // 迁移失败不能挡启动：下次再迁，共享目录还在，数据不会丢
+    AppLog.warn('物料迁移失败（下次启动再试）：$e');
+  }
   await _sweepOrphans(repository, dataDir);
 
   // `ishkafel open <task>` 会带 --task=<id> 把 app 拉起来。CLI 写、GUI 读，
@@ -125,12 +139,14 @@ Future<void> main(List<String> args) async {
       // 清理缓存时能整目录带走
       // 预览音轨：与导出共用同一个混音器，听到的就是要交付的
       // 选中配乐就把它下到本地：和预览/导出读同一份缓存
-      bgmFetcherProvider.overrideWithValue(bgmCache(dataDir).fetch),
+      bgmFetcherProvider.overrideWithValue(
+          (taskId, m) => bgmCache(dataDir, taskId).fetch(m)),
       // 挑素材时就把本体下到本地：和导出读同一个缓存目录，导出时不必再下
-      materialFetcherProvider.overrideWithValue(MaterialDownloader(
-        content: MiaoaContentService(),
-        cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
-      ).fetch),
+      materialFetcherProvider.overrideWithValue((taskId, id) =>
+          MaterialDownloader(
+            content: MiaoaContentService(),
+            cacheDir: TaskMedia(dataDir: dataDir, taskId: taskId).materialsDir,
+          ).fetch(id)),
       // 预览与导出共用同一份素材人声：听到的就是要交付的
       // （工具没装时 vocalsOf 一律返回 null，界面据此如实说明）
       materialSeparatorProvider
@@ -138,7 +154,7 @@ Future<void> main(List<String> args) async {
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
-            resolveBgm: bgmCache(dataDir).fetch,
+            resolveBgm: bgmCache(dataDir, taskId).fetch,
             // 整体替换的段落铺了配乐时，用素材的纯人声——否则素材自带的
             // 背景音和新配乐两首曲子一起响
             separateMaterial: materialVocals(dataDir).vocalsOf,
@@ -150,7 +166,8 @@ Future<void> main(List<String> args) async {
                 .inMilliseconds,
             fetchMaterial: MaterialDownloader(
               content: MiaoaContentService(),
-              cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+              cacheDir:
+                  TaskMedia(dataDir: dataDir, taskId: taskId).materialsDir,
             ).fetch,
           )),
     ],

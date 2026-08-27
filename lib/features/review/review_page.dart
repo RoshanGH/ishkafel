@@ -439,7 +439,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         (int id) async {
           final fetch = ref.read(materialFetcherProvider);
           if (fetch == null) throw StateError('素材下载器未就绪');
-          return fetch(id);
+          return fetch(widget.task.id, id);
         };
     return resolve(id);
   }

@@ -27,6 +27,7 @@ import '../../core/script/voice_sweep.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
 import 'dart:io';
@@ -337,11 +338,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       extension: 'mp3',
       fetch: (id) {
         for (final seg in _doc.bgmSegments) {
-          if (seg.material.id == id) return fetch(seg.material);
+          if (seg.material.id == id) return fetch(_task.id, seg.material);
         }
         throw StateError('这首配乐已经不在方案里了');
       },
-      cacheDir: Directory(p.join(dataDir.path, 'bgm_cache')),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: _task.id).bgmDir,
     );
   }
 
@@ -876,8 +877,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = ref.read(dataDirProvider);
     if (fetch == null || dataDir == null) return null;
     return PickedMediaCache(
-      fetch: fetch,
-      cacheDir: Directory(p.join(dataDir.path, 'material_cache')),
+      fetch: (id) => fetch(_task.id, id),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: _task.id).materialsDir,
     );
   }
 
