@@ -13,6 +13,7 @@ import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
+import 'package:ishkafel/cli/commands/voices_command.dart';
 import 'package:ishkafel/cli/commands/script_command.dart';
 import 'package:ishkafel/cli/commands/skill_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
@@ -112,6 +113,7 @@ Future<void> main(List<String> args) async {
         tagGroups: parsed['tag-groups'] as String?,
         visual: parsed['visual'] as bool,
       ),
+    'voices' => runVoicesCommand(),
     'tag-groups' => await runTagGroupsCommand(),
     'analyze' => await runAnalyzeCommand(
         rest: rest,
@@ -156,6 +158,7 @@ Future<void> main(List<String> args) async {
         voiceId: parsed['voice'] as String?,
         outputDir: parsed['out'] as String?,
         visual: parsed['visual'] as bool,
+        keyword: parsed['keyword'] as String?,
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),
@@ -195,6 +198,7 @@ ishkafel —— 成片翻新工具的命令行入口
 用法：ishkafel <命令> [参数]
 
 命令：
+  voices           有哪些音色可选（配音前先问人要哪个，别自己挑）
   tag-groups       当前企业下有哪些标签组（import 要用它的 id）
   import <视频> [--tag-groups <id,id>]
                    建任务。**标签组要在这一步定**——它是打标的受控词表，

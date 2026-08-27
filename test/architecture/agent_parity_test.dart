@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/commands/script_apply_command.dart';
+import 'package:ishkafel/cli/top_level_commands.dart';
 import 'package:ishkafel/core/agent_skill/agent_skill_doc.dart';
 
 /// **人能干的，Agent 都要能干。**
@@ -42,6 +43,26 @@ void main() {
         reason: '开篇只说翻新的话，「从台词直接造一条新片」这条线就被埋没了');
     expect(head, anyOf(contains('哪条线'), contains('走哪条')),
         reason: 'Agent 拿到需求第一件事是选线，得先告诉它怎么选');
+  });
+
+  /// 手册里写了 `ishkafel voices`，而这条命令一直不存在。验收 Agent 撞上：
+  /// 手册说「别自己挑音色，用 voices 列给人看」，它照做，拿到「未知命令」
+  /// ——既不能挑也不能列，整条配音链路在纯 CLI 下是死的。
+  ///
+  /// **手册写了的命令必须真的有**。照着不存在的命令走，Agent 会以为是
+  /// 环境坏了，而不是文档错了
+  test('手册里提到的每条顶层命令都要真的存在', () {
+    final declared = <String>{};
+    for (final m in RegExp(r'ishkafel ([a-z][a-z-]+)')
+        .allMatches(agentSkillMarkdown)) {
+      declared.add(m.group(1)!);
+    }
+    // 这些是参数或说明里的词，不是命令
+    declared.removeAll(const {'skill', 'script'});
+    for (final c in declared) {
+      expect(topLevelCommands, contains(c),
+          reason: '手册里写着 `ishkafel $c`，但它不是一条真命令');
+    }
   });
 
   test('会静默毁掉成片的两条自查必须在手册里', () {

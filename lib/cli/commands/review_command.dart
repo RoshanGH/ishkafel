@@ -11,6 +11,7 @@ import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
+import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
 import 'open_command.dart';
 
@@ -203,8 +204,8 @@ Future<int> _changeCandidates({
         waitFor: waitForUi,
       );
     }
-    sink.writeln('${current?.holder ?? '别人'} 正在操作这个任务，写不进去。'
-        '等它结束，或在 app 里强制接管');
+    sink.writeln(guiLockGuidance(
+        holder: current?.holder, taskId: task.id));
     return exitLocked;
   }
   final stage = AgentStage(

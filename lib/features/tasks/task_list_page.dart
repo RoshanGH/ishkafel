@@ -229,6 +229,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         return;
       }
       // **真的把向导打开**，字段预填好，让人看见
+      final wantName = p['name'] is String ? (p['name'] as String).trim() : '';
       final result = await showNewTaskWizard(
         context,
         prefillUnitGroups: groups,
@@ -252,7 +253,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       // 而它要等人退出来才返回——回执压在后面的话，CLI 必然等到超时，
       // 于是「任务建好了但命令报失败」，Agent 照着退出码会去重试、
       // 建出第二个垃圾任务（验收 Agent 实测到的第一个问题）
-      final created = _createFromWizard(ref, context, result);
+      final created = _createFromWizard(ref, context, result, name: wantName);
       reply(true, '任务已经建好了');
       await created;
     } catch (e) {
@@ -409,12 +410,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   Future<void> _createFromWizard(
     WidgetRef ref,
     BuildContext context,
-    NewTaskWizardResult result,
-  ) async {
+    NewTaskWizardResult result, {
+    String name = '',
+  }) async {
     if (result.script) {
       // 脚本成片：没有原片、不走分析，建出来直接进编导台开写
       final task = await ref.read(taskListProvider.notifier).createScriptTask(
-            name: '脚本 ${DateTime.now().toString().substring(5, 16)}',
+            name: name.isNotEmpty
+                ? name
+                : '脚本 ${DateTime.now().toString().substring(5, 16)}',
             unitTagGroups: result.unitTagGroups,
             shotTagGroups: result.shotTagGroups,
             unitTagPrompt: result.unitTagPrompt,
@@ -422,6 +426,17 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             project: result.project,
           );
       if (context.mounted) {
+        // **先回到列表页再进新任务**。
+        //
+        // 直接 push 的话，上一个编导台还留在路由栈上活着，新的又建一个
+        // ——两个 mpv 渲染上下文并发存在，`mpv_render_context_create`
+        // 里的断言当场失败、整个 app abort（真机崩了三次，栈一字不差）。
+        //
+        // 之前以为是冷启动竞态，加了几秒缓冲；验收 Agent 拿崩溃报告反证：
+        // 三次崩溃时 app 已经活了 9 分钟、23 分钟、89 秒，缓冲一次都没
+        // 覆盖到。而 `ishkafel open` 那条路一直不崩——它先 popUntil 回
+        // 列表页，同一时刻只有一个编导台。差别就在这儿
+        Navigator.of(context).popUntil((r) => r.isFirst);
         await Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
         );
@@ -433,7 +448,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     if (filePath == null) {
       // 空白任务：没有原片可导，直接建出来就能编辑
       await ref.read(taskListProvider.notifier).createBlankTask(
-            name: '拼片 ${DateTime.now().toString().substring(5, 16)}',
+            name: name.isNotEmpty
+                ? name
+                : '拼片 ${DateTime.now().toString().substring(5, 16)}',
             unitTagGroups: result.unitTagGroups,
             shotTagGroups: result.shotTagGroups,
             unitTagPrompt: result.unitTagPrompt,

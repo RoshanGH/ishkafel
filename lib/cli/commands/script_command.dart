@@ -30,6 +30,9 @@ Future<int> runScriptCommand({
   /// `voice` 用：指定音色
   String? voiceId,
 
+  /// 没有参考镜时，自己给一句**画面描述**去搜（不是台词）
+  String? keyword,
+
   /// `export` 用：输出目录
   String? outputDir,
 
@@ -160,18 +163,32 @@ Future<int> runScriptCommand({
         final description = refShots.isEmpty
             ? ''
             : '${refShots.first['description']}'.trim();
-        if (description.isEmpty) {
+        // 没有参考镜时**允许自己给一句画面描述**（--keyword）。
+        //
+        // 原来这里直接返回空候选，而 hint 却写着「只能按台词与标签找」
+        // ——那条路根本没有对应的参数，`--keyword` 传了会被默默吃掉。
+        // 验收 Agent 撞上了：hint 指了一条不存在的路，它试了参数、
+        // 不报错也不生效，只能干等着。
+        //
+        // 要点：**描述的是画面**（「一只手在厨房台面上举着喷雾瓶」），
+        // 不是台词。拿台词去搜画面描述是 0.1.45 砍掉的错配——
+        // 台词是一句话、画面是一幅画，不在一个维度上
+        final searchKey =
+            description.isNotEmpty ? description : (keyword ?? '').trim();
+        if (searchKey.isEmpty) {
           emitJson({...ctx, 'candidates': const []}, out: out);
           return 0;
         }
         final services = content ?? MiaoaContentService();
         final tagIds = await _tagIdsOf(
-          tags: (refShots.first['tags'] as List).cast<String>(),
+          tags: refShots.isEmpty
+              ? const <String>[]
+              : (refShots.first['tags'] as List).cast<String>(),
           groups: [...task.shotTagGroups, ...task.unitTagGroups],
           service: tags,
         );
         final page = await services.searchByDescription(
-          keyword: description,
+          keyword: searchKey,
           tagIds: tagIds,
           projectIds: [if (task.project != null) task.project!.id],
           pageSize: 20,

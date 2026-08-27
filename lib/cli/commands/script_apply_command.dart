@@ -16,6 +16,7 @@ import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
+import '../gui_lock_guidance.dart';
 import '../agent_stage.dart';
 import '../script_apply.dart';
 
@@ -94,8 +95,8 @@ Future<int> runScriptApplyCommand({
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder)) {
     final current = lock.read();
-    sink.writeln('${current?.holder ?? '别人'} 正在操作这个任务，写不进去。'
-        '等它结束，或在 app 里强制接管');
+    sink.writeln(guiLockGuidance(
+        holder: current?.holder, taskId: task.id));
     return exitLocked;
   }
   final stage = AgentStage(

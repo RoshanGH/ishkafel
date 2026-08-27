@@ -26,6 +26,9 @@ Future<int> runUiCommand({
   String? mode,
   String? file,
   String? tagGroups,
+
+  /// 任务名。不给就用软件的默认命名（「脚本 08-27 20:57」这种）
+  String? name,
   String holder = 'Agent',
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
@@ -90,6 +93,7 @@ Future<int> runUiCommand({
     payload: {
       'mode': parsed.wire,
       if (file != null) 'filePath': file,
+      if ((name ?? '').trim().isNotEmpty) 'name': name!.trim(),
       'tagGroupIds': ids,
     },
   );
