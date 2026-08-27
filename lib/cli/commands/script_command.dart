@@ -11,6 +11,7 @@ import '../../core/ffmpeg/process_runner.dart';
 import '../../core/miaoa/material_downloader.dart';
 import '../../core/storage/task_media.dart';
 import '../cli_output.dart';
+import '../search_modes.dart';
 import '../script_shot_context.dart';
 import 'script_apply_command.dart';
 import 'script_run_command.dart';
@@ -39,8 +40,12 @@ Future<int> runScriptCommand({
   /// 没有参考镜时，自己给一句**画面描述**去搜（不是台词）
   String? keyword,
 
-  /// script peek 用：要看哪几条素材
+  /// script peek 用：要看哪几条素材；
+  /// script shots --by image 用：拿哪条素材的画面去找相似
   String? materials,
+
+  /// 检索方式（tags / content / image / voiceover / name）
+  String? by,
 
   /// `export` 用：输出目录
   String? outputDir,
@@ -221,9 +226,32 @@ Future<int> runScriptCommand({
         // 要点：**描述的是画面**（「一只手在厨房台面上举着喷雾瓶」），
         // 不是台词。拿台词去搜画面描述是 0.1.45 砍掉的错配——
         // 台词是一句话、画面是一幅画，不在一个维度上
+        // 检索方式：**与界面上人能用的完全一致**（五种）。
+        // 不给 --by 时按参考镜的画面描述搜——那是复刻的默认路子
+        final mode = SearchMode.parse(by) ??
+            (by == null ? SearchMode.content : null);
+        if (mode == null) {
+          sink.writeln('认不出的检索方式「$by」。可用：\n'
+              '${[
+            for (final m in SearchMode.values)
+              '  ${m.wire.padRight(10)} ${m.label}——${m.whenToUse}'
+          ].join('\n')}');
+          return exitBadUsage;
+        }
         final searchKey =
-            description.isNotEmpty ? description : (keyword ?? '').trim();
-        if (searchKey.isEmpty) {
+            (keyword ?? '').trim().isNotEmpty ? keyword!.trim() : description;
+        if (mode.needsKeyword && searchKey.isEmpty) {
+          sink.writeln('${mode.label}要给一个关键词：--keyword "…"'
+              '${mode == SearchMode.content ? '（描述的是画面，不是台词）' : ''}');
+          return exitBadUsage;
+        }
+        if (mode.needsMaterial && (materials ?? '').trim().isEmpty) {
+          sink.writeln('以图搜图要指定拿哪条素材的画面去找：'
+              '--materials <素材 id>（从 candidates 里挑一条像的）');
+          return exitBadUsage;
+        }
+        if (!mode.needsKeyword && !mode.needsMaterial && searchKey.isEmpty) {
+          // 按标签搜：标签从参考镜带过来，没有参考镜就没标签可用
           emitJson({...ctx, 'candidates': const []}, out: out);
           return 0;
         }
@@ -235,12 +263,33 @@ Future<int> runScriptCommand({
           groups: [...task.shotTagGroups, ...task.unitTagGroups],
           service: tags,
         );
-        final page = await services.searchByDescription(
-          keyword: searchKey,
-          tagIds: tagIds,
-          projectIds: [if (task.project != null) task.project!.id],
-          pageSize: 20,
-        );
+        final projectIds = [if (task.project != null) task.project!.id];
+        final page = switch (mode) {
+          SearchMode.tags => await services.searchByTags(
+              tagIds: tagIds, projectIds: projectIds, pageSize: 20),
+          SearchMode.content => await services.searchByDescription(
+              keyword: searchKey,
+              tagIds: tagIds,
+              projectIds: projectIds,
+              pageSize: 20),
+          SearchMode.voiceover => await services.searchByVoiceover(
+              keyword: searchKey,
+              tagIds: tagIds,
+              projectIds: projectIds,
+              pageSize: 20),
+          SearchMode.name => await services.searchByName(
+              keyword: searchKey,
+              tagIds: tagIds,
+              projectIds: projectIds,
+              pageSize: 20),
+          // 以图搜图：拿指定素材的 fileKey 去找相似。**复刻最该用这个**
+          SearchMode.image => await _searchLikeImage(
+              services: services,
+              materials: materials!,
+              tagIds: tagIds,
+              projectIds: projectIds,
+              sink: sink),
+        };
         emitJson({
           ...ctx,
           'candidates': [
@@ -384,4 +433,29 @@ Future<int> runScriptPeekCommand({
     'next': '直接打开 framePath 看图，像人一样判断这一镜像不像',
   }, out: out);
   return frames.isEmpty ? exitFailed : 0;
+}
+
+
+/// 以图搜图：拿某条素材的画面去找相似的。
+///
+/// 界面上人是「在候选里看到一条像的 → 点『找相似』」，这里是同一件事，
+/// 只是把那条素材的 id 用参数给出来
+Future<CandidatePage> _searchLikeImage({
+  required MiaoaContentService services,
+  required String materials,
+  required List<int> tagIds,
+  required List<int> projectIds,
+  required StringSink sink,
+}) async {
+  final id = int.tryParse(materials.split(',').first.trim());
+  if (id == null) {
+    throw ArgumentError('--materials 要给素材 id，给的是「$materials」');
+  }
+  final m = await services.fetchById(id);
+  final key = m?.fileKey;
+  if (key == null || key.isEmpty) {
+    throw ArgumentError('素材 $id 没有可用来搜相似的画面（缺 fileKey）');
+  }
+  return services.searchByImage(
+      fileKey: key, tagIds: tagIds, projectIds: projectIds, pageSize: 20);
 }

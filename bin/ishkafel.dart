@@ -47,6 +47,8 @@ Future<void> main(List<String> args) async {
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
     ..addFlag('yes',
         negatable: false, help: 'task-delete 用：确认删除（不可逆）')
+    ..addOption('by',
+        help: 'script shots 用：检索方式 tags/content/image/voiceover/name')
     ..addOption('materials',
         help: 'script peek 用：要看哪几条素材的画面，逗号分隔')
     ..addOption('mode',
@@ -162,6 +164,7 @@ Future<void> main(List<String> args) async {
         visual: parsed['visual'] as bool,
         keyword: parsed['keyword'] as String?,
         materials: parsed['materials'] as String?,
+        by: parsed['by'] as String?,
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),
