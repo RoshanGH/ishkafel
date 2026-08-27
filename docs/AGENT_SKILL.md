@@ -132,6 +132,14 @@ ishkafel candidates <task> --unit 0                    # 之后照旧
 都不成立，方案里每个单元都要给 `whole` + material。`analyze` 对它无意义，
 会直接拒绝。
 
+**删任务**（不可逆，连素材、配音、预览产物一起走）：
+
+```bash
+ishkafel task-delete <task> --yes
+```
+
+不加 `--yes` 只会告诉你要删的是什么、不会真删。
+
 任何一步都可以停下来交给人：
 
 ```bash
@@ -152,8 +160,19 @@ stderr 给一句状态、`skill` 输出 Markdown）；进度和失败原因走 s
 | 1 | 其他运行失败 | 看 stderr 决定 |
 
 **多环境**：数据目录默认与 GUI 一致；`--data-dir <目录>` 或环境变量
-`ISHKAFEL_DATA_DIR` 可换。app 不在 /Applications 时，`open`/`review`
-用环境变量 `ISHKAFEL_APP` 指到 app 路径。
+`ISHKAFEL_DATA_DIR` 可换。
+
+app 不在 `/Applications` 时，**所有会拉起界面的命令**（`open`、`review`、
+`ui new-task`、以及任何带 `--visual` 的）都用环境变量 `ISHKAFEL_APP`
+指到 app 路径。
+
+**怎么找到那个路径**：app 正开着的话直接从进程里读——
+
+```bash
+export ISHKAFEL_APP="$(ps aux | grep -o '[^ ]*ishkafel\.app' | head -1)"
+```
+
+没开着就问用户要，别去 Finder 里翻。
 
 ---
 

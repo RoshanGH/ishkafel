@@ -44,6 +44,8 @@ Future<void> main(List<String> args) async {
         help: '可视模式：把 app 拉起来，一步一步演给人看'
             '（也可以用 ISHKAFEL_VISUAL=1）')
     ..addOption('file', help: 'apply 用：结果文件（不给就从 stdin 读）')
+    ..addFlag('yes',
+        negatable: false, help: 'task-delete 用：确认删除（不可逆）')
     ..addOption('mode',
         help: 'ui new-task 用：script / renew / blank')
     ..addOption('items',
@@ -121,6 +123,8 @@ Future<void> main(List<String> args) async {
         install: parsed['install'] as bool,
         dir: parsed['dir'] as String?,
       ),
+    'task-delete' => await runTaskDeleteCommand(
+        rest: rest, dataDir: dataDir, yes: parsed['yes'] as bool),
     'ui' => await runUiCommand(
         rest: rest,
         dataDir: dataDir,
@@ -214,6 +218,8 @@ ishkafel —— 成片翻新工具的命令行入口
   open <id>        把 app 弹出来并落到这个任务的工作台
   review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
                    确认后 task <id> 里的方案就是最终结果，等用户发话再继续
+  task-delete <id> --yes
+                   删掉一条任务，连同它的素材/配音/预览产物。不可逆
   ui new-task --mode <script|renew|blank> --tag-groups <id,id> [--file <原片>]
                    **当着人的面**新建任务：软件弹出来、向导打开、字段填上、
                    点创建。人在旁边看着时用它；人不在场用 script new 更快

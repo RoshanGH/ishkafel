@@ -1,5 +1,8 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+import '../../core/storage/task_media.dart';
+import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
@@ -29,6 +32,61 @@ Future<int> runTasksCommand({
           'createdAt': t.createdAt.toIso8601String(),
         },
     ],
+  }, out: out);
+  return 0;
+}
+
+/// `ishkafel task delete <id> --yes` —— 删掉一条任务，连同它的物料。
+///
+/// 验收 Agent 卡在这儿：让它「验完自己删掉」，CLI 却没有这条命令。
+/// 它的原话——「不是我懒，是 CLI 真的没有这条路」，只能看着界面上的
+/// ⋯ 菜单不敢点。**界面上人能删，Agent 就得能删**。
+///
+/// 要 `--yes` 才真删：这是不可逆的，而 Agent 手快。
+Future<int> runTaskDeleteCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  bool yes = false,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel task delete <任务 id> --yes');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  if (!yes) {
+    // 删任务连素材、配音、导出记录一起没，而且回不来。手快的话
+    // 一条命令就把人半天的活删了——所以要明确点头
+    sink.writeln('这会删掉「${task.name}」'
+        '${task.seq != null ? '（#${task.seq}）' : ''}，'
+        '连同它的素材、配音、预览产物，**删了回不来**。'
+        '确定就加 --yes');
+    return exitBadUsage;
+  }
+  try {
+    // 物料按项目存，跟着任务一起走——不留孤儿
+    TaskMedia(dataDir: dataDir, taskId: task.id).deleteAll();
+    for (final name in TaskArtifacts.perTaskDirNames) {
+      final d = Directory(p.join(dataDir.path, name, task.id));
+      if (d.existsSync()) d.deleteSync(recursive: true);
+    }
+    await repository.delete(task.id);
+  } catch (e) {
+    sink.writeln('删除失败：$e');
+    return exitFailed;
+  }
+  emitJson({
+    'ok': true,
+    'deleted': task.id,
+    'name': task.name,
+    if (task.seq != null) 'seq': task.seq,
   }, out: out);
   return 0;
 }

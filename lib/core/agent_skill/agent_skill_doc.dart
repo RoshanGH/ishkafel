@@ -139,6 +139,14 @@ ishkafel candidates <task> --unit 0                    # 之后照旧
 都不成立，方案里每个单元都要给 `whole` + material。`analyze` 对它无意义，
 会直接拒绝。
 
+**删任务**（不可逆，连素材、配音、预览产物一起走）：
+
+```bash
+ishkafel task-delete <task> --yes
+```
+
+不加 `--yes` 只会告诉你要删的是什么、不会真删。
+
 任何一步都可以停下来交给人：
 
 ```bash
@@ -159,8 +167,19 @@ stderr 给一句状态、`skill` 输出 Markdown）；进度和失败原因走 s
 | 1 | 其他运行失败 | 看 stderr 决定 |
 
 **多环境**：数据目录默认与 GUI 一致；`--data-dir <目录>` 或环境变量
-`ISHKAFEL_DATA_DIR` 可换。app 不在 /Applications 时，`open`/`review`
-用环境变量 `ISHKAFEL_APP` 指到 app 路径。
+`ISHKAFEL_DATA_DIR` 可换。
+
+app 不在 `/Applications` 时，**所有会拉起界面的命令**（`open`、`review`、
+`ui new-task`、以及任何带 `--visual` 的）都用环境变量 `ISHKAFEL_APP`
+指到 app 路径。
+
+**怎么找到那个路径**：app 正开着的话直接从进程里读——
+
+```bash
+export ISHKAFEL_APP="$(ps aux | grep -o '[^ ]*ishkafel\.app' | head -1)"
+```
+
+没开着就问用户要，别去 Finder 里翻。
 
 ---
 
@@ -620,12 +639,61 @@ ishkafel script apply subtitles <任务> --file c.json
 
 提交后这一行会标成「已手改」，人在界面上能看到是你断的句，也能一键退回自动。
 
+## 四点二、两个坐标基准，别搞混
+
+| 写法 | 从几开始 | 用在哪 |
+|---|---|---|
+| `--line N` | **1**（和界面上看到的行号一致） | 命令行参数 |
+| `"lineIndex": N` | **0** | 提交的 JSON 里 |
+| 报错信息里的「第 N 行」 | **1** | 读错误时 |
+
+传 `lineIndex: 1` 报「第 2 行不存在」不是矛盾——它在用人话说第 2 行。
+
+## 四点三、行有两种类型
+
+`show` 里每行都有 `type`：
+
+- **`voiced`**：有台词，要配音。时间根是配音时长
+- **`visual`**：**画面行**，没有台词也没有配音，只有画面。时间根是手填时长
+
+新建的脚本任务自带一个空行，它是 `visual`——**写上台词就自动变成
+`voiced`**，不用手动改类型。反过来把台词清空就退回 `visual`。
+
+看到「写了台词但 type 还是 visual」，说明**那次写入没生效**，不是类型没变。
+
 ## 四点五、改台词、改镜头、改字幕文字
 
 ```bash
-# 改台词 / 插入 / 删除（删掉带配音的行会连配音镜头一起没了，会先提醒）
-echo '{"lines":[{"op":"set","lineIndex":0,"text":"改过的台词"}]}' > l.json
 ishkafel script apply lines <任务> --file l.json
+```
+
+`op` 有三个，语义各不相同：
+
+| op | 干什么 | lineIndex 指的是 |
+|---|---|---|
+| `set` | 改这一行的台词 | 要改的那一行 |
+| `insert` | **在这一行之后插一行新的** | 插在谁后面 |
+| `remove` | 删掉这一行 | 要删的那一行 |
+
+```json
+{"lines": [
+  {"op": "set",    "lineIndex": 0, "text": "改过的台词"},
+  {"op": "insert", "lineIndex": 0, "text": "插在第 1 行后面，成为新的第 2 行"},
+  {"op": "remove", "lineIndex": 3}
+]}
+```
+
+**`insert` 是「之后」不是「之前」**：只有 1 行时想追加第 2 行，
+写 `lineIndex: 0`（在第 1 行之后）；写 `lineIndex: 1` 会被拒
+（那一行还不存在）。
+
+**一批里有多条 insert / remove 时下标会互相影响**——它们是按顺序依次
+执行的，前一条插入之后，后面的行都往下挪了一位。稳妥的做法是**一次只
+提交一条**，或者从后往前写（下标大的先删）。
+
+删掉带配音的行会连它的配音和镜头一起没，命令会先提醒。
+
+```bash
 
 # 取段、变速、原声音量、删镜
 echo '{"shots":[{"lineIndex":2,"shotIndex":0,"op":"volume","value":0.35}]}' > s.json

@@ -27,6 +27,7 @@ import '../../core/script/voice_sweep.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/doc_watch.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
@@ -940,6 +941,34 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   static String get _holder => '人（编导台）';
 
   /// 与工作台/审核页同一套会话级互斥：谁先进谁处理
+  /// 盘上这个任务的指纹。Agent 写盘之后它会变，界面据此重读
+  String? _docPrint;
+
+  /// Agent 改了盘上的数据 → 这一页立刻显示新内容。
+  ///
+  /// 只在 Agent 在场时做：人自己编辑的时候，内存里的才是最新的，
+  /// 反过来读盘会把人正在打的字冲掉
+  void _followDocOnDisk(Directory dataDir) {
+    final now = taskFingerprint(dataDir, _task.id);
+    if (_docPrint == null) {
+      _docPrint = now;
+      return;
+    }
+    if (now == _docPrint) return;
+    _docPrint = now;
+    unawaited(_repo.findById(_task.id).then((fresh) {
+      final doc = fresh?.script;
+      if (!mounted || doc == null) return;
+      setState(() {
+        _task = fresh!;
+        _doc = doc;
+      });
+      _schedulePreviewRebuild();
+    }).catchError((Object e) {
+      AppLog.warn('跟随 Agent 重读任务失败（${_task.id}）：$e');
+    }));
+  }
+
   /// 订阅 Agent 的在场状态。
   ///
   /// 用轮询而不是文件监听：这份文件是**另一个进程**写的，macOS 上的文件
@@ -953,6 +982,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       final now = readAgentPresence(dataDir: dataDir, taskId: _task.id);
       final was = _agent;
       final leaving = was != null && now == null;
+      // **数据也要跟着走**：Agent 改了什么，这一页当场显示出来。
+      // 以前只做了「滚到那一行」，人看到的是一块不动的板子
+      if (now != null) _followDocOnDisk(dataDir);
       final focusChanged = now?.focus?.lineIndex != was?.focus?.lineIndex ||
           now?.focus?.shotIndex != was?.focus?.shotIndex ||
           now?.focus?.panel != was?.focus?.panel;
@@ -1047,7 +1079,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (dataDir == null) return;
     final lock = TaskLockFile(dataDir: dataDir, taskId: _task.id);
     if (!lock.acquire(_holder)) {
-      _blockedBy = lock.read()?.holder ?? '别人';
+      final holder = lock.read()?.holder;
+      // Agent 占着**不拦成一张空白页**：可视模式下人正是为了看它干活才
+      // 打开这一页的，拦掉等于把要看的东西挡在门外。转成只读跟随
+      // （见 [_watchAgent]），它一收工这一页自动可操作。
+      //
+      // 审片台早就这么做了，这里漏了——验收 Agent 报回来的现象是：
+      // 「人在旁边看着，看到的是一块黑板」
+      if (isGuiHolder(holder)) _blockedBy = holder ?? '别人';
       return;
     }
     _lock = lock;
@@ -2204,6 +2243,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   void _flushNow() {
     _autosave?.cancel();
+    // **Agent 在场时一个字都不许写**。
+    //
+    // 这一页写盘写的是内存里的整份 doc。Agent 可视模式下界面刚被唤醒
+    // 打开，内存里是**打开那一刻**的旧数据；Agent 随后写了盘，界面这边
+    // 任何一次自动保存都会把旧的整份盖回去——CLI 报 ok:true、盘上没变，
+    // 人以为写好了继续往下走（验收 Agent 实测到的第二个问题，
+    // 而且它比「报失败」更危险：那个会重试，这个会带着错往前走）。
+    //
+    // 这时人本来也改不动（_mutate 拦着），所以没有要保存的东西
+    // 这里不 setState：Agent 在场时本来就没有「正在保存」这回事，
+    // 多一次重建只会把动画重新拉起来
+    if (_agent != null) return;
     _task = _task.copyWith(script: _doc, updatedAt: DateTime.now());
     unawaited(_repo.save(_task).then((_) {
       if (mounted) setState(() => _saving = false);

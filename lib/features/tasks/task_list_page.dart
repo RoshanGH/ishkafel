@@ -232,8 +232,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         reply(false, '界面已经关了');
         return;
       }
-      await _createFromWizard(ref, context, result);
+      // **先回执再进任务**：脚本成片那条路会 await 编导台的路由，
+      // 而它要等人退出来才返回——回执压在后面的话，CLI 必然等到超时，
+      // 于是「任务建好了但命令报失败」，Agent 照着退出码会去重试、
+      // 建出第二个垃圾任务（验收 Agent 实测到的第一个问题）
+      final created = _createFromWizard(ref, context, result);
       reply(true, '任务已经建好了');
+      await created;
     } catch (e) {
       reply(false, '新建任务失败：$e');
     } finally {
