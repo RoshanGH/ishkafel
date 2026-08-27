@@ -730,6 +730,10 @@ class ScriptLine {
     return src.substring(start, end);
   }
 
+  /// 自动切点落在划词边界上就不必重复添加（去重由 Set 负责，
+  /// 这里只是让意图看得见）
+  static bool _crossesBound(Set<int> bounds, int cut) => bounds.contains(cut);
+
   /// 这一句的配音**念岔了没有**（结尾卡住反复念、半截断掉、语速离谱）。
   /// null = 没问题或没证据可判。
   ///
@@ -806,15 +810,31 @@ class ScriptLine {
           AsrWord(text: w.text, startMs: w.startMs, endMs: w.endMs),
       ],
     );
-    // 切点：人切过就用人的，否则按语言节奏自动切
+    // 切点：人切过就用人的，否则按语言节奏自动切。
+    //
+    // **划词建的镜头会把边界让给字幕**：一次操作同时定下画面和字幕的
+    // 切点，字幕不会再跟配音脱节（真机数据里有一行「字幕停在 8 个字上、
+    // 配音还在念后面 18 个字」，就是因为改字幕时改不了切点）。
+    // 中间的自由段自成一屏——那里有几个镜头是画面的事，字幕不必跟着碎
     final manual = subtitleScreens;
-    final cuts = <int>[
+    final boundCuts = <int>{
+      for (final shot in shots)
+        if (shot.boundToWords) ...[shot.startWord!, shot.endWord!],
+    };
+    final cuts = <int>{
       0,
       ...(manual != null
               ? manual.map((s) => s.startWord).where((w) => w > 0)
-              : autoScreenCuts(sentence, maxChars: chars))
-          .where((w) => w < words.length),
-    ]..sort();
+              : [
+                  ...boundCuts,
+                  // 划词镜之内字太多时照样细分：可读性是硬要求，
+                  // 但细分点落在划词边界之内，不会跨出去
+                  ...autoScreenCuts(sentence, maxChars: chars)
+                      .where((w) => !_crossesBound(boundCuts, w)),
+                ])
+          .where((w) => w > 0 && w < words.length),
+    }.toList()
+      ..sort();
     // 每个词在原文里的字符区间（对不上给 null）
     final src = vo.sourceText.trim().isNotEmpty ? vo.sourceText : text;
     final offsets = _wordOffsets(src, words);

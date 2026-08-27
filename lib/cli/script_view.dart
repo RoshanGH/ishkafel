@@ -1,5 +1,6 @@
 import '../core/models/renew_task.dart';
 import '../core/script/script_doc.dart';
+import '../core/script/subtitle_mismatch.dart';
 import '../core/script/shot_allocation.dart';
 import '../core/script/shot_coverage.dart';
 
@@ -70,6 +71,16 @@ Map<String, dynamic> scriptTaskJson(RenewTask task) {
           'message': '第 ${g.lineIndex + 1} 行第 ${g.shotIndex + 1} 镜的画面只有 '
               '${_sec(g.usableMs)} 秒，铺不满 ${_sec(g.allocMs)} 秒',
         },
+      // 手写字幕盖不住这一屏的语音：不拦导出的话，成片里会出现
+      // 「配音在念、字幕停着不动」，人拿到片子才发现
+      for (var i = 0; i < doc.lines.length; i++)
+        for (final m in subtitleMismatches(doc.lines[i]))
+          {
+            'lineIndex': i,
+            'screenIndex': m.screenIndex,
+            'kind': 'subtitle-too-short',
+            'message': '第 ${i + 1} 行：${m.message}',
+          },
     ],
     'exports': [
       for (final e in task.exports)
