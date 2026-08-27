@@ -44,12 +44,15 @@ import 'core/export/export_runner.dart';
 import 'core/miaoa/miaoa_content_service.dart';
 
 /// 素材人声分离器。预览与导出共用一份缓存目录，同一条素材只分离一次
-MaterialVocalCache materialVocals(Directory dataDir) => MaterialVocalCache(
+/// 人声分离结果落在**这个任务名下**（`vocals/<taskId>/`）：
+/// 派生产物也按项目存，删任务时一起走
+MaterialVocalCache materialVocals(Directory dataDir, String taskId) =>
+    MaterialVocalCache(
       separator: VocalSeparator(
         binary: resolveVocalSeparatorBinary(),
         modelDir: Directory(p.join(dataDir.path, 'separator_models')),
       ),
-      cacheDir: Directory(p.join(dataDir.path, 'material_vocals')),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: taskId).vocalsDir,
     );
 
 Future<void> main(List<String> args) async {
@@ -149,15 +152,15 @@ Future<void> main(List<String> args) async {
           ).fetch(id)),
       // 预览与导出共用同一份素材人声：听到的就是要交付的
       // （工具没装时 vocalsOf 一律返回 null，界面据此如实说明）
-      materialSeparatorProvider
-          .overrideWithValue(materialVocals(dataDir).vocalsOf),
+      materialSeparatorProvider.overrideWithValue(
+          (taskId, path) => materialVocals(dataDir, taskId).vocalsOf(path)),
       exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
             run: const ResolvingProcessRunner().call,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
             resolveBgm: bgmCache(dataDir, taskId).fetch,
             // 整体替换的段落铺了配乐时，用素材的纯人声——否则素材自带的
             // 背景音和新配乐两首曲子一起响
-            separateMaterial: materialVocals(dataDir).vocalsOf,
+            separateMaterial: materialVocals(dataDir, taskId).vocalsOf,
             // 镜头替换要按候选的真实时长算变速倍率
             probeDurationMs: (path) async => (await FfprobeService(
                     run: const ResolvingProcessRunner().call)

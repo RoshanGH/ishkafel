@@ -132,6 +132,27 @@ void main() {
     expect(r.moved, 0);
   });
 
+  test('老的派生缓存整个清掉——它们按内容指纹命名，反查不出归谁', () async {
+    writeTask('t1', materials: [100]);
+    cacheFile('material_cache', '100.mp4');
+    Directory('${dir.path}/preview_proxy').createSync();
+    File('${dir.path}/preview_proxy/proxy_abc.mp4')
+        .writeAsBytesSync(List.filled(64, 1));
+    Directory('${dir.path}/material_vocals/114797').createSync(recursive: true);
+
+    final r = await migrateSharedMediaToTasks(dir);
+    expect(Directory('${dir.path}/preview_proxy').existsSync(), isFalse);
+    expect(Directory('${dir.path}/material_vocals').existsSync(), isFalse);
+    expect(r.derivedCleared, greaterThan(0),
+        reason: '要如实回报清了多少——它们会重算，但重算要花时间，人该知道');
+  });
+
+  test('人声分离模型不能碰——那是工具，不是任务数据', () async {
+    Directory('${dir.path}/separator_models').createSync();
+    await migrateSharedMediaToTasks(dir);
+    expect(Directory('${dir.path}/separator_models').existsSync(), isTrue);
+  });
+
   test('没有共享目录时什么都不做，不炸', () async {
     Directory('${dir.path}/material_cache').deleteSync();
     Directory('${dir.path}/bgm_cache').deleteSync();

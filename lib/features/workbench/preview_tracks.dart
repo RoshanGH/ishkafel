@@ -220,8 +220,12 @@ class PreviewTracks extends ChangeNotifier {
 ///
 /// 放在 features 层而不是 core：riverpod 会把 Flutter 拖进依赖树，
 /// 而 core/audio 是 CLI 也要用的——`dart build cli` 会在 FFI 那层直接崩
-final materialSeparatorProvider =
-    Provider<Future<String?> Function(String materialPath)?>((ref) => null);
+/// 带 taskId 是因为派生产物也按项目存：分离结果落在 `vocals/<taskId>/`，
+/// 删任务时一起走
+final materialSeparatorProvider = Provider<
+    Future<String?> Function(String taskId, String materialPath)?>(
+  (ref) => null,
+);
 
 /// 有配乐或配音、但没有分离出来的人声轨时的提醒。
 ///

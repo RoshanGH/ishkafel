@@ -153,7 +153,7 @@ Future<int> runExportCommand({
         binary: resolveVocalSeparatorBinary(),
         modelDir: Directory(p.join(dataDir.path, 'separator_models')),
       ),
-      cacheDir: Directory(p.join(dataDir.path, 'material_vocals')),
+      cacheDir: TaskMedia(dataDir: dataDir, taskId: task.id).vocalsDir,
     ).vocalsOf,
   );
 

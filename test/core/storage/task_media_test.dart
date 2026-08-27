@@ -44,6 +44,12 @@ void main() {
     expect(m.localBgm(7), endsWith('7.m4a'));
   });
 
+  test('派生产物也在这个任务名下——删任务一起走', () {
+    final m = TaskMedia(dataDir: dir, taskId: 't1');
+    expect(m.proxyDir.path, endsWith('proxy/t1'));
+    expect(m.vocalsDir.path, endsWith('vocals/t1'));
+  });
+
   test('删任务就把这个任务的物料一起收走', () {
     final m = TaskMedia(dataDir: dir, taskId: 't1');
     m.materialsDir.createSync(recursive: true);
@@ -51,9 +57,14 @@ void main() {
     File(m.materialPath(1)).writeAsStringSync('x');
     File('${m.bgmDir.path}/2.mp3').writeAsStringSync('x');
 
+    m.proxyDir.createSync(recursive: true);
+    m.vocalsDir.createSync(recursive: true);
+
     m.deleteAll();
     expect(m.materialsDir.existsSync(), isFalse);
     expect(m.bgmDir.existsSync(), isFalse);
+    expect(m.proxyDir.existsSync(), isFalse);
+    expect(m.vocalsDir.existsSync(), isFalse);
   });
 
   test('删别的任务不碰我的', () {

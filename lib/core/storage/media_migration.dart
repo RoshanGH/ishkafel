@@ -18,13 +18,19 @@ class MediaMigrationResult {
   /// 清出来的空间（字节）
   final int freedBytes;
 
+  /// 清掉的老派生缓存字节数（预览代理、人声分离）。**要如实回报**：
+  /// 它们会自动重算，但重算要花时间——尤其人声分离是分钟级的
+  final int derivedCleared;
+
   const MediaMigrationResult({
     this.moved = 0,
     this.orphansRemoved = 0,
     this.freedBytes = 0,
+    this.derivedCleared = 0,
   });
 
-  bool get didSomething => moved > 0 || orphansRemoved > 0;
+  bool get didSomething =>
+      moved > 0 || orphansRemoved > 0 || derivedCleared > 0;
 }
 
 /// 把共享缓存（`material_cache/`、`bgm_cache/`）里的物料**分发到各任务
@@ -44,7 +50,10 @@ Future<MediaMigrationResult> migrateSharedMediaToTasks(
     Directory dataDir) async {
   final materialCache = Directory(p.join(dataDir.path, 'material_cache'));
   final bgmCache = Directory(p.join(dataDir.path, 'bgm_cache'));
-  if (!materialCache.existsSync() && !bgmCache.existsSync()) {
+  final hasDerived = Directory(p.join(dataDir.path, 'preview_proxy'))
+          .existsSync() ||
+      Directory(p.join(dataDir.path, 'material_vocals')).existsSync();
+  if (!materialCache.existsSync() && !bgmCache.existsSync() && !hasDerived) {
     return const MediaMigrationResult();
   }
 
@@ -148,6 +157,23 @@ Future<MediaMigrationResult> migrateSharedMediaToTasks(
   orphans = a.orphans + b.orphans;
   freed = a.freed + b.freed;
 
+  // 老的派生缓存**整个清掉**。
+  //
+  // 它们按内容指纹命名（`proxy_<hash>.mp4`），反查不出归谁——没法像素材
+  // 那样按引用分发。而它们是算得出来的：预览代理会重转、人声分离会重跑。
+  // 留着才是孤儿：新版本按任务存，这两个目录从此没有任何人会去读它
+  var derived = 0;
+  for (final name in const ['preview_proxy', 'material_vocals']) {
+    final d = Directory(p.join(dataDir.path, name));
+    if (!d.existsSync()) continue;
+    try {
+      derived += _dirSize(d);
+      d.deleteSync(recursive: true);
+    } catch (e) {
+      AppLog.warn('老派生缓存清理失败（${d.path}）：$e');
+    }
+  }
+
   // 收掉空的共享目录：留着的话，下次谁手滑往里写又会长出一批孤儿
   for (final d in [materialCache, bgmCache]) {
     try {
@@ -161,7 +187,20 @@ Future<MediaMigrationResult> migrateSharedMediaToTasks(
     AppLog.info('物料迁移完成：搬 $moved 个到任务名下，清掉 $orphans 个孤儿');
   }
   return MediaMigrationResult(
-      moved: moved, orphansRemoved: orphans, freedBytes: freed);
+      moved: moved,
+      orphansRemoved: orphans,
+      freedBytes: freed,
+      derivedCleared: derived);
+}
+
+int _dirSize(Directory d) {
+  var n = 0;
+  try {
+    for (final e in d.listSync(recursive: true)) {
+      if (e is File) n += _sizeOf(e);
+    }
+  } catch (_) {}
+  return n;
 }
 
 int _sizeOf(File f) {

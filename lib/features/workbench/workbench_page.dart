@@ -381,7 +381,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (playback is MultitrackPlayback) {
       _tracks = PreviewTracks(
         playback: playback,
-        separateMaterial: ref.read(materialSeparatorProvider),
+        separateMaterial: switch (ref.read(materialSeparatorProvider)) {
+          final f? => (path) => f(_task.id, path),
+          _ => null,
+        },
         materials: _mediaCache,
         bgmMedia: _bgmMediaCache,
         speedFitter: _speedFitter = _buildSpeedFitter(),

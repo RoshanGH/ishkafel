@@ -36,18 +36,24 @@ class TaskArtifacts {
     'speed_fit', // 预览的变速切片（曾经不在清单里：任务删了目录还躺着）
     'materials', // 这个任务用到的素材原始下载（**导出读这里**）
     'bgm', // 这个任务用到的配乐
+    'proxy', // 预览代理（派生产物，删了会重转）
+    'vocals', // 素材人声分离结果（派生产物，但重算很贵）
   ];
 
   /// **跨任务共享**的缓存目录：里面按内容指纹命名，同一份内容只存一次，
   /// 换任务、换候选都能命中。归不到某个任务名下，所以不进 [perTaskDirNames]，
   /// 但占的是同一块盘，必须计入占用
+  /// 现在只剩**工具**，不再有任务数据。
+  ///
+  /// 素材、配乐、预览代理、人声分离结果全部改成按任务存
+  /// （见 [TaskMedia]），删任务时跟着一起走。共享缓存省了重复下载与
+  /// 重复计算，代价是**任务删了没人收**——盘上永远躺着一批不知道归谁的
+  /// 文件，谁都不敢删。用户明确选了「按项目存、不留孤儿」这一边。
+  ///
+  /// 这一改顺带让清理逻辑简单了一大截：按素材反查孤儿（vocalOrphans）
+  /// 和按配额清扫（sweepByQuota）都不再需要——删任务直接带走
   static const sharedCacheDirNames = [
-    'preview_proxy', // 预览代理（原片与候选素材共用，见 ProxySpec）
-    'material_vocals', // 素材人声分离产物（曾经不在清单：32MB/条只增不减）
-    'separator_models', // 人声分离模型下载
-    // 素材与配乐**不在这里了**：它们改成按任务存（materials/<id>、
-    // bgm/<id>），删任务时跟着一起走。共享缓存省了重复下载，代价是
-    // 任务删了没人收——盘上永远躺着一批不知道归谁的文件
+    'separator_models', // 人声分离**模型**：与任务无关，是工具不是数据
   ];
 
   /// 已经废弃、但可能还躺在老用户盘上的目录。开机扫一遍清掉——
@@ -130,42 +136,6 @@ class TaskArtifacts {
         ..._children(Directory(p.join(dataDir.path, name)))
             .where((e) => orphan(p.basename(e.path))),
     ];
-  }
-
-  /// material_vocals 里没有任何现存任务引用的条目。
-  ///
-  /// 人声分离产物按**素材**归档（不按任务），删任务带不走它——必须拿
-  /// 「全部现存任务还引用哪些素材」来反推孤儿。[referencedStems] 是这些
-  /// 素材落地文件的 basename（不带扩展名，与子目录名一致）
-  List<FileSystemEntity> vocalOrphans(Set<String> referencedStems) => [
-        for (final e
-            in _children(Directory(p.join(dataDir.path, 'material_vocals'))))
-          if (!referencedStems.contains(p.basename(e.path))) e,
-      ];
-
-  /// 按配额清扫一个共享缓存目录：超过 [maxBytes] 时从最久没碰过的开始删。
-  /// preview_proxy 这类按内容指纹命名的缓存没有「归属」可判，只能按量控
-  static int sweepByQuota(Directory dir, {required int maxBytes}) {
-    if (!dir.existsSync()) return 0;
-    final files = dir
-        .listSync()
-        .whereType<File>()
-        .map((f) => (file: f, stat: f.statSync()))
-        .toList()
-      ..sort((a, b) => a.stat.modified.compareTo(b.stat.modified));
-    var total = files.fold(0, (n, f) => n + f.stat.size);
-    var freed = 0;
-    for (final f in files) {
-      if (total <= maxBytes) break;
-      try {
-        f.file.deleteSync();
-        total -= f.stat.size;
-        freed += f.stat.size;
-      } catch (_) {
-        // 删不掉就跳过：清扫失败不该打断任何主流程
-      }
-    }
-    return freed;
   }
 
   /// 删掉给定的这些，返回**实际**释放的字节数（删失败的不计入，不虚报）

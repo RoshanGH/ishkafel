@@ -30,6 +30,15 @@ class TaskMedia {
 
   Directory get bgmDir => Directory(p.join(dataDir.path, 'bgm', taskId));
 
+  /// 预览代理（把素材转成预览链路统一规格的那一份）。
+  /// **派生产物**：删了会重转，不会丢东西
+  Directory get proxyDir => Directory(p.join(dataDir.path, 'proxy', taskId));
+
+  /// 素材人声分离结果。同样是派生产物，但**重算很贵**（要跑模型，
+  /// 分钟级、32MB/条）——所以它跟着任务走而不是随手清
+  Directory get vocalsDir =>
+      Directory(p.join(dataDir.path, 'vocals', taskId));
+
   String materialPath(int materialId) =>
       p.join(materialsDir.path, '$materialId.mp4');
 
@@ -51,7 +60,7 @@ class TaskMedia {
 
   /// 删任务时把这个任务的物料一起收走
   void deleteAll() {
-    for (final d in [materialsDir, bgmDir]) {
+    for (final d in [materialsDir, bgmDir, proxyDir, vocalsDir]) {
       try {
         if (d.existsSync()) d.deleteSync(recursive: true);
       } catch (e) {
