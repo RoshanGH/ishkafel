@@ -23,3 +23,12 @@ fi
 ./scripts/bump_build.sh
 ./scripts/build_macos.sh --release
 ./scripts/package_macos.sh
+
+# 打完包顺手把跑着的换成新版本。
+#
+# **不能只 open**：macOS 对已经在跑的 app 只是激活窗口、不加载新二进制，
+# 于是「新功能没生效」——真机上撞过好几次，用户只好自己退出再打开一遍。
+# --no-restart 给不需要立刻看效果的场合（比如只是出包发给别人）
+if [ "${1:-}" != "--no-restart" ]; then
+  ./scripts/restart_app.sh
+fi
