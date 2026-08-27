@@ -377,6 +377,24 @@ class LineShot {
   /// 但有的素材背景嘈杂，又得单独压下去。所以全局定基调、这里开小灶
   final double? sourceVolume;
 
+  /// 这一镜绑住台词的哪几个字（词序号区间 `[startWord, endWord)`）。
+  ///
+  /// **划词建镜**：人在台词上选中「如果你觉得有点贵」，这一镜的时长就是
+  /// 这几个字的朗读时长——不用自己听、自己数秒数再填进来。
+  ///
+  /// 为什么记词序号而不是毫秒：换音色、重新配音之后朗读长短全变，
+  /// 记毫秒就得逐镜重调；记词区间则切点不变、时长自动重算。
+  /// 这与 [SubtitleScreen] 是同一套模型——它们本来就该在同一个坐标系里，
+  /// 此前一个记「第几个字」一个记「多少毫秒」，所以永远对不齐。
+  ///
+  /// **两端都要记**：字幕屏连续覆盖整句，下一屏的起点就是本屏的终点，
+  /// 只记 startWord 够用；镜头之间夹着自由镜、还允许留空隙，推不出终点
+  final int? startWord;
+  final int? endWord;
+
+  /// 这一镜是不是划词绑上去的
+  bool get boundToWords => startWord != null && endWord != null;
+
   /// 【旧数据】曾经字幕写在镜头上，现在字幕屏挂在行上（见
   /// [ScriptLine.subtitleScreens]）。这里只保留读取，供打开老方案时
   /// 一次性迁移成屏；新写入一律不再产生它
@@ -395,6 +413,8 @@ class LineShot {
     this.allocMs,
     this.localSource,
     this.sourceVolume,
+    this.startWord,
+    this.endWord,
     this.legacySubtitleText,
   });
 
@@ -417,6 +437,8 @@ class LineShot {
     int? trimStartMs,
     double? speed,
     Object? allocMs = _unsetAlloc,
+    int? startWord,
+    int? endWord,
   }) =>
       LineShot(
         materialId: materialId,
@@ -431,6 +453,8 @@ class LineShot {
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
         localSource: localSource,
         sourceVolume: sourceVolume,
+        startWord: startWord ?? this.startWord,
+        endWord: endWord ?? this.endWord,
         legacySubtitleText: legacySubtitleText,
       );
 
@@ -448,6 +472,8 @@ class LineShot {
         allocMs: allocMs,
         localSource: localSource,
         sourceVolume: v?.clamp(0.0, 1.0),
+        startWord: startWord,
+        endWord: endWord,
         legacySubtitleText: legacySubtitleText,
       );
 
@@ -467,6 +493,8 @@ class LineShot {
         allocMs: allocMs,
         localSource: localSource,
         sourceVolume: sourceVolume,
+        startWord: startWord,
+        endWord: endWord,
         legacySubtitleText: legacySubtitleText,
       );
 
@@ -488,6 +516,8 @@ class LineShot {
         if (allocMs != null) 'allocMs': allocMs,
         if (localSource != null) 'localSource': localSource,
         if (sourceVolume != null) 'sourceVolume': sourceVolume,
+        if (startWord != null) 'startWord': startWord,
+        if (endWord != null) 'endWord': endWord,
       };
 
   static LineShot? tryFromJson(Object? raw) {
@@ -511,6 +541,8 @@ class LineShot {
       allocMs: raw['allocMs'] is int ? raw['allocMs'] as int : null,
       localSource:
           raw['localSource'] is String ? raw['localSource'] as String : null,
+      startWord: raw['startWord'] is int ? raw['startWord'] as int : null,
+      endWord: raw['endWord'] is int ? raw['endWord'] as int : null,
       sourceVolume: raw['sourceVolume'] is num
           ? (raw['sourceVolume'] as num).toDouble().clamp(0.0, 1.0)
           : null,

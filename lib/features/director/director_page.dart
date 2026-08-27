@@ -45,6 +45,7 @@ import '../../core/playback/track_plan.dart';
 import '../../core/script/script_export.dart';
 import '../../core/script/script_track_plan.dart';
 import '../../core/script/shot_allocation.dart';
+import '../../core/script/word_shot_insert.dart';
 import '../../core/script/speed_clip_renderer.dart';
 import '../picking/picked_media_cache.dart';
 import '../picking/picking_providers.dart';
@@ -1306,6 +1307,103 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         d.setShotsById(line.id, shots).setTagsById(line.id, picked.tags));
     _flushNow();
     _pinAllShots();
+  }
+
+  /// 改台词。**划词建的镜头会失效**：字变了，词序号整个错位，
+  /// 之前「这几个字配这个画面」的对应关系全部说不通了。
+  ///
+  /// 所以要清掉——但清之前说清损失，别让人改个错别字就丢了挑好的素材
+  Future<void> _changeText(int index, String text) async {
+    final line = _doc.lines[index];
+    if (line.text.trim() == text.trim()) return;
+    final bound = line.shots.where((s) => s.boundToWords).length;
+    if (bound > 0) {
+      final withMaterial =
+          line.shots.where((s) => s.boundToWords && s.materialId > 0).length;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: AppColors.surfaceRaised,
+          title: const Text('改了台词，划词的分镜要清掉'),
+          content: Text('这一行有 $bound 个分镜是按字划出来的'
+              '${withMaterial > 0 ? '（其中 $withMaterial 个已经挑好素材）' : ''}。'
+              '台词一改，字的位置全变了，这些对应关系就不成立了——'
+              '只能清掉重划。'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('先不改')),
+            FilledButton(
+                key: const Key('text-change-drop-bound'),
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('改，并清掉这些分镜')),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    _mutate((d) {
+      var next = d.updateText(index, text);
+      if (bound > 0) {
+        final kept = [
+          for (final s in next.lines[index].shots)
+            if (!s.boundToWords) s,
+        ];
+        next = next.setShotsById(next.lines[index].id, kept);
+      }
+      return next;
+    });
+  }
+
+  /// 划词建镜：选中的字读多久，这一镜就多长。
+  ///
+  /// 与「找镜头」的区别是**插入而不是替换**：那个是给整行铺一遍，
+  /// 这个是给这几个字单配一个画面，其余镜头原样不动
+  Future<void> _addShotByWords(int index, int startWord, int endWord) async {
+    final line = _doc.lines[index];
+    final usedBy = <int, int>{};
+    for (var i = 0; i < _doc.lines.length; i++) {
+      for (final shot in _doc.lines[i].shots) {
+        if (shot.localSource != null) continue;
+        usedBy.putIfAbsent(shot.materialId, () => i);
+      }
+    }
+    final picked = await showFindShotsSheet(
+      context,
+      services: ref.read(shotSearchServicesProvider),
+      tagger: ref.read(lineTaggerProvider),
+      task: _task,
+      lineIndex: index,
+      line: line,
+      usedBy: usedBy,
+      refThumbOf: (segIndex) {
+        _ensureRefThumb(line, segIndex);
+        return _refThumbs['${line.id}_$segIndex'];
+      },
+      tagRefShot: (segIndex) => _tagRefShot(line.id, segIndex),
+      prepareRef: () async {
+        await _ensureRefCuts(line.id);
+        return _doc.lines.where((l) => l.id == line.id).firstOrNull;
+      },
+    );
+    if (picked == null || picked.shots.isEmpty || !mounted) return;
+    // 一次划词配一个画面。挑了多个只用第一个——要给这几个字配好几个画面，
+    // 就分几次划，那样每一段的时长才说得清
+    final shot =
+        picked.shots.first.copyWith(startWord: startWord, endWord: endWord);
+    final next = [...line.shots];
+    next.insert(insertIndexForWords(next, startWord), shot);
+    final words = line.voiceover?.words ?? const <VoiceWord>[];
+    final root = ShotAllocation.rootMsOf(line);
+    final allocated = root == null
+        ? next
+        : ShotAllocation.distributeWithWords(next, root, words);
+    _mutate((d) => d.setShotsById(line.id, allocated));
+    _flushNow();
+    _pinAllShots();
+    if (picked.shots.length > 1 && mounted) {
+      _toast('这次只用了挑中的第一个画面——要给这几个字配多个画面，分几次划。');
+    }
   }
 
   /// 这一句的参考还没切过视觉镜头时，**就地切一次**（只切这句的区间，
@@ -2724,8 +2822,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         _mutate((d) => d.move(from, to));
                         setState(() => _selected = to);
                       },
-                      onTextChanged: (i, text) =>
-                          _mutate((d) => d.updateText(i, text)),
+                      onTextChanged: _changeText,
                     ),
                   ),
                 ),
@@ -2804,6 +2901,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       voiceIdOf: _doc.voiceIdOf,
                       speechRateOf: _doc.speechRateOf,
                       voiceStateOf: _doc.voiceStateOf,
+                      onPickWords: _addShotByWords,
                       onShotSourceVolume: (index, j, volume) {
                         final line = _doc.lines[index];
                         // 音量不改变编排，所以不重铺轨道；改完直接把新音量

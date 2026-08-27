@@ -12,6 +12,7 @@ import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../picking/picked_media_cache.dart';
+import 'line_text_picker.dart';
 
 /// 分镜编辑板（右栏）：**所有行的工作块从上到下铺开**，一块对应一行台词。
 ///
@@ -83,6 +84,9 @@ class LineBoardHandlers {
   /// 这一行的配音新不新（拿有效值判定）
   final LineVoiceState Function(ScriptLine line) voiceStateOf;
 
+  /// 划词建镜：人在台词上选中几个字，给出**词序号**区间 `[start, end)`
+  final void Function(int lineIndex, int startWord, int endWord) onPickWords;
+
   /// 这一段配乐的曲子在本地的状态（null = 这段没配乐 / 没有下载器）
   final PickedMediaStatus? Function(int materialId) bgmStatus;
 
@@ -143,6 +147,7 @@ class LineBoardHandlers {
     required this.voiceIdOf,
     required this.speechRateOf,
     required this.voiceStateOf,
+    required this.onPickWords,
     required this.bgmStatus,
     required this.onRetryBgm,
     required this.onSubtitleCutHere,
@@ -782,15 +787,29 @@ class _LineBand extends StatelessWidget {
         ),
       ),
       Expanded(
-        child: Text(
-          voiced ? line.text.trim() : '画面行（无台词，只有画面）',
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-              fontSize: AppFontSize.body,
-              height: 1.4,
-              color: voiced ? AppColors.textPrimary : AppColors.textTertiary),
-        ),
+        // 选中的这一行才让划词：整块板子都摆成可选文本的话，随手一拖
+        // 就冒出一堆按钮，反而碍事
+        child: voiced && selected && line.voiceover != null
+            ? LineTextPicker(
+                text: line.text.trim(),
+                words: line.voiceover!.words,
+                takenWordRanges: [
+                  for (final s in line.shots)
+                    if (s.boundToWords)
+                      (start: s.startWord!, end: s.endWord!),
+                ],
+                onPick: (a, b) => handlers.onPickWords(index, a, b),
+              )
+            : Text(
+                voiced ? line.text.trim() : '画面行（无台词，只有画面）',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: AppFontSize.body,
+                    height: 1.4,
+                    color:
+                        voiced ? AppColors.textPrimary : AppColors.textTertiary),
+              ),
       ),
       // 标签可以点开改：从素材库的标签体系里搜索、点选、替换
       Padding(
