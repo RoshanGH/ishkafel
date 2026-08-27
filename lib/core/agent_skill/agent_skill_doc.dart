@@ -497,6 +497,7 @@ ISHKAFEL_VISUAL=1 ishkafel script apply shots <任务> --file p.json
 ```bash
 ishkafel script new "8月新品口播"                    # 建任务
 ishkafel script extract <任务> ~/参考片.mp4          # 识别台词，生成脚本行
+ishkafel script tag-ref <任务> --line N             # ★ 给参考镜打标（有参考片时必做）
 ishkafel script apply baseline <任务> --file b.json # ★ 先定本片音色，再配音
 ishkafel script voice <任务>                        # 给所有句子配音
 # …挑镜头、断句、分时长、配乐（见下文）…
@@ -583,6 +584,22 @@ ishkafel script show <任务> --json
 - **`lines[].shortfallMs`**：正数表示这一行的画面还没铺满
 
 ## 三、挑镜头
+
+### ★ 先给参考镜打标，否则你等于蒙着眼睛挑
+
+`script extract` 只出**台词和切点**。参考镜的画面描述、标签、首帧图
+**全是空的**，而挑镜头的三条路都靠它们。所以从参考片复刻时，第一件事是：
+
+```bash
+ishkafel script tag-ref <任务> --line 3
+```
+
+打完这一行的参考镜才会有 `description` / `tags` / `framePath`。
+**打标每镜一次识图、是花钱的一步**，所以按行打、打过的自动跳过。
+
+不打就挑镜头会怎样：`framePath` 是 null（看不见画面）、`--by tags` 没标签
+可用、缺省的 `--by content` 没有描述可搜——你只能自己去猜关键词，
+猜偏一点就搜回一堆别的品牌的素材。
 
 **这一步是你的活，不是软件的活。** 软件的「自动铺一版」只会照着参考镜的
 画面描述去搜——它看不懂视频。你能看懂：参考镜的画面、标签、那一段在说什么，

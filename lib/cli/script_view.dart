@@ -71,6 +71,22 @@ Map<String, dynamic> scriptTaskJson(RenewTask task) {
           'message': '第 ${g.lineIndex + 1} 行第 ${g.shotIndex + 1} 镜的画面只有 '
               '${_sec(g.usableMs)} 秒，铺不满 ${_sec(g.allocMs)} 秒',
         },
+      // 配音没有逐字时间：**断不了句、字幕退回整句**。
+      // 原来只 warn 不拦，于是片子导得出来、字幕却是一整段糊在屏幕上
+      // （真机撞到：第 16 句「加一点。」ASR 报 no valid speech in audio）
+      for (var i = 0; i < doc.lines.length; i++)
+        if (doc.lines[i].type == ScriptLineType.voiced &&
+            doc.lines[i].voiceover != null &&
+            doc.lines[i].voiceover!.words.isEmpty)
+          {
+            'lineIndex': i,
+            'kind': 'no-word-timings',
+            'message': '第 ${i + 1} 行的配音没有逐字时间，断不了句——'
+                '字幕会整句糊在屏幕上。重新生成这一句的配音试试'
+                '（ishkafel script voice <任务> --line ${i + 1}）；'
+                '还是不行就把这句台词改一改，太短或只有语气词的句子'
+                'ASR 认不出来',
+          },
       // 手写字幕盖不住这一屏的语音：不拦导出的话，成片里会出现
       // 「配音在念、字幕停着不动」，人拿到片子才发现
       for (var i = 0; i < doc.lines.length; i++)

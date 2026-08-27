@@ -12,6 +12,11 @@ import '../../core/miaoa/material_downloader.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/audio/bgm_library.dart';
+import '../../core/ai/tag_dimension.dart';
+import '../../features/director/director_providers.dart';
+import '../ref_shot_tagging.dart';
+import '../../core/log/app_log.dart';
+import 'analyze_command.dart' show loadCliCredentials;
 import '../cli_output.dart';
 import '../search_modes.dart';
 import '../script_shot_context.dart';
@@ -75,6 +80,7 @@ Future<int> runScriptCommand({
         '                                  baseline/line-voice/mix）\n'
         '  export <任务> [--out 目录]      导出成片\n'
         '  peek <任务> --materials <id,id> 把候选的画面抽到本地，亲眼看看\n'
+        '  tag-ref <任务> --line N        给参考镜打标（画面描述+标签+首帧图）\n'
         '  bgm-candidates <任务> [--keyword 轻快]  有哪些配乐可选\n'
         '  jianying <任务>                 写成剪映草稿，去剪映里精修');
     return exitBadUsage;
@@ -99,6 +105,14 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'tag-ref':
+      return runScriptTagRefCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        line: line,
         out: out,
         err: err,
       );
@@ -546,4 +560,115 @@ Future<int> runScriptBgmCandidatesCommand({
     sink.writeln(e.message);
     return exitEnv;
   }
+}
+
+/// `ishkafel script tag-ref <task> --line N` —— 给这一行的参考镜打标。
+///
+/// `script extract` 只出台词与切点，参考镜的画面描述、标签、首帧图全是空的。
+/// 而挑镜头的三条路全依赖它们——验收 Agent 因此只能自己 ffmpeg 抽帧、
+/// 肉眼看图、手写关键词，中间多一层有损转译，写偏了就搜回一堆别的品牌。
+///
+/// **打标花钱**（每镜一次识图），所以按行打、不整片预打；已经打过的跳过。
+Future<int> runScriptTagRefCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  int? line,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script tag-ref <任务 id> --line <行号>');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final script = task.script;
+  if (script == null) {
+    sink.writeln('「${task.name}」不是脚本成片任务');
+    return exitBadUsage;
+  }
+  if (line == null) {
+    sink.writeln('要指定行号：--line <行号>（从 1 开始）。'
+        '打标每镜一次识图、是花钱的一步，所以按行打');
+    return exitBadUsage;
+  }
+  var doc = script;
+  final index = line - 1;
+  if (index < 0 || index >= doc.lines.length) {
+    sink.writeln('没有第 $line 行（这个脚本共 ${doc.lines.length} 行）');
+    return exitNotFound;
+  }
+  final target = doc.lines[index];
+  final ref = target.reference;
+  final video = ref?.videoPath;
+  if (ref == null || video == null || !File(video).existsSync()) {
+    sink.writeln('第 $line 行没有参考片可打标。'
+        '手写的脚本没有参考镜——用 script shots --by content --keyword "画面描述" 直接搜');
+    return exitBadUsage;
+  }
+
+  // 走 CLI 那份凭据加载：它会去 <dataDir>/credentials 找，
+  // 而不是只看编译期注入的（命令行跑的时候没有那一份）
+  final tagger = buildRefShotTagger(loadCliCredentials(dataDir));
+  if (tagger == null) {
+    sink.writeln('尚未配置 AI 服务（视觉理解），打不了标。'
+        '让用户在 app 的设置里补上凭据');
+    return exitEnv;
+  }
+  // 视觉镜头层用**视觉镜头标签组**的词表（与单元层的话术标签不同）
+  final groups = task.shotTagGroups.isNotEmpty
+      ? task.shotTagGroups
+      : task.unitTagGroups;
+  final vocab = <TagDimension>[];
+  try {
+    final all = await MiaoaTagService().listGroups();
+    for (final g in groups) {
+      final hit = all.where((x) => x.id == g.id).firstOrNull;
+      if (hit != null && hit.tags.isNotEmpty) {
+        vocab.add(TagDimension(name: hit.name, vocabulary: hit.tags));
+      }
+    }
+  } catch (e) {
+    // 拉不到词表也要打——画面描述不依赖词表，而它正是检索键
+    AppLog.warn('拉标签词表失败（只出画面描述）：$e');
+  }
+
+  final done = <Map<String, dynamic>>[];
+  for (var k = 0; k < ref.segments.length; k++) {
+    if ((ref.metaAt(ref.segments[k].$1)?.description ?? '').isNotEmpty) {
+      continue; // 打过的跳过：这一步花钱
+    }
+    final meta = await tagRefShot(
+      line: doc.lines[index],
+      videoPath: video,
+      segIndex: k,
+      workDir: Directory(p.join(dataDir.path, 'script_refs', task.id)),
+      tagger: tagger,
+      vocabulary: vocab,
+      constraint: task.shotTagPrompt.isEmpty ? null : task.shotTagPrompt,
+    );
+    if (meta == null) continue;
+    doc = doc.setReferenceById(
+        doc.lines[index].id, doc.lines[index].reference!.withShotMeta(meta));
+    done.add({
+      'shotIndex': k,
+      'description': meta.description,
+      'tags': meta.tags,
+      if (meta.framePath != null) 'framePath': meta.framePath,
+    });
+  }
+  await repository.save(task.copyWith(script: doc, updatedAt: DateTime.now()));
+  emitJson({
+    'ok': true,
+    'lineIndex': index,
+    'tagged': done.length,
+    'shots': done,
+    'next': '现在可以挑镜头了：ishkafel script shots ${task.id} --line $line',
+  }, out: out);
+  return 0;
 }

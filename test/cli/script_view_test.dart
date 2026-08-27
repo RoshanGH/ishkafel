@@ -69,9 +69,14 @@ void main() {
           .withVoiceover(vo(6048)),
     ]);
     final blocking = scriptTaskJson(task(doc))['blocking'] as List;
-    expect(blocking, hasLength(1));
-    expect(blocking.single['kind'], 'shot-too-short');
-    expect('${blocking.single['message']}', contains('1.2'));
+    final tooShort =
+        blocking.where((b) => (b as Map)['kind'] == 'shot-too-short');
+    expect(tooShort, hasLength(1));
+    expect('${(tooShort.single as Map)['message']}', contains('1.2'));
+    // 这个夹具的配音没有逐字时间，所以还会多一条 no-word-timings——
+    // 那是对的：断不了句的行会让字幕整句糊在屏幕上
+    expect(blocking.map((b) => (b as Map)['kind']),
+        contains('no-word-timings'));
   });
 
   test('参考镜的画面描述要给——那是复刻的依据', () {

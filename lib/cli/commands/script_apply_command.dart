@@ -157,6 +157,8 @@ Future<int> runScriptApplyCommand({
       'what': what,
       'taskId': task.id,
       'applied': _countOf(what, payload),
+      // 说清改了什么，别让调用方靠 applied 的数字去猜
+      'changed': _changedOf(what, payload),
     }, out: out);
     return 0;
   } finally {
@@ -591,6 +593,26 @@ AgentFocus? _focusOf(String what, Map<String, dynamic> payload) {
   );
 }
 
+/// 改了什么——人话，直接可以转给用户
+String _changedOf(String what, Map<String, dynamic> payload) => switch (what) {
+      'baseline' => '本片基调：'
+          '${[
+            if (_str(payload['voiceId']) case final v?) '音色 $v',
+            if (_int(payload['speechRate']) case final r?) '语速 $r',
+          ].join('、')}',
+      'mix' => '三条声音轨的音量',
+      'shots' => '给 ${_picks(payload).length} 行挑了镜头',
+      'word-shots' => '划词建了 ${_wordShots(payload).length} 个镜头',
+      'subtitles' => '给 ${_subtitles(payload).length} 行断了句',
+      'alloc' => '调了 ${_allocs(payload).length} 行的镜头时长',
+      'bgm' => '铺了 ${_bgms(payload).length} 段配乐',
+      'lines' => '改了 ${_lineEdits(payload).length} 处台词',
+      'line-voice' => '改了 ${_lineVoices(payload).length} 行的音色/语速',
+      'shot-edit' => '调了 ${_shotEdits(payload).length} 处镜头',
+      'screen-text' => '改了 ${_screenTexts(payload).length} 屏字幕',
+      _ => what,
+    };
+
 int _countOf(String what, Map<String, dynamic> payload) => switch (what) {
       'shots' => _picks(payload).length,
       'subtitles' => _subtitles(payload).length,
@@ -599,5 +621,11 @@ int _countOf(String what, Map<String, dynamic> payload) => switch (what) {
       'lines' => _lineEdits(payload).length,
       'shot-edit' => _shotEdits(payload).length,
       'screen-text' => _screenTexts(payload).length,
+      'line-voice' => _lineVoices(payload).length,
+      'word-shots' => _wordShots(payload).length,
+      // baseline 和 mix 改的是**整片一处设置**，没有「几条」可数。
+      // 原来落到 _ => 0，返回 {"ok":true,"applied":0}——读起来像
+      // 「一条都没落」，验收 Agent 又跑了一次 show 才敢确认真的写进去了
+      'baseline' || 'mix' => 1,
       _ => 0,
     };
