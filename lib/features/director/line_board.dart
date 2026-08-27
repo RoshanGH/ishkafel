@@ -799,6 +799,9 @@ class _LineBand extends StatelessWidget {
                       (start: s.startWord!, end: s.endWord!),
                 ],
                 onPick: (a, b) => handlers.onPickWords(index, a, b),
+                // 点台词也算点这一行——可选文本会把点击吃掉，
+                // 不转出去的话，划过词的那一行点了预览不跳
+                onTapText: () => handlers.onFocusLine(index),
               )
             : Text(
                 voiced ? line.text.trim() : '画面行（无台词，只有画面）',

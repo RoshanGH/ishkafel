@@ -1245,8 +1245,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _mutate((d) => d.setShotsById(
             lineId,
             ShotAllocation.fillBySlowdown(
-                ShotAllocation.distribute(updated.shots, vo.durationMs),
-                vo.durationMs)));
+                reallocShots(updated, updated.shots), vo.durationMs)));
       }
       _flushNow();
       // 旧配音**不再立即删**：⌘Z 撤销可能把数据回滚到旧文件上，
@@ -1299,10 +1298,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (picked == null) return;
     // 挑完就把时长按行的根均分好（默认全自动预填，人只做否决）；
     // 行还没有根（没配音/没填时长）就先不分，界面会说清下一步
-    final root = ShotAllocation.rootMsOf(line.withShots(picked.shots));
-    final shots = root == null
-        ? picked.shots
-        : ShotAllocation.distribute(picked.shots, root);
+    // 走统一入口：这一行可能已经有划词镜，老的均分会把它们的时长平摊掉
+    final shots = reallocShots(line, picked.shots);
     _mutate((d) =>
         d.setShotsById(line.id, shots).setTagsById(line.id, picked.tags));
     _flushNow();
@@ -1393,12 +1390,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         picked.shots.first.copyWith(startWord: startWord, endWord: endWord);
     final next = [...line.shots];
     next.insert(insertIndexForWords(next, startWord), shot);
-    final words = line.voiceover?.words ?? const <VoiceWord>[];
-    final root = ShotAllocation.rootMsOf(line);
-    final allocated = root == null
-        ? next
-        : ShotAllocation.distributeWithWords(next, root, words);
-    _mutate((d) => d.setShotsById(line.id, allocated));
+    _mutate((d) => d.setShotsById(line.id, reallocShots(line, next)));
     _flushNow();
     _pinAllShots();
     if (picked.shots.length > 1 && mounted) {
@@ -1675,9 +1667,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   void _distribute(int index) {
     final line = _doc.lines[index];
-    final root = ShotAllocation.rootMsOf(line);
-    if (root == null) return;
-    _updateShots(index, ShotAllocation.distribute(line.shots, root));
+    _updateShots(index, reallocShots(line, line.shots));
   }
 
   /// 素材偏短分不满行时长：放慢镜头把整行充满（分镜可加速可放慢，
@@ -2013,9 +2003,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       trimStartMs: seg.$1,
     );
     final next = [...line.shots, shot];
-    final root = ShotAllocation.rootMsOf(line);
-    _updateShots(
-        index, root == null ? next : ShotAllocation.distribute(next, root));
+    _updateShots(index, reallocShots(line, next));
     _flushNow();
   }
 
@@ -2733,7 +2721,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           root == null
               ? withShot.shots
               : ShotAllocation.fillBySlowdown(
-                  ShotAllocation.distribute(withShot.shots, root), root)));
+                  reallocShots(withShot, withShot.shots), root)));
       return true;
     } catch (e) {
       AppLog.warn('自动配镜失败（line=$lineId）：$e');
@@ -2871,9 +2859,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         final root = ShotAllocation.rootMsOf(line);
                         _mutate((d) => d.setShotsById(
                             line.id,
-                            root == null || next.isEmpty
-                                ? next
-                                : ShotAllocation.distribute(next, root)));
+                            next.isEmpty ? next : reallocShots(line, next)));
                         setState(() => _expandedShot = null);
                       },
                       onResizeShot: _resizeShot,

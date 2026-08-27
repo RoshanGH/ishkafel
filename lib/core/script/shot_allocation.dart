@@ -269,3 +269,20 @@ String? wordBoundConflict(List<LineShot> shots) {
   }
   return null;
 }
+
+/// 重排一行的镜头时长——**全软件唯一入口**。
+///
+/// 真机 bug：人先划词建了两个镜（时长按朗读长短算好），再用「找镜头」加
+/// 两个镜，那条路径调的是老的均分函数，把整行重新平摊，4 个镜头全变成
+/// 8880÷4=2220ms。划的词等于白划，而且不报错、不提示。
+///
+/// 根因是「同一个东西两处算」：9 个调用点各自决定调 [ShotAllocation.
+/// distribute] 还是 [ShotAllocation.distributeWithWords]，漏一个就悄悄错。
+/// 今天已经因为同一个毛病出过静音、配音过期两个 bug——所以这里收口：
+/// **调用方不需要知道有没有划词镜**，交给它自己判断。
+List<LineShot> reallocShots(ScriptLine line, List<LineShot> shots) {
+  final root = ShotAllocation.rootMsOf(line.withShots(shots));
+  if (root == null) return shots;
+  final words = line.voiceover?.words ?? const <VoiceWord>[];
+  return ShotAllocation.distributeWithWords(shots, root, words);
+}

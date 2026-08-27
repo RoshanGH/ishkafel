@@ -241,7 +241,7 @@ Future<int> runScriptVoiceCommand({
           doc = doc.setShotsById(
               lineId,
               ShotAllocation.fillBySlowdown(
-                  ShotAllocation.distribute(updated.shots, vo.durationMs),
+                  reallocShots(updated, updated.shots),
                   vo.durationMs));
         }
         await repository.save(task.copyWith(script: doc));

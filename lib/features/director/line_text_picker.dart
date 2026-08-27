@@ -27,12 +27,20 @@ class LineTextPicker extends StatefulWidget {
   /// 选好了：给出**词序号**区间 `[start, end)`
   final void Function(int start, int end) onPick;
 
+  /// 在台词上单纯点了一下（没划出选区）。
+  ///
+  /// **必须转出去**：可选文本会把点击吃掉，不冒泡到外层的行卡片。
+  /// 真机上就是这样——划过词的那一行再点它，预览不跳了，其他行都正常，
+  /// 因为只有选中的行才是可选文本
+  final VoidCallback? onTapText;
+
   const LineTextPicker({
     super.key,
     required this.text,
     required this.words,
     required this.takenWordRanges,
     required this.onPick,
+    this.onTapText,
   });
 
   @override
@@ -60,12 +68,20 @@ class LineTextPickerState extends State<LineTextPicker> {
     }
   }
 
-  /// 测试用：直接设一段选区（真机上由 SelectableText 的选区变化驱动）
+  /// 测试用：模拟一次选区变化。**走的是和真机同一条路径**——
+  /// 直接改字段的话，「点击要转出去」这类行为就测不到了
   @visibleForTesting
-  void debugSelect(int from, int to) => setState(() {
-        _from = from;
-        _to = to;
-      });
+  void debugSelect(int from, int to) =>
+      _onSelection(TextSelection(baseOffset: from, extentOffset: to));
+
+  void _onSelection(TextSelection selection) {
+    setState(() {
+      _from = selection.start;
+      _to = selection.end;
+    });
+    // 收起的选区 = 单纯点了一下，把它当成「点这一行」转出去
+    if (selection.isCollapsed) widget.onTapText?.call();
+  }
 
   /// 这一段能不能划：有选区、有逐字时间、没碰到已占用的字
   WordRange? get _pickable {
@@ -89,10 +105,7 @@ class LineTextPickerState extends State<LineTextPicker> {
               fontSize: AppFontSize.body,
               height: 1.5,
               color: AppColors.textPrimary),
-          onSelectionChanged: (selection, _) => setState(() {
-            _from = selection.start;
-            _to = selection.end;
-          }),
+          onSelectionChanged: (selection, _) => _onSelection(selection),
         ),
         if (pick != null) _addShotBar(pick),
         // 划不了的时候要说清为什么——不然人反复选却什么都不出现

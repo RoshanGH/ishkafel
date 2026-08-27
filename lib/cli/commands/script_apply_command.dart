@@ -264,7 +264,7 @@ ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
             root == null
                 ? shots
                 : ShotAllocation.fillBySlowdown(
-                    ShotAllocation.distribute(shots, root), root));
+                    reallocShots(line, shots), root));
       }
     case 'subtitles':
       for (final sub in _subtitles(payload)) {
@@ -332,7 +332,7 @@ ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
             line.id,
             e.op == 'remove' && root != null && shots.isNotEmpty
                 ? ShotAllocation.fillBySlowdown(
-                    ShotAllocation.distribute(shots, root), root)
+                    reallocShots(line, shots), root)
                 : shots);
       }
     case 'baseline':

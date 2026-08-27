@@ -93,6 +93,26 @@ void main() {
     expect(gotEnd, 5, reason: '「如果/你/觉得/有点/贵」是 5 个单位');
   });
 
+  testWidgets('单纯点一下台词也算点这一行——可选文本不能把点击吃掉', (tester) async {
+    var tapped = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: LineTextPicker(
+          text: src,
+          words: words,
+          takenWordRanges: const [],
+          onPick: (_, __) {},
+          onTapText: () => tapped++,
+        ),
+      ),
+    ));
+    final state = tester.state<LineTextPickerState>(find.byType(LineTextPicker));
+    state.debugSelect(3, 3); // 收起的选区 = 点了一下
+    await tester.pump();
+    expect(tapped, 1,
+        reason: '不转出去的话，划过词的那一行点了预览不跳（真机撞到过）');
+  });
+
   testWidgets('没有逐字时间时划不了，并说清为什么', (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
