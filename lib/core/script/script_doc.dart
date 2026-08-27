@@ -480,6 +480,12 @@ class LineShot {
   static const _unsetAlloc = Object();
 
   /// 挂上实测时长（素材落地后量出来的）。其余字段原样
+  /// 探测到素材真实时长。
+  ///
+  /// **顺手把悬空的取段起点夹回来**：挑素材那一刻时长还不知道，这期间
+  /// 设的取段起点夹不了边界；等时长回来，那个数就悬在素材之外没人管。
+  /// 真机上出过 trim=19953 而素材只有 3467ms 的镜头，取段条按它算，
+  /// 直接把整块面板渲染成一片灰。
   LineShot withMeasuredDuration(int ms) => LineShot(
         materialId: materialId,
         name: name,
@@ -488,7 +494,11 @@ class LineShot {
         thumbnailUrl: thumbnailUrl,
         fileKey: fileKey,
         durationMs: ms,
-        trimStartMs: trimStartMs,
+        // 留得下这一镜要用的那一段：起点 + 用量不能超过素材总长
+        trimStartMs: ms <= 0
+            ? trimStartMs
+            : trimStartMs.clamp(
+                0, (ms - (allocMs ?? 0) * speed).round().clamp(0, ms)),
         speed: speed,
         allocMs: allocMs,
         localSource: localSource,

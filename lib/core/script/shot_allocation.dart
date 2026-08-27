@@ -286,3 +286,35 @@ List<LineShot> reallocShots(ScriptLine line, List<LineShot> shots) {
   final words = line.voiceover?.words ?? const <VoiceWord>[];
   return ShotAllocation.distributeWithWords(shots, root, words);
 }
+
+/// 取段条上「窗口」的位置与宽度（像素）。
+///
+/// 抽出来是因为它**真机上崩过**：第 6 句第 2 镜的素材只有 3467ms，取段
+/// 起点却是 19953ms（挑素材那一刻时长还没探测出来，夹不了；等时长回来
+/// 那个数就悬在外面）。于是窗口左边缘正好顶到条尾，`clamp(8.0, 0.0)`
+/// 上下限颠倒抛异常，Release 包把整块面板渲染成一片灰。
+///
+/// 埋在 build 方法里的算术是测不到的，所以搬到这儿来。
+/// **数据再离谱也不许崩**：界面可以显示得难看，不能整块消失。
+({double left, double width}) trimBarMetrics({
+  required double width,
+  required int sourceMs,
+  required int trimStartMs,
+  required int allocMs,
+  required double speed,
+}) {
+  if (width <= 0 || sourceMs <= 0 || speed <= 0) {
+    return (left: 0, width: 0);
+  }
+  // 整条是**成片时间轴**：这条素材按当前倍速最多能出多长
+  final outTotal = sourceMs / speed;
+  final pxPerMs = width / outTotal;
+  final left = (trimStartMs / speed * pxPerMs).clamp(0.0, width);
+  final room = width - left;
+  if (room <= 0) return (left: left, width: 0);
+  // 下限取 min(8, room)：窗口至少 8px 才看得见，但剩余空间不足 8px 时
+  // 不能反过来把下限抬到上限之上——那正是崩掉的那一步
+  final want = allocMs * pxPerMs;
+  final lower = room < 8.0 ? room : 8.0;
+  return (left: left, width: want.clamp(lower, room));
+}

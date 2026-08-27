@@ -283,11 +283,22 @@ class _TrimBar extends StatelessWidget {
       final w = constraints.maxWidth;
       // **整条是成片时间轴**（用户定的口径）：这条素材按当前倍速最多能
       // 出多长（素材长 ÷ 倍速）。1.5 秒就是成片里的 1.5 秒，与倍速无关；
-      // 倍速只改变「这条素材能出多长」
+      // 倍速只改变「这条素材能出多长」。
+      //
+      // 算术搬到 trimBarMetrics 里去了：埋在 build 里测不到，而这段真机
+      // 上崩过——取段起点悬在素材之外时 clamp 上下限颠倒，Release 包把
+      // 整块面板渲染成一片灰
+      final m = trimBarMetrics(
+        width: w,
+        sourceMs: src,
+        trimStartMs: shot.trimStartMs,
+        allocMs: alloc,
+        speed: shot.speed,
+      );
       final outTotal = src / shot.speed;
-      final pxPerMs = w / outTotal;
-      final winLeft = (shot.trimStartMs / shot.speed * pxPerMs).clamp(0.0, w);
-      final winWidth = (alloc * pxPerMs).clamp(8.0, w - winLeft);
+      final pxPerMs = outTotal <= 0 ? 0.0 : w / outTotal;
+      final winLeft = m.left;
+      final winWidth = m.width;
       final fs = frames;
       const barH = 64.0;
       // 格数随条宽自适应：格宽 = 条高 × 素材宽高比（比例锁定，
