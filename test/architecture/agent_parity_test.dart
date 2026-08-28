@@ -36,13 +36,13 @@ void main() {
     }
   });
 
-  /// 定位写错，后面写得再细也白搭：Agent 读完开头就形成了「这是个翻新
+  /// 定位写错，后面写得再细也白搭：Agent 读完开头就形成了「这是个换画面的
   /// 工具」的印象，脚本成片那一半会被当成附属，甚至根本不会想起来用。
-  test('手册开篇要把两条线摆成平级，不能只说翻新', () {
+  test('手册开篇要把两条线摆成平级，不能只说替换裂变', () {
     final head = agentSkillMarkdown.substring(0, 2200);
-    expect(head, contains('成片翻新'));
+    expect(head, contains('替换裂变'));
     expect(head, contains('脚本成片'),
-        reason: '开篇只说翻新的话，「从台词直接造一条新片」这条线就被埋没了');
+        reason: '开篇只说替换裂变的话，「从台词直接造一条新片」这条线就被埋没了');
     expect(head, anyOf(contains('哪条线'), contains('走哪条')),
         reason: 'Agent 拿到需求第一件事是选线，得先告诉它怎么选');
   });

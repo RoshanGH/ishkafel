@@ -314,7 +314,7 @@ class _WizardHeader extends StatelessWidget {
     return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('新建翻新任务',
+        Text('新建替换裂变任务',
             style: TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: AppFontSize.title,

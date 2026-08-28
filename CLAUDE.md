@@ -2,7 +2,7 @@
 
 ## 项目简介
 
-素材生产平台（成片翻新）：Flutter 跨平台桌面 app + libmpv 预览 + 本地 ffmpeg 合成 + 云端 AI API + miaoa 素材检索。
+素材生产平台（替换裂变 / 脚本成片）：Flutter 跨平台桌面 app + libmpv 预览 + 本地 ffmpeg 合成 + 云端 AI API + miaoa 素材检索。
 核心概念与流程见 `docs/术语表.md` 与 `docs/2026-07-29-项目方向与架构设计.md`。
 
 ## 最高准则：按商业化 To C 软件的标准做（强制，凌驾于其他所有条目）

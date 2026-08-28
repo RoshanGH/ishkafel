@@ -13,7 +13,7 @@ CandidateMaterial _m(int id, int project) => CandidateMaterial(
       tags: const [],
     );
 
-/// 「换成别的项目拍的」是这条线最常见的诉求——翻新的意义就是换掉原来那批画面。
+/// 「换成别的项目拍的」是这条线最常见的诉求——替换裂变的意义就是换掉原来那批画面。
 /// 而语义检索越准，搜出来越是原项目自己的素材（跟原镜最像的当然是它）。
 /// 真机上验收 Agent 只能靠 name 前缀手工过滤 35 个镜头。
 void main() {

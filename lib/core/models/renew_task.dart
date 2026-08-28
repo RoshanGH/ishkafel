@@ -29,7 +29,7 @@ import 'semantic_unit.dart';
 /// 差异，同样由 [parseStatus] 兜底。
 enum RenewTaskStatus { analyzing, ready }
 
-/// 翻新任务实体（不可变）
+/// 有原片的任务实体（不可变）
 class RenewTask {
   final String id;
   final String name;

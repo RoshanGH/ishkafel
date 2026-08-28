@@ -64,7 +64,7 @@ Future<void> main(List<String> args) async {
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
     ..addOption('exclude-projects',
         help: 'candidates 用：排除这些项目的素材（逗号分隔的项目 id）。'
-            '翻新时常用 --exclude-projects <原片项目> 换掉原来那批画面')
+            '替换裂变常用 --exclude-projects <原片项目> 换掉原来那批画面')
     ..addOption('page', help: 'candidates 用：第几页（从 1 开始）')
     ..addOption('tag-mode',
         defaultsTo: 'or', help: 'candidates 用：标签检索 and（全满足）| or（任一）')

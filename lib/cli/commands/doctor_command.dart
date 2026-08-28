@@ -49,7 +49,7 @@ Future<int> runDoctorCommand({
     out.writeln('✗ 素材库：没登录，或者 miaoa 这个工具没装');
     problems.add('素材库连不上。请人自己在终端里敲 `miaoa auth login`'
         '——这条命令要跳浏览器，Agent 代跑不了。'
-        '连不上就挑不了素材，翻新做不下去。');
+        '连不上就挑不了素材，换画面做不下去。');
   }
 
   final ffmpegOk = await (ffmpegProbe ?? _probeFfmpeg)();

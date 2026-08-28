@@ -50,7 +50,7 @@ void main() {
       expect(body, contains('name: ishkafel'));
       // 只写「ishkafel 的使用说明」的话，Agent 不知道什么场景该想起它
       expect(body, contains('description:'));
-      expect(body, contains('翻新'));
+      expect(body, contains('替换裂变'));
       expect(body, contains('# 用法'), reason: '正文要原样带上');
     });
 

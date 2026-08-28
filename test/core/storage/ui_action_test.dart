@@ -39,14 +39,14 @@ void main() {
   });
 
   group('新建向导的参数', () {
-    test('选哪条线：脚本成片 / 成片翻新 / 空白拼片', () {
+    test('选哪条线：脚本成片 / 替换裂变 / 空白拼片', () {
       expect(WizardMode.parse('script'), WizardMode.script);
       expect(WizardMode.parse('renew'), WizardMode.renew);
       expect(WizardMode.parse('blank'), WizardMode.blank);
       expect(WizardMode.parse('乱写'), isNull);
     });
 
-    test('成片翻新必须给原片路径——没有原片这条线走不通', () {
+    test('替换裂变必须给原片路径——没有原片这条线走不通', () {
       final issues = validateWizardFill(
           mode: WizardMode.renew, filePath: null, tagGroupIds: const [1]);
       expect(issues, isNotEmpty);

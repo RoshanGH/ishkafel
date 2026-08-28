@@ -71,7 +71,7 @@ class InspectorPanel extends StatefulWidget {
 
   /// 空白任务：分子标签是**手填**的，所以这里要能改。
   ///
-  /// 翻新任务为 null——那边的标签是模型按台词打出来的，在这儿手改会和
+  /// 有原片的任务为 null——那边的标签是模型按台词打出来的，在这儿手改会和
   /// 「重新打标」互相覆盖，而用户看不出是谁赢了。
   final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
 
@@ -313,7 +313,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
-          // 空白任务给一个能选的编辑器；翻新任务照旧只展示模型打的结果
+          // 空白任务给一个能选的编辑器；有原片的任务照旧只展示模型打的结果
           widget.unitTagEditor?.call(unitIndex, unit.tags) ??
               TagTraceSection(
                 title: '台词语义单元标签',

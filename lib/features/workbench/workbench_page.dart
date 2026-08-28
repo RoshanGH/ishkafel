@@ -689,7 +689,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _scheduleConsequenceCheck(
       [Duration delay = const Duration(seconds: 3)]) {
     // 空白任务不问这个。它问的是「切分结构变了，原来的素材和标签多半对不上」
-    // ——那是翻新任务拆分/合并之后的真实后果。空白任务加一个分子什么都没影响，
+    // ——那是有原片的任务拆分/合并之后的真实后果。空白任务加一个分子什么都没影响，
     // 删一个的连带处理（替换方案、配乐区间）已经在删除那一步做掉了。
     //
     // 更要命的是它提出的「重新打标」：空白任务的标签是**手填**的，
@@ -1624,7 +1624,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onBgmResize: _isEditable ? _resizeBgm : null,
                 onBgmDelete: _isEditable ? _deleteBgm : null,
                 editor: editor,
-                // 分子手动加只发生在空白任务上。翻新任务的分子是分析切出来的，
+                // 分子手动加只发生在空白任务上。有原片的任务的分子是分析切出来的，
                 // 给它一个「添加」按钮只会让人误以为能凭空插一段
                 onAddUnit: _task.isBlank && _isEditable && _lock == null
                     ? _addBlankUnit

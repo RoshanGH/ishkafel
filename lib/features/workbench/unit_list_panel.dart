@@ -14,7 +14,7 @@ class UnitListPanel extends StatelessWidget {
   final ValueChanged<SemanticUnit>? onUnitTap;
 
   /// 空白任务：分子是手动加出来的，所以列表头上要有「添加」。
-  /// 翻新任务的分子是分析切出来的，不给这个按钮
+  /// 有原片的任务的分子是分析切出来的，不给这个按钮
   final VoidCallback? onAddUnit;
 
   /// 删掉一个分子（同样只有空白任务给）
@@ -139,7 +139,7 @@ class _UnitRow extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  /// 空白任务才给。翻新任务的分子是分析切出来的，删掉一个等于让台词断掉
+  /// 空白任务才给。有原片的任务的分子是分析切出来的，删掉一个等于让台词断掉
   final VoidCallback? onDelete;
 
   const _UnitRow({

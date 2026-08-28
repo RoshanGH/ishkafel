@@ -70,7 +70,7 @@ void main() {
   test('有原片的任务不许 add/remove——分子是分析切出来的', () async {
     await repo.save(RenewTask(
       id: 'r1',
-      name: '翻新',
+      name: '拼片',
       sourcePath: '/v/a.mp4',
       units: const [],
       status: RenewTaskStatus.ready,

@@ -211,7 +211,7 @@ int _sizeOf(File f) {
   }
 }
 
-/// 这个任务引用了哪些素材。**两条线都要算**：成片翻新走 replacements，
+/// 这个任务引用了哪些素材。**两条线都要算**：替换裂变走 replacements，
 /// 脚本成片走 script.lines[].shots。漏一条就会把在用的素材当孤儿删掉
 Set<int> _materialIdsOf(RenewTask task) {
   final ids = <int>{};
@@ -237,7 +237,7 @@ Set<int> _bgmIdsOf(RenewTask task) {
     // 脚本成片：一段一首
     for (final seg in task.script?.bgmSegments ?? const []) seg.material.id,
   };
-  // 成片翻新：**一段可以选好几首互为备选**，导出时按变体轮流取。
+  // 替换裂变：**一段可以选好几首互为备选**，导出时按变体轮流取。
   // 只算 previewIndex 那一首的话，其余备选会被当孤儿删掉，
   // 导第二条变体时就没曲子了
   for (final seg in task.bgm?.segments ?? const []) {

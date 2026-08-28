@@ -48,10 +48,10 @@ enum WizardMode {
   /// 脚本成片：从台词造一条新片，不需要原片
   script('script'),
 
-  /// 成片翻新：拿一条现成的片子换画面
+  /// 替换裂变：拿一条现成的片子换画面
   renew('renew'),
 
-  /// 空白拼片：翻新线的旁支，没有台词与配音
+  /// 空白拼片：替换裂变里「没有原片」的那种起点，没有台词与配音
   blank('blank');
 
   const WizardMode(this.wire);
@@ -77,7 +77,7 @@ List<String> validateWizardFill({
   final issues = <String>[];
   if (mode == WizardMode.renew) {
     if (filePath == null || filePath.trim().isEmpty) {
-      issues.add('成片翻新要给原片（--file）——这条线就是拿现成的片子换画面，'
+      issues.add('替换裂变要给原片（--file）——这条线就是拿现成的片子换画面，'
           '没有原片走不通。想从零做一条就用 script 那条线');
     } else if (!File(filePath).existsSync()) {
       issues.add('找不到这个原片：$filePath');

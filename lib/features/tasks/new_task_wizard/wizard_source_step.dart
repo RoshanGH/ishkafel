@@ -85,7 +85,7 @@ class WizardSourceStep extends StatelessWidget {
       );
 
   /// 「脚本即成片」：编导写脚本，配音/镜头/字幕从脚本长出来。
-  /// 与「成片翻新」互为镜像——一个从成片出发换画面，一个从脚本出发长成片
+  /// 与「替换裂变」互为镜像——一个从成片出发换画面，一个从脚本出发长成片
   Widget _scriptCard() => _SourceCard(
         cardKey: const Key('wizard-script-source'),
         icon: Icons.edit_note,

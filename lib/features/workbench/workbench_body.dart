@@ -39,7 +39,7 @@ import 'workbench_shortcuts.dart';
 class WorkbenchBody extends StatefulWidget {
   final SegmentationEditorController editor;
 
-  /// 空白任务：分子手动加。翻新任务为 null（分子是分析切出来的）
+  /// 空白任务：分子手动加。有原片的任务为 null（分子是分析切出来的）
   final VoidCallback? onAddUnit;
 
   /// 空白任务：分子标签手填，检查器里给一个能选的编辑器

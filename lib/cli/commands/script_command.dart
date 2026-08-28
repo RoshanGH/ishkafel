@@ -28,7 +28,7 @@ import '../script_view.dart';
 
 /// `ishkafel script <子命令> <任务>` —— 脚本成片这条线的只读入口。
 ///
-/// 与成片翻新是同一个任务对象的两个字段（`units` / `script`），所以共用
+/// 与替换裂变是同一个任务对象的两个字段（`units` / `script`），所以共用
 /// 仓库与输出层，只在这里开一层新的命名空间。
 ///
 /// 子命令：
@@ -180,7 +180,7 @@ Future<int> runScriptCommand({
   final doc = task.script;
   if (doc == null) {
     sink.writeln('「${task.name}」不是脚本成片任务——'
-        '成片翻新那条线请用 ishkafel task / candidates');
+        '替换裂变那条线请用 ishkafel task / candidates');
     return exitBadUsage;
   }
 

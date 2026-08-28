@@ -4,7 +4,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 
-/// 成片翻新的一步
+/// 替换裂变的一步
 class WorkflowStep {
   final IconData icon;
   final String title;
@@ -22,7 +22,7 @@ class WorkflowStep {
 }
 
 /// 产品一句话。首页、使用说明、关于三处共用，措辞不会各说各的。
-const String productTagline = '把一条成片翻新成多条变体：台词与配音不变，只换画面。';
+const String productTagline = '把一条成片裂变成多条变体：台词与配音不变，只换画面。';
 
 /// 四步流程。术语按 docs/术语表.md，不自造说法——界面上叫「分镜」、
 /// 文档里叫「视觉镜头」，用户会以为是两个东西。

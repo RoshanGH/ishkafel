@@ -3,7 +3,7 @@ import '../ai/taggers.dart';
 import '../analysis/tag_vocabulary.dart';
 import '../models/tag_group_ref.dart';
 
-/// 行台词打标：复用成片翻新的 U 层打标管线（同一个打标员、同一套
+/// 行台词打标：复用替换裂变的 U 层打标管线（同一个打标员、同一套
 /// 受控词表规则），给一行台词从任务选定的标签组里挑标签。
 ///
 /// 标签是**所有检索的公共筛选层**（设计稿）：打出来挂在行上、可改可删，

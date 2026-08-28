@@ -40,7 +40,7 @@ class EditorSelection {
 class SegmentationEditorController extends ChangeNotifier {
   /// 时间轴总长。
   ///
-  /// 翻新任务是原片时长，一经建立不变。**空白任务是分子加出来的**——加一个
+  /// 有原片的任务是原片时长，一经建立不变。**空白任务是分子加出来的**——加一个
   /// 分子、挑到一条更长的素材，总长就变了，所以这里不能是 final
   int durationMs;
   final double fps;
@@ -246,7 +246,7 @@ class SegmentationEditorController extends ChangeNotifier {
   /// 只是防御，不会误伤合法 selection）。
   /// 整批换掉分子列表（**只给空白任务用**）。
   ///
-  /// 翻新任务的编辑一律走 [SegmentationEditOps] 那套带不变量校验的操作：
+  /// 有原片的任务的编辑一律走 [SegmentationEditOps] 那套带不变量校验的操作：
   /// 那边有一条固定的原片时长要无缝覆盖。空白任务没有原片，分子是加出来的，
   /// 总长跟着变——这条通路把两者分开，免得为了让「加一个分子」通过校验而把
   /// 那套不变量放松掉。
