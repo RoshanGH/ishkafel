@@ -364,11 +364,23 @@ class ExportRunner {
         );
         out.add(ExportOutcome(index: combo.index, path: path));
       } catch (e) {
-        AppLog.warn('导出：第 ${combo.index} 条失败：$e');
+        // 一条成片没出来是**硬失败**，不是「注意一下」——用 error 级别，
+        // 别让人在一屏 warn 里把它滑过去
+        AppLog.error('导出：第 ${combo.index} 条失败：$e');
         out.add(ExportOutcome(index: combo.index, failure: '$e'));
       }
     }
-    onProgress?.call(total, total, '完成');
+    final failed = out.where((o) => o.failure != null).length;
+    // 收尾话按结果说：三条全灭还打「完成」，只看进度行的人（和只 tail
+    // 日志的脚本）会以为导完了
+    onProgress?.call(
+        total,
+        total,
+        failed == 0
+            ? '完成'
+            : failed == total
+                ? '全部失败，一条都没出来'
+                : '完成 ${total - failed} 条，失败 $failed 条');
     // 工作目录**留着**：切片和音轨都按内容指纹命名——改一个候选重导，
     // 没变的段落直接命中磁盘、一次 ffmpeg 都不跑（「算过一次的东西要落地
     // 复用，改动了才重算」）。它按任务归属在产物清单里：删任务时一并清、

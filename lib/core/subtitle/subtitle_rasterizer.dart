@@ -17,6 +17,22 @@ class SubtitleRasterizer {
 
   SubtitleRasterizer({this.run = systemProcessRunner});
 
+  /// 同一个工作目录上的渲染要**排队**。
+  ///
+  /// 导出时段落是并行渲的（窗口 3），于是好几次 rasterize 会同时盯着同一个
+  /// 目录：各自算出「还缺哪几张」，再各自把清单写进 spec——后一个覆盖前一个，
+  /// 而前一个的 osascript 才刚启动、这时候才去读，读到的是别人的清单，
+  /// 于是它要的图没人渲。真机上三条方案全部导出失败就是这么来的，
+  /// 报「某某句没有产出图片」，句子每次都不一样。
+  ///
+  /// 排队不亏：这一层本来就靠内容指纹复用，排在后面的多半直接命中磁盘，
+  /// 连进程都不用起。
+  static final Map<String, Future<void>> _queues = {};
+
+  /// 一次调用一份 spec：跨进程（比如界面和命令行同时导）排不到同一个队里，
+  /// 文件名撞了照样互相覆盖
+  static int _seq = 0;
+
   /// 把 [lines] 渲成 PNG，返回与 overlay 滤镜对接的图。
   /// 渲染失败直接抛——字幕是成片内容，悄悄少一句正是不允许的那类错。
   Future<List<SubtitleOverlayImage>> rasterize({
@@ -28,6 +44,31 @@ class SubtitleRasterizer {
   }) async {
     if (lines.isEmpty) return const [];
     outDir.createSync(recursive: true);
+
+    final key = outDir.absolute.path;
+    final ahead = _queues[key] ?? Future<void>.value();
+    final mine = ahead.then((_) => _rasterize(
+        lines: lines,
+        width: width,
+        height: height,
+        style: style,
+        outDir: outDir));
+    // 队列只记「轮到下一个没有」，失败不能把后面的人一起带走
+    _queues[key] = mine.then((_) {}, onError: (_) {});
+    try {
+      return await mine;
+    } finally {
+      if (identical(_queues[key], mine)) _queues.remove(key);
+    }
+  }
+
+  Future<List<SubtitleOverlayImage>> _rasterize({
+    required List<SubtitleLine> lines,
+    required int width,
+    required int height,
+    required SubtitleStyle style,
+    required Directory outDir,
+  }) async {
 
     final blur = style.preset == SubtitlePreset.blurBox;
     final entries = <({String out, SubtitleLine line})>[];
@@ -44,7 +85,8 @@ class SubtitleRasterizer {
     }
     if (missing.isEmpty) return _collect(entries, blur);
 
-    final script = File(p.join(outDir.path, 'subrender.js'))
+    final stamp = '${pid}_${_seq++}';
+    final script = File(p.join(outDir.path, 'subrender_$stamp.js'))
       ..writeAsStringSync(_jxaScript);
     final custom = style.colorHex;
     final (r, g, b) = custom != null
@@ -57,7 +99,7 @@ class SubtitleRasterizer {
             SubtitlePreset.yellowOutline => (1.0, 0.85, 0.0),
             _ => (1.0, 1.0, 1.0),
           };
-    final spec = File(p.join(outDir.path, 'subrender_spec.json'))
+    final spec = File(p.join(outDir.path, 'subrender_spec_$stamp.json'))
       ..writeAsStringSync(jsonEncode({
         'width': width,
         'height': height,
@@ -81,6 +123,14 @@ class SubtitleRasterizer {
 
     final result =
         await run('osascript', ['-l', 'JavaScript', script.path, spec.path]);
+    // 中间产物用完即弃——留在工作目录里只会越堆越多，且谁也不读
+    for (final f in [script, spec]) {
+      try {
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {
+        // 删不掉不影响成片，不值得让导出失败
+      }
+    }
     if (result.exitCode != 0) {
       throw StateError('字幕渲染失败（osascript exit=${result.exitCode}）：'
           '${result.stderr}'.trim());
@@ -90,7 +140,15 @@ class SubtitleRasterizer {
         if (!File(m['out']!).existsSync()) m['text'],
     ];
     if (bad.isNotEmpty) {
-      throw StateError('字幕渲染失败：「${bad.first}」等 ${bad.length} 句没有产出图片');
+      // 说清是谁没干活、人能做什么。以前这里只有一句「没有产出图片」，
+      // 拿到的人不知道图该由谁产出、也不知道该去修什么
+      throw StateError(
+          '字幕图没渲出来（${bad.length} 句，第一句是「${bad.first}」）。'
+          '字幕是交给 macOS 系统渲染的（osascript 调 AppKit），'
+          '它这次报了成功却没落下文件。'
+          '请人试一次：终端里跑 `osascript -l JavaScript -e "1+1"`，'
+          '若被拦，去「系统设置 → 隐私与安全性 → 自动化」里给终端放行；'
+          '（这条报错以前只说「没有产出图片」，拿到的人无从下手。）');
     }
     return _collect(entries, blur);
   }

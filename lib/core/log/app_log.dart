@@ -11,6 +11,11 @@ abstract final class AppLog {
   /// 日志出口，测试可替换以捕获输出
   static void Function(String line) sink = _writeToStderr;
 
+  /// 真出事了：该出的东西没出来、用户拿不到结果。
+  /// 和 warn 分开是因为 warn 用得太随意，一屏里全是它，
+  /// 「三条成片一条都没导出来」混在中间会被人和脚本一起滑过去
+  static void error(String message) => sink('[ishkafel][error] $message');
+
   static void warn(String message) => sink('[ishkafel][warn] $message');
   static void info(String message) => sink('[ishkafel][info] $message');
 
