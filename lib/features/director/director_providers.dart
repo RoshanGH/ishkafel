@@ -11,6 +11,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/script/line_tagger.dart';
 import '../../core/script/script_service_wiring.dart';
+export '../../core/script/script_service_wiring.dart' show buildRefShotTagger;
 import '../../core/script/script_transcriber.dart';
 
 /// 「从视频提取脚本」的服务。null = AI 凭据不全——编导台把入口禁用并
@@ -39,11 +40,6 @@ Future<String?> pickRefFile() async {
 /// 参考视觉镜头打标（多帧 vision，一次给标签 + 画面描述——与 U 层
 /// 视觉镜头打标同一个 ShotTagger）。null = 方舟凭据缺失
 final refShotTaggerProvider = Provider<ShotTagger?>((ref) => null);
-
-ShotTagger? buildRefShotTagger(AiCredentials credentials) {
-  if (credentials.arkApiKey.isEmpty) return null;
-  return ShotTagger(chat: ArkChatClient(apiKey: credentials.arkApiKey));
-}
 
 /// 找镜头面板的三件套：内容检索、规格探测、标签体系。
 /// 默认真实实例（构造不起子进程，真正调用才 exec）；单测 override

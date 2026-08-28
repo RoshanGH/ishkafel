@@ -1,7 +1,7 @@
 name: ishkafel
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.1.78+79
+version: 0.1.82+82
 
 environment:
   sdk: ^3.12.2
@@ -33,3 +33,4 @@ flutter:
 # CLI 入口：`dart compile exe bin/ishkafel.dart`
 executables:
   ishkafel: ishkafel
+

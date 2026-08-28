@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../ai/ai_credentials.dart';
+import '../ai/ark_chat_client.dart';
+import '../ai/taggers.dart';
 import '../ai/volcano_asr_provider.dart';
 import '../audio/tts_client.dart';
 import '../ffmpeg/process_runner.dart';
@@ -83,4 +85,14 @@ Future<int> measureAudioMs(File audio) async {
     return 0;
   }
   return (seconds * 1000).round();
+}
+
+/// 参考视觉镜头打标（多帧 vision，一次给标签 + 画面描述——与 U 层视觉镜头
+/// 打标同一个 ShotTagger）。null = 方舟凭据缺失。
+///
+/// 摆在 core 而不是编导台的 providers 里：CLI 也要造这个东西，而 CLI 是
+/// 纯 Dart 编译，碰不得任何 flutter 包
+ShotTagger? buildRefShotTagger(AiCredentials credentials) {
+  if (credentials.arkApiKey.isEmpty) return null;
+  return ShotTagger(chat: ArkChatClient(apiKey: credentials.arkApiKey));
 }

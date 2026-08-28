@@ -13,7 +13,7 @@ import '../../core/storage/task_media.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/audio/bgm_library.dart';
 import '../../core/ai/tag_dimension.dart';
-import '../../features/director/director_providers.dart';
+import '../../core/script/script_service_wiring.dart';
 import '../ref_shot_tagging.dart';
 import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
