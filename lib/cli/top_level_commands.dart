@@ -11,6 +11,7 @@ const List<String> topLevelCommands = [
   'apply',
   'blank',
   'candidates',
+  'doctor',
   'export',
   'import',
   'open',

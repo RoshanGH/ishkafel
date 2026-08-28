@@ -70,4 +70,32 @@ void main() {
       );
     });
   });
+
+  group('CLI 从自己所在的 app 包里读凭据', () {
+    test('包里的 credentials 目录排在最后——人放在数据目录的能盖掉它', () {
+      final dirs = cliSecretsDirs(
+        dataDir: Directory('/data'),
+        executable: '/Applications/ishkafel.app/Contents/Resources/cli/ishkafel',
+        currentDir: '/work',
+      );
+
+      expect(dirs.map((d) => d.path), [
+        '/data/credentials',
+        '/work/.secrets',
+        '/Applications/ishkafel.app/Contents/Resources/cli/credentials',
+      ], reason: '正式包自带一份，是为了让 Agent 开箱就能跑；'
+          '但人手动放的那份必须能盖过它，不然换 key 都没处换');
+    });
+
+    test('工具被单独拷出来时就没有那一项，不硬编一个不存在的路径', () {
+      final dirs = cliSecretsDirs(
+        dataDir: Directory('/data'),
+        executable: '/usr/local/bin/ishkafel',
+        currentDir: '/work',
+      );
+
+      expect(dirs.map((d) => d.path), ['/data/credentials', '/work/.secrets']);
+    });
+  });
+
 }

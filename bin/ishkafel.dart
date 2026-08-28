@@ -6,6 +6,7 @@ import 'package:ishkafel/cli/commands/analyze_command.dart';
 import 'package:ishkafel/cli/commands/blank_command.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
 import 'package:ishkafel/cli/commands/candidates_command.dart';
+import 'package:ishkafel/cli/commands/doctor_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
@@ -117,6 +118,8 @@ Future<void> main(List<String> args) async {
         tagGroups: parsed['tag-groups'] as String?,
         visual: parsed['visual'] as bool,
       ),
+    'doctor' => await runDoctorCommand(
+        dataDir: dataDir, out: stdout, err: stderr),
     'voices' => runVoicesCommand(),
     'tag-groups' => await runTagGroupsCommand(),
     'analyze' => await runAnalyzeCommand(
@@ -202,11 +205,13 @@ Future<void> main(List<String> args) async {
 /// 用法说明。抽出来是为了让「没给命令」「命令不认识」「-h」三条路
 /// 给出同一份文本——三份各写各的迟早会漂
 String usageText(ArgParser parser) => '''
-ishkafel —— 成片翻新工具的命令行入口
+ishkafel —— 竖屏口播短视频工具的命令行入口
 
 用法：ishkafel <命令> [参数]
 
 命令：
+  doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
+                   第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
   voices           有哪些音色可选（配音前先问人要哪个，别自己挑）
   tag-groups       当前企业下有哪些标签组（import 要用它的 id）
   import <视频> [--tag-groups <id,id>]

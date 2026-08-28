@@ -82,3 +82,28 @@ Future<String?> launchApp({
     return '拉起 app 失败（$path）：$e';
   }
 }
+
+/// CLI 找凭据要翻的目录，按优先级排。
+///
+/// 最后那一项是**正式包自带的那份**：`dart build cli` 不支持 `--dart-define`，
+/// GUI 那套编译期注入对 CLI 完全无效，于是打包时把凭据拷进
+/// `<app>/Contents/Resources/cli/credentials/`，CLI 从自己的路径回推着读。
+///
+/// 没有这一项的后果不是「少个便利」——是 Agent 拿到正式包后
+/// `analyze` 直接失败，而同一台机器上人点界面却好好的。翻新线第二步就断，
+/// 后面挑素材、组方案、导出全部无从谈起（验收 Agent 真机撞上过）。
+///
+/// 顺序上它排在最后：人手动放进数据目录的那份要能盖掉它，否则换 key 无处可换。
+List<Directory> cliSecretsDirs({
+  required Directory dataDir,
+  String? executable,
+  String? currentDir,
+}) {
+  final bundled = appPathFromExecutable(executable ?? Platform.resolvedExecutable);
+  return [
+    Directory(p.join(dataDir.path, 'credentials')),
+    Directory(p.join(currentDir ?? Directory.current.path, '.secrets')),
+    if (bundled != null)
+      Directory(p.join(bundled, 'Contents', 'Resources', 'cli', 'credentials')),
+  ];
+}

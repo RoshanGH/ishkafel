@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../app_locator.dart';
+
 import '../../app/service_wiring.dart';
 import '../../core/ai/ai_credentials.dart';
 import '../../core/analysis/tag_vocabulary.dart';
@@ -170,11 +172,10 @@ Future<List<String>> vocabularyFor(List<TagGroupRef> groups) async {
 
 /// CLI 的凭据来源。
 ///
-/// **和 GUI 不是一回事**：GUI 那份是 `--dart-define` 在编译期注入的，而 CLI
-/// 是单独编译的二进制，带不过来。所以只能从环境变量或凭据目录读——读不到时
-/// 上面会把该放哪儿说清楚，而不是让分析跑到一半报一个 401。
+/// GUI 那份是 `--dart-define` 在编译期注入的，而 `dart build cli` 压根不认
+/// 这个参数，所以 CLI 只能从文件读。正式包会把同一份凭据拷进
+/// `<app>/Contents/Resources/cli/credentials/`，CLI 从自己的路径回推着读——
+/// 拿到正式包的人不用配任何东西，Agent 也能直接开工。
+/// 顺序见 [cliSecretsDirs]：人手动放的能盖掉包里自带的。
 AiCredentials loadCliCredentials(Directory dataDir) =>
-    CredentialsLoader.load(secretsDirs: [
-      Directory(p.join(dataDir.path, 'credentials')),
-      Directory(p.join(Directory.current.path, '.secrets')),
-    ]);
+    CredentialsLoader.load(secretsDirs: cliSecretsDirs(dataDir: dataDir));

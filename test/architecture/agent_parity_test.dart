@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/commands/script_apply_command.dart';
 import 'package:ishkafel/cli/top_level_commands.dart';
@@ -72,4 +74,22 @@ void main() {
     expect(agentSkillMarkdown, contains('subtitle-too-short'),
         reason: '字幕盖不住语音不拦导出——配音在念、字幕停着不动');
   });
+
+  /// 这份清单和 bin 里的分发是**同一个东西的两处写法**——加了新命令只改一处，
+  /// 清单就悄悄落后，而它正是用来盯手册的那把尺子。尺子本身不准，
+  /// 手册写错了也照样绿。
+  test('命令清单要和真正的分发对得上', () {
+    final source = File('bin/ishkafel.dart').readAsStringSync();
+    final dispatched = RegExp(r"^\s*'([a-z][a-z-]+)' =>", multiLine: true)
+        .allMatches(source)
+        .map((m) => m.group(1)!)
+        .toSet();
+
+    expect(dispatched, isNotEmpty, reason: '没扫到任何命令，正则该修了');
+    expect(dispatched.difference(topLevelCommands.toSet()), isEmpty,
+        reason: 'bin 里分发了但清单里没有——手册写它也不会被查');
+    expect(topLevelCommands.toSet().difference(dispatched), isEmpty,
+        reason: '清单里有但 bin 不认——Agent 照着敲会拿到「未知命令」');
+  });
+
 }

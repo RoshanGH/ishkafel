@@ -46,6 +46,23 @@ echo "命令行工具自检通过：macos_arm64 + macos_x64"
 rm -rf "$APP/Contents/Resources/cli"
 mkdir -p "$APP/Contents/Resources/cli"
 cp -R "$CLI_SRC/." "$APP/Contents/Resources/cli/"
+
+# 把凭据也塞进去：`dart build cli` 不支持 --dart-define，GUI 那套编译期注入
+# 对命令行工具完全无效。少了这一步，对方拿到包以后人点界面能跑、Agent 敲命令
+# 却在第二步 analyze 就失败——而两者跑的是同一个 app（验收 Agent 真机撞上过）。
+CRED_DST="$APP/Contents/Resources/cli/credentials"
+rm -rf "$CRED_DST"
+mkdir -p "$CRED_DST"
+for key in ark_api_key speech_app_id speech_access_token; do
+  src=".secrets/$key"
+  if [[ ! -s "$src" ]]; then
+    echo "缺 .secrets/$key——这个包里的命令行工具会没有凭据，Agent 跑不了分析。" >&2
+    exit 1
+  fi
+  cp "$src" "$CRED_DST/$key"
+  chmod 600 "$CRED_DST/$key"
+done
+echo "命令行工具的凭据已随包带上"
 # 往签好名的 app 里塞东西有可能破坏封签，那样对方双击会报「已损坏」——
 # 而这件事要等包发出去才暴露，必须在这儿挡住
 if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
