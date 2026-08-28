@@ -110,6 +110,9 @@ void main() {
   testWidgets('miaoa 拉片通道本期不做，但如实说明而不是留个点不动的控件',
       (tester) async {
     await openWizard(tester, wrap());
+    // 它是替换裂变的一种「有参考」来源，选完线才露出来
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
 
     expect(find.text('miaoa 成片库'), findsOneWidget);
     expect(find.textContaining('本期未开放'), findsOneWidget);
@@ -118,6 +121,8 @@ void main() {
   testWidgets('选择本地文件后显示文件名', (tester) async {
     await openWizard(tester, wrap());
 
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
     await tester.pumpAndSettle();
 
@@ -203,7 +208,9 @@ void main() {
 
     testWidgets('只选了文件、标签组还没选齐时仍然禁用', (tester) async {
       await openWizard(tester, wrap());
-      await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
+      await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
       await tester.pumpAndSettle();
       await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
 
@@ -219,7 +226,9 @@ void main() {
       final app = wrap();
       await openWizard(tester, app);
 
-      await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
+      await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
       await tester.pumpAndSettle();
       await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
       await pickGroup(tester, const Key('wizard-shot-tag-group'), '画面类型');
@@ -235,7 +244,9 @@ void main() {
 
     testWidgets('两层各自可以选多个标签组', (tester) async {
       await openWizard(tester, wrap());
-      await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
+      await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
       await tester.pumpAndSettle();
 
       // 视觉镜头层一次勾两个组
@@ -310,8 +321,14 @@ void main() {
 /// 空白任务不需要原片，也不需要镜头标签组（它不分镜头）；但分子标签组仍然
 /// 必填——那是打标的受控词表，没有它后面挑素材时没有标签可用。
 void _blankSourceTests() {
-  testWidgets('第 1 步有「不用原片」这张卡，并说清它是干什么的', (tester) async {
+  testWidgets('选了替换裂变，才露出「不用原片」这个起点', (tester) async {
     await openWizard(tester, wrap());
+    // 起点是线里面的事：没选线之前不该看见
+    expect(find.text('不用原片，从素材拼'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
+
     expect(find.text('不用原片，从素材拼'), findsOneWidget);
     expect(find.textContaining('用标签搜素材拼片'), findsOneWidget);
   });
@@ -319,6 +336,8 @@ void _blankSourceTests() {
   testWidgets('选了它之后，缺的只剩分子标签组——不再要求选文件、也不要镜头标签组',
       (tester) async {
     await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wizard-blank-source')));
     await tester.pumpAndSettle();
 
@@ -330,6 +349,8 @@ void _blankSourceTests() {
 
   testWidgets('只选分子标签组就能开始，交回来的 filePath 是 null', (tester) async {
     await openWizard(tester, wrap());
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wizard-blank-source')));
     await tester.pumpAndSettle();
     await pickGroup(tester, const Key('wizard-unit-tag-group'), '衣清.消毒液');
@@ -348,15 +369,17 @@ void _blankSourceTests() {
 /// 与拼片同理：没有原片可导，也不分镜头，镜头标签组不必填；
 /// 分子标签组仍必填——它是台词打标与后续检索的受控词表。
 void _scriptSourceTests() {
-  testWidgets('第 1 步有「脚本成片」这张卡，并说清它是干什么的', (tester) async {
+  testWidgets('第 1 步就两张卡：替换裂变、脚本成片', (tester) async {
     await openWizard(tester, wrap());
+
+    expect(find.text('替换裂变'), findsOneWidget);
     expect(find.text('脚本成片'), findsOneWidget);
-    expect(find.textContaining('写脚本'), findsOneWidget);
+    expect(find.textContaining('从台词造新片'), findsOneWidget);
   });
 
   testWidgets('选了它之后不再要求选文件；只选分子标签组就能开始', (tester) async {
     await openWizard(tester, wrap());
-    await tester.tap(find.byKey(const Key('wizard-script-source')));
+    await tester.tap(find.byKey(const Key('wizard-line-script')));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('选择本地成片文件'), findsNothing);
@@ -374,7 +397,9 @@ void _scriptSourceTests() {
 
   testWidgets('脚本卡与拼片/本地文件互斥：后选的生效', (tester) async {
     await openWizard(tester, wrap());
-    await tester.tap(find.byKey(const Key('wizard-script-source')));
+    await tester.tap(find.byKey(const Key('wizard-line-script')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wizard-blank-source')));
     await tester.pumpAndSettle();

@@ -41,14 +41,16 @@ void main() {
   group('新建向导的参数', () {
     test('选哪条线：脚本成片 / 替换裂变 / 空白拼片', () {
       expect(WizardMode.parse('script'), WizardMode.script);
-      expect(WizardMode.parse('renew'), WizardMode.renew);
+      expect(WizardMode.parse('replace'), WizardMode.replace);
+      expect(WizardMode.parse('renew'), WizardMode.replace,
+          reason: 'renew 是旧名，认它才不会让写好的 Agent 脚本一夜失效');
       expect(WizardMode.parse('blank'), WizardMode.blank);
       expect(WizardMode.parse('乱写'), isNull);
     });
 
     test('替换裂变必须给原片路径——没有原片这条线走不通', () {
       final issues = validateWizardFill(
-          mode: WizardMode.renew, filePath: null, tagGroupIds: const [1]);
+          mode: WizardMode.replace, filePath: null, tagGroupIds: const [1]);
       expect(issues, isNotEmpty);
       expect(issues.first, contains('原片'));
     });
@@ -69,7 +71,7 @@ void main() {
 
     test('给了不存在的原片路径：当场拒绝，不要等建到一半才发现', () {
       final issues = validateWizardFill(
-          mode: WizardMode.renew,
+          mode: WizardMode.replace,
           filePath: '/根本没有这个文件.mp4',
           tagGroupIds: const [1]);
       expect(issues, isNotEmpty);

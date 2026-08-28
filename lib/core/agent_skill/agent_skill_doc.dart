@@ -259,11 +259,14 @@ export ISHKAFEL_APP=/path/to/ishkafel.app
 ```bash
 # 当着人的面：软件弹出来 → 向导打开 → 来源和标签组填上 → 点创建 → 进任务
 ishkafel ui new-task --mode script --tag-groups 1261,1262
-ishkafel ui new-task --mode renew  --tag-groups 1261 --file ~/原片.mp4
+ishkafel ui new-task --mode replace --tag-groups 1261 --file ~/原片.mp4
 ishkafel ui new-task --mode blank  --tag-groups 1261
 ```
 
-`--mode` 就是前面那张表里的两条线（外加旁支 blank）。
+`--mode` 是**两条线四种起点**里的三种：`replace`（替换裂变，要给原片）、
+`blank`（替换裂变但不用原片）、`script`（脚本成片）。脚本成片的第四种起点
+「从参考片提取台词」发生在编导台里，不在这一步。
+（`renew` 是 `replace` 的旧名，仍然认，但别再用。）
 参数不合格时**不会弹向导**——让人看着窗口弹出来又关掉，比不弹更糟。
 
 人不在场时用 `script new` / `blank create` / `import` 更快，

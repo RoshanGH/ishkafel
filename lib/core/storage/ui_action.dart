@@ -43,25 +43,37 @@ enum UiAction {
   }
 }
 
-/// 新建任务走哪条线。与手册里那张「两条线」的表一一对应
+/// 新建任务要建成什么。
+///
+/// **两条线、四种起点**，这里的三个值是其中三种（脚本成片的「从参考片提取
+/// 台词」发生在编导台里，不在建任务这一步）：
+///
+/// | | 有原片 | 没有原片 |
+/// |---|---|---|
+/// | 替换裂变 | [replace] | [blank] |
+/// | 脚本成片 | （进编导台后传参考片） | [script] |
 enum WizardMode {
   /// 脚本成片：从台词造一条新片，不需要原片
   script('script'),
 
-  /// 替换裂变：拿一条现成的片子换画面
-  renew('renew'),
+  /// 替换裂变 · 有原片：拿一条现成的片子换画面
+  replace('replace'),
 
-  /// 空白拼片：替换裂变里「没有原片」的那种起点，没有台词与配音
+  /// 替换裂变 · 没有原片：手动排位置、每个位置挑素材拼起来，没有台词与配音
   blank('blank');
 
   const WizardMode(this.wire);
   final String wire;
 
+  /// `renew` 是 [replace] 的旧名（那时这条线还叫「成片翻新」）。
+  /// 认它是为了不让已经写好的 Agent 脚本一夜之间失效
+  static const Map<String, WizardMode> _legacy = {'renew': WizardMode.replace};
+
   static WizardMode? parse(String? name) {
     for (final m in WizardMode.values) {
       if (m.wire == name) return m;
     }
-    return null;
+    return _legacy[name];
   }
 }
 
@@ -75,7 +87,7 @@ List<String> validateWizardFill({
   required List<int> tagGroupIds,
 }) {
   final issues = <String>[];
-  if (mode == WizardMode.renew) {
+  if (mode == WizardMode.replace) {
     if (filePath == null || filePath.trim().isEmpty) {
       issues.add('替换裂变要给原片（--file）——这条线就是拿现成的片子换画面，'
           '没有原片走不通。想从零做一条就用 script 那条线');

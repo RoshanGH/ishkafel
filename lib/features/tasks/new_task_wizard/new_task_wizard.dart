@@ -11,6 +11,7 @@ import '../../../core/models/project_ref.dart';
 import '../../../core/models/tag_group_ref.dart';
 import 'tag_group_field.dart';
 import 'wizard_body.dart';
+import 'wizard_source_step.dart';
 import 'wizard_providers.dart';
 
 /// 弹出新建任务向导；用户取消返回 null。
@@ -74,6 +75,9 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   /// 走「不用原片，从素材拼」这一路
   bool _blank = false;
   bool _script = false;
+
+  /// 选了哪条线。起点（有没有参考片）是线里面的事，不是第三条线
+  WizardLine? _line;
   List<TagGroup>? _groups;
   String? _groupsError;
   late final List<TagGroupRef> _unitGroups = [...widget.prefillUnitGroups];
@@ -94,6 +98,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
       // 「唰」地一下闪过去等于没演
       _script = auto.mode == 'script';
       _blank = auto.mode == 'blank';
+      _line = _script ? WizardLine.script : WizardLine.replace;
       _filePath = auto.filePath;
       _autoSubmitAfterGroups = true;
     }
@@ -216,16 +221,28 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
           '选择本地成片文件或「不用原片」',
         if (_unitGroups.isEmpty) '选择台词语义单元标签组',
         if (!_blank && !_script && _shotGroups.isEmpty) '选择视觉镜头标签组',
+        if (_line == null) '先选一条线：替换裂变还是脚本成片',
       ];
 
   void _pickBlank() => setState(() {
         _blank = true;
         _script = false;
+        _line = WizardLine.replace;
         _filePath = null;
       });
 
   void _pickScript() => setState(() {
         _script = true;
+        _blank = false;
+        _line = WizardLine.script;
+        _filePath = null;
+      });
+
+  /// 选线。换线时把上一条线的起点清掉——留着会让「缺什么」算错，
+  /// 也会让人以为上次选的文件还算数
+  void _pickLine(WizardLine line) => setState(() {
+        _line = line;
+        _script = line == WizardLine.script;
         _blank = false;
         _filePath = null;
       });
@@ -262,6 +279,8 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                 child: SingleChildScrollView(
                   child: WizardBody(
                     filePath: _filePath,
+                    line: _line,
+                    onPickLine: _pickLine,
                     onPickFile: _pickFile,
                     blank: _blank,
                     onPickBlank: _pickBlank,

@@ -14,6 +14,10 @@ import 'wizard_source_step.dart';
 /// 向导正文（两步），纯展示：状态与回调由 [NewTaskWizard] 持有
 class WizardBody extends StatelessWidget {
   final String? filePath;
+
+  /// 选了哪条线（替换裂变 / 脚本成片）
+  final WizardLine? line;
+  final void Function(WizardLine line)? onPickLine;
   final VoidCallback onPickFile;
 
   /// 走「不用原片，从素材拼」这一路
@@ -50,6 +54,8 @@ class WizardBody extends StatelessWidget {
   const WizardBody({
     super.key,
     required this.filePath,
+    this.line,
+    this.onPickLine,
     this.blank = false,
     required this.onPickBlank,
     this.script = false,
@@ -80,6 +86,8 @@ class WizardBody extends StatelessWidget {
         const _StepLabel('第 1 步 · 成片来源'),
         WizardSourceStep(
             filePath: filePath,
+            line: line,
+            onPickLine: onPickLine,
             onPickFile: onPickFile,
             blank: blank,
             onPickBlank: onPickBlank,

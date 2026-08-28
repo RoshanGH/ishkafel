@@ -136,6 +136,8 @@ void _promptSurvivesStart() {
     await tester.tap(find.byKey(const Key('open')));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('wizard-line-replace')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('wizard-pick-local-file')));
     await tester.pumpAndSettle();
     await tester.enterText(

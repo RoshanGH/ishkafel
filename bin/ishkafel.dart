@@ -53,7 +53,8 @@ Future<void> main(List<String> args) async {
     ..addOption('materials',
         help: 'script peek 用：要看哪几条素材的画面，逗号分隔')
     ..addOption('mode',
-        help: 'ui new-task 用：script / renew / blank')
+        help: 'ui new-task 用：replace（替换裂变，要 --file）/ '
+            'blank（替换裂变但不用原片）/ script（脚本成片）')
     ..addOption('items',
         help: 'review drop/keep 用：要动的候选，单元:镜头:素材（逗号分隔），'
             '整体替换的候选镜头位写 `-`')
@@ -243,7 +244,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   task-rename <id> --name "新名字"     给任务改名
   task-delete <id> --yes
                    删掉一条任务，连同它的素材/配音/预览产物。不可逆
-  ui new-task --mode <script|renew|blank> --tag-groups <id,id> [--file <原片>]
+  ui new-task --mode <replace|blank|script> --tag-groups <id,id> [--file <原片>]
                    **当着人的面**新建任务：软件弹出来、向导打开、字段填上、
                    点创建。人在旁边看着时用它；人不在场用 script new 更快
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）

@@ -5,13 +5,29 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../app/theme/app_typography.dart';
 
-/// 第 1 步：成片来源。
+/// 想做哪条线的活儿。**起点（有没有参考片）是线里面的事，不是第三条线**
+enum WizardLine {
+  /// 替换裂变：以片找片、换画面。工作页是工作台
+  replace,
+
+  /// 脚本成片：从台词造新片。工作页是编导台
+  script,
+}
+
+/// 第 1 步：选一条线，再选起点。
 ///
-/// 四条通道：本地文件、**不用原片从素材拼**、**脚本成片**（写脚本长出
-/// 成片，工作页是编导台）、miaoa 成片库（未开放）。
-/// miaoa 通道保留但明确标注未开放并写清原因——项目刚清理过一个「点不动、
-/// 没有任何解释」的死按钮，那种控件只会让用户反复点击并怀疑软件坏了。
+/// **为什么是两层而不是四张卡并排**：本地文件和「不用原片从素材拼」不是
+/// 两个模块，它们是替换裂变的两种起点——有参考片和没参考片，进去之后干的
+/// 是同一件事。四张卡并列摆着等于告诉人这里有四种玩法，用户看着这个界面
+/// 说的原话是「现在有三个可用模块，但其实两个就够了」。
+///
+/// miaoa 成片库是替换裂变的另一种「有参考」来源，本期未开放但保留并写清
+/// 原因——项目清理过一个「点不动、没有任何解释」的死按钮，那种控件只会让
+/// 用户反复点击并怀疑软件坏了。
 class WizardSourceStep extends StatelessWidget {
+  /// 选中的线。null = 还没选
+  final WizardLine? line;
+
   final String? filePath;
   final VoidCallback onPickFile;
 
@@ -23,8 +39,13 @@ class WizardSourceStep extends StatelessWidget {
   final bool script;
   final VoidCallback onPickScript;
 
+  /// 选线。null 时只展示（单测用）
+  final void Function(WizardLine line)? onPickLine;
+
   const WizardSourceStep({
     super.key,
+    this.line,
+    this.onPickLine,
     required this.filePath,
     required this.onPickFile,
     this.blank = false,
@@ -38,24 +59,59 @@ class WizardSourceStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 三张卡一行。多加一行会把下面的标签组区推到折叠线以下——那一区里有
-    // 「重试」这类必须够得到的按钮，宁可对话框宽一点也不能让它们掉下去。
-    //
-    // IntrinsicHeight：三张卡等高（文案长短不一时排版才整齐）。直接用
-    // CrossAxisAlignment.stretch 会在向导的滚动区（高度无界）里要求无限高。
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(child: _localCard()),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(child: _scriptCard()),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(child: _blankCard()),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(child: _miaoaCard()),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: _lineCard(WizardLine.replace)),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: _lineCard(WizardLine.script)),
+            ],
+          ),
+        ),
+        if (line == WizardLine.replace) ...[
+          const SizedBox(height: AppSpacing.md),
+          const Text('从哪儿开始',
+              style: TextStyle(
+                  color: AppColors.textSecondary, fontSize: AppFontSize.caption)),
+          const SizedBox(height: AppSpacing.xs),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(child: _localCard()),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(child: _miaoaCard()),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(child: _blankCard()),
+              ],
+            ),
+          ),
         ],
-      ),
+        if (line == WizardLine.script) ...[
+          const SizedBox(height: AppSpacing.md),
+          const Text('台词自己写，也可以进编导台后上传一条参考片、让它把台词扒出来',
+              style: TextStyle(
+                  color: AppColors.textSecondary, fontSize: AppFontSize.caption)),
+        ],
+      ],
+    );
+  }
+
+  Widget _lineCard(WizardLine which) {
+    final isReplace = which == WizardLine.replace;
+    return _SourceCard(
+      cardKey: Key(isReplace ? 'wizard-line-replace' : 'wizard-line-script'),
+      icon: isReplace ? Icons.grid_view : Icons.edit_note,
+      title: isReplace ? '替换裂变' : '脚本成片',
+      description: isReplace
+          ? '拿一条片子换画面，出多条；台词与节奏照原片'
+          : '从台词造新片，配音配镜长出成片',
+      selected: line == which,
+      onTap: onPickLine == null ? null : () => onPickLine!(which),
     );
   }
 
