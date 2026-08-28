@@ -76,6 +76,16 @@ fi
 "$APP/Contents/Resources/cli/ishkafel" --help > /dev/null || {
   echo "app 里的命令行工具跑不起来，别把这个包发出去。" >&2; exit 1
 }
+# 凭据拷进去了 ≠ 工具找得到。它是从自己的路径往上回推 app 位置的，
+# 而包里的真实布局（cli/<架构>/bundle/bin/）比单测里假设的深两层——
+# 那一版单测全绿、装进包里 doctor 照样报「缺凭据」。所以在真包上跑一遍。
+CRED_CHECK="$(cd /tmp && "$APP/Contents/Resources/cli/ishkafel" doctor 2>&1 || true)"
+if grep -q "AI 凭据：缺" <<<"$CRED_CHECK"; then
+  echo "包里的命令行工具读不到自己带的凭据，别把这个包发出去：" >&2
+  grep "AI 凭据" <<<"$CRED_CHECK" >&2
+  exit 1
+fi
+echo "命令行工具能读到随包带的凭据"
 
 VERSION="$(grep '^const String appVersion' lib/core/app_version.dart \
   | sed "s/.*'\(.*\)'.*/\1/")"

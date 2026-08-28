@@ -14,16 +14,20 @@ import 'package:path/path.dart' as p;
 const String defaultAppPath = '/Applications/ishkafel.app';
 
 /// 从 CLI 自己的路径推出 app 包的位置；不在包里就返回 null（不硬猜）
+///
+/// **一路往上找 `.app`，不数固定层数**：包里的真实布局是
+/// `Contents/Resources/cli/<架构>/bundle/bin/ishkafel`（两个架构并存，
+/// 外面那个 `cli/ishkafel` 只是按 uname 选一个的壳），从可执行文件算起是
+/// 六层，不是想当然的四层。写死层数的那版在单测里绿着，装进包里就失效——
+/// 真机上 doctor 报「缺凭据」而凭据明明就躺在包里。
 String? appPathFromExecutable(String executable) {
-  // <app>/Contents/Resources/cli/ishkafel → 往上四层
   var dir = p.dirname(p.absolute(executable));
-  for (var i = 0; i < 4; i++) {
+  while (true) {
     if (dir.endsWith('.app')) return dir;
     final parent = p.dirname(dir);
-    if (parent == dir) break;
+    if (parent == dir) return null;
     dir = parent;
   }
-  return dir.endsWith('.app') ? dir : null;
 }
 
 /// 按优先级找 app：**环境变量 → 自己所在的包 → 默认位置**。

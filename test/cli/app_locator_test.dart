@@ -98,4 +98,23 @@ void main() {
     });
   });
 
+
+  /// 真机上栽过：写死「往上四层」在单测里绿着，装进包里就失效——
+  /// 包内的真实布局比想当然的深两层，doctor 于是报「缺凭据」，
+  /// 而凭据就躺在包里。测试要照抄真实布局，不能照抄假设。
+  test('照包里的真实布局推：cli/<架构>/bundle/bin/ishkafel', () {
+    const real = '/Applications/ishkafel.app/Contents/Resources/cli/'
+        'macos_arm64/bundle/bin/ishkafel';
+
+    expect(appPathFromExecutable(real), '/Applications/ishkafel.app');
+    expect(
+        cliSecretsDirs(
+                dataDir: Directory('/data'),
+                executable: real,
+                currentDir: '/work')
+            .last
+            .path,
+        '/Applications/ishkafel.app/Contents/Resources/cli/credentials');
+  });
+
 }
