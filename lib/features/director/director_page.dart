@@ -54,6 +54,7 @@ import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_id_badge.dart';
 import '../tasks/task_list_controller.dart';
+import '../shared/long_task_dialog.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
@@ -3681,7 +3682,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                Process.run('open', ['-a', 'VideoFusion-macOS']);
+                Process.run('open', ['-a', jianyingAppName]);
               },
               child: const Text('打开剪映'),
             ),
@@ -4597,6 +4598,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 }
 
 /// 导出进度对话框：一段一报，不许点掉——导出中改内容不会进这一版成片
+/// 编导台的进度框。**壳而已**——实现在 [LongTaskDialog]，两个工作页共用一份。
+/// 保留这层壳是为了不动这里十几处调用点。
 class _ExportProgressDialog extends StatelessWidget {
   final ValueListenable<ScriptExportProgress?> progress;
   final String title;
@@ -4605,26 +4608,12 @@ class _ExportProgressDialog extends StatelessWidget {
       {required this.progress, this.title = '正在导出成片'});
 
   @override
-  Widget build(BuildContext context) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          title: Text(title),
-          content: ValueListenableBuilder<ScriptExportProgress?>(
-            valueListenable: progress,
-            builder: (_, value, _) =>
-                Column(mainAxisSize: MainAxisSize.min, children: [
-              LinearProgressIndicator(
-                  value: value?.fraction, color: AppColors.accentBlue),
-              const SizedBox(height: AppSpacing.md),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(value?.step ?? '准备中',
-                    style: const TextStyle(
-                        fontSize: AppFontSize.body,
-                        color: AppColors.textSecondary)),
-              ),
-            ]),
-          ),
+  Widget build(BuildContext context) => ValueListenableBuilder(
+        valueListenable: progress,
+        builder: (_, value, _) => LongTaskDialog(
+          title: title,
+          progress: ValueNotifier(
+              value == null ? null : LongTaskProgress(value.step, value.fraction)),
         ),
       );
 }

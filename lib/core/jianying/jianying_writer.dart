@@ -51,6 +51,12 @@ String defaultJianyingRoot() => p.join(
     'Projects',
     'com.lveditor.draft');
 
+/// 剪映在 macOS 上的 app 名（专业版一直叫这个，跟界面上显示的名字不一样）。
+///
+/// 只是把它拉起来——剪映**没有**「打开指定草稿」的外部通道，草稿名得交代给人，
+/// 让他自己去「本地草稿」里点。
+const String jianyingAppName = 'VideoFusion-macOS';
+
 class JianyingWriter {
   JianyingWriter({
     required this.sourceOf,

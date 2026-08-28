@@ -73,6 +73,7 @@ import '../../core/jianying/renew_jianying_plan.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../shared/long_task_dialog.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
@@ -1224,6 +1225,24 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
   bool _jianyingBusy = false;
 
+  /// 还有几条素材没落到本地、其中几条是彻底下不下来的。
+  ///
+  /// 画面素材与配乐用同一把闸：任何一样没齐都不给导出、也不给写剪映工程
+  /// ——工程里少一段素材，人要到剪映里才发现。抽出来是因为导出和剪映
+  /// 两个出口都要问同一个问题，各算各的迟早会漂
+  (int pending, int failed) get _mediaReadiness {
+    var pending = 0;
+    var failed = 0;
+    for (final cache in [_mediaCache, _bgmMediaCache]) {
+      if (cache == null) continue;
+      for (final id in cache.notReady) {
+        pending++;
+        if (cache.statusOf(id) == PickedMediaStatus.failed) failed++;
+      }
+    }
+    return (pending, failed);
+  }
+
   /// 写成一份剪映工程：所有候选摞成多条轨，人在剪映里边看边切。
   ///
   /// **和导出成片是两个出口**：导出出的是定死的成片，这里交出去的是
@@ -1234,7 +1253,23 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (units == null || units.isEmpty) return;
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
+    // 素材没落到本地就别开工：工程里少一段，人要到剪映里才发现
+    final (pending, failed) = _mediaReadiness;
+    if (exportBlockedReason(_plan, pendingMedia: pending, failedMedia: failed)
+        case final blocked?) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(blocked)));
+      return;
+    }
     setState(() => _jianyingBusy = true);
+    // 一百多个素材要归集到工程目录，不能让人对着一个卡住的窗口猜
+    final progress = ValueNotifier<LongTaskProgress?>(
+        const LongTaskProgress('正在核对方案'));
+    unawaited(showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => LongTaskDialog(progress: progress, title: '正在生成剪映工程'),
+    ));
     try {
       final media = TaskMedia(dataDir: dataDir, taskId: task.id);
       final durations = {
@@ -1255,19 +1290,26 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         plan,
         taskName: '#${task.seq ?? ''} ${task.name}'.trim(),
         subtitle: const SubtitleStyle(),
+        onProgress: (done, total, what) =>
+            progress.value = LongTaskProgress(
+                '$what（$done/$total）', total <= 0 ? null : done / total),
       );
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       await _showJianyingDone(result, plan.videoTracks.length);
     } on JianyingPlanException catch (e) {
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.message)));
     } catch (e) {
       AppLog.warn('剪映草稿生成失败：$e');
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('生成剪映草稿失败，请稍后重试。')));
     } finally {
+      progress.dispose();
       if (mounted) setState(() => _jianyingBusy = false);
     }
   }
@@ -1324,6 +1366,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             TextButton(
               onPressed: () => Process.run('open', ['-R', result.folder]),
               child: const Text('在访达中显示'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                // 只是把剪映拉起来——它没有「打开指定草稿」的通道，
+                // 草稿名在上面写着，人自己去列表里点
+                Process.run('open', ['-a', jianyingAppName]);
+              },
+              child: const Text('打开剪映'),
             ),
             TextButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -1789,16 +1840,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         bottomNavigationBar: AnimatedBuilder(
           animation: editor,
           builder: (context, _) {
-            // 画面素材与配乐用同一把闸：任何一样没落到本地都不给导出
-            var pending = 0;
-            var failed = 0;
-            for (final cache in [_mediaCache, _bgmMediaCache]) {
-              if (cache == null) continue;
-              for (final id in cache.notReady) {
-                pending++;
-                if (cache.statusOf(id) == PickedMediaStatus.failed) failed++;
-              }
-            }
+            final (pending, failed) = _mediaReadiness;
             final blocked = exportBlockedReason(_plan,
                 pendingMedia: pending, failedMedia: failed);
             return WorkbenchBottomBar(
