@@ -40,6 +40,8 @@ Future<String?> ensureFrame({
   final out = framePath(dataDir, videoPath: videoPath, atMs: atMs);
   final f = File(out);
   if (f.existsSync() && f.lengthSync() > 0) return out;
+  // 目录在这儿建好：让每个抽帧实现各记一遍，迟早有一个忘了
+  Directory(p.dirname(out)).createSync(recursive: true);
   try {
     final ok = await extract(videoPath, out, atMs);
     if (!ok) return null;

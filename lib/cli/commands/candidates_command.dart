@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
@@ -33,6 +34,11 @@ Future<int> runCandidatesCommand({
   required int? shotIndex,
   String? keyword,
   String? excludeProjects,
+
+  /// 探一下每条候选多长、选它会变速多少。
+  /// 默认不探：一页 50 条各跑一次 ffprobe，慢到人会以为卡死了
+  bool probeDurations = false,
+  CandidateProbe? probe,
   int page = 1,
   String tagMode = 'or',
   int pageSize = 50,
@@ -225,6 +231,21 @@ Future<int> runCandidatesCommand({
     }
   }
 
+  // 时长要不要探：探了才知道「选它会变速多少」——那才是真正要判断的东西。
+  // 以前一律不给，Agent 只能凭 description 猜，17 秒的坑位全靠赌
+  final specs = <int, int>{};
+  if (probeDurations) {
+    final prober = probe ?? CandidateProbe();
+    for (final c in filtered.items) {
+      final spec =
+          await prober.probe(materialId: c.id, previewUrl: c.previewUrl);
+      if (spec?.durationMs case final ms? when ms > 0) specs[c.id] = ms;
+    }
+  }
+  final slotMs = shotIndex == null
+      ? units[unitIndex].endMs - units[unitIndex].startMs
+      : shots[shotIndex].endMs - shots[shotIndex].startMs;
+
   emitJson({
     'context': shotIndex == null
         ? {
@@ -254,6 +275,13 @@ Future<int> runCandidatesCommand({
           'tags': c.tags,
           'thumbnailUrl': c.thumbnailUrl,
           'previewUrl': c.previewUrl,
+          if (specs[c.id] case final ms?) ...{
+            'durationMs': ms,
+            // 塞进这个坑位要多少倍速。1.0 附近最自然，
+            // 离得远就是快进或慢动作——这才是要判断的东西
+            'speedIfPicked':
+                slotMs <= 0 ? null : (ms / slotMs * 100).round() / 100,
+          },
         },
     ],
   }, out: out);

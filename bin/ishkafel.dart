@@ -10,6 +10,7 @@ import 'package:ishkafel/cli/commands/doctor_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/jianying_command.dart';
+import 'package:ishkafel/cli/commands/peek_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
@@ -64,6 +65,11 @@ Future<void> main(List<String> args) async {
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
+    ..addFlag('probe',
+        help: 'candidates 用：探一下每条候选多长、选它会变速多少（慢一些）')
+    ..addOption('video', help: 'peek 用：要看哪个视频文件')
+    ..addOption('at', help: 'peek 用：看第几毫秒（缺省 1000）')
+    ..addOption('ats', help: 'peek 用：一次看好几个时间点，逗号分隔')
     ..addOption('exclude-projects',
         help: 'candidates 用：排除这些项目的素材（逗号分隔的项目 id）。'
             '替换裂变常用 --exclude-projects <原片项目> 换掉原来那批画面')
@@ -125,6 +131,13 @@ Future<void> main(List<String> args) async {
       ),
     'doctor' => await runDoctorCommand(
         dataDir: dataDir, out: stdout, err: stderr),
+    'peek' => await runPeekCommand(
+        rest: rest,
+        dataDir: dataDir,
+        videoPath: parsed['video'] as String?,
+        atMs: int.tryParse(parsed['at'] as String? ?? ''),
+        atMsList: parsed['ats'] as String?,
+      ),
     'jianying' => await runJianyingCommand(
         rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),
     'voices' => runVoicesCommand(),
@@ -202,6 +215,7 @@ Future<void> main(List<String> args) async {
         shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
         keyword: parsed['keyword'] as String?,
         excludeProjects: parsed['exclude-projects'] as String?,
+        probeDurations: parsed['probe'] as bool,
         page: int.tryParse(parsed['page'] as String? ?? '') ?? 1,
         tagMode: parsed['tag-mode'] as String,
       ),

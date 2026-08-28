@@ -16,6 +16,7 @@ const List<String> topLevelCommands = [
   'import',
   'jianying',
   'open',
+  'peek',
   'review',
   'script',
   'skill',
