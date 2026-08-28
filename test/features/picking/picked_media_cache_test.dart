@@ -185,4 +185,58 @@ void main() {
       cache.dispose();
     });
   });
+
+  /// 真机上用户问的：「我记得第一次已经下载过了，为什么每次打开都要再下载
+  /// 一次？」——文件确实没重下（下载器会跳过已存在的），但每次开任务都把
+  /// 一百多条重新排一遍队列，底部横幅于是闪出「正在把 91 条已选素材存到本地」，
+  /// 数字慢慢往下掉。人看到的就是「又在下一遍」。
+  group('上次已经存到本地的，重开也该认得', () {
+    test('本地有文件就直接算就绪，不排队也不去下', () async {
+      File('${temp.path}/71.mp4').writeAsStringSync('已经下过的内容');
+      final asked = <int>[];
+      final cache = make(fetch: (id) async {
+        asked.add(id);
+        return '${temp.path}/$id.mp4';
+      });
+
+      cache.pin(71);
+
+      expect(cache.statusOf(71), PickedMediaStatus.ready);
+      expect(asked, isEmpty, reason: '文件就在本地，不该再走一趟下载');
+      expect(cache.notReady, isEmpty);
+    });
+
+    test('空文件不算——那是上次没下完的半截', () async {
+      File('${temp.path}/71.mp4').writeAsStringSync('');
+      final asked = <int>[];
+      final cache = make(fetch: (id) async {
+        asked.add(id);
+        return '${temp.path}/$id.mp4';
+      });
+
+      cache.pin(71);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(asked, [71]);
+    });
+
+    test('整批对齐时也认得——重开任务走的就是这条路', () async {
+      for (final id in [1, 2, 3]) {
+        File('${temp.path}/$id.mp4').writeAsStringSync('x');
+      }
+      final asked = <int>[];
+      final cache = make(fetch: (id) async {
+        asked.add(id);
+        return '${temp.path}/$id.mp4';
+      });
+
+      cache.pinAll({1, 2, 3});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(asked, isEmpty);
+      expect(cache.notReady, isEmpty,
+          reason: '三条都在本地，底部不该再闪「正在存到本地」');
+    });
+  });
+
 }

@@ -100,12 +100,25 @@ class PickedMediaCache extends ChangeNotifier {
           if (_status[id] != PickedMediaStatus.ready) id,
       ];
 
-  /// 固定住这条素材：排进下载队列。已经在下或已经就绪的不重复排。
+  /// 固定住这条素材：排进下载队列。已经在下、已经就绪、或者**上次就存在本地**
+  /// 的不重复排。
+  ///
+  /// 那个「本地已有」的判断不能少：状态是内存里的，app 一关就没了，
+  /// 重开任务时一百多条全被当成没下过重排一遍队列——文件其实没重下
+  /// （下载器会跳过已存在的），但底部横幅会闪出「正在把 91 条已选素材
+  /// 存到本地」并慢慢往下掉，人看到的就是「怎么又下一遍」。
   void pin(int id) {
     _pinned.add(id);
     final status = _status[id];
     if (status == PickedMediaStatus.ready ||
         status == PickedMediaStatus.downloading) {
+      return;
+    }
+    final local = localPathOf(id);
+    if (local != null) {
+      _paths[id] = local;
+      _status[id] = PickedMediaStatus.ready;
+      _queue.remove(id);
       return;
     }
     if (_queue.contains(id)) return;
@@ -128,6 +141,8 @@ class PickedMediaCache extends ChangeNotifier {
     for (final id in ids) {
       pin(id);
     }
+    // 整批认领完通知一次。逐条通知的话，一百多条会把整个工作台重建一百多次
+    _notify();
   }
 
   /// 重试一条下失败的
