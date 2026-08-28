@@ -87,7 +87,13 @@ class JyTextSegment {
 
 /// 四条轨，与剪映的轨道一一对应
 class JianyingPlan {
-  final List<JyVideoSegment> video;
+  /// 画面轨，**从下往上**排：`videoTracks.first` 是底轨，最后一条盖在最上面。
+  ///
+  /// 替换裂变要把一个位置的所有候选都摆进同一份工程里——同一时间位置上
+  /// 挑了几条素材就有几条轨，人在剪映里把上面那条关掉，下面那条就露出来。
+  /// 脚本成片只有一条轨，那是这个结构的退化情形。
+  final List<List<JyVideoSegment>> videoTracks;
+
   final List<JyAudioSegment> voice;
   final List<JyAudioSegment> bgm;
   final List<JyTextSegment> text;
@@ -96,15 +102,31 @@ class JianyingPlan {
   final Map<int, int> lineStarts;
 
   const JianyingPlan({
-    this.video = const [],
+    this.videoTracks = const [],
     this.voice = const [],
     this.bgm = const [],
     this.text = const [],
     this.lineStarts = const {},
   });
 
+  /// 单轨的便捷构造（脚本成片那条线一直是单轨）
+  JianyingPlan.single({
+    List<JyVideoSegment> video = const [],
+    this.voice = const [],
+    this.bgm = const [],
+    this.text = const [],
+    this.lineStarts = const {},
+  }) : videoTracks = video.isEmpty ? const [] : [List.unmodifiable(video)];
+
+  /// 底轨。成片时长、素材清点这些都以它为准——它是唯一铺满全片的那条
+  List<JyVideoSegment> get video =>
+      videoTracks.isEmpty ? const [] : videoTracks.first;
+
+  /// 所有轨上的段落，清点素材用
+  Iterable<JyVideoSegment> get allVideo => videoTracks.expand((t) => t);
+
   int get totalMs => video.isEmpty ? 0 : video.last.endMs;
-  bool get isEmpty => video.isEmpty;
+  bool get isEmpty => videoTracks.isEmpty || video.isEmpty;
 }
 
 /// 把方案拼成剪映轨道计划。
@@ -204,7 +226,7 @@ JianyingPlan buildJianyingPlan(
   }
 
   return JianyingPlan(
-    video: List.unmodifiable(video),
+    videoTracks: [List.unmodifiable(video)],
     voice: List.unmodifiable(voice),
     bgm: List.unmodifiable(_buildBgm(doc, lineStarts, cursorMs, bgmOf)),
     text: List.unmodifiable(text),

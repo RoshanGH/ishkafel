@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../script/script_doc.dart';
+import '../subtitle/subtitle_style.dart';
 import 'jianying_draft.dart';
 import 'jianying_materials.dart';
 import 'jianying_plan.dart';
@@ -80,6 +81,21 @@ class JianyingWriter {
     onProgress?.call(0, 1, '正在核对方案');
     final plan = buildJianyingPlan(doc,
         sourceOf: sourceOf, voiceOf: voiceOf, bgmOf: bgmOf);
+    return writePlan(plan,
+        taskName: taskName, subtitle: doc.subtitle, onProgress: onProgress);
+  }
+
+  /// 把算好的计划写成草稿。
+  ///
+  /// 与 [write] 分开是因为**两条线各算各的计划**：脚本成片从 ScriptDoc 算，
+  /// 替换裂变从单元和替换方案算（见 `renew_jianying_plan.dart`），
+  /// 但落盘、素材归集、命名这些完全一样，没有理由写两遍。
+  Future<JianyingDraftResult> writePlan(
+    JianyingPlan plan, {
+    required String taskName,
+    required SubtitleStyle subtitle,
+    void Function(int done, int total, String what)? onProgress,
+  }) async {
     if (plan.isEmpty) {
       throw const JianyingPlanException('这一版方案还没有可用的画面，生成不了剪映草稿');
     }
@@ -93,7 +109,8 @@ class JianyingWriter {
     // 3) 素材落地
     final stager = MaterialStager(p.join(folder, 'materials'));
     final sources = <String>{
-      for (final s in plan.video) s.path,
+      // 所有轨都要收——底轨之外的候选素材同样得跟着工程走
+      for (final s in plan.allVideo) s.path,
       for (final s in plan.voice) s.path,
       for (final s in plan.bgm) s.path,
     };
@@ -109,7 +126,7 @@ class JianyingWriter {
     onProgress?.call(sources.length, sources.length, '正在写入草稿');
     final json = buildDraftJson(
       plan: plan,
-      subtitle: doc.subtitle,
+      subtitle: subtitle,
       draftName: name,
       draftFolder: folder,
       draftRoot: root,

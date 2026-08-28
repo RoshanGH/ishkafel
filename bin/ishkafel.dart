@@ -9,6 +9,7 @@ import 'package:ishkafel/cli/commands/candidates_command.dart';
 import 'package:ishkafel/cli/commands/doctor_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
+import 'package:ishkafel/cli/commands/jianying_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
@@ -124,6 +125,8 @@ Future<void> main(List<String> args) async {
       ),
     'doctor' => await runDoctorCommand(
         dataDir: dataDir, out: stdout, err: stderr),
+    'jianying' => await runJianyingCommand(
+        rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),
     'voices' => runVoicesCommand(),
     'tag-groups' => await runTagGroupsCommand(),
     'analyze' => await runAnalyzeCommand(

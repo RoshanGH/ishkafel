@@ -152,9 +152,11 @@ JianyingDraftJson buildDraftJson({
     return out;
   }
 
-  // ---- 画面轨
+  // ---- 画面轨（可能好几条：同一时间位置上挑了几条候选就有几条轨）
+  final videoTrackSegs = <List<Map<String, dynamic>>>[];
+  for (var layer = 0; layer < plan.videoTracks.length; layer++) {
   final videoSegs = <Map<String, dynamic>>[];
-  for (final s in plan.video) {
+  for (final s in plan.videoTracks[layer]) {
     final path = pathOf(s.path);
     final total = s.sourceTotalMs;
     final mid = ids.next();
@@ -204,9 +206,13 @@ JianyingDraftJson buildDraftJson({
       'responsive_layout': <String, dynamic>{},
       'enable_adjust_mask': false,
       'visible': true,
-      'render_index': 0,
+      // 层号越大越靠上。底轨是原片，替换素材摞在它上面——打开草稿看到的
+      // 就是替换之后的样子，想看原片把上面那条关掉
+      'render_index': layer,
       'source': 'segmentsourcenormal',
     });
+  }
+  videoTrackSegs.add(videoSegs);
   }
 
   // ---- 声音轨（口播 / 配乐同构）
@@ -369,7 +375,8 @@ JianyingDraftJson buildDraftJson({
       };
 
   final tracks = <Map<String, dynamic>>[
-    track('video', videoSegs),
+    for (final segs in videoTrackSegs)
+      if (segs.isNotEmpty) track('video', segs),
     if (textSegs.isNotEmpty) track('text', textSegs, flag: 1),
     if (voiceSegs.isNotEmpty) track('audio', voiceSegs),
     if (bgmSegs.isNotEmpty) track('audio', bgmSegs),

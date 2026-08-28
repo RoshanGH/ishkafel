@@ -67,6 +67,12 @@ import 'workbench_chrome.dart';
 import 'workbench_summary.dart';
 import '../export/export_dialog.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/jianying/jianying_plan.dart' show JianyingPlanException;
+import '../../core/jianying/jianying_writer.dart';
+import '../../core/jianying/renew_jianying_plan.dart';
+import '../../core/subtitle/subtitle_style.dart';
+import '../../app/theme/app_spacing.dart';
+import '../../app/theme/app_typography.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
@@ -1216,6 +1222,116 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   ///
   /// 这里曾经是「确认切分，进入替换选材」——切分和选材已经合并在本工作台里
   /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
+  bool _jianyingBusy = false;
+
+  /// 写成一份剪映工程：所有候选摞成多条轨，人在剪映里边看边切。
+  ///
+  /// **和导出成片是两个出口**：导出出的是定死的成片，这里交出去的是
+  /// 还没定死的选择。不拉起剪映——它没有给外部程序「打开指定草稿」的通道。
+  Future<void> _openJianying() async {
+    final task = _task;
+    final units = task.units;
+    if (units == null || units.isEmpty) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    setState(() => _jianyingBusy = true);
+    try {
+      final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+      final durations = {
+        for (final m in task.pickedMaterials) m.id: m.durationMs,
+      };
+      final plan = buildRenewJianyingPlan(
+        units: units,
+        replacements: _replacements ?? const [],
+        sourcePath: task.sourcePath ?? '',
+        sourceTotalMs: task.videoInfo?.duration.inMilliseconds ?? 0,
+        materialOf: media.localMaterial,
+        materialDurationOf: (id) => durations[id] ?? 0,
+        sentences: task.asrSentences ?? const [],
+        bgm: task.bgm,
+        bgmPathOf: media.localBgm,
+      );
+      final result = await JianyingWriter(sourceOf: (_) => null).writePlan(
+        plan,
+        taskName: '#${task.seq ?? ''} ${task.name}'.trim(),
+        subtitle: const SubtitleStyle(),
+      );
+      if (!mounted) return;
+      await _showJianyingDone(result, plan.videoTracks.length);
+    } on JianyingPlanException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      AppLog.warn('剪映草稿生成失败：$e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('生成剪映草稿失败，请稍后重试。')));
+    } finally {
+      if (mounted) setState(() => _jianyingBusy = false);
+    }
+  }
+
+  /// 生成完的交代：草稿叫什么、去哪儿开、那些轨是怎么回事。
+  /// **不许只弹一句「成功」**——人下一步要做什么必须说清楚
+  Future<void> _showJianyingDone(JianyingDraftResult result, int tracks) =>
+      showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('剪映工程已生成'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(result.name,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.body,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                  '${(result.totalMs / 1000).toStringAsFixed(1)} 秒 · '
+                  '$tracks 条画面轨 · ${result.materialCount} 个素材',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+              const SizedBox(height: AppSpacing.md),
+              const Text('打开剪映，在「本地草稿」里找到它继续编辑。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.body,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: AppSpacing.xs),
+              const Text('同一个位置挑的候选摞成了好几条轨，上面那条盖着下面的——'
+                  '想用别的候选，把上面那条关掉就行。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+              const SizedBox(height: AppSpacing.xs),
+              const Text('剪映如果已经开着，需要重启它才会出现在草稿列表里。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+              for (final note in result.notes) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text('· $note',
+                    style: const TextStyle(
+                        fontSize: AppFontSize.caption,
+                        color: AppColors.orange)),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Process.run('open', ['-R', result.folder]),
+              child: const Text('在访达中显示'),
+            ),
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
+
   Future<void> _openExport() async {
     final editor = _editor;
     if (editor == null) return;
@@ -1693,6 +1809,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               combinationText: _plan.isEmpty ? null : combinationSummaryText(_plan),
               blockedReason: blocked,
               onExport: blocked == null ? _openExport : null,
+              onJianying: _jianyingBusy || !_isEditable ? null : _openJianying,
               onReview: _isEditable &&
                       _lock == null &&
                       collectReviewItems(_replacements ?? const []).isNotEmpty

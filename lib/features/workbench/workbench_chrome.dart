@@ -325,6 +325,9 @@ class WorkbenchBottomBar extends StatelessWidget {
   /// 有已挑候选时出现：人的审核主入口。为 null 不显示
   final VoidCallback? onReview;
 
+  /// 写成一份剪映工程，去剪映里接着改。为 null 表示正在生成、或还没得可导
+  final VoidCallback? onJianying;
+
   /// 有几句指定了新音色。为 0 时不显示「生成配音」——没选音色的片子
   /// 生成个什么
   final int voiceCount;
@@ -339,6 +342,7 @@ class WorkbenchBottomBar extends StatelessWidget {
     this.blockedReason,
     this.onExport,
     this.onReview,
+    this.onJianying,
     this.voiceCount = 0,
     this.onGenerateVoices,
   });
@@ -396,6 +400,14 @@ class WorkbenchBottomBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
+          // 剪映是**另一个出口**，不是导出的一种格式：导出出的是定死的成片，
+          // 剪映拿到的是还没定死的选择——所有候选摞成多条轨，人在那边边看边切
+          OutlinedButton(
+            key: const Key('workbench-jianying-btn'),
+            onPressed: onJianying,
+            child: const Text('剪映'),
+          ),
+          const SizedBox(width: 8),
           FilledButton(
             key: const Key('workbench-export-btn'),
             onPressed: blockedReason == null ? onExport : null,
