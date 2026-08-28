@@ -281,8 +281,19 @@ class RenewTask {
         backgroundPath: backgroundPath ?? this.backgroundPath,
         unitTagPrompt: unitTagPrompt ?? this.unitTagPrompt,
         shotTagPrompt: shotTagPrompt ?? this.shotTagPrompt,
-        analysisError:
-            clearAnalysisError ? null : (analysisError ?? this.analysisError),
+        // **把状态置成 ready 就等于宣布分析成功**，那一刻要连带清掉上一次的
+        // 分析错误。真机上撞到过：一个 35 镜分析完、方案提交过、导出成功四次的
+        // 任务，列表里挂着红色「上次分析被中断，请重新分析」——七个地方把状态
+        // 置成 ready，没有一处记得清这个字段。
+        // 显式传了 analysisError 的除外（那是「置成 ready 的同时记一笔错」，
+        // 目前没人这么用，但语义上要让调用方说了算）。
+        analysisError: clearAnalysisError
+            ? null
+            : analysisError ??
+                (status == RenewTaskStatus.ready &&
+                        this.status == RenewTaskStatus.analyzing
+                    ? null
+                    : this.analysisError),
         replacements: replacements ?? this.replacements,
         pickedMaterials: pickedMaterials ?? this.pickedMaterials,
         exports: exports ?? this.exports,

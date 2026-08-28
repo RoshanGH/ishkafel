@@ -129,6 +129,20 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     final repo = ref.read(taskRepositoryProvider);
     final recovered = <RenewTask>[];
     for (final task in tasks) {
+      // 陈旧的中断标记：状态已经回到 ready，说明后来分析成功了，
+      // 那句「上次分析被中断」是上一轮留下的。不清掉的话，人看到的是一条
+      // 完整可用的任务显示红色失败，点「重试」还要再花一次分析的钱
+      if (task.status == RenewTaskStatus.ready &&
+          task.analysisError == stalledAnalysisMessage) {
+        final healed = task.copyWith(clearAnalysisError: true);
+        try {
+          await repo.save(healed);
+        } catch (e) {
+          AppLog.warn('任务 ${task.id} 清理陈旧中断标记失败：$e');
+        }
+        recovered.add(healed);
+        continue;
+      }
       if (!_isStalled(task)) {
         recovered.add(task);
         continue;

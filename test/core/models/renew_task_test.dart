@@ -244,4 +244,44 @@ void main() {
     final untouched = failed.copyWith(name: '改名');
     expect(untouched.analysisError, '分析失败（模拟）');
   });
+
+  /// 真机上撞到的：一个 35 镜分析完、方案提交过、片子也导出成功四次的任务，
+  /// 列表里挂着红色「分析失败：上次分析被中断，请重新分析」。
+  ///
+  /// 原因是 `status` 早就回到 ready，而 analysisError 还留着那次中断时写下的
+  /// 话——**七处地方把状态置成 ready，没有一处记得清它**。人看到的是一条
+  /// 好端端的任务显示失败，点「重试」还要再花一次分析的钱。
+  ///
+  /// 「ready 且带着分析错误」是个不可能的状态，不该指望七个调用点各自记得。
+  group('分析成功就不该再挂着分析错误', () {
+    test('状态回到 ready 时，陈旧的分析错误自动清掉', () {
+      final stalled = task.copyWith(
+        status: RenewTaskStatus.analyzing,
+        analysisError: '上次分析被中断（应用退出或异常关闭），请重新分析',
+      );
+
+      final done = stalled.copyWith(status: RenewTaskStatus.ready);
+
+      expect(done.analysisError, isNull);
+    });
+
+    test('还在分析中的，错误照留——那是真的出过错', () {
+      final failed = task.copyWith(
+        status: RenewTaskStatus.analyzing,
+        analysisError: '网络超时，请重试',
+      );
+
+      expect(failed.analysisError, '网络超时，请重试');
+    });
+
+    test('已经是 ready 的任务重新分析又失败了，那个错要留住', () {
+      // 分析失败是「保持原状态、只记错误」——ready 的任务重分析失败，
+      // ready + 错误是合法的，不能一刀切
+      final ready = task.copyWith(status: RenewTaskStatus.ready);
+      final failedAgain = ready.copyWith(analysisError: '转写失败');
+
+      expect(failedAgain.analysisError, '转写失败');
+    });
+  });
+
 }
