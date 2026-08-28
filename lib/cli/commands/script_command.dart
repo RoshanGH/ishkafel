@@ -18,6 +18,8 @@ import '../ref_shot_tagging.dart';
 import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 import '../cli_output.dart';
+import '../line_evidence.dart';
+import '../search_narrowing.dart';
 import '../search_modes.dart';
 import '../script_shot_context.dart';
 import 'script_apply_command.dart';
@@ -80,6 +82,7 @@ Future<int> runScriptCommand({
         '                                  baseline/line-voice/mix）\n'
         '  export <任务> [--out 目录]      导出成片\n'
         '  peek <任务> --materials <id,id> 把候选的画面抽到本地，亲眼看看\n'
+        '  frames <任务> --line N         这一行能看能听的全给出来（参考镜/已选镜头/配音）\n'
         '  tag-ref <任务> --line N        给参考镜打标（画面描述+标签+首帧图）\n'
         '  bgm-candidates <任务> [--keyword 轻快]  有哪些配乐可选\n'
         '  jianying <任务>                 写成剪映草稿，去剪映里精修');
@@ -105,6 +108,14 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'frames':
+      return runScriptFramesCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        line: line,
         out: out,
         err: err,
       );
@@ -333,8 +344,17 @@ Future<int> runScriptCommand({
               if (spec != null) specs[m.id] = spec;
             }),
         ]);
+        final narrowing =
+            describeNarrowing(projectIds: projectIds, tagIds: tagIds);
         emitJson({
           ...ctx,
+          // 这一轮按什么收窄的。没收窄住就明说——搜回来的东西看着都
+          // 「像那么回事」，不说的话人拿到成片才发现品牌串了
+          'narrowedBy': {
+            'projectIds': projectIds,
+            'tagCount': tagIds.length,
+          },
+          if (narrowing.notice case final n?) 'notice': n,
           'candidates': [
             for (final m in page.items)
               {
@@ -382,12 +402,20 @@ Future<int> runScriptCommand({
 }
 
 /// 参考镜的画面标签 → 标签 id（检索约束）。拉不到就不带约束，不挡路
+/// 参考镜的标签 → miaoa 的标签 id。
+///
+/// [tags] 空时**退回整个标签组的全部标签**，而不是直接放弃约束。
+///
+/// 真机翻车就在这儿：参考镜没打标 → tags 空 → 旧代码 `return []` →
+/// 检索一道约束都没有 → 在全库里捞，混回一堆防晒乳和洗护。
+/// 而任务建的时候明明选了「AI自然消毒液原子库」——那个词表本身就是
+/// 一道有效的收窄，只是没人用它。
 Future<List<int>> _tagIdsOf({
   required List<String> tags,
   required List<dynamic> groups,
   MiaoaTagService? service,
 }) async {
-  if (tags.isEmpty) return const [];
+  if (groups.isEmpty) return const [];
   try {
     final svc = service ?? MiaoaTagService();
     final all = await svc.listGroups();
@@ -396,7 +424,8 @@ Future<List<int>> _tagIdsOf({
     for (final g in all) {
       if (!wanted.contains(g.id)) continue;
       for (final t in await svc.listTags(g.id)) {
-        if (tags.contains(t.name)) ids.add(t.id);
+        // 打过标就按打出来的那几个；没打标就把这个组的词表整个用上
+        if (tags.isEmpty || tags.contains(t.name)) ids.add(t.id);
       }
     }
     return ids;
@@ -669,6 +698,121 @@ Future<int> runScriptTagRefCommand({
     'tagged': done.length,
     'shots': done,
     'next': '现在可以挑镜头了：ishkafel script shots ${task.id} --line $line',
+  }, out: out);
+  return 0;
+}
+
+/// `ishkafel script frames <task> --line N` ——
+/// 把这一行**人能看到、听到的每一样东西**的本地路径给出来。
+///
+/// 设计原则（用户的原话）：「你想让 Agent 完全还原一个优秀的人的操作，
+/// 那你首先得让它拥有所有这个人能够拥有的信息。」
+///
+/// 典型场景：人说「第 3 行你找的这个分镜不对」。Agent 得能**看见**——
+/// 参考镜长什么样（要复刻的目标）、自己选的那一镜长什么样（现在的结果），
+/// 才谈得上跟人确认「你是嫌画面太暗、还是这个动作不对」。看不见就只能
+/// 瞎猜着换关键词重搜，而人要的可能根本不是那个方向。
+///
+/// **已选镜头抽的是成片里真正出现的那一帧**（取段之后），不是素材开头——
+/// 给错了帧，Agent 看到的不是成片里的东西，跟人讨论时对不上。
+Future<int> runScriptFramesCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  int? line,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel script frames <任务 id> --line <行号>');
+    return exitBadUsage;
+  }
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final doc = task.script;
+  if (doc == null) {
+    sink.writeln('「${task.name}」不是脚本成片任务');
+    return exitBadUsage;
+  }
+  if (line == null || line < 1 || line > doc.lines.length) {
+    sink.writeln('要指定行号：--line <1~${doc.lines.length}>');
+    return exitBadUsage;
+  }
+  final target = doc.lines[line - 1];
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+
+  Future<String?> frameOf(String video, int atMs) => ensureFrame(
+        dataDir: dataDir,
+        videoPath: video,
+        atMs: atMs,
+        extract: (v, o, ms) async {
+          Directory(p.dirname(o)).createSync(recursive: true);
+          await ThumbnailService(run: const ResolvingProcessRunner().call)
+              .extractCover(videoPath: v, outPath: o, atSeconds: ms / 1000);
+          return true;
+        },
+      );
+
+  // 一、参考镜：要复刻的目标长什么样。**不依赖打标**——抽帧不花钱，
+  // 打标才花钱，没道理因为没打标就不让人看见画面
+  final refFrames = <Map<String, dynamic>>[];
+  final refVideo = target.reference?.videoPath;
+  if (refVideo != null && File(refVideo).existsSync()) {
+    final segs = target.reference!.segments;
+    for (var k = 0; k < segs.length; k++) {
+      final (a, b) = segs[k];
+      final meta = target.reference!.metaAt(a);
+      final f = await frameOf(refVideo, a + (b - a) ~/ 2);
+      refFrames.add({
+        'shotIndex': k,
+        'startMs': a,
+        'endMs': b,
+        if (f != null) 'framePath': f,
+        if ((meta?.description ?? '').isNotEmpty) 'description': meta!.description,
+        if ((meta?.tags ?? const []).isNotEmpty) 'tags': meta!.tags,
+        'asr': target.reference!.segmentText(k, ''),
+      });
+    }
+  }
+
+  // 二、已选镜头：现在的结果长什么样
+  final picked = <Map<String, dynamic>>[];
+  for (var j = 0; j < target.shots.length; j++) {
+    final s = target.shots[j];
+    final local = s.localSource ?? media.localMaterial(s.materialId);
+    String? frame;
+    if (local != null && File(local).existsSync()) {
+      frame = await frameOf(local, evidenceFrameAtMs(s));
+    }
+    picked.add({
+      'shotIndex': j,
+      'materialId': s.materialId,
+      'name': s.name,
+      if (s.allocMs != null) 'allocMs': s.allocMs,
+      'trimStartMs': s.trimStartMs,
+      'speed': s.speed,
+      if (local != null) 'videoPath': local,
+      if (frame != null) 'framePath': frame,
+      if (local == null)
+        'note': '这条素材还没下到本地——script peek --materials ${s.materialId} 会下',
+    });
+  }
+
+  emitJson({
+    'taskId': task.id,
+    'lineIndex': line - 1,
+    'text': target.text,
+    'reference': refFrames,
+    'picked': picked,
+    // 三、配音：人能听，Agent 也得知道文件在哪
+    if (target.voiceover?.audioPath case final a?)
+      if (File(a).existsSync()) 'voiceAudioPath': a,
+    'next': '打开 framePath 看图。参考镜是**要复刻的目标**、picked 是'
+        '**现在的结果**——人说「这一镜不对」时，先看这两张图差在哪，'
+        '再问清楚他要的是什么方向，别直接换个词重搜',
   }, out: out);
   return 0;
 }

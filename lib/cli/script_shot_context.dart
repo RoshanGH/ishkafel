@@ -69,12 +69,21 @@ Map<String, dynamic> scriptShotContext(
         for (final s in l.shots)
           if (s.localSource == null) s.materialId,
     ],
+    // 提示要给**能照做的命令**，不是描述状态。
+    // 真机上「先打标」这句指向的命令当时根本不存在，Agent 只能自己
+    // ffmpeg 抽帧、肉眼看图、手写关键词——中间多一层有损转译，
+    // 写偏一点就搜回一堆别的品牌
     if (ref == null)
-      'hint': '这一行没有参考片可依据——只能按台词与标签找，'
-          '或者先给这一行传一段参考视频'
+      'hint': '这一行没有参考片。自己给一句**画面描述**去搜：'
+          'ishkafel script shots <任务> --line ${lineIndex + 1} '
+          '--by content --keyword "一只手在厨房台面上举着喷雾瓶"。'
+          '描述的是画面，不是台词'
     else if (untagged)
-      'hint': '参考镜还没打标（没有画面描述），先打标再挑镜头：'
-          '打完才知道要复刻的是什么画面',
+      'hint': '参考镜还没打标——没有画面描述、没有标签、也没有首帧图，'
+          '这三样正是挑镜头的依据。先打标：'
+          'ishkafel script tag-ref <任务> --line ${lineIndex + 1}。'
+          '打完再回来 shots，候选会照着参考镜的画面搜，'
+          '而且标签会把检索收窄在本任务的词表里',
   };
 }
 

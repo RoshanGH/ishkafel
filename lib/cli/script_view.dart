@@ -158,6 +158,9 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
         // 用 line.voiceState 会漏掉基调变化——界面说要重配、CLI 说新鲜，
         // Agent 就会拿旧音色直接导出去（静默出错，最要命的那种）
         'state': doc.voiceStateOf(line).name,
+        // 人能听，Agent 也得知道文件在哪。听不了也能拿去做别的判断
+        // （时长、有没有生成成功），而不是只看几个数字
+        'audioPath': vo.audioPath,
         if (vo.voiceId.isNotEmpty) 'voiceId': vo.voiceId,
         'durationMs': vo.durationMs,
         'speechRate': vo.speechRate,
@@ -201,6 +204,8 @@ Map<String, dynamic> _shotJson(LineShot shot, int index,
       if (shot.durationMs != null) 'availableMs': shot.availableMs,
       if (shot.localSource != null) 'localSource': shot.localSource,
       if (shot.sourceVolume != null) 'sourceVolume': shot.sourceVolume,
+      // 这一镜的画面要看的话，用 script frames --line N
+      // （它会抽出**成片里真正出现的那一帧**，不是素材开头）
       // 划词建的镜：绑住台词的哪几个字。时长是**从这个区间算出来的**，
       // 不是存的——换音色、重配音之后朗读长短全变，切点不变、时长自动跟上
       if (shot.boundToWords) ...{
