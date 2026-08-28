@@ -4,6 +4,11 @@ import 'package:path/path.dart' as p;
 
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
+import '../../core/miaoa/material_downloader.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_media.dart';
+import '../../core/storage/task_seq.dart';
 import '../agent_frames.dart';
 import '../cli_output.dart';
 
@@ -20,6 +25,10 @@ Future<int> runPeekCommand({
   required List<String> rest,
   required Directory dataDir,
   String? videoPath,
+
+  /// 看候选素材：`peek <任务> --materials 65071,65073`。
+  /// 没落到本地的会先取下来——「有 URL 但没有命令能读」等于没给
+  String? materials,
   int? atMs,
   String? atMsList,
   StringSink? out,
@@ -28,6 +37,16 @@ Future<int> runPeekCommand({
   Future<int> Function(String path)? probeDurationMs,
 }) async {
   final sink = err ?? stderr;
+  if ((materials ?? '').trim().isNotEmpty) {
+    return _peekMaterials(
+      taskRef: rest.isNotEmpty ? rest.first : null,
+      materials: materials!,
+      dataDir: dataDir,
+      out: out,
+      sink: sink,
+      extract: extract,
+    );
+  }
   final path = videoPath ?? (rest.isNotEmpty ? rest.first : null);
   if (path == null || path.trim().isEmpty) {
     sink.writeln('用法：ishkafel peek --video <视频路径> [--at 2000] '
@@ -93,6 +112,79 @@ Future<int> runPeekCommand({
     if (failed.isNotEmpty) 'failed': failed,
     'next': '直接打开 framePath 看图。一帧看不出片子对不对——'
         '用 --ats 挑几个时间点，开头、中间、结尾各看一眼',
+  }, out: out);
+  return 0;
+}
+
+/// 看候选素材长什么样。与脚本成片线的 `script peek --materials` 同一件事——
+/// 那条线一直有，替换裂变这条线一直没有，于是 Agent 只能自己 curl
+/// （验收 Agent 真这么干了，并且指出手册让它「读 thumbnailUrl」
+/// 却没给读的手段）
+Future<int> _peekMaterials({
+  required String? taskRef,
+  required String materials,
+  required Directory dataDir,
+  required StringSink sink,
+  StringSink? out,
+  FrameExtractor? extract,
+}) async {
+  if (taskRef == null) {
+    sink.writeln('要指定任务：ishkafel peek <任务 id> --materials 65071,65073');
+    return exitBadUsage;
+  }
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), taskRef);
+  if (task == null) {
+    sink.writeln('没有这个任务：$taskRef');
+    return exitNotFound;
+  }
+  final ids = <int>[
+    for (final piece in materials.split(',')) ?int.tryParse(piece.trim()),
+  ];
+  if (ids.isEmpty) {
+    sink.writeln('没说要看哪几条：--materials 65071,65073');
+    return exitBadUsage;
+  }
+
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+  final downloader = MaterialDownloader(
+    content: MiaoaContentService(),
+    cacheDir: media.materialsDir,
+  );
+  final frames = <Map<String, dynamic>>[];
+  final failed = <String>[];
+  for (final id in ids) {
+    try {
+      final local = media.localMaterial(id) ?? await downloader.fetch(id);
+      final frame = await ensureFrame(
+        dataDir: dataDir,
+        videoPath: local,
+        // 第 1 秒：开头常有转场和黑帧，拿它当封面会看不出画面
+        atMs: 1000,
+        extract: extract ?? _defaultExtract,
+      );
+      if (frame == null) {
+        failed.add('$id（抽帧失败）');
+        continue;
+      }
+      frames.add({
+        'materialId': id,
+        'framePath': frame,
+        'videoPath': local,
+      });
+    } catch (e) {
+      // 一条失败不挡其余：能看的那几条照样能帮 Agent 下判断
+      failed.add('$id（$e）');
+    }
+  }
+  if (frames.isEmpty) {
+    sink.writeln('一条都没看成：${failed.join('；')}');
+    return exitFailed;
+  }
+  emitJson({
+    'frames': frames,
+    if (failed.isNotEmpty) 'failed': failed,
+    'next': '直接打开 framePath 看图，像人一样判断这一镜像不像。'
+        '想看这条素材更多画面就用 --video <videoPath> --ats <时间点>',
   }, out: out);
   return 0;
 }

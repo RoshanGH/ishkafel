@@ -137,6 +137,7 @@ Future<void> main(List<String> args) async {
         videoPath: parsed['video'] as String?,
         atMs: int.tryParse(parsed['at'] as String? ?? ''),
         atMsList: parsed['ats'] as String?,
+        materials: parsed['materials'] as String?,
       ),
     'jianying' => await runJianyingCommand(
         rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),

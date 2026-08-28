@@ -4,6 +4,9 @@ import 'dart:io';
 import '../../core/jianying/jianying_plan.dart' show JianyingPlanException;
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/renew_jianying_plan.dart';
+import '../../core/miaoa/material_downloader.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
@@ -63,6 +66,27 @@ Future<int> runJianyingCommand({
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
   try {
     final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+
+    // **先把素材备齐再算计划**：以前这里只查本地、缺一条就掉头报错，
+    // 而报错给的两条出路（「等它下完」「去界面点重试」）Agent 一条都走不了
+    // ——没有人在下它，等到天荒地老也不会变。export 一直是自己下的，
+    // 这条线漏了这一步（验收 Agent 做了对照实验：同一个任务 export 3/3 全出）
+    final downloader = MaterialDownloader(
+      content: MiaoaContentService(),
+      cacheDir: media.materialsDir,
+    );
+    final wanted = _neededMaterials(task.replacements ?? const []);
+    var fetched = 0;
+    for (final id in wanted) {
+      if (media.localMaterial(id) == null) {
+        sink.writeln('[${fetched + 1}/${wanted.length}] 正在取素材 $id');
+        stage.heartbeat('正在取素材（${fetched + 1}/${wanted.length}）',
+            focus: const AgentFocus(module: 'workbench'));
+        await downloader.fetch(id);
+      }
+      fetched++;
+    }
+
     final durations = {
       for (final m in task.pickedMaterials) m.id: m.durationMs,
     };
@@ -103,8 +127,10 @@ Future<int> runJianyingCommand({
     }, out: out);
     return 0;
   } on JianyingPlanException catch (e) {
+    // 不是用法错：命令本身没问题，改多少遍参数都一样。
+    // 报成 2 会让照退出码判断的调用方跑去检查参数，走进死胡同
     sink.writeln(e.message);
-    return exitBadUsage;
+    return exitFailed;
   } catch (e) {
     sink.writeln('生成剪映草稿失败：$e');
     return exitFailed;
@@ -113,4 +139,17 @@ Future<int> runJianyingCommand({
     stage.end();
     lock.release(holder);
   }
+}
+
+
+/// 这份方案要用到哪些素材（去重，顺序稳定——取素材的进度报出来才好读）
+List<int> _neededMaterials(List<UnitReplacement> replacements) {
+  final out = <int>{};
+  for (final r in replacements) {
+    out.addAll(r.wholeCandidateIds);
+    for (final ids in r.shotCandidateIds.values) {
+      out.addAll(ids);
+    }
+  }
+  return out.toList()..sort();
 }

@@ -119,9 +119,13 @@ JianyingPlan buildRenewJianyingPlan({
     for (final p in picks.where((p) => p.rank == rank)) {
       final path = materialOf(p.candidateId);
       if (path == null) {
+        // 走到这儿说明取素材那一步已经失败过了——别再说「等它下完」，
+        // 没有人在下它，那是条假出路
         throw JianyingPlanException(
-            '素材 ${p.candidateId} 还没存到本地，写不进剪映工程。'
-            '等它下完再导，或在「替换素材」的已选托盘上点 ↻ 重试');
+            '素材 ${p.candidateId} 取不下来，写不进剪映工程。'
+            '多半是它在素材库里被删了或没有可用地址：'
+            '用 ishkafel candidates 重新挑一条替掉它，'
+            '再 ishkafel apply plans 提交一次');
       }
       final slot = p.endMs - p.startMs;
       final total = materialDurationOf(p.candidateId);
