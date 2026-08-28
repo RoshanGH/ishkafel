@@ -37,7 +37,26 @@ class TaskLock {
     this.staleAfter = defaultStaleAfter,
   });
 
-  bool isStale(DateTime now) => now.difference(heartbeatAt) > staleAfter;
+  /// 持有者标识里的进程号（`gui:82809` → 82809）。没有就返回 null
+  int? get holderPid {
+    final i = holder.indexOf(':');
+    return i < 0 ? null : int.tryParse(holder.substring(i + 1).trim());
+  }
+
+  /// 这把锁还作不作数。
+  ///
+  /// 除了心跳超时，还多问一句「写锁的那个进程还在吗」：真机上每次重启 app
+  /// 打开任务都会撞到一条黄横幅说任务被占着、当前只读，而那个 pid 的进程
+  /// 早就退了——进程都不在了还让人干等一分钟，是白等。
+  ///
+  /// pid 会被系统复用，所以「问到还活着」不代表真是它——那个方向是保守的
+  /// （不接管），安全。
+  bool isStale(DateTime now, {bool Function(int pid)? processAlive}) {
+    if (now.difference(heartbeatAt) > staleAfter) return true;
+    final pid = holderPid;
+    if (pid == null || processAlive == null) return false;
+    return !processAlive(pid);
+  }
 
   Map<String, dynamic> toJson() => {
         'holder': holder,
@@ -76,7 +95,11 @@ class TaskLockFile {
     required this.dataDir,
     required this.taskId,
     this.staleAfter = defaultStaleAfter,
-  });
+    bool Function(int pid)? processAlive,
+  }) : processAlive = processAlive ?? isProcessAlive;
+
+  /// 写锁的那个进程还在不在。默认问系统，单测里注入
+  final bool Function(int pid) processAlive;
 
   File get _file => File(p.join(dataDir.path, 'locks', '$taskId.json'));
 
@@ -100,7 +123,9 @@ class TaskLockFile {
   bool acquire(String holder, {DateTime? now}) {
     final at = now ?? DateTime.now().toUtc();
     final current = read();
-    if (current != null && current.holder != holder && !current.isStale(at)) {
+    if (current != null &&
+        current.holder != holder &&
+        !current.isStale(at, processAlive: processAlive)) {
       return false;
     }
     _write(TaskLock(holder: holder, acquiredAt: at, heartbeatAt: at));
@@ -141,5 +166,20 @@ class TaskLockFile {
     final file = _file;
     file.parent.createSync(recursive: true);
     file.writeAsStringSync(jsonEncode(lock.toJson()));
+  }
+}
+
+
+/// 这个进程号还在不在。
+///
+/// 用 `kill(pid, 0)` 的等价物：`ps -p` 查一次。只在开任务、拿锁这类稀疏
+/// 时刻调用，不在热路径上。查不动就当它活着——保守方向是「不接管」，
+/// 宁可让人多等一分钟，也不能把另一个真开着的窗口挤掉。
+bool isProcessAlive(int pid) {
+  if (pid <= 0) return true;
+  try {
+    return Process.runSync('ps', ['-p', '$pid']).exitCode == 0;
+  } catch (_) {
+    return true;
   }
 }

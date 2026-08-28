@@ -102,4 +102,55 @@ void main() {
       expect(lockFile().read(), isNull);
     });
   });
+
+  /// 真机上每次重启 app 打开任务都撞到：顶上一条黄横幅「这个任务被另一个
+  /// 窗口占着，或者上一次没有正常退出（gui:82809），当前为只读」，
+  /// 要么干等一分钟，要么点「强制接管」。
+  ///
+  /// 而那个 pid 的进程早就没了——写锁的那个 app 已经退出。进程都不在了还
+  /// 让人等心跳超时，是白等。
+  group('持有者的进程已经没了，锁立刻作废', () {
+    TaskLock lockOf(String holder, DateTime beat) => TaskLock(
+          holder: holder,
+          acquiredAt: beat,
+          heartbeatAt: beat,
+        );
+
+    final now = DateTime(2026, 8, 28, 12, 0, 0);
+
+    test('进程不在了就算失效，不用等一分钟', () {
+      final lock = lockOf('gui:82809', now.subtract(const Duration(seconds: 3)));
+
+      expect(lock.isStale(now, processAlive: (pid) => false), isTrue);
+    });
+
+    test('进程还活着就照常等心跳——那可能真是另一个窗口开着', () {
+      final lock = lockOf('gui:82809', now.subtract(const Duration(seconds: 3)));
+
+      expect(lock.isStale(now, processAlive: (pid) => true), isFalse);
+    });
+
+    test('拿哪个 pid 去问，得跟持有者写的一致', () {
+      final asked = <int>[];
+      lockOf('agent:4242', now).isStale(now, processAlive: (pid) {
+        asked.add(pid);
+        return true;
+      });
+
+      expect(asked, [4242]);
+    });
+
+    test('持有者里没有 pid 就退回心跳判断，不瞎猜', () {
+      final human = lockOf('人（审片台）', now.subtract(const Duration(seconds: 3)));
+
+      expect(human.isStale(now, processAlive: (_) => false), isFalse);
+    });
+
+    test('心跳早就超时的，问都不用问', () {
+      final old = lockOf('gui:82809', now.subtract(const Duration(minutes: 5)));
+
+      expect(old.isStale(now, processAlive: (_) => true), isTrue);
+    });
+  });
+
 }

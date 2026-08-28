@@ -108,10 +108,10 @@ void main() {
     });
 
     test('另一个 Agent 占着就写不进去，明说是谁', () async {
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('agent:999');
+      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('agent:$pid');
       final err = StringBuffer();
       expect(await run(['drop', 'r1'], items: '0:-:100', err: err), exitLocked);
-      expect(err.toString(), contains('agent:999'));
+      expect(err.toString(), contains('agent:$pid'));
     });
   });
 

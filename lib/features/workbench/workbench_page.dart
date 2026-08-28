@@ -196,7 +196,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       final current = mine ? null : file.read();
       final held = current != null &&
           current.holder != _lockHolder &&
-          !current.isStale(DateTime.now().toUtc());
+          // 带上进程存在性：写锁的 app 已经退了的话，不用干等心跳超时
+          !current.isStale(DateTime.now().toUtc(),
+              processAlive: isProcessAlive);
       final next = held ? current : null;
       if (next?.holder == _lock?.holder) return;
       if (mounted) setState(() => _lock = next);

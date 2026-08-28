@@ -215,11 +215,11 @@ void main() {
     // 只在确认那一刻抢锁是补丁：审核期间任务不设防，别人中途改方案
     // 会让确认剪的是过期状态
     final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
-    lock.acquire('gui:999');
+    lock.acquire('gui:$pid');
 
     await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
 
-    expect(find.textContaining('gui:999 正在操作这个任务'), findsOneWidget);
+    expect(find.textContaining('gui:$pid 正在操作这个任务'), findsOneWidget);
     expect(find.byKey(const Key('review-confirm')), findsNothing,
         reason: '被拦时不该出现确认按钮');
 
