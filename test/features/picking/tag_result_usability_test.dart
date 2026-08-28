@@ -11,29 +11,29 @@ import 'package:ishkafel/features/picking/tag_result_usability.dart';
 /// 这条路人和 Agent 都在走——界面默认也是标签模式。
 void main() {
   test('命中上万条：前几页就是随机取样', () {
-    expect(tagResultIsUsable(total: 11265, libraryTotal: 45000, returned: 50),
+    expect(tagResultIsUsable(total: 11265, returned: 50),
         isFalse);
   });
 
   test('命中一两页：最新和最像的差别还不致命', () {
     expect(
-        tagResultIsUsable(total: 120, libraryTotal: 45000, returned: 50), isTrue);
+        tagResultIsUsable(total: 120, returned: 50), isTrue);
   });
 
   test('刚好四页还行，第五页起就翻不完了', () {
-    expect(tagResultIsUsable(total: 200, libraryTotal: 45000, returned: 50),
+    expect(tagResultIsUsable(total: 200, returned: 50),
         isTrue);
-    expect(tagResultIsUsable(total: 201, libraryTotal: 45000, returned: 50),
+    expect(tagResultIsUsable(total: 201, returned: 50),
         isFalse);
   });
 
   test('一页装得下就是全部命中，没有取样问题', () {
     expect(
-        tagResultIsUsable(total: 37, libraryTotal: 45000, returned: 37), isTrue);
+        tagResultIsUsable(total: 37, returned: 37), isTrue);
   });
 
   test('一条都没有也算没筛住——要换条路，不是让人对着空列表发呆', () {
     expect(
-        tagResultIsUsable(total: 0, libraryTotal: 45000, returned: 0), isFalse);
+        tagResultIsUsable(total: 0, returned: 0), isFalse);
   });
 }

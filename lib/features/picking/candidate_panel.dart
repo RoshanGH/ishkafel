@@ -32,6 +32,9 @@ class CandidatePanel extends StatelessWidget {
   /// 不说清楚的话，用户看到结果变了却不知道为什么
   final TagQueryPlan? tagPlan;
 
+  /// 标签没筛住、已自动改走语义搜的说明。null = 没发生过切换
+  final String? autoSemanticNote;
+
   /// 重新拉标签表并重跑检索。为空表示上层没接（测试里常见）
   final VoidCallback? onRetryTags;
 
@@ -92,6 +95,7 @@ class CandidatePanel extends StatelessWidget {
     required this.search,
     required this.scope,
     this.tagPlan,
+    this.autoSemanticNote,
     this.onRetryTags,
     this.onRetrySearch,
     this.onRelogin,
@@ -345,6 +349,7 @@ class CandidatePanel extends StatelessWidget {
       ];
       if (reasons.isNotEmpty) notes.add('已排除 ${reasons.join('；')}');
     }
+    if (autoSemanticNote case final note?) notes.add(note);
     if (scope.tagUnavailableText case final reason?) notes.add(reason);
     if (searchMode == CandidateSearchMode.image) {
       notes.add(imageSearchUnavailableReason);

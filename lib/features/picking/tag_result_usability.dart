@@ -20,7 +20,6 @@ const int _unreviewablePages = 4;
 /// 这批标签检索结果值不值得用。false = 该换画面描述语义搜
 bool tagResultIsUsable({
   required int total,
-  required int libraryTotal,
   required int returned,
   int pageSize = 50,
 }) {

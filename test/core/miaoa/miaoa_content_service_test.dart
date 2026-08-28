@@ -310,4 +310,29 @@ void main() {
     });
   });
 
+
+  group('素材属于哪个项目', () {
+    test('projectId 要解析出来——「换成别的项目拍的」得靠它', () {
+      final m = CandidateMaterial.tryFromJson({
+        'id': 1,
+        'name': 'x',
+        'projectId': 107,
+        'mediaFile': {'id': 2, 'fileKey': 'k', 'previewUrl': 'https://c/x.mov'},
+      });
+
+      expect(m?.projectId, 107);
+    });
+
+    test('没有这个字段也不能整条丢掉——旧数据里可能没有', () {
+      final m = CandidateMaterial.tryFromJson({
+        'id': 1,
+        'name': 'x',
+        'mediaFile': {'id': 2, 'fileKey': 'k', 'previewUrl': 'https://c/x.mov'},
+      });
+
+      expect(m, isNotNull);
+      expect(m?.projectId, isNull);
+    });
+  });
+
 }

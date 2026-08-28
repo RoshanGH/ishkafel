@@ -232,7 +232,9 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
       ));
     }
   }
-  return ExportCombination(index: index, segments: segments);
+  // 方案名带下去——它就是成片的文件名（手册一直是这么承诺的）
+  return ExportCombination(
+      index: index, segments: segments, name: plan.name);
 }
 
 /// 把提交的方案**投影**成任务的替换现状（主流程的唯一真相）。

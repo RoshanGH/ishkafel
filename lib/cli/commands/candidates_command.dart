@@ -7,6 +7,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../../features/picking/tag_hit_probe.dart';
 import '../../features/picking/tag_query_narrowing.dart';
+import '../../features/picking/project_exclusion.dart';
 import '../../features/picking/tag_result_usability.dart';
 import '../candidate_context.dart';
 import '../cli_output.dart';
@@ -31,6 +32,7 @@ Future<int> runCandidatesCommand({
   required int? unitIndex,
   required int? shotIndex,
   String? keyword,
+  String? excludeProjects,
   int page = 1,
   String tagMode = 'or',
   int pageSize = 50,
@@ -74,20 +76,36 @@ Future<int> runCandidatesCommand({
     return exitNotFound;
   }
 
+  final excluded = <int>{
+    for (final raw in (excludeProjects ?? '').split(','))
+      if (int.tryParse(raw.trim()) case final id?) id,
+  };
+  if ((excludeProjects ?? '').trim().isNotEmpty && excluded.isEmpty) {
+    sink.writeln('--exclude-projects 认不出来：'
+        '要的是逗号分隔的项目 id（比如 --exclude-projects 107,120）。'
+        '项目 id 在 `ishkafel task <任务>` 的 project 字段里');
+    return exitBadUsage;
+  }
+
   final service = contentService ?? MiaoaContentService();
   final projectIds = [?task.project?.id];
 
-  final CandidatePage result;
+  final ExcludedCandidatePage filtered;
   Map<String, Object?>? narrowNote;
   Map<String, Object?>? fallbackNote;
   int? libraryTotal;
   if (keyword != null && keyword.trim().isNotEmpty) {
     // 画面描述语义搜：标签打不上（话术标签几乎没人打）时的第二条路
-    result = await service.searchByDescription(
-      keyword: keyword.trim(),
-      projectIds: projectIds,
-      page: page,
-      pageSize: pageSize,
+    filtered = await searchExcluding(
+      fetch: (p) => service.searchByDescription(
+        keyword: keyword.trim(),
+        projectIds: projectIds,
+        page: p,
+        pageSize: pageSize,
+      ),
+      exclude: excluded,
+      want: pageSize,
+      firstPage: page,
     );
   } else {
     // 打标产出的是标签**名**（受控词表就是名字），而 miaoa 的检索只收标签
@@ -156,7 +174,6 @@ Future<int> runCandidatesCommand({
     // 并把换了这件事说出来——不说就是静默换了一套结果
     final usable = tagResultIsUsable(
       total: byTags.total,
-      libraryTotal: libraryTotal ?? byTags.total,
       returned: byTags.items.length,
       pageSize: pageSize,
     );
@@ -165,11 +182,16 @@ Future<int> runCandidatesCommand({
             : shots[shotIndex].description) ??
         '';
     if (!usable && semantic.trim().isNotEmpty) {
-      result = await service.searchByDescription(
-        keyword: semantic.trim(),
-        projectIds: projectIds,
-        page: page,
-        pageSize: pageSize,
+      filtered = await searchExcluding(
+        fetch: (p) => service.searchByDescription(
+          keyword: semantic.trim(),
+          projectIds: projectIds,
+          page: p,
+          pageSize: pageSize,
+        ),
+        exclude: excluded,
+        want: pageSize,
+        firstPage: page,
       );
       fallbackNote = {
         'from': 'tags',
@@ -182,7 +204,24 @@ Future<int> runCandidatesCommand({
             '想自己指定说法用 --keyword',
       };
     } else {
-      result = byTags;
+      filtered = excluded.isEmpty
+          ? ExcludedCandidatePage(
+              items: byTags.items,
+              total: byTags.total,
+              excludedCount: 0,
+              pagesFetched: 1)
+          : await searchExcluding(
+              fetch: (p) => service.searchByTags(
+                tagIds: effectiveIds,
+                mode: tagMode,
+                projectIds: projectIds,
+                page: p,
+                pageSize: pageSize,
+              ),
+              exclude: excluded,
+              want: pageSize,
+              firstPage: page,
+            );
     }
   }
 
@@ -195,16 +234,21 @@ Future<int> runCandidatesCommand({
             'unitTags': units[unitIndex].tags,
           }
         : shotContext(task: task, unitIndex: unitIndex, shotIndex: shotIndex),
-    'total': result.total,
+    'total': filtered.total,
+    'excludedProjects': excluded.isEmpty ? null : excluded.toList(),
+    'excludedCount': excluded.isEmpty ? null : filtered.excludedCount,
+    'pagesFetched': filtered.pagesFetched == 1 ? null : filtered.pagesFetched,
     'page': page,
     'pageSize': pageSize,
     'narrowed': ?narrowNote,
     'searchFallback': ?fallbackNote,
     'candidates': [
-      for (final c in result.items)
+      for (final c in filtered.items)
         {
           'id': c.id,
           'name': c.name,
+          // 哪个项目拍的——「换成别的项目的素材」得看得见它
+          'projectId': c.projectId,
           'description': c.sceneDescription,
           'voiceover': c.voiceover,
           'tags': c.tags,

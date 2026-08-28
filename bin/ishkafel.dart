@@ -62,6 +62,9 @@ Future<void> main(List<String> args) async {
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
+    ..addOption('exclude-projects',
+        help: 'candidates 用：排除这些项目的素材（逗号分隔的项目 id）。'
+            '翻新时常用 --exclude-projects <原片项目> 换掉原来那批画面')
     ..addOption('page', help: 'candidates 用：第几页（从 1 开始）')
     ..addOption('tag-mode',
         defaultsTo: 'or', help: 'candidates 用：标签检索 and（全满足）| or（任一）')
@@ -194,6 +197,7 @@ Future<void> main(List<String> args) async {
         unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
         shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
         keyword: parsed['keyword'] as String?,
+        excludeProjects: parsed['exclude-projects'] as String?,
         page: int.tryParse(parsed['page'] as String? ?? '') ?? 1,
         tagMode: parsed['tag-mode'] as String,
       ),

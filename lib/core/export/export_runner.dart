@@ -14,6 +14,7 @@ import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_rasterizer.dart';
 import '../subtitle/subtitle_style.dart';
 import 'export_commands.dart';
+import 'export_file_name.dart';
 import 'export_plan.dart';
 import 'export_spec.dart';
 
@@ -431,7 +432,11 @@ class ExportRunner {
     // 会被当成另一种东西
     final out = p.join(
       outputDir.path,
-      '变体${combo.index}.${renderSpec.fileExtension}',
+      exportFileName(
+        name: combo.name,
+        index: combo.index,
+        extension: renderSpec.fileExtension,
+      ),
     );
     await _ffmpeg(
       ExportCommands.mux(video: silent, audio: audio, out: out),

@@ -69,7 +69,14 @@ class ExportCombination {
   final int index;
   final List<ExportSegment> segments;
 
-  ExportCombination({required this.index, required List<ExportSegment> segments})
+  /// 这条方案叫什么——**它就是文件名**。
+  /// 界面上枚举出来的组合没有名字（null），走「变体N」
+  final String? name;
+
+  ExportCombination(
+      {required this.index,
+      required List<ExportSegment> segments,
+      this.name})
       : segments = List.unmodifiable(segments);
 
   /// 这一条里有几段是换过的。全是原片的那一条要能被认出来——

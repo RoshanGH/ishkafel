@@ -12,6 +12,13 @@ class CandidateMaterial {
   final int id;
   final String name;
 
+  /// 这条素材属于哪个项目。
+  ///
+  /// 翻新的意义就是换掉原来那批画面，而语义搜越准、搜出来越是原项目拍的
+  /// （跟原镜最像的当然是原片自己的素材）。要「换成别的项目拍的」就得认得出
+  /// 它是哪个项目的。旧数据里可能没有这个字段，所以可空
+  final int? projectId;
+
   /// 画面描述（AI 生成，也是「画面描述语义搜」的检索维度）
   final String sceneDescription;
 
@@ -36,6 +43,7 @@ class CandidateMaterial {
   const CandidateMaterial({
     required this.id,
     required this.name,
+    this.projectId,
     required this.sceneDescription,
     this.voiceover = '',
     required this.thumbnailUrl,
@@ -55,6 +63,7 @@ class CandidateMaterial {
     return CandidateMaterial(
       id: id,
       name: raw['name'] is String ? raw['name'] as String : '未命名素材',
+      projectId: raw['projectId'] is int ? raw['projectId'] as int : null,
       sceneDescription:
           raw['sceneDescription'] is String ? raw['sceneDescription'] as String : '',
       voiceover: raw['voiceover'] is String ? raw['voiceover'] as String : '',

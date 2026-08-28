@@ -20,6 +20,7 @@ import '../picking/candidate_preview.dart';
 import '../../core/log/app_log.dart';
 import '../picking/tag_hit_probe.dart';
 import '../picking/tag_query_narrowing.dart';
+import '../picking/tag_result_usability.dart';
 import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
@@ -124,6 +125,9 @@ class CandidateTabState extends State<CandidateTab> {
   /// 这一次实际用了哪几个标签、剔掉了哪几个。界面要说清楚——否则用户看到
   /// 结果变了却不知道为什么
   TagQueryPlan? _tagPlan;
+
+  /// 标签没筛住、已自动改走语义搜——这句话要显示给人看
+  String? _autoSemanticNote;
 
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
@@ -524,12 +528,42 @@ class CandidateTabState extends State<CandidateTab> {
         if (!mounted) return;
         setState(() => _tagPlan = plan);
         await _search.searchByTags(tagIds: plan.tagIds);
+        if (!mounted) return;
+        await _fallBackToDescriptionIfUseless(scope);
       case CandidateSearchMode.description:
         await _search.searchByDescription(scope.descriptionKeyword);
       case CandidateSearchMode.image:
         // 首帧搜图未接通（原片这一帧不在素材库里，没有可用的检索键）
         _search.clear();
     }
+  }
+
+  /// 标签没筛住就自动改走画面描述语义搜。
+  ///
+  /// **为什么必须自动做**：素材库按标签检索**不做相关性排序**，返回的是 id
+  /// 最新的一批。真机上一个 35 镜的任务每一镜都命中一万多条，于是每一镜拿到的
+  /// 都是同样那批最新素材——要「女孩在书桌前情绪激动诉说」，首条给的是
+  /// 「户外街道上女士与男孩并排走着交谈」。换成语义搜，同一镜命中四百多条，
+  /// 首条就是「夜晚室内脸上长满红痘的女孩坐在书桌前」。
+  ///
+  /// 换了要说出来（走 notes 那行灰字）——不说就是悄悄换了一套结果。
+  Future<void> _fallBackToDescriptionIfUseless(PickingScope scope) async {
+    final tagTotal = _search.total;
+    if (tagResultIsUsable(
+        total: tagTotal,
+        returned: _search.entries.length,
+        pageSize: _search.pageSize)) {
+      if (_autoSemanticNote != null) setState(() => _autoSemanticNote = null);
+      return;
+    }
+    final keyword = scope.descriptionKeyword.trim();
+    if (keyword.isEmpty) return;
+    await _search.searchByDescription(keyword);
+    if (!mounted) return;
+    setState(() => _autoSemanticNote = tagTotal == 0
+        ? '这组标签在素材库里一条都没有，已改用画面描述检索'
+        : '按标签命中 $tagTotal 条，宽到等于没筛（素材库按标签搜给的是最新的，'
+            '不是最像的），已改用画面描述检索');
   }
 
   void _onSearchModeChanged(CandidateSearchMode mode) {
@@ -578,6 +612,7 @@ class CandidateTabState extends State<CandidateTab> {
           search: _search,
           scope: _scope,
           tagPlan: _tagPlan,
+          autoSemanticNote: _autoSemanticNote,
           onRetryTags: _retryTagVocabulary,
           onRetrySearch: _search.retry,
           onRelogin: () => _reloginThenRetry(context),
