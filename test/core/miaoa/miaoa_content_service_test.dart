@@ -280,4 +280,34 @@ void main() {
 
     test('超时 → 指向网络', () => expectMessage('operation timed out', '网络'));
   });
+
+  group('取单条素材：负数 id 也要能取到', () {
+    test('id 放在 `--` 后面——不然负数会被命令行当成参数名', () async {
+      final calls = <List<String>>[];
+      final service = _service(calls,
+          stdout: '{"id":-19954,"name":"x","mediaFile":{"id":1,'
+              '"fileKey":"k","previewUrl":"https://cdn/x.mov"}}');
+
+      final m = await service.fetchById(-19954);
+
+      expect(m?.id, -19954);
+      final args = calls.single;
+      expect(args.last, '-19954',
+          reason: '真机上直接传 -19954 被解析成参数：'
+              "error: unexpected argument '-1' found");
+      expect(args[args.length - 2], '--');
+    });
+
+    test('正数 id 走的是同一条路，不搞两套', () async {
+      final calls = <List<String>>[];
+      await _service(calls,
+              stdout: '{"id":76555,"name":"x","mediaFile":{"id":1,'
+                  '"fileKey":"k","previewUrl":"https://cdn/x.mov"}}')
+          .fetchById(76555);
+
+      expect(calls.single.last, '76555');
+      expect(calls.single[calls.single.length - 2], '--');
+    });
+  });
+
 }

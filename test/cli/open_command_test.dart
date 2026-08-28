@@ -27,6 +27,7 @@ void main() {
       rest: ['t1'],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       run: (bin, args) async {
         calls.add([bin, ...args]);
         return ProcessResult(0, 0, '', '');
@@ -44,6 +45,7 @@ void main() {
     await runOpenCommand(
       rest: ['t1'],
       dataDir: dir,
+      appExists: (_) => true,
       env: const {'ISHKAFEL_APP': '/tmp/别处/ishkafel.app'},
       run: (bin, args) async {
         calls.add([bin, ...args]);
@@ -59,6 +61,7 @@ void main() {
       rest: ['不存在'],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       run: (bin, args) async {
         launched = true;
         return ProcessResult(0, 0, '', '');
@@ -74,6 +77,7 @@ void main() {
       rest: const [],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       err: err,
       run: (bin, args) async => ProcessResult(0, 0, '', ''),
     );
@@ -87,6 +91,7 @@ void main() {
       rest: ['t1'],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       err: err,
       run: (bin, args) async => ProcessResult(0, 1, '', 'app not found'),
     );

@@ -57,6 +57,7 @@ void main() {
       rest: rest,
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       items: items,
       file: file,
       waitForUi: waitForUi ?? const Duration(milliseconds: 400),

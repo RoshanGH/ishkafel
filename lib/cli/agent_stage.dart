@@ -3,7 +3,7 @@ import 'dart:io';
 import '../core/log/app_log.dart';
 import '../core/storage/agent_presence.dart';
 import '../core/storage/ui_wake.dart';
-import 'commands/open_command.dart' show defaultAppPath;
+import 'app_locator.dart';
 
 /// Agent 干活的两种模式。
 ///
@@ -45,6 +45,9 @@ class AgentStage {
 
   final Future<ProcessResult> Function(String, List<String>) _run;
 
+  /// 测试注入：app 在不在。真机走默认（看目录存不存在）
+  final bool Function(String path)? appExists;
+
   int _step = 0;
   bool _appLaunched = false;
   String? _lastModule;
@@ -56,6 +59,7 @@ class AgentStage {
     this.holder = 'Agent',
     this.stepTimeout = const Duration(seconds: 5),
     Future<ProcessResult> Function(String, List<String>)? run,
+    this.appExists,
   }) : _run = run ?? Process.run;
 
   bool get visual => mode == AgentStageMode.visual;
@@ -136,7 +140,6 @@ class AgentStage {
     if (_appLaunched) return;
     _appLaunched = true;
     _lastModule = module;
-    final path = Platform.environment['ISHKAFEL_APP'] ?? defaultAppPath;
     try {
       // 「去哪个任务」走唤醒文件而不是 --args：启动参数只在冷启动时生效，
       // app 已经在跑时会被静默丢弃（`open` 命令那边真机撞到过——再点一次
@@ -145,7 +148,10 @@ class AgentStage {
         writeUiWake(dataDir, taskId,
             review: module == 'review', module: module);
       }
-      await _run('open', ['-a', path]);
+      final failure = await launchApp(run: _run, exists: appExists);
+      if (failure != null) {
+        AppLog.warn('拉起 app 失败（可视模式退化成静默）：$failure');
+      }
     } catch (e) {
       AppLog.warn('拉起 app 失败（可视模式退化成静默）：$e');
     }

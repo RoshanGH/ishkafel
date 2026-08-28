@@ -8,7 +8,7 @@ import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_action.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
-import 'open_command.dart' show defaultAppPath;
+import '../app_locator.dart';
 
 /// `ishkafel ui new-task --mode script --tag-groups 1261` ——
 /// **让界面当着人的面新建任务**。
@@ -32,6 +32,9 @@ Future<int> runUiCommand({
   String holder = 'Agent',
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
+
+  /// 测试注入：app 在不在。真机走默认（看目录存不存在）
+  bool Function(String path)? appExists,
   Duration waitForUi = const Duration(seconds: 90),
 
   /// 冷启动后等多久再下单。界面那头也有一道同样的缓冲
@@ -69,13 +72,14 @@ Future<int> runUiCommand({
   }
 
   // 界面没开就先拉起来——这条命令的意义就是让人看见
-  final appPath = (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
   final exec = run ?? Process.run;
+  final appPath = resolveAppPath(env: env, exists: appExists);
   // 冷启动的话，界面要几秒才起得来。先探一眼它在不在，好决定等多久
-  final wasRunning = await _appIsRunning(exec, appPath);
-  final launched = await exec('open', ['-a', appPath]);
-  if (launched.exitCode != 0) {
-    sink.writeln('打不开 app（$appPath）：${'${launched.stderr}'.trim()}');
+  final wasRunning =
+      appPath != null && await _appIsRunning(exec, appPath);
+  final failure = await launchApp(run: exec, env: env, exists: appExists);
+  if (failure != null) {
+    sink.writeln(failure);
     return exitEnv;
   }
   if (!wasRunning) {

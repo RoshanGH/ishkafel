@@ -1,0 +1,73 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/cli/app_locator.dart';
+
+/// app 装在哪 —— **不该靠人告诉，也不该靠翻进程**。
+///
+/// 验收 Agent 开工前就卡在这儿：手册给的唯一办法是 `ps aux` 从进程里读，
+/// 而 app 一关就返回空；手册接着把出路推给「问用户要」——那在无人值守的
+/// 静默模式里是死路。
+///
+/// 真正的解法是现成的：**CLI 本身就装在 app 包里**
+/// （`ishkafel.app/Contents/Resources/cli/ishkafel`），从自己的路径往上
+/// 数四层就是 app。它一直知道自己在哪，只是没人问过它。
+void main() {
+  test('从自己在 app 包里的位置推出 app 路径', () {
+    expect(
+      appPathFromExecutable(
+          '/Applications/ishkafel.app/Contents/Resources/cli/ishkafel'),
+      '/Applications/ishkafel.app',
+    );
+  });
+
+  test('开发期的产物路径也认', () {
+    expect(
+      appPathFromExecutable('/Users/me/www/ishkafel/build/macos/Build/'
+          'Products/Release/ishkafel.app/Contents/Resources/cli/ishkafel'),
+      endsWith('Release/ishkafel.app'),
+    );
+  });
+
+  test('不在 app 包里（比如直接跑编译产物）就返回 null，不硬猜', () {
+    expect(appPathFromExecutable('/usr/local/bin/ishkafel'), isNull);
+    expect(appPathFromExecutable('/tmp/ishkafel'), isNull);
+  });
+
+  group('按优先级找', () {
+    test('环境变量最优先——用户指到哪就用哪', () {
+      final got = resolveAppPath(
+        env: {'ISHKAFEL_APP': '/custom/my.app'},
+        executable: '/Applications/ishkafel.app/Contents/Resources/cli/ishkafel',
+        exists: (_) => true,
+      );
+      expect(got, '/custom/my.app');
+    });
+
+    test('没给环境变量就从自己的位置推', () {
+      final got = resolveAppPath(
+        env: const {},
+        executable: '/Applications/ishkafel.app/Contents/Resources/cli/ishkafel',
+        exists: (p) => p == '/Applications/ishkafel.app',
+      );
+      expect(got, '/Applications/ishkafel.app');
+    });
+
+    test('推出来的路径不存在就退回默认位置', () {
+      final got = resolveAppPath(
+        env: const {},
+        executable: '/tmp/somewhere/ishkafel',
+        exists: (p) => p == '/Applications/ishkafel.app',
+      );
+      expect(got, '/Applications/ishkafel.app');
+    });
+
+    test('哪儿都找不到时返回 null——**说找不到，别给一个假路径**', () {
+      expect(
+        resolveAppPath(
+            env: const {}, executable: '/tmp/x', exists: (_) => false),
+        isNull,
+      );
+    });
+  });
+}

@@ -25,6 +25,7 @@ void main() {
   }
 
   AgentStage stage(AgentStageMode mode) => AgentStage(
+        appExists: (_) => true,
         mode: mode,
         dataDir: dir,
         taskId: 't1',
@@ -141,6 +142,7 @@ void _globalSlotTests() {
   test('全局槽不写唤醒文件——没有任务可跳，跳了只会把人甩到别处', () async {
     final calls = <List<String>>[];
     final stage = AgentStage(
+      appExists: (_) => true,
       mode: AgentStageMode.visual,
       dataDir: dir,
       taskId: globalPresenceSlot,

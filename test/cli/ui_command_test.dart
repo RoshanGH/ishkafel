@@ -33,6 +33,7 @@ void main() {
         tagGroups: tagGroups,
         name: name,
         env: const {},
+        appExists: (_) => true,
         waitForUi: wait ?? const Duration(milliseconds: 300),
         // 测试里不真的等冷启动那几秒
         coldStartWait: Duration.zero,

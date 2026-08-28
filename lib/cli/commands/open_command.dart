@@ -3,10 +3,13 @@ import 'dart:io';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/storage/ui_wake.dart';
+import '../app_locator.dart';
 import '../cli_output.dart';
 
 /// app 的默认安装位置。装在别处时用 `ISHKAFEL_APP` 指定
-const String defaultAppPath = '/Applications/ishkafel.app';
+/// app 的默认位置。**真正的定位逻辑在 [resolveAppPath]**——
+/// 它会先看环境变量，再从 CLI 自己所在的包推，最后才退到这里
+export '../app_locator.dart' show defaultAppPath;
 
 /// `ishkafel open <task>` —— 把 GUI 弹出来并落到这个任务的工作台。
 ///
@@ -18,6 +21,9 @@ Future<int> runOpenCommand({
   required Directory dataDir,
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
+
+  /// 测试注入：app 在不在。真机走默认（看目录存不存在）
+  bool Function(String path)? appExists,
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
@@ -36,12 +42,10 @@ Future<int> runOpenCommand({
   // 时会被静默丢弃（真机撞到过：再次 open/review 只是把窗口调到前台，
   // 什么都不发生）。文件冷热启动一条路，GUI 轮询读到即删
   writeUiWake(dataDir, task.id, review: false);
-  final appPath =
-      (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
-  final exec = run ?? Process.run;
-  final result = await exec('open', ['-a', appPath]);
-  if (result.exitCode != 0) {
-    sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
+  final failure =
+      await launchApp(run: run ?? Process.run, env: env, exists: appExists);
+  if (failure != null) {
+    sink.writeln(failure);
     return exitEnv;
   }
   return 0;

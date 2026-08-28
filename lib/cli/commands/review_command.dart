@@ -10,6 +10,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
+import '../app_locator.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
@@ -33,6 +34,9 @@ Future<int> runReviewCommand({
   required Directory dataDir,
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
+
+  /// 测试注入：app 在不在。真机走默认（看目录存不存在）
+  bool Function(String path)? appExists,
 
   /// `drop` / `keep` 要动的候选：`单元:镜头:素材`，逗号分隔
   String? items,
@@ -70,7 +74,7 @@ Future<int> runReviewCommand({
   if (!isAction) {
     return _openReviewUi(
         task: task, items: candidates, dataDir: dataDir, run: run,
-        env: env, sink: sink);
+        env: env, appExists: appExists, sink: sink);
   }
   if (rest.first == 'list') {
     emitJson({
@@ -113,6 +117,7 @@ Future<int> _openReviewUi({
   required Directory dataDir,
   required Future<ProcessResult> Function(String, List<String>)? run,
   required Map<String, String>? env,
+  required bool Function(String path)? appExists,
   required StringSink sink,
 }) async {
   if (items.isEmpty) {
@@ -122,12 +127,10 @@ Future<int> _openReviewUi({
     return exitBadUsage;
   }
   writeUiWake(dataDir, task.id, review: true, module: 'review');
-  final appPath =
-      (env ?? Platform.environment)['ISHKAFEL_APP'] ?? defaultAppPath;
-  final exec = run ?? Process.run;
-  final result = await exec('open', ['-a', appPath]);
-  if (result.exitCode != 0) {
-    sink.writeln('打不开 app（$appPath）：${'${result.stderr}'.trim()}');
+  final failure =
+      await launchApp(run: run ?? Process.run, env: env, exists: appExists);
+  if (failure != null) {
+    sink.writeln(failure);
     return exitEnv;
   }
   sink.writeln('审核界面已打开（${items.length} 条候选待审）。'

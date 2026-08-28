@@ -45,6 +45,7 @@ void main() {
       rest: ['r1'],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       err: err,
       run: (bin, args) async {
         calls.add([bin, ...args]);

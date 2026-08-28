@@ -85,6 +85,7 @@ void main() {
       rest: ['t1'],
       dataDir: dir,
       env: const {},
+      appExists: (_) => true,
       err: err,
       run: (_, _) async => ProcessResult(0, 0, '', ''),
     );

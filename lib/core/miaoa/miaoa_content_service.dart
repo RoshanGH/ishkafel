@@ -272,14 +272,19 @@ class MiaoaContentService {
   ///
   /// 一条一次调用：`content search --ids` 服务端目前直接 500（真机实测），
   /// 不能拿它当批量入口。找不到返回 null，由调用方决定是跳过还是报错。
+  ///
+  /// id 一律搁在 `--` 后面：素材库里真有负数 id（真机遇到 -19954），
+  /// 直接当位置参数传会被命令行解析成参数名，报
+  /// `unexpected argument '-1' found`，这一条就静静地落不了地
   Future<CandidateMaterial?> fetchById(int id) async {
     final stdout = await gateway.text([
       'content',
       'get',
-      '$id',
       '--type',
       'storyboard',
       '--json',
+      '--',
+      '$id',
     ], what: '读取素材详情');
     return CandidateMaterial.tryFromJson(_decode(stdout));
   }
