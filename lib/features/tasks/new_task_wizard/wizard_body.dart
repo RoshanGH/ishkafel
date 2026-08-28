@@ -83,7 +83,7 @@ class WizardBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _StepLabel('第 1 步 · 成片来源'),
+        const _StepLabel('第 1 步 · 做哪条线'),
         WizardSourceStep(
             filePath: filePath,
             line: line,

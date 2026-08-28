@@ -146,7 +146,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(NewTaskWizard), findsOneWidget);
-    expect(find.text('新建替换裂变任务'), findsOneWidget);
+    expect(find.text('第 1 步 · 做哪条线'), findsOneWidget);
   });
 
   group('重新加载不闪白（保存后整页 spinner）', () {

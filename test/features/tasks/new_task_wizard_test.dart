@@ -97,10 +97,10 @@ Future<void> pickGroup(WidgetTester tester, Key fieldKey, String name) async {
 void main() {
   _blankSourceTests();
   _scriptSourceTests();
-  testWidgets('向导按设计稿分两步：成片来源 + 两个标签组', (tester) async {
+  testWidgets('向导按设计稿分两步：选一条线 + 两个标签组', (tester) async {
     await openWizard(tester, wrap());
 
-    expect(find.text('新建替换裂变任务'), findsOneWidget);
+    expect(find.text('新建任务'), findsOneWidget);
     expect(find.textContaining('第 1 步'), findsOneWidget);
     expect(find.textContaining('第 2 步'), findsOneWidget);
     expect(find.text('台词语义单元标签组'), findsOneWidget);

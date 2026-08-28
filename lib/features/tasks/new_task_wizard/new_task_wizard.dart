@@ -217,11 +217,12 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
   /// （镜头层打标发生在参考分镜出现之后，届时用建任务时选的组）——
   /// 但为了检索质量，脚本成片允许选镜头组，仅分子组必填
   List<String> get _missing => [
-        if (!_blank && !_script && _filePath == null)
-          '选择本地成片文件或「不用原片」',
+        // 顺序就是人该动手的顺序：先定线，再定起点，最后标签组
+        if (_line == null) '先选一条线：替换裂变还是脚本成片',
+        if (_line == WizardLine.replace && !_blank && _filePath == null)
+          '选择本地成片文件，或选「不用原片」',
         if (_unitGroups.isEmpty) '选择台词语义单元标签组',
         if (!_blank && !_script && _shotGroups.isEmpty) '选择视觉镜头标签组',
-        if (_line == null) '先选一条线：替换裂变还是脚本成片',
       ];
 
   void _pickBlank() => setState(() {
@@ -273,7 +274,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const _WizardHeader(),
+              _WizardHeader(_line),
               const SizedBox(height: AppSpacing.lg),
               Flexible(
                 child: SingleChildScrollView(
@@ -326,20 +327,37 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
 }
 
 class _WizardHeader extends StatelessWidget {
-  const _WizardHeader();
+  const _WizardHeader(this.line);
+
+  /// 还没选线时不预设标题——写死「新建替换裂变任务」的话，
+  /// 人一进来就被告知要做哪条线，而这一步恰恰是让他选
+  final WizardLine? line;
+
+  String get title => switch (line) {
+        WizardLine.replace => '新建替换裂变任务',
+        WizardLine.script => '新建脚本成片任务',
+        null => '新建任务',
+      };
+
+  String get subtitle => switch (line) {
+        WizardLine.replace =>
+          '选择成片来源与两个标签组，提交后自动完成：语音转写 → 台词语义单元切分与打标 → 视觉镜头切分与打标',
+        WizardLine.script => '建出来直接进编导台开写；台词可以自己敲，也可以上传一条参考片让它扒出来',
+        null => '先选一条线。替换裂变是拿现成的片子换画面，脚本成片是从台词造一条新的',
+      };
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('新建替换裂变任务',
+        Text(title,
             style: TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: AppFontSize.title,
                 fontWeight: FontWeight.w700)),
         SizedBox(height: AppSpacing.xs),
-        Text('选择成片来源与两个标签组，提交后自动完成：语音转写 → 台词语义单元切分与打标 → 视觉镜头切分与打标',
+        Text(subtitle,
             style: TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: AppFontSize.caption,
