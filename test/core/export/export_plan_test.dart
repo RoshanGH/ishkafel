@@ -327,4 +327,58 @@ void _duplicateMaterialTests() {
       expect(combos, hasLength(4));
     });
   });
+
+  /// 候选选多了是常态，导出只取 100 条——**这 100 条得挑得有意义**。
+  ///
+  /// 里程表默认从最后一个单元开始进位，前 100 条里前面的单元永远停在
+  /// 第一个候选：真机上 U2 选了几百个候选，导出来的 100 条却全是
+  /// 「U1 第一个 + U2 第一个 + U3 变来变去」，等于白挑。
+  ///
+  /// 改成**从候选最多的单元开始变**，同样的 100 条名额落在差异最大的那一维上。
+  group('取不完时，这 100 条要挑得有意义', () {
+    List<SemanticUnit> unitsOf(int n) => [
+          for (var i = 0; i < n; i++)
+            SemanticUnit(
+                index: i, startMs: i * 1000, endMs: i * 1000 + 1000, transcript: 't$i'),
+        ];
+
+    test('候选最多的那个单元变化最快——哪怕它夹在中间', () {
+      // 真机形状：候选最多的是 U2，而它后面还有 U3。
+      // 从最后一个单元开始进位的话，十条里 U2 一动不动
+      final combos = ExportPlanner.enumerate(
+        units: unitsOf(3),
+        replacements: [
+          UnitReplacement.whole([1, 2]),
+          UnitReplacement.whole(List.generate(50, (i) => 100 + i)),
+          UnitReplacement.whole(List.generate(20, (i) => 200 + i)),
+        ],
+        limit: 10,
+      );
+
+      final u2Ids = {
+        for (final c in combos)
+          c.segments.firstWhere((s) => s.unitIndex == 1).candidateId,
+      };
+      expect(u2Ids.length, greaterThan(5),
+          reason: '十条里 U2 应该换了好几个候选，而不是十条都用同一个');
+    });
+
+    test('还是互不相同——名额有限不能拿重复的凑数', () {
+      final combos = ExportPlanner.enumerate(
+        units: unitsOf(3),
+        replacements: [
+          UnitReplacement.whole([1, 2, 3]),
+          UnitReplacement.whole([10, 11, 12]),
+          UnitReplacement.whole([20, 21, 22]),
+        ],
+        limit: 20,
+      );
+
+      final seen = combos
+          .map((c) => c.segments.map((s) => s.candidateId).join(','))
+          .toSet();
+      expect(seen.length, combos.length);
+    });
+  });
+
 }

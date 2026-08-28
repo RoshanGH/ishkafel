@@ -116,6 +116,20 @@ class ExportPlanner {
             materialDurations),
     ];
 
+    // 进位顺序：**候选最多的单元当最低位**（变化最快）。
+    //
+    // 里程表默认从最后一个单元开始进位，而候选最多的那个单元往往夹在中间——
+    // 真机上 U2 选了几百个候选、后面还有 U3/U4，导出来的一百条里 U2 一动不动，
+    // 等于白挑。名额有限，就该花在差异最大的那一维上。
+    // 候选数相同时保持「后面的单元先变」——那是原本的里程表顺序，
+    // 用户对着导出目录看到的规律（前几条只有片尾不同）不该无缘无故改掉
+    final carryOrder = [for (var i = 0; i < units.length; i++) i]
+      ..sort((a, b) {
+        final byCount =
+            choicesPerUnit[b].length.compareTo(choicesPerUnit[a].length);
+        return byCount != 0 ? byCount : b.compareTo(a);
+      });
+
     final out = <ExportCombination>[];
     final cursor = List<int>.filled(units.length, 0);
     // 里程表最多能走多少格。作废的组合不占 out 的名额，光靠 out.length
@@ -132,15 +146,16 @@ class ExportPlanner {
       if (!_hasDuplicateMaterial(segments)) {
         out.add(ExportCombination(index: out.length + 1, segments: segments));
       }
-      // 里程表进位：从最后一个单元开始加
-      var i = units.length - 1;
-      while (i >= 0) {
+      // 里程表进位：从候选最多的单元开始加
+      var k = 0;
+      while (k < carryOrder.length) {
+        final i = carryOrder[k];
         cursor[i]++;
         if (cursor[i] < choicesPerUnit[i].length) break;
         cursor[i] = 0;
-        i--;
+        k++;
       }
-      if (i < 0) break; // 全部进位完毕 = 枚举结束
+      if (k >= carryOrder.length) break; // 全部进位完毕 = 枚举结束
     }
     return List.unmodifiable(out);
   }

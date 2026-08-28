@@ -16,13 +16,13 @@ void main() {
           1: [3, 4, 5],
         }),
       ]);
-      expect(combinationSummaryText(plan), '当前组合 2 × 1 × 6 = 12 条 / 上限 100');
+      expect(combinationSummaryText(plan), '当前组合 2 × 1 × 6 = 12 条，全部导出');
     });
 
     test('单元很多时不摊开因子（状态栏一行放不下，摊开等于什么都没说清）', () {
       final plan = ReplacementPlan(
           List.generate(20, (_) => UnitReplacement.keepOriginal()));
-      expect(combinationSummaryText(plan), '当前组合 1 条 / 上限 100');
+      expect(combinationSummaryText(plan), '当前组合 1 条，全部导出');
     });
 
     test('超限时状态栏如实显示条数而不是显示饱和哨兵值', () {
@@ -40,23 +40,34 @@ void main() {
           isNull);
     });
 
-    test('超限时说清超了多少、该从哪个单元减', () {
+    /// 候选选多了**不是错误**：人本来就该随便挑，挑完由软件按规则挑出
+    /// 100 条来导。以前这里把导出按钮变成死按钮，还让人回去一个个删候选——
+    /// 那是把软件该干的活推给人。
+    test('候选选多了不阻断导出——该由软件挑出 100 条，不是让人回去删', () {
       final plan = ReplacementPlan([
         UnitReplacement.whole(List.generate(11, (i) => i)), // 11
         UnitReplacement.whole(List.generate(11, (i) => 100 + i)), // 11
       ]);
-      final reason = exportBlockedReason(plan)!;
-      expect(reason, contains('121'));
-      expect(reason, contains('21'), reason: '要说清超出上限多少条');
-      expect(reason, contains('U1'), reason: '要指到具体的台词语义单元');
+
+      expect(exportBlockedReason(plan), isNull);
     });
 
-    test('组合数荒谬到无法精确统计时也要给一句人话，不能显示天文数字', () {
+    test('多到没法精确统计也照样能导', () {
       final huge = ReplacementPlan(
           List.generate(60, (_) => UnitReplacement.whole([1, 2])));
-      final reason = exportBlockedReason(huge)!;
-      expect(reason, contains('远超上限'));
-      expect(reason, isNot(contains('e+')));
+
+      expect(exportBlockedReason(huge), isNull);
+    });
+
+    test('但要如实告诉人「导出的是其中 100 条」', () {
+      final plan = ReplacementPlan([
+        UnitReplacement.whole(List.generate(11, (i) => i)),
+        UnitReplacement.whole(List.generate(11, (i) => 100 + i)),
+      ]);
+      final text = combinationSummaryText(plan)!;
+
+      expect(text, contains('121'));
+      expect(text, contains('100'), reason: '人要知道导出来的不是全部');
     });
 
     test('一条替换都没设置时给提醒，但不阻断（用户可能就是想先导一条原片）', () {

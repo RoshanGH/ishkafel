@@ -16,22 +16,29 @@ import '../../core/replacement/replacement_plan.dart';
 /// 状态栏摊开因子算式的单元数上限：再多一行放不下，摊开等于什么都没说清
 const int _maxFactorsInline = 10;
 
-/// 组合数状态栏：`当前组合 2 × 1 × 6 = 12 条 / 上限 100`
+/// 组合数状态栏：`当前组合 2 × 1 × 6 = 12 条，全部导出`
+/// 或 `当前组合 121 条，导出其中 100 条`
+///
+/// **候选选多了不是错误**——人本来就该随便挑，挑完由软件挑出 100 条来导。
+/// 这里只负责如实说清「导出来的是不是全部」。
 String combinationSummaryText(ReplacementPlan plan) {
-  final count = plan.overflowsPreciseCount
-      ? '远超上限'
-      : '${plan.preciseCombinationCount} 条';
+  final over = plan.exceedsLimit;
+  final count =
+      plan.overflowsPreciseCount ? '很多' : '${plan.preciseCombinationCount} 条';
+  final tail = over ? '导出其中 ${ReplacementPlan.maxCombinations} 条' : '全部导出';
   if (plan.units.isEmpty || plan.units.length > _maxFactorsInline) {
-    return '当前组合 $count / 上限 ${ReplacementPlan.maxCombinations}';
+    return '当前组合 $count，$tail';
   }
   final factors = plan.units.map((u) => '${u.factor}').join(' × ');
-  return '当前组合 $factors = $count / 上限 ${ReplacementPlan.maxCombinations}';
+  return '当前组合 $factors = $count，$tail';
 }
 
 /// 「进入矩阵导出」被禁用的原因；可以导出时返回 null。
 ///
-/// 必须说清三件事：现在多少条、超出多少条、该从哪个台词语义单元减——
-/// 只说「超出上限」的话，用户面对十几个单元根本不知道去动哪一个。
+/// **组合数多不在此列**：候选选多了是常态，软件按规则挑出 100 条导就是了，
+/// 让人回去一个个删候选是把软件该干的活推给人（真机上撞到过：
+/// 底部横幅写「无法导出，请先减少 U2 选中的候选素材」，而 U2 的因子是
+/// 四百多万——那句话等于让人从头再挑一遍）。
 /// [pendingMedia] 是已选但**本体还没落到本地**的素材条数，[failedMedia] 是
 /// 其中彻底下不下来的。素材没齐就导，成片里会缺画面——用户设置好的东西
 /// 出了错就该直接失败，而不是导出一批半成品（见 docs/2026-08-07-四种替换的
@@ -49,21 +56,7 @@ String? exportBlockedReason(
     return '正在把 $pendingMedia 条已选素材存到本地，存完就能导出'
         '——存到本地之后，素材库那边被删也不影响这条任务';
   }
-  if (!plan.exceedsLimit) return null;
-  final where = _reduceHint(plan);
-  if (plan.overflowsPreciseCount) {
-    return '当前组合数已远超上限 ${ReplacementPlan.maxCombinations} 条，无法导出。$where';
-  }
-  final count = plan.preciseCombinationCount;
-  final over = count - ReplacementPlan.maxCombinations;
-  return '当前组合 $count 条，超出上限 $over 条，无法导出。$where';
-}
-
-String _reduceHint(ReplacementPlan plan) {
-  final index = plan.largestFactorUnitIndex;
-  if (index == null) return '请减少已选中的候选素材';
-  final factor = plan.units[index].factor;
-  return '台词语义单元 U${index + 1} 的因子最大（×$factor），请先减少它选中的候选素材';
+  return null;
 }
 
 /// 一条替换都没设置时的提醒。不阻断导出——用户可能就是想先导一条原片，
