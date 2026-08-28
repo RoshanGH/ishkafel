@@ -536,20 +536,50 @@ List<ScreenText> _screenTexts(Map<String, dynamic> payload) => [
           ),
     ];
 
+/// 播报里的一句话。
+///
+/// 人在旁边看着 Agent 干活，读到的就是这一句。所以它得说清**对哪几行
+/// 做了什么**——「正在铺配乐」等于没说，「正在给第 3~15 行铺配乐」
+/// 才知道它动了哪儿。
+///
+/// 只播**人能理解的动作**：内部的重试、轮询、缓存命中不进来，
+/// 那些只会把真正的动作淹掉。
 String _actionOf(String what, Map<String, dynamic> payload) => switch (what) {
       'shots' => '正在给${_lineLabel(payload, 'picks')}挑镜头',
       'subtitles' => '正在给${_lineLabel(payload, 'subtitles')}断句',
       'alloc' => '正在调${_lineLabel(payload, 'alloc')}的镜头时长',
-      'bgm' => '正在铺配乐',
-      'lines' => '正在改台词',
+      'bgm' => '正在给${_bgmLabel(payload)}铺配乐',
+      'lines' => '正在改${_lineLabel(payload, 'lines')}的台词',
       'shot-edit' => '正在调${_lineLabel(payload, 'shots')}的镜头',
       'screen-text' => '正在改${_lineLabel(payload, 'screens')}的字幕文字',
       'baseline' => '正在定本片的音色与语速',
       'line-voice' => '正在改${_lineLabel(payload, 'lines')}的音色/语速',
       'mix' => '正在调三条声音轨的音量',
-      'word-shots' => '正在给选中的字配画面',
+      'word-shots' => '正在给${_wordShotLabel(payload)}配画面',
       _ => '正在操作',
     };
+
+/// 配乐段覆盖到哪几行：「第 3~15 行」
+String _bgmLabel(Map<String, dynamic> payload) {
+  final segs = _bgms(payload);
+  if (segs.isEmpty) return '整片';
+  var from = segs.first.startLine;
+  var to = segs.first.endLine;
+  for (final s in segs) {
+    if (s.startLine < from) from = s.startLine;
+    if (s.endLine > to) to = s.endLine;
+  }
+  return from == to ? '第 ${from + 1} 行' : '第 ${from + 1}~${to + 1} 行';
+}
+
+/// 划词建镜播的是**划了哪几个字**，那才是人关心的
+String _wordShotLabel(Map<String, dynamic> payload) {
+  final picks = _wordShots(payload);
+  if (picks.isEmpty) return '选中的字';
+  final p = picks.first;
+  final more = picks.length > 1 ? ' 等 ${picks.length} 处' : '';
+  return '第 ${p.lineIndex + 1} 行的第 ${p.startWord + 1}~${p.endWord} 个字$more';
+}
 
 String _lineLabel(Map<String, dynamic> payload, String key) {
   final list = payload[key] as List? ?? const [];
