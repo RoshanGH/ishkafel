@@ -2,6 +2,7 @@ import '../analysis/providers.dart';
 import '../audio/bgm_plan.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
+import '../replacement/candidate_trim.dart';
 import '../replacement/replacement_plan.dart';
 import 'jianying_plan.dart';
 
@@ -98,12 +99,14 @@ JianyingPlan buildRenewJianyingPlan({
     if (r == null) continue;
     switch (r.mode) {
       case ReplacementMode.whole:
-        _collect(picks, r.wholeCandidateIds, u.startMs, u.endMs);
+        _collect(picks, r.wholeCandidateIds, u.startMs, u.endMs,
+            trimStarts: r.wholeTrimStarts);
       case ReplacementMode.perShot:
         for (final entry in r.shotCandidateIds.entries) {
           final shot = _shotAt(u.shots, entry.key);
           if (shot == null) continue;
-          _collect(picks, entry.value, shot.startMs, shot.endMs);
+          _collect(picks, entry.value, shot.startMs, shot.endMs,
+              trimStarts: r.shotTrimStarts[entry.key] ?? const {});
         }
       case ReplacementMode.keepOriginal:
         break;
@@ -129,16 +132,21 @@ JianyingPlan buildRenewJianyingPlan({
       }
       final slot = p.endMs - p.startMs;
       final total = materialDurationOf(p.candidateId);
-      // 素材比坑位长就加速、短就放慢——和成片导出同一个口径，
-      // 人在剪映里看到的倍率就是 ishkafel 里算出来的那个
-      final speed = total <= 0 ? 1.0 : total / slot;
+      // **和导出 mp4 走同一个函数**：那边早就改成「从素材里截一段」了，
+      // 这边要是还整条压缩，同一条片子导 mp4 是 1.0 倍、拖进剪映却是
+      // 三十几倍快进，人会以为软件坏了
+      final cut = trimFor(
+        materialMs: total,
+        slotMs: slot,
+        startMs: p.trimStartMs,
+      );
       segs.add(JyVideoSegment(
         path: path,
         atMs: p.startMs,
         durationMs: slot,
-        sourceStartMs: 0,
-        sourceDurationMs: total <= 0 ? slot : total,
-        speed: speed,
+        sourceStartMs: cut.startMs,
+        sourceDurationMs: cut.durationMs,
+        speed: cut.speed,
         volume: 1.0,
         sourceTotalMs: total <= 0 ? slot : total,
       ));
@@ -185,10 +193,16 @@ JianyingPlan buildRenewJianyingPlan({
   );
 }
 
-void _collect(List<_Pick> out, List<int> ids, int startMs, int endMs) {
+void _collect(List<_Pick> out, List<int> ids, int startMs, int endMs,
+    {Map<int, int> trimStarts = const {}}) {
   for (var i = 0; i < ids.length; i++) {
     out.add(_Pick(
-        candidateId: ids[i], rank: i, startMs: startMs, endMs: endMs));
+      candidateId: ids[i],
+      rank: i,
+      startMs: startMs,
+      endMs: endMs,
+      trimStartMs: trimStarts[ids[i]],
+    ));
   }
 }
 
@@ -210,10 +224,14 @@ class _Pick {
   final int startMs;
   final int endMs;
 
+  /// 人调过的取段起点；null = 自动（取素材中段）
+  final int? trimStartMs;
+
   const _Pick({
     required this.candidateId,
     required this.rank,
     required this.startMs,
     required this.endMs,
+    this.trimStartMs,
   });
 }

@@ -77,8 +77,10 @@ void main() {
     final seg = plan.videoTracks.last.single;
     expect(seg.atMs, 3000, reason: 'U2 的坑位从 3 秒开始');
     expect(seg.durationMs, 2000, reason: '坑位两秒，素材再长也只占两秒');
-    expect(seg.speed, closeTo(4.0, 0.001),
-        reason: '八秒的素材塞进两秒的坑位就是四倍速');
+    // 以前这里断言的是「八秒塞进两秒 = 四倍速」——那正是要消灭的行为。
+    // 现在从素材里截两秒用，倍速回到 1.0
+    expect(seg.speed, 1.0);
+    expect(seg.sourceStartMs, greaterThan(0), reason: '从素材中段截');
   });
 
   test('原子替换排在原子轨上面，按最宽的那个位置决定轨数', () {
@@ -162,6 +164,78 @@ void main() {
     expect(plan.bgm.single.path, '/tmp/bgm7.mp3');
     expect(plan.bgm.single.atMs, 3000);
     expect(plan.bgm.single.durationMs, 2000);
+  });
+
+
+  /// 剪映工程必须和导出 mp4 **同一个口径**：导出那边已经改成「从素材里
+  /// 截一段」了，剪映这边还在整条压缩——同一条片子导 mp4 是 1.0 倍速，
+  /// 拖进剪映却是三十几倍快进，人会以为软件坏了。
+  group('剪映工程也要截一段，不是整条压缩', () {
+    test('长素材配短坑位：截一段，倍速 1.0', () {
+      final plan = buildRenewJianyingPlan(
+        units: [
+          unit(0, 0, 3000, shots: [shot(0, 433), shot(433, 3000)])
+        ],
+        replacements: [
+          UnitReplacement.perShot({
+            0: [21]
+          }),
+        ],
+        sourcePath: source,
+        sourceTotalMs: 3000,
+        materialOf: material,
+        materialDurationOf: (_) => 14000,
+      );
+
+      final seg = plan.videoTracks.last.single;
+      expect(seg.speed, 1.0,
+          reason: '14 秒的素材塞进 0.433 秒的坑位，整条压缩就是 32 倍快进');
+      expect(seg.durationMs, 433);
+      expect(seg.sourceStartMs, greaterThan(0),
+          reason: '要从素材中段开始截，开头常有转场');
+    });
+
+    test('人调过起点就听人的——和导出那边同一个判断', () {
+      final plan = buildRenewJianyingPlan(
+        units: [
+          unit(0, 0, 3000, shots: [shot(0, 500), shot(500, 3000)])
+        ],
+        replacements: [
+          UnitReplacement.perShot({
+            0: [21]
+          }, trimStarts: {
+            0: {21: 9000}
+          }),
+        ],
+        sourcePath: source,
+        sourceTotalMs: 3000,
+        materialOf: material,
+        materialDurationOf: (_) => 20000,
+      );
+
+      expect(plan.videoTracks.last.single.sourceStartMs, 9000);
+    });
+
+    test('素材本身不够长：照旧放慢，如实给出倍速', () {
+      final plan = buildRenewJianyingPlan(
+        units: [
+          unit(0, 0, 3000, shots: [shot(0, 2000), shot(2000, 3000)])
+        ],
+        replacements: [
+          UnitReplacement.perShot({
+            0: [21]
+          }),
+        ],
+        sourcePath: source,
+        sourceTotalMs: 3000,
+        materialOf: material,
+        materialDurationOf: (_) => 800,
+      );
+
+      final seg = plan.videoTracks.last.single;
+      expect(seg.speed, closeTo(0.4, 0.01));
+      expect(seg.sourceStartMs, 0);
+    });
   });
 
 }
