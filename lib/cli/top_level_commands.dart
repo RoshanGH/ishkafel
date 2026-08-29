@@ -28,5 +28,6 @@ const List<String> topLevelCommands = [
   'tasks',
   'todo',
   'ui',
+  'voice',
   'voices',
 ];

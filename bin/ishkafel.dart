@@ -17,6 +17,7 @@ import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
+import 'package:ishkafel/cli/commands/voice_command.dart';
 import 'package:ishkafel/cli/commands/voices_command.dart';
 import 'package:ishkafel/cli/commands/script_command.dart';
 import 'package:ishkafel/cli/commands/skill_command.dart';
@@ -66,6 +67,7 @@ Future<void> main(List<String> args) async {
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
+    ..addOption('units', help: 'voice 用：给哪几个单元换音色（0,2）')
     ..addOption('preset',
         help: 'subtitle 用：字幕样式预设。'
             'whiteBox / blurBox 能盖住素材自带的烧录字幕')
@@ -154,6 +156,19 @@ Future<void> main(List<String> args) async {
       ),
     'jianying' => await runJianyingCommand(
         rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),
+    // voice generate <任务> 与 voice <任务>：前者真合成，后者只定方案
+    'voice' => rest.isNotEmpty && rest.first == 'generate'
+        ? await runVoiceGenerateCommand(
+            rest: rest.sublist(1),
+            dataDir: dataDir,
+            visual: parsed['visual'] as bool,
+          )
+        : await runVoiceCommand(
+            rest: rest,
+            dataDir: dataDir,
+            units: parsed['units'] as String?,
+            voiceId: parsed['voice'] as String?,
+          ),
     'voices' => runVoicesCommand(),
     'tag-groups' => await runTagGroupsCommand(),
     'analyze' => await runAnalyzeCommand(
@@ -249,6 +264,10 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 命令：
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
+  voice <task> --units 0,2 --voice <音色 id>
+                   给这几句换音色（只定方案，不立刻合成）
+  voice generate <task>
+                   把定好的音色真正合成。**只选不生成的话导出会被拦下**
   voices           有哪些音色可选（配音前先问人要哪个，别自己挑）
   tag-groups       当前企业下有哪些标签组（import 要用它的 id）
   import <视频> [--tag-groups <id,id>]
