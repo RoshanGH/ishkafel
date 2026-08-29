@@ -266,15 +266,19 @@ Future<int> runCandidatesCommand({
   final media = TaskMedia(dataDir: dataDir, taskId: task.id);
   if (probeDurations) {
     final prober = probe ?? CandidateProbe();
-    for (final c in filtered.items) {
-      final spec =
-          // 本地已经有就读本地：联网量一条要一秒，一页 50 条就是一分钟
-          await prober.probe(
-              materialId: c.id,
-              previewUrl: c.previewUrl,
-              localPath: media.localMaterial(c.id));
-      if (spec?.durationMs case final ms? when ms > 0) specs[c.id] = ms;
-    }
+    // **并行量**：一条条串着来，一页 50 条就是几十秒（脚本成片那条线
+    // 一直是并行的，这边漏了）。本地已有的读本地，只有没下过的才走网络
+    await Future.wait([
+      for (final c in filtered.items)
+        prober
+            .probe(
+                materialId: c.id,
+                previewUrl: c.previewUrl,
+                localPath: media.localMaterial(c.id))
+            .then((spec) {
+          if (spec?.durationMs case final ms? when ms > 0) specs[c.id] = ms;
+        }),
+    ]);
   }
   final slotMs = shotIndex == null
       ? units[unitIndex].endMs - units[unitIndex].startMs
