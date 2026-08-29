@@ -17,6 +17,8 @@ import '../../core/script/script_service_wiring.dart';
 import '../ref_shot_tagging.dart';
 import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
+import '../../core/storage/agent_presence.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../line_evidence.dart';
 import '../search_narrowing.dart';
@@ -213,6 +215,20 @@ Future<int> runScriptCommand({
         sink.writeln('要指定行号：ishkafel script shots <任务> --line <行号>');
         return exitBadUsage;
       }
+      // 找镜头是**最该被看见的一步**：人要看着它在给哪一行找、找出了什么。
+      // 以前这条命令收了 --visual 却从不上报，于是软件既不拉起、界面也不跟——
+      // 人开着别的任务时，看到的是「Agent 说在给第 4 行找镜头」而界面纹丝不动
+      final shotsStage = AgentStage(
+        mode: AgentStageMode.from(visual: visual),
+        dataDir: dataDir,
+        taskId: task.id,
+      );
+      await shotsStage.begin('正在给第 $line 行找镜头',
+          focus: AgentFocus(
+            module: 'director',
+            lineIndex: line - 1,
+            panel: AgentPanel.findShots,
+          ));
       try {
         // 先给参考镜抽本地首帧：**让 Agent 真的看见要复刻的是什么画面**，
         // 而不是只读一句别人总结的描述。抽过的直接用，不重跑 ffmpeg
@@ -381,6 +397,10 @@ Future<int> runScriptCommand({
       } on ArgumentError catch (e) {
         sink.writeln('${e.message}');
         return exitBadUsage;
+      } finally {
+        // 每条出口都要撤场——漏一条，界面就永远停在「Agent 正在操作」的
+        // 只读态上，人得等心跳超时才能自己动手
+        shotsStage.end();
       }
     case 'subtitles':
       if (line == null) {
