@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
 import '../../../core/audio/bgm_plan.dart';
+import '../../../core/audio/bgm_range.dart';
+export '../../../core/audio/bgm_range.dart' show unitRangeMs;
 import '../../../core/models/semantic_unit.dart';
 
 /// 全片打平之后的一个视觉镜头：它在哪个单元里、是第几个、时间范围多少。
@@ -36,14 +38,6 @@ List<FlatShot> flattenShots(List<SemanticUnit> units) => List.unmodifiable([
 /// 连续台词语义单元区间 `[from, to]` 的总时长（毫秒）。
 ///
 /// 越界下标夹住而不是抛异常：方案是存在盘上的，用户改完切分回来时下标可能
-/// 已经指不到东西了，为此崩掉整个时间线不值得。
-int unitRangeMs(List<SemanticUnit> units, {required int from, required int to}) {
-  if (units.isEmpty) return 0;
-  final lo = math.max(0, math.min(from, to));
-  final hi = math.min(units.length - 1, math.max(from, to));
-  if (lo > hi) return 0;
-  return units[hi].endMs - units[lo].startMs;
-}
 
 /// 一段配乐在时间轴上占的范围，供绘制使用
 class BgmSpan {

@@ -17,6 +17,8 @@ import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
+import 'package:ishkafel/cli/commands/bgm_command.dart';
+import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/cli/commands/voice_command.dart';
 import 'package:ishkafel/cli/commands/voices_command.dart';
 import 'package:ishkafel/cli/commands/script_command.dart';
@@ -68,6 +70,10 @@ Future<void> main(List<String> args) async {
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
     ..addOption('units', help: 'voice 用：给哪几个单元换音色（0,2）')
+    ..addOption('from', help: 'bgm 用：从第几个单元开始铺')
+    ..addOption('to', help: 'bgm 用：铺到第几个单元')
+    ..addOption('volume', help: 'bgm 用：音量（0~1）')
+    ..addFlag('remove', help: 'bgm 用：删掉从 --from 开始的那一段')
     ..addOption('preset',
         help: 'subtitle 用：字幕样式预设。'
             'whiteBox / blurBox 能盖住素材自带的烧录字幕')
@@ -157,6 +163,19 @@ Future<void> main(List<String> args) async {
     'jianying' => await runJianyingCommand(
         rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),
     // voice generate <任务> 与 voice <任务>：前者真合成，后者只定方案
+    'bgm' => await runBgmCommand(
+        rest: rest,
+        dataDir: dataDir,
+        fromUnit: parsed['from'] as String?,
+        toUnit: parsed['to'] as String?,
+        materialIds: parsed['materials'] as String?,
+        volume: parsed['volume'] as String?,
+        remove: parsed['remove'] as bool,
+        fetchMaterial: (id) async => (await BgmLibrary().search(pageSize: 200))
+            .items
+            .where((m) => m.id == id)
+            .firstOrNull,
+      ),
     'voice' => rest.isNotEmpty && rest.first == 'generate'
         ? await runVoiceGenerateCommand(
             rest: rest.sublist(1),
@@ -264,6 +283,8 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 命令：
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
+  bgm <task> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]
+                   给一段单元铺配乐。一段选好几首是互为备选，导出时轮流用
   voice <task> --units 0,2 --voice <音色 id>
                    给这几句换音色（只定方案，不立刻合成）
   voice generate <task>

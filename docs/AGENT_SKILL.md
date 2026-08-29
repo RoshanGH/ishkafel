@@ -538,6 +538,23 @@ ishkafel subtitle <task> --preset blurBox
 新字幕长、或者位置更高时仍然盖不全——那种素材只能换掉。所以遮挡是补救，
 不是万能。
 
+### 配乐：人能铺，你也能铺
+
+配乐是**进成片**的东西，不是装饰。界面上人给一段单元铺曲子、改区间、
+调音量、删掉——这一套你也有：
+
+```bash
+ishkafel script bgm-candidates <task> --keyword 轻快   # 有哪些曲子
+ishkafel bgm <task> --from 0 --to 2 --materials 7,8   # 给 U1~U3 铺
+ishkafel bgm <task> --from 0 --volume 0.3             # 调这一段的音量
+ishkafel bgm <task> --from 0 --remove                 # 删掉这一段
+ishkafel bgm <task>                                   # 看现在铺了什么
+```
+
+**一段选好几首是「互为备选」，不是叠着放**：导出多条时按变体轮流用
+（一段选 4 首、导 6 条，就是 A/B/C/D/A/B）。总条数只由画面替换决定，
+配乐不做乘法。
+
 ### 换音色：人能换，你也能换
 
 替换裂变默认用原片的声音，但**可以换成别的音色**（人在工作台上就是这么做的）：

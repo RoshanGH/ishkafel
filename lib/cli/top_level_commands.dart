@@ -9,6 +9,7 @@
 const List<String> topLevelCommands = [
   'analyze',
   'apply',
+  'bgm',
   'blank',
   'candidates',
   'doctor',
