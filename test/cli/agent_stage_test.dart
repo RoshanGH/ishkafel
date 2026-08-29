@@ -164,4 +164,34 @@ void _globalSlotTests() {
     expect(readAgentPresence(dataDir: dir, taskId: globalPresenceSlot),
         isNull);
   });
+
+  /// 每一步都握手（界面展示完才回执）是为了让人跟得上，但界面**没开着**的时候
+  /// 每步都得干等超时——一条命令报五步就白等 25 秒，而 Agent 什么也没等到。
+  ///
+  /// 静默模式下压根不该等；可视模式下连着没人应，就认了：后面几步直接过。
+  group('界面没人应的时候不能一步步干等', () {
+    test('连着两步没回执，后面就不等了', () async {
+      final dir = Directory.systemTemp.createTempSync('nowait');
+      final stage = AgentStage(
+        mode: AgentStageMode.visual,
+        dataDir: dir,
+        taskId: 't1',
+        appExists: (_) => true,
+        run: (_, _) async => ProcessResult(0, 0, '', ''),
+        stepTimeout: const Duration(milliseconds: 60),
+      );
+
+      final began = DateTime.now();
+      for (var i = 0; i < 6; i++) {
+        await stage.show('第 $i 步');
+      }
+      final spent = DateTime.now().difference(began);
+
+      // 前两步各等一个超时，后面四步不再等
+      expect(spent.inMilliseconds, lessThan(60 * 4),
+          reason: '六步全等的话是 360ms 起步，人和 Agent 都在白耗');
+      dir.deleteSync(recursive: true);
+    });
+  });
+
 }

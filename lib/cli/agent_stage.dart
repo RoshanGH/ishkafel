@@ -43,6 +43,13 @@ class AgentStage {
   /// 等界面展示完一步最多等多久。超时不算错——界面没开也不该把正事卡死
   final Duration stepTimeout;
 
+  /// 连着这么多步没回执就不再等。**状态照写**（界面随时可能开起来接上），
+  /// 只是不再为它停下来
+  static const int _giveUpAfter = 2;
+
+  /// 连着几步没人回执了
+  int _unanswered = 0;
+
   final Future<ProcessResult> Function(String, List<String>) _run;
 
   /// 测试注入：app 在不在。真机走默认（看目录存不存在）
@@ -102,14 +109,24 @@ class AgentStage {
         focus: focus,
       ),
     );
+    // 连着没人应就不再等：界面没开着的话，每步干等一个超时——
+    // 一条命令报五步就白耗 25 秒，而人根本不在看
+    if (_unanswered >= _giveUpAfter) return;
+
     final shown = await waitForAck(
       dataDir: dataDir,
       taskId: taskId,
       step: _step,
       timeout: stepTimeout,
     );
-    if (!shown) {
-      AppLog.info('界面没跟上第 $_step 步（可能没开着），照常往下跑');
+    if (shown) {
+      _unanswered = 0;
+      return;
+    }
+    _unanswered++;
+    AppLog.info('界面没跟上第 $_step 步（可能没开着），照常往下跑');
+    if (_unanswered == _giveUpAfter) {
+      AppLog.info('界面连着 $_giveUpAfter 步没回应，后面几步不再等它');
     }
   }
 

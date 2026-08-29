@@ -110,12 +110,7 @@ Future<int> runCandidatesCommand({
     shotIndex == null
         ? '正在给 U${unitIndex + 1} 找素材'
         : '正在给 U${unitIndex + 1}S${shotIndex + 1} 找素材',
-    focus: AgentFocus(
-      module: 'workbench',
-      unitIndex: unitIndex,
-      shotIndex: shotIndex,
-      panel: AgentPanel.findShots,
-    ),
+    focus: _focus(unitIndex, shotIndex),
   );
 
   final service = contentService ?? MiaoaContentService();
@@ -127,6 +122,8 @@ Future<int> runCandidatesCommand({
   int? libraryTotal;
   if (keyword != null && keyword.trim().isNotEmpty) {
     // 画面描述语义搜：标签打不上（话术标签几乎没人打）时的第二条路
+    await stage.show('正在按画面描述找：${keyword.trim()}',
+        focus: _focus(unitIndex, shotIndex));
     filtered = await searchExcluding(
       fetch: (p) => service.searchByDescription(
         keyword: keyword.trim(),
@@ -191,6 +188,8 @@ Future<int> runCandidatesCommand({
       sink.writeln('标签收窄失败，按原样检索：$e');
     }
 
+    await stage.show('正在按这一镜的标签找素材',
+        focus: _focus(unitIndex, shotIndex));
     final byTags = await service.searchByTags(
       tagIds: effectiveIds,
       mode: tagMode,
@@ -213,6 +212,9 @@ Future<int> runCandidatesCommand({
             : shots[shotIndex].description) ??
         '';
     if (!usable && semantic.trim().isNotEmpty) {
+      await stage.show(
+          '标签命中 ${byTags.total} 条太宽，改用画面描述再找一轮',
+          focus: _focus(unitIndex, shotIndex));
       filtered = await searchExcluding(
         fetch: (p) => service.searchByDescription(
           keyword: semantic.trim(),
@@ -310,8 +312,21 @@ Future<int> runCandidatesCommand({
         },
     ],
   }, out: out);
-  // 结果出来了再停一拍：人得看见候选面板亮出来那一刻，
-  // 不然界面一闪就撤，等于没演
+  // 结果出来再报一句：这是人判断「它找的方向对不对」的第一个信号。
+  // 报完再撤——界面一闪就走等于没演
+  await stage.show(
+      filtered.items.isEmpty
+          ? '没找到素材，要换个说法再搜'
+          : '找到 ${filtered.total} 条，取回 ${filtered.items.length} 条备选',
+      focus: _focus(unitIndex, shotIndex));
   stage.end();
   return 0;
 }
+
+/// 这一步要界面看哪儿。四处都要这么指，抽出来免得写歪一处
+AgentFocus _focus(int unitIndex, int? shotIndex) => AgentFocus(
+      module: 'workbench',
+      unitIndex: unitIndex,
+      shotIndex: shotIndex,
+      panel: AgentPanel.findShots,
+    );

@@ -233,6 +233,14 @@ Future<int> runScriptCommand({
         // 先给参考镜抽本地首帧：**让 Agent 真的看见要复刻的是什么画面**，
         // 而不是只读一句别人总结的描述。抽过的直接用，不重跑 ffmpeg
         final refVideo = doc.lines[line - 1].reference?.videoPath;
+        if (refVideo != null && File(refVideo).existsSync()) {
+          await shotsStage.show('正在看参考片这一句的画面',
+              focus: AgentFocus(
+                module: 'director',
+                lineIndex: line - 1,
+                panel: AgentPanel.findShots,
+              ));
+        }
         final refSegs =
             doc.lines[line - 1].reference?.segments ?? const <(int, int)>[];
         final frames = <int, String>{};
@@ -307,6 +315,24 @@ Future<int> runScriptCommand({
           emitJson({...ctx, 'candidates': const []}, out: out);
           return 0;
         }
+        // **把过程说出来**：一条命令几秒就跑完，只在开头报一句的话，
+        // 人看到的是「跳过去 → 结束」，中间全黑。每一步都握手（界面展示完
+        // 才回执），人才跟得上——不是靠加延迟，是靠把在干什么说清楚
+        await shotsStage.show(
+          switch (mode) {
+            SearchMode.tags => '正在按标签找素材',
+            SearchMode.content => '正在按画面描述找：$searchKey',
+            SearchMode.voiceover => '正在按台词找：$searchKey',
+            SearchMode.name => '正在按名字找：$searchKey',
+            SearchMode.image => '正在拿这条素材的画面找相似的',
+          },
+          focus: AgentFocus(
+            module: 'director',
+            lineIndex: line - 1,
+            panel: AgentPanel.findShots,
+          ),
+        );
+
         final services = content ?? MiaoaContentService();
         final tagIds = await _tagIdsOf(
           tags: refShots.isEmpty
@@ -351,6 +377,18 @@ Future<int> runScriptCommand({
         // ResolvingProcessRunner 自己会把 ffprobe 解析到真实路径
         // （GUI 进程的 PATH 不含 Homebrew 目录，这一层早就处理过）
         final probe = CandidateProbe(run: const ResolvingProcessRunner().call);
+        // 搜完先说搜到多少——这是人判断「它找的方向对不对」的第一个信号
+        await shotsStage.show(
+          page.total <= 0
+              ? '没找到素材，要换个说法再搜'
+              : '找到 ${page.total} 条，正在逐条量时长',
+          focus: AgentFocus(
+            module: 'director',
+            lineIndex: line - 1,
+            panel: AgentPanel.findShots,
+          ),
+        );
+
         final specs = <int, CandidateSpec>{};
         await Future.wait([
           for (final m in page.items)
@@ -360,6 +398,15 @@ Future<int> runScriptCommand({
               if (spec != null) specs[m.id] = spec;
             }),
         ]);
+        await shotsStage.show(
+          '量完了：${specs.length}/${page.items.length} 条能用，正在挑',
+          focus: AgentFocus(
+            module: 'director',
+            lineIndex: line - 1,
+            panel: AgentPanel.findShots,
+          ),
+        );
+
         final narrowing =
             describeNarrowing(projectIds: projectIds, tagIds: tagIds);
         emitJson({
