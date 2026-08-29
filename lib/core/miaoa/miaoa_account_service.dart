@@ -64,7 +64,7 @@ String? maskAccount(String? raw) {
 String accountFailureGuidance(MiaoaFailureKind kind) => switch (kind) {
       MiaoaFailureKind.cliMissing =>
         '未检测到 miaoa 命令行工具。请先安装 miaoa CLI 并确认它在 PATH 中，'
-            '然后点「重试」。',
+            '然后点「重试」；命令行那头装好后重跑一次原来的命令即可。',
       MiaoaFailureKind.unauthorized =>
         'miaoa 登录已失效。请在终端运行 miaoa auth login 重新登录，再点「重试」。',
       MiaoaFailureKind.forbidden => '当前 miaoa 账号没有读取账号信息的权限，请联系 miaoa 管理员。',

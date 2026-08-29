@@ -95,7 +95,8 @@ abstract final class InstallRecipes {
     description: '安装视频处理组件（走清华镜像，约 2~5 分钟）',
     environment: Mirrors.brew,
     prerequisiteHint: '需要先装 Homebrew。请在终端执行官网给出的安装命令'
-        '（brew.sh），装好后回到这里点「重新检测」。',
+        '（brew.sh），装好后回到这里点「重新检测」；'
+            '命令行那头跑 ishkafel doctor 复查。',
   );
 
   /// miaoa CLI：官方安装脚本，**按平台下对应的二进制**
@@ -119,7 +120,8 @@ abstract final class InstallRecipes {
         '只有换配乐时才用得到）',
     environment: Mirrors.pypi,
     prerequisiteHint: '需要先装 uv（Python 工具管理器）。请在终端执行 '
-        'brew install uv，装好后回到这里点「重新检测」。',
+        'brew install uv，装好后回到这里点「重新检测」；'
+            '命令行那头跑 ishkafel doctor 复查。',
   );
 
   static const all = [ffmpeg, miaoa, audioSeparator];

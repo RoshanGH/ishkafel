@@ -136,8 +136,11 @@ class ExportRunner {
       }
     }
     if (missing.isNotEmpty) {
+      // **两边都要能照做**：这句话界面和命令行共用一份，只说「点按钮」
+      // 的话，命令行那头没有按钮可点（Agent 真机撞到过这类死路）
       return '${missing.join('、')} 选了音色但还没生成配音，'
-          '直接导出这几段会是原声。请先点「生成配音」';
+          '直接导出这几段会是原声。'
+          '在工作台上点「生成配音」，或者跑 ishkafel voice generate <任务>';
     }
     return null;
   }

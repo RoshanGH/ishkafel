@@ -92,7 +92,8 @@ ScriptPlanResult buildScriptTrackPlan(
         voiceOk != null &&
         !voiceOk(lineVo.audioPath)) {
       // 死链配音不进 EDL——那会静默播出一段没有声音的台词
-      skipped[i] = '配音文件丢失（点「重配」重新生成即可）';
+      skipped[i] = '配音文件丢失（在界面上点「重配」，'
+          '或跑 ishkafel script voice <任务> --line N 重新生成）';
       continue;
     }
     if (line.shots.isEmpty) {
