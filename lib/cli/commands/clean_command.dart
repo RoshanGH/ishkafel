@@ -69,11 +69,13 @@ Future<int> runCleanCommand({
     return 0;
   }
 
-  final removed = artifacts.delete(all);
+  // delete 返回的是**释放的字节数**，不是条数——字段名写成 removed 的话，
+  // 拿到 39485646 会被当成「删了三千九百万个文件」
+  final freedBytes = artifacts.delete(all);
   emitJson({
     'ok': true,
-    'removed': removed,
-    'freedMB': mb,
+    'removedItems': all.length,
+    'freedMB': (freedBytes / 1024 / 1024).round(),
     'next': '清完了',
   }, out: out);
   return 0;

@@ -65,6 +65,18 @@ void main() {
         reason: '活着的任务的东西一个都不能碰');
   });
 
+  test('报的是条数和释放的兆数，别把字节数当条数', () async {
+    final out = StringBuffer();
+    await runCleanCommand(
+        rest: const [], dataDir: dir, confirmed: true,
+        out: out, err: StringBuffer());
+
+    final json = decode(out);
+    expect(json['removedItems'], greaterThan(0));
+    expect(json['removedItems'], lessThan(100),
+        reason: '条数不该是个天文数字——那说明报的其实是字节数');
+  });
+
   test('没什么可清时明说，不装作干了活', () async {
     await runCleanCommand(
         rest: const [], dataDir: dir, confirmed: true,
