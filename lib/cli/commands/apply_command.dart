@@ -15,6 +15,7 @@ import 'analyze_command.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
+import '../../core/storage/task_media.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
@@ -154,11 +155,20 @@ Future<int> _applyWithLock({
   final picked = await collectPickedMaterials(
     candidateIds: used,
     known: task.pickedMaterials,
-    fetch: content.fetchById,
+    // 本地已经有这条素材时就不去问名字了：那是给人看的字段，
+    // 而每问一次就是一次网络往返（102 条素材实测差出几十秒）
+    fetch: (id) async =>
+        TaskMedia(dataDir: dataDir, taskId: task.id).localMaterial(id) != null
+            ? null
+            : content.fetchById(id),
     probeDurationMs: (id) async {
-      final m = await content.fetchById(id);
-      final spec =
-          await probe.probe(materialId: id, previewUrl: m?.previewUrl);
+      // 素材已经下到本地就读本地：联网量一条要一秒，一百多条就是一百多秒，
+      // 而且网络那条路会失败——失败了取段就退回快进
+      final local = TaskMedia(dataDir: dataDir, taskId: task.id)
+          .localMaterial(id);
+      final m = local != null ? null : await content.fetchById(id);
+      final spec = await probe.probe(
+          materialId: id, previewUrl: m?.previewUrl, localPath: local);
       return spec?.durationMs ?? 0;
     },
   );

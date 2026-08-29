@@ -12,6 +12,7 @@ import '../../features/picking/project_exclusion.dart';
 import '../../features/picking/tag_result_usability.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
+import '../../core/storage/task_media.dart';
 import '../candidate_context.dart';
 import '../cli_output.dart';
 
@@ -261,11 +262,16 @@ Future<int> runCandidatesCommand({
   // 时长要不要探：探了才知道「选它会变速多少」——那才是真正要判断的东西。
   // 以前一律不给，Agent 只能凭 description 猜，17 秒的坑位全靠赌
   final specs = <int, int>{};
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
   if (probeDurations) {
     final prober = probe ?? CandidateProbe();
     for (final c in filtered.items) {
       final spec =
-          await prober.probe(materialId: c.id, previewUrl: c.previewUrl);
+          // 本地已经有就读本地：联网量一条要一秒，一页 50 条就是一分钟
+          await prober.probe(
+              materialId: c.id,
+              previewUrl: c.previewUrl,
+              localPath: media.localMaterial(c.id));
       if (spec?.durationMs case final ms? when ms > 0) specs[c.id] = ms;
     }
   }

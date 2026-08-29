@@ -68,15 +68,16 @@ void main() {
         reason: '存个 0 进去，取段会以为它是 0 秒——那比没有更糟');
   });
 
-  test('取不到素材信息的不拦整批：能拿到的照样落下来', () async {
+  test('名字取不到、时长也量不到的，才真的没什么可留', () async {
     final picked = await collectPickedMaterials(
       candidateIds: {11, 12},
       known: const [],
       fetch: (id) async => id == 11 ? null : mat(id),
-      probeDurationMs: (_) async => 4000,
+      probeDurationMs: (id) async => id == 11 ? 0 : 4000,
     );
 
-    expect(picked.map((p) => p.id), [12]);
+    expect(picked.map((p) => p.id), [12],
+        reason: '11 既没名字也没时长，留一条空记录只会让人以为它是好的');
   });
 
   /// **不静默降级**：量不到时长的素材，取段会退回「整条压缩」——短镜头
@@ -103,6 +104,24 @@ void main() {
   test('没有短坑位时也不用提——那些镜头本来就不会变速', () {
     expect(trimUnavailableNotice(total: 102, withDuration: 90, shortSlots: 0),
         isNull);
+  });
+
+
+  /// 本地已经有素材文件时，**名字取不到也不该挡住时长**。
+  ///
+  /// 取段只要时长；名字和描述是给人看的。为了拿个名字每条都跑一次网络往返，
+  /// 102 条就是几十秒，而且网一断整批素材就没有时长——取段随之退回快进。
+  test('本地有文件时，网络取不到信息也要留住时长', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [],
+      fetch: (_) async => null, // 网络取不到
+      probeDurationMs: (_) async => 20000, // 但本地量得出时长
+    );
+
+    expect(picked, hasLength(1),
+        reason: '时长量到了就该留下——名字空着不影响取段，没时长才致命');
+    expect(picked.single.durationMs, 20000);
   });
 
 }

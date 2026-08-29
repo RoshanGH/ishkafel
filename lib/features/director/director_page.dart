@@ -2800,8 +2800,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           .where((m) => !used.contains(m.id) && m.previewUrl != null)
           .firstOrNull;
       if (pick == null) return false;
-      final spec = await services.probe
-          .probe(materialId: pick.id, previewUrl: pick.previewUrl);
+      // 本地已经有就读本地：联网量一条要一秒，而且会失败
+      final dir = ref.read(dataDirProvider);
+      final spec = await services.probe.probe(
+        materialId: pick.id,
+        previewUrl: pick.previewUrl,
+        localPath: dir == null
+            ? null
+            : TaskMedia(dataDir: dir, taskId: _task.id)
+                .localMaterial(pick.id),
+      );
       final shot = LineShot(
         materialId: pick.id,
         name: pick.name,

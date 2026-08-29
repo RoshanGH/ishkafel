@@ -116,4 +116,44 @@ void main() {
           DurationFit.within);
     });
   });
+
+  /// 素材已经下到本地了，量时长还去联网量签名 URL——一条要一秒，
+  /// 102 条就是一百多秒，而读本地文件只要 0.15 秒。
+  ///
+  /// 而且网络那条路还会失败（地址过期、网断），失败了取段就退回快进。
+  group('本地已经有的，就别再联网量', () {
+    test('给了本地路径就读本地，不碰网址', () async {
+      final asked = <String>[];
+      final probe = CandidateProbe(run: (bin, args) async {
+        asked.add(args.last);
+        return ProcessResult(
+            1, 0, 'width=1080\nheight=1920\nduration=5.042\n', '');
+      });
+
+      final spec = await probe.probe(
+        materialId: 1,
+        previewUrl: 'https://cdn/x.mov?sign=abc',
+        localPath: '/tmp/素材.mp4',
+      );
+
+      expect(spec?.durationMs, 5042);
+      expect(asked.single, '/tmp/素材.mp4',
+          reason: '本地文件就在那儿，联网量是白等一秒还可能失败');
+    });
+
+    test('本地没有才回落到签名地址', () async {
+      final asked = <String>[];
+      final probe = CandidateProbe(run: (bin, args) async {
+        asked.add(args.last);
+        return ProcessResult(
+            1, 0, 'width=1080\nheight=1920\nduration=5.042\n', '');
+      });
+
+      await probe.probe(
+          materialId: 2, previewUrl: 'https://cdn/y.mov', localPath: null);
+
+      expect(asked.single, 'https://cdn/y.mov');
+    });
+  });
+
 }

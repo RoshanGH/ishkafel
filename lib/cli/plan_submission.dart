@@ -377,15 +377,17 @@ Future<List<PickedMaterial>> collectPickedMaterials({
       out.add(hit);
       continue;
     }
-    // 一条取不到不拦整批：能拿到的照样落下来，取段对它们照样生效
+    // **时长比名字要紧**：取段只认时长，名字和描述是给人看的。
+    // 名字取不到（网断、地址过期）不该连时长一起丢——丢了取段就退回快进
     final material = await fetch(id);
-    if (material == null) continue;
     final ms = await probeDurationMs(id);
+    // 两样都没有才真的没什么可留：留一条空记录只会让人以为它是好的
+    if (material == null && ms <= 0) continue;
     out.add(PickedMaterial(
       id: id,
-      name: material.name,
-      voiceover: material.voiceover,
-      sceneDescription: material.sceneDescription,
+      name: material?.name ?? '素材 $id',
+      voiceover: material?.voiceover ?? '',
+      sceneDescription: material?.sceneDescription ?? '',
       thumbPath: hit?.thumbPath,
       // 量不到就留空。存个 0 进去，取段会以为它是 0 秒——那比没有更糟
       durationMs: ms > 0 ? ms : null,

@@ -393,7 +393,11 @@ Future<int> runScriptCommand({
         await Future.wait([
           for (final m in page.items)
             probe
-                .probe(materialId: m.id, previewUrl: m.previewUrl)
+                .probe(
+                    materialId: m.id,
+                    previewUrl: m.previewUrl,
+                    localPath: TaskMedia(dataDir: dataDir, taskId: task.id)
+                        .localMaterial(m.id))
                 .then((spec) {
               if (spec != null) specs[m.id] = spec;
             }),

@@ -48,10 +48,18 @@ class CandidateProbe {
   Future<CandidateSpec?> probe({
     required int materialId,
     required String? previewUrl,
+
+    /// 这条素材在本地的路径。**有就读本地**：一条素材联网量要一秒，
+    /// 一百多条就是一百多秒，而读本地文件只要 0.15 秒。网络那条路还会失败
+    /// （地址过期、网断），而量不到时长会让取段退回快进
+    String? localPath,
   }) async {
     final hit = _cache[materialId];
     if (hit != null) return hit;
-    if (previewUrl == null || previewUrl.isEmpty) return null;
+    final source = (localPath != null && localPath.isNotEmpty)
+        ? localPath
+        : previewUrl;
+    if (source == null || source.isEmpty) return null;
 
     try {
       final result = await run(ffprobeBinary, [
@@ -65,7 +73,7 @@ class CandidateProbe {
         'format=duration',
         '-of',
         'default=nw=1',
-        previewUrl,
+        source,
       ]);
       if (result.exitCode != 0) {
         AppLog.warn('候选素材规格探测失败（id=$materialId，exit=${result.exitCode}）');
