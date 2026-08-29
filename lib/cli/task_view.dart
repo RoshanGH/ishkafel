@@ -33,6 +33,18 @@ Map<String, dynamic> taskToJson(RenewTask task) {
             for (var i = 0; i < task.replacements!.length; i++)
               _replacementToJson(i, task.replacements![i]),
           ],
+    // 已选素材的时长。**取段靠它**：20 秒的素材塞进 0.5 秒的坑位，
+    // 得先知道它是 20 秒才知道该截一段而不是压成 40 倍快放。
+    // 不报出来的话，Agent 没法确认取段到底生没生效，只能盲猜
+    'pickedMaterials': {
+      'count': task.pickedMaterials.length,
+      'withDuration':
+          task.pickedMaterials.where((m) => (m.durationMs ?? 0) > 0).length,
+      'items': [
+        for (final m in task.pickedMaterials)
+          {'id': m.id, 'name': m.name, 'durationMs': m.durationMs},
+      ],
+    },
     'exports': [
       for (final e in task.exports)
         {

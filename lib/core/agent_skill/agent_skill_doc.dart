@@ -444,6 +444,16 @@ ishkafel candidates <task> --unit 3 --shot 2 --probe
 默认不探是因为一页 50 条各跑一次 ffprobe，慢到人以为卡死了。
 **要下判断的那一镜才加 `--probe`**，不必每次都带。
 
+**提交完方案，确认取段生效了**：
+
+```bash
+ishkafel task <task>   # 看 pickedMaterials.withDuration
+```
+
+短坑位配长素材时，软件会**从素材里截一段**而不是整条压缩成快进——
+但这要靠素材时长才算得出来。`withDuration` 明显小于 `count` 的话，
+那些量不到时长的镜头会退回整条压缩，短镜头就是一串快进。
+
 **光看数字不够的时候就亲眼看**：
 
 ```bash

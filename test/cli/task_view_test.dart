@@ -86,4 +86,18 @@ void main() {
     final json = taskToJson(taskWith());
     expect(json['exports'], isA<List>());
   });
+
+  /// 取段全靠素材时长（20 秒的素材塞进 0.5 秒坑位，得先知道它是 20 秒）。
+  /// 不把这个数报出来，Agent 提交完方案根本没法确认取段生没生效——
+  /// 自查时我自己就对着一个不存在的字段猜了半天
+  test('已选素材要报出时长，Agent 才能确认取段生效了', () {
+    final json = taskToJson(taskWith(units: const []));
+
+    expect(json['pickedMaterials'], isA<Map>());
+    final pm = json['pickedMaterials'] as Map;
+    expect(pm.containsKey('count'), isTrue);
+    expect(pm.containsKey('withDuration'), isTrue,
+        reason: '光有条数不够——有几条真的量到了时长才是关键');
+  });
+
 }
