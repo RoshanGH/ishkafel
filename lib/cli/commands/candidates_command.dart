@@ -15,6 +15,7 @@ import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
 import '../../core/storage/task_media.dart';
 import '../candidate_context.dart';
+import '../shot_frame.dart';
 import '../cli_output.dart';
 
 /// `ishkafel candidates [task] --unit [i] --shot/--keyword 等（详见用法行）
@@ -284,6 +285,18 @@ Future<int> runCandidatesCommand({
       ? units[unitIndex].endMs - units[unitIndex].startMs
       : shots[shotIndex].endMs - shots[shotIndex].startMs;
 
+  // 原片这一镜长什么样：抽一张本地图。**人点开那一镜就看见了**，
+  // 而 Agent 以前只拿得到一句文字描述，得自己再跑一次 peek
+  final slot = shotIndex == null
+      ? (units[unitIndex].startMs, units[unitIndex].endMs)
+      : (shots[shotIndex].startMs, shots[shotIndex].endMs);
+  final sourceFrame = await shotFramePath(
+    dataDir: dataDir,
+    sourcePath: task.sourcePath,
+    startMs: slot.$1,
+    endMs: slot.$2,
+  );
+
   emitJson({
     'context': shotIndex == null
         ? {
@@ -293,6 +306,8 @@ Future<int> runCandidatesCommand({
             'unitTags': units[unitIndex].tags,
           }
         : shotContext(task: task, unitIndex: unitIndex, shotIndex: shotIndex),
+    // 要复刻的就是这一帧——**先看它，再看候选像不像**
+    'sourceFramePath': sourceFrame,
     'total': filtered.total,
     'excludedProjects': excluded.isEmpty ? null : excluded.toList(),
     'excludedCount': excluded.isEmpty ? null : filtered.excludedCount,

@@ -501,7 +501,7 @@ ishkafel peek --video <素材或成片路径> --ats 0,30000,70000
 |---|---|
 | 点开某条候选看看 | `ishkafel peek <任务> --materials <id,id>` → `framePath` |
 | 看这条候选够不够长、会不会变速 | `ishkafel candidates … --probe` → `durationMs` / `speedIfPicked` |
-| 看原片这一镜长什么样 | `ishkafel peek --video <原片> --at <这一镜的 startMs>` |
+| 看原片这一镜长什么样 | `candidates` 直接给 `sourceFramePath`——**要复刻的就是这一帧** |
 | 看导出来的成片对不对 | `ishkafel peek --video <成片> --ats 0,30000,70000` |
 | 看这一镜的画面描述、标签、前后文 | `candidates` 的 `context` |
 
@@ -617,11 +617,11 @@ ishkafel voice generate <task>                   # 真正合成，按字符计�
 
 ```bash
 ishkafel peek <任务> --materials <你给它挑的那条 id>
-ishkafel peek --video <原片> --at <这一镜的 startMs>
 ```
 
-两张图摆在一起，多半一眼就知道差在哪——是场景不对、人物不对，还是
-镜别不对。带着这个再去搜，比盲目换词快得多。
+原片那一帧不用另外抽——`candidates` 的 `sourceFramePath` 就是它。
+两张图摆在一起，多半一眼就知道差在哪：是场景不对、人物不对，还是镜别不对。
+带着这个再去搜，比盲目换词快得多。
 
 ---
 
