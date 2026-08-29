@@ -167,12 +167,30 @@ Future<int> _applyWithLock({
   // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
   await repository.save(task.copyWith(
       replacements: replacements, pickedMaterials: picked));
+  // 短坑位有几个：取段就是为它们做的，量不到时长时这些镜头会退回快进
+  final shortSlots = [
+    for (final u in task.units ?? const [])
+      for (final shot in u.shots)
+        if (shot.endMs - shot.startMs < 1500) shot,
+  ].length;
+  final notice = trimUnavailableNotice(
+    total: picked.length,
+    withDuration: picked.where((m) => (m.durationMs ?? 0) > 0).length,
+    shortSlots: shortSlots,
+  );
+
   emitJson({
     'ok': true,
     'plans': [
       for (final plan in validation.plans)
         {'name': plan.name, 'units': plan.units.length},
     ],
+    'materials': {
+      'count': picked.length,
+      'withDuration': picked.where((m) => (m.durationMs ?? 0) > 0).length,
+    },
+    // 影响成片的降级要说出来，不能等人拿到片子才发现有几镜在快放
+    if (notice != null) 'notice': notice,
   }, out: out);
   return 0;
 }

@@ -78,4 +78,31 @@ void main() {
 
     expect(picked.map((p) => p.id), [12]);
   });
+
+  /// **不静默降级**：量不到时长的素材，取段会退回「整条压缩」——短镜头
+  /// 又变回十几二十倍快进。这是影响成片的降级，必须说出来，
+  /// 不能让人拿到片子才发现有几镜在快放。
+  test('有素材量不到时长时，提交要点名说出来', () {
+    final notice = trimUnavailableNotice(
+      total: 102,
+      withDuration: 99,
+      shortSlots: 13,
+    );
+
+    expect(notice, isNotNull);
+    expect(notice!, contains('3'), reason: '要说清有几条没量到');
+    expect(notice, contains('快'), reason: '要说清后果是什么，不是只报个数');
+  });
+
+  test('全都量到了就不啰嗦', () {
+    expect(
+        trimUnavailableNotice(total: 102, withDuration: 102, shortSlots: 13),
+        isNull);
+  });
+
+  test('没有短坑位时也不用提——那些镜头本来就不会变速', () {
+    expect(trimUnavailableNotice(total: 102, withDuration: 90, shortSlots: 0),
+        isNull);
+  });
+
 }

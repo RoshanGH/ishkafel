@@ -393,3 +393,20 @@ Future<List<PickedMaterial>> collectPickedMaterials({
   }
   return List.unmodifiable(out);
 }
+
+/// 有素材量不到时长时，说清后果。全都量到、或压根没有短坑位时返回 null。
+///
+/// **不静默降级**：取段要靠素材时长，量不到就退回「整条压缩」——短镜头
+/// 又变回十几二十倍快进。这是影响成片的降级，不能等人拿到片子才发现。
+String? trimUnavailableNotice({
+  required int total,
+  required int withDuration,
+  required int shortSlots,
+}) {
+  final missing = total - withDuration;
+  if (missing <= 0 || shortSlots <= 0) return null;
+  return '有 $missing 条素材量不出时长（可能已被删或地址失效）。'
+      '这条片子有 $shortSlots 个不到 1.5 秒的坑位——'
+      '碰上这些素材时只能整条压缩进去，画面会明显快放。'
+      '用 ishkafel task 看 pickedMaterials 里哪几条缺时长，换掉它们';
+}
