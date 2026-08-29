@@ -68,7 +68,7 @@ import 'export_readiness.dart';
 import '../../core/jianying/jianying_plan.dart';
 import '../../core/jianying/jianying_writer.dart';
 import 'script_export_dialog.dart';
-import 'subtitle_style_sheet.dart';
+import '../shared/subtitle_style_sheet.dart';
 import 'voice_select_dialog.dart';
 
 /// 编导台——「脚本成片」的工作页（对仗审片台）。

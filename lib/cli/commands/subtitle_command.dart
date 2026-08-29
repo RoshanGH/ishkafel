@@ -1,0 +1,98 @@
+import 'dart:io';
+
+import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_seq.dart';
+import '../../core/subtitle/subtitle_style.dart';
+import '../cli_output.dart';
+
+/// `ishkafel subtitle <任务> [--preset blurBox] [--bottom 0.22] [--font 0.034]`
+///
+/// **主要用途是遮挡素材自带的烧录字幕。** 素材库里不少分镜画面里本来就烧着
+/// 别家品牌的字，而画面描述里一个字都看不出来——真机上撞过：描述写
+/// 「成人给小孩按摩额头」，画面底部烧着「冰冰凉凉的好舒服呀」。默认的白字
+/// 黑描边盖不住它，成片上两行字打架，片子直接废。
+///
+/// 不给参数就报现状。
+Future<int> runSubtitleCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String? preset,
+  String? bottomRatio,
+  String? fontRatio,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel subtitle <任务 id> '
+        '[--preset whiteOutline|whiteBox|yellowOutline|blurBox] '
+        '[--bottom 0.22] [--font 0.034]');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+
+  var style = task.subtitle;
+  var changed = false;
+
+  if (preset != null) {
+    final found = SubtitlePreset.values
+        .where((p) => p.name.toLowerCase() == preset.trim().toLowerCase())
+        .firstOrNull;
+    if (found == null) {
+      // 只说「无效」等于让人自己猜。四个名字就四个，直接列出来
+      sink.writeln('认不出这个预设：$preset。只有这四个：'
+          '${SubtitlePreset.values.map((p) => p.name).join(' / ')}');
+      return exitBadUsage;
+    }
+    style = style.copyWith(preset: found);
+    changed = true;
+  }
+
+  if (bottomRatio != null) {
+    final v = double.tryParse(bottomRatio.trim());
+    if (v == null || v <= 0 || v >= 1) {
+      sink.writeln('--bottom 要 0~1 之间的小数（字幕基线距画面底部的比例，'
+          '0.22 大约是竖屏底部安全区上沿）');
+      return exitBadUsage;
+    }
+    style = style.copyWith(bottomRatio: v);
+    changed = true;
+  }
+
+  if (fontRatio != null) {
+    final v = double.tryParse(fontRatio.trim());
+    if (v == null || v <= 0 || v >= 1) {
+      sink.writeln('--font 要 0~1 之间的小数（字号占画面高度的比例，'
+          '0.034 在 1920 高下约 65px）');
+      return exitBadUsage;
+    }
+    style = style.copyWith(fontRatio: v);
+    changed = true;
+  }
+
+  if (changed) {
+    await repository
+        .save(task.copyWith(subtitle: style, updatedAt: DateTime.now()));
+  }
+
+  emitJson({
+    'taskId': task.id,
+    'preset': style.preset.name,
+    'bottomRatio': style.bottomRatio,
+    'fontRatio': style.fontRatio,
+    'presets': [
+      for (final p in SubtitlePreset.values) p.name,
+    ],
+    'note': '素材画面里自带烧录字幕时，whiteOutline（白字黑描边）盖不住它——'
+        '原字幕会从描边缝里透出来，成片上两行字打架。'
+        'whiteBox（半透明黑底条）和 blurBox（毛玻璃）能盖住。'
+        '但底条的宽窄是按新字幕的文本框算的：原字幕比新字幕长、'
+        '或者位置更高时仍然盖不全，那种素材只能换掉',
+  }, out: out);
+  return 0;
+}

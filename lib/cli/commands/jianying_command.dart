@@ -105,7 +105,7 @@ Future<int> runJianyingCommand({
     final result = await JianyingWriter(sourceOf: (_) => null).writePlan(
       plan,
       taskName: '#${task.seq ?? ''} ${task.name}'.trim(),
-      subtitle: const SubtitleStyle(),
+      subtitle: task.subtitle,
       onProgress: (done, total, what) {
         sink.writeln('[$done/$total] $what');
         stage.heartbeat('生成剪映草稿：$what',

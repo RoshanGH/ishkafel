@@ -154,8 +154,10 @@ Future<void> main(List<String> args) async {
       // （工具没装时 vocalsOf 一律返回 null，界面据此如实说明）
       materialSeparatorProvider.overrideWithValue(
           (taskId, path) => materialVocals(dataDir, taskId).vocalsOf(path)),
-      exportRunnerFactoryProvider.overrideWithValue((taskId) => ExportRunner(
+      exportRunnerFactoryProvider
+          .overrideWithValue((taskId, subtitle) => ExportRunner(
             run: const ResolvingProcessRunner().call,
+            subtitleStyle: subtitle,
             workDir: Directory(p.join(dataDir.path, 'export_work', taskId)),
             resolveBgm: bgmCache(dataDir, taskId).fetch,
             // 整体替换的段落铺了配乐时，用素材的纯人声——否则素材自带的

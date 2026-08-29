@@ -21,12 +21,14 @@ import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/audio/bgm_plan.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
+import '../../core/subtitle/subtitle_style.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/replacement/replacement_plan.dart';
 
 /// 造一个能干活的导出器（真实 ffmpeg + 真实下载）。
 /// 缺省为 null，由 main.dart 按数据目录装配；测试注入假实现。
-typedef ExportRunnerFactory = ExportRunner Function(String taskId);
+typedef ExportRunnerFactory = ExportRunner Function(
+    String taskId, SubtitleStyle subtitle);
 
 final exportRunnerFactoryProvider =
     Provider<ExportRunnerFactory?>((ref) => null);
@@ -48,6 +50,10 @@ Future<void> showExportDialog(
 
   /// 句级转写：镜头替换的切片上重渲台词字幕用（空 = 不渲）
   List<AsrSentence> subtitleSentences = const [],
+
+  /// 字幕烧成什么样。**素材自带烧录字幕时人会切成底条/毛玻璃来遮挡**，
+  /// 不传下去的话那个设置等于白设
+  SubtitleStyle subtitleStyle = SubtitleStyle.standard,
   required Directory outputDir,
 
   /// 让用户挑一个目录；返回 null 表示他取消了。注入而不是内建：单测不弹系统框
@@ -78,6 +84,7 @@ Future<void> showExportDialog(
         taskName: taskName,
         sourcePath: sourcePath,
         subtitleSentences: subtitleSentences,
+        subtitleStyle: subtitleStyle,
         units: units,
         replacements: replacements,
         bgm: bgm,
@@ -132,6 +139,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final VoicePlan voices;
   final String? vocalsPath;
   final List<AsrSentence> subtitleSentences;
+  final SubtitleStyle subtitleStyle;
   final Directory outputDir;
   final Future<String?> Function() pickDirectory;
   final Future<void> Function(String path) revealDirectory;
@@ -159,6 +167,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.voices,
     required this.vocalsPath,
     this.subtitleSentences = const [],
+    this.subtitleStyle = SubtitleStyle.standard,
     required this.outputDir,
     required this.pickDirectory,
     required this.revealDirectory,
@@ -215,7 +224,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     });
     try {
       final chosen = _selected;
-      final runner = factory(widget.taskId);
+      final runner = factory(widget.taskId, widget.subtitleStyle);
       // 挑了几条就只导那几条，不再重新做笛卡尔积
       final results = _pickCount == null
           ? await runner.exportAll(

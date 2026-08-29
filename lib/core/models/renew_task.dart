@@ -3,6 +3,7 @@ import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../ai/ai_usage.dart';
 import '../audio/bgm_plan.dart';
+import '../subtitle/subtitle_style.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/picked_material.dart';
 import '../script/script_doc.dart';
@@ -145,6 +146,16 @@ class RenewTask {
   /// 不再改它。
   final int? firstReadyMs;
 
+  /// 烧进成片的字幕长什么样。
+  ///
+  /// **两个预设是用来遮挡的**：素材自带烧录字幕时（库里不少见，而且画面
+  /// 描述里一个字都看不出来），默认的白字黑描边盖不住，原字幕会从描边缝里
+  /// 透出来，成片上就是两行字打架。`whiteBox`（半透明黑底条）和
+  /// `blurBox`（毛玻璃）能盖住。
+  ///
+  /// 以前这条线写死用标准样式——人和 Agent 都没得选，遇到这种素材无解。
+  final SubtitleStyle subtitle;
+
   /// 这个任务累计花掉的 AI 用量。**会一直涨**：在工作台里每重打一次标、
   /// 每复核一次切点都记进来。见 [AiUsage]。
   final AiUsage aiUsage;
@@ -178,6 +189,7 @@ class RenewTask {
     this.voices = VoicePlan.empty,
     this.firstReadyMs,
     this.aiUsage = AiUsage.empty,
+    this.subtitle = SubtitleStyle.standard,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
         pickedMaterials = List.unmodifiable(pickedMaterials),
@@ -259,6 +271,7 @@ class RenewTask {
     VoicePlan? voices,
     int? firstReadyMs,
     AiUsage? aiUsage,
+    SubtitleStyle? subtitle,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -301,6 +314,7 @@ class RenewTask {
         voices: voices ?? this.voices,
         firstReadyMs: firstReadyMs ?? this.firstReadyMs,
         aiUsage: aiUsage ?? this.aiUsage,
+        subtitle: subtitle ?? this.subtitle,
       );
 
   Map<String, dynamic> toJson() => {
@@ -333,6 +347,7 @@ class RenewTask {
         'pickedMaterials': pickedMaterials.map((m) => m.toJson()).toList(),
         'exports': exports.map((e) => e.toJson()).toList(),
         'bgm': bgm.toJson(),
+        'subtitle': subtitle.toJson(),
         'voices': voices.toJson(),
         'firstReadyMs': firstReadyMs,
         'aiUsage': aiUsage.toJson(),
@@ -382,6 +397,8 @@ class RenewTask {
         bgm: BgmPlan.fromJson(json['bgm'])
             .migrateShotsToUnits(units ?? const []),
         voices: VoicePlan.fromJson(json['voices']),
+        // 老任务没有这个字段，退回标准样式
+        subtitle: SubtitleStyle.fromJson(json['subtitle']),
         firstReadyMs:
             json['firstReadyMs'] is num ? (json['firstReadyMs'] as num).toInt() : null,
         aiUsage: AiUsage.fromJson(json['aiUsage']),

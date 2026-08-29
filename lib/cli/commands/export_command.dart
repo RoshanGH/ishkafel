@@ -143,6 +143,9 @@ Future<int> runExportCommand({
 
   final runner = ExportRunner(
     run: const ResolvingProcessRunner().call,
+    // 字幕样式跟任务走：素材自带烧录字幕时人会把它切成底条/毛玻璃来遮挡，
+    // 这里吃默认值的话那个设置等于白设
+    subtitleStyle: task.subtitle,
     workDir: Directory(p.join(dataDir.path, 'export_work', id)),
     resolveBgm: bgmCache(dataDir, task.id).fetch,
     probeDurationMs: (path) async =>

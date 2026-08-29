@@ -74,6 +74,7 @@ import '../../core/subtitle/subtitle_style.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../shared/long_task_dialog.dart';
+import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
@@ -1225,6 +1226,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
   bool _jianyingBusy = false;
 
+  /// 改字幕样式。**主要用途是遮挡**：素材自带烧录字幕时（库里不少见，
+  /// 而且画面描述里一个字都看不出来），默认的白字黑描边盖不住，
+  /// 原字幕会从描边缝里透出来；切成底条或毛玻璃才能盖住。
+  Future<void> _editSubtitleStyle() async {
+    final picked =
+        await showSubtitleStyleSheet(context, initial: _task.subtitle);
+    if (picked == null || !mounted) return;
+    final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
+    setState(() => _task = next);
+    await ref.read(taskRepositoryProvider).save(next);
+  }
+
   /// 还有几条素材没落到本地、其中几条是彻底下不下来的。
   ///
   /// 画面素材与配乐用同一把闸：任何一样没齐都不给导出、也不给写剪映工程
@@ -1289,7 +1302,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       final result = await JianyingWriter(sourceOf: (_) => null).writePlan(
         plan,
         taskName: '#${task.seq ?? ''} ${task.name}'.trim(),
-        subtitle: const SubtitleStyle(),
+        subtitle: task.subtitle,
         onProgress: (done, total, what) =>
             progress.value = LongTaskProgress(
                 '$what（$done/$total）', total <= 0 ? null : done / total),
@@ -1405,6 +1418,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       vocalsPath: _task.vocalsPath,
       // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
       subtitleSentences: _task.asrSentences ?? const [],
+      subtitleStyle: _task.subtitle,
       // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片。
       // 但临时目录不算数：CLI 测试之类导进 /tmp 的一次性位置被记成默认，
       // 下次成片就会落进重启即清的地方（真机踩过）
@@ -1757,6 +1771,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           task: _task,
           onBack: _handleBackRequest,
           onEditTagGroups: _isEditable ? _editTagGroups : null,
+          onEditSubtitle: _isEditable ? _editSubtitleStyle : null,
         ),
         body: Column(
           children: [

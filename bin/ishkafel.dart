@@ -11,6 +11,7 @@ import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/jianying_command.dart';
 import 'package:ishkafel/cli/commands/peek_command.dart';
+import 'package:ishkafel/cli/commands/subtitle_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
@@ -65,6 +66,11 @@ Future<void> main(List<String> args) async {
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
+    ..addOption('preset',
+        help: 'subtitle 用：字幕样式预设。'
+            'whiteBox / blurBox 能盖住素材自带的烧录字幕')
+    ..addOption('bottom', help: 'subtitle 用：字幕距画面底部的比例（如 0.22）')
+    ..addOption('font', help: 'subtitle 用：字号占画面高度的比例（如 0.034）')
     ..addFlag('probe',
         help: 'candidates 用：探一下每条候选多长、选它会变速多少（慢一些）')
     ..addOption('video', help: 'peek 用：要看哪个视频文件')
@@ -131,6 +137,13 @@ Future<void> main(List<String> args) async {
       ),
     'doctor' => await runDoctorCommand(
         dataDir: dataDir, out: stdout, err: stderr),
+    'subtitle' => await runSubtitleCommand(
+        rest: rest,
+        dataDir: dataDir,
+        preset: parsed['preset'] as String?,
+        bottomRatio: parsed['bottom'] as String?,
+        fontRatio: parsed['font'] as String?,
+      ),
     'peek' => await runPeekCommand(
         rest: rest,
         dataDir: dataDir,

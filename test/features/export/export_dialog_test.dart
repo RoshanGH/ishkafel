@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/models/export_record.dart';
 import 'package:ishkafel/core/export/export_runner.dart';
+import 'package:ishkafel/core/subtitle/subtitle_style.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
@@ -65,7 +66,7 @@ Future<void> _open(
   });
 
   final resolved = factory ??
-      (String taskId) => ExportRunner(
+      (String taskId, SubtitleStyle _) => ExportRunner(
             run: _Ffmpeg().call,
             workDir: work,
             fetchMaterial: (id) async {
@@ -160,7 +161,7 @@ void main() {
         UnitReplacement.whole(const [11, 12]),
         UnitReplacement.keepOriginal(),
       ],
-      factory: (taskId) => ExportRunner(
+      factory: (taskId, _) => ExportRunner(
         run: _Ffmpeg(failOn: 'm12.mp4').call,
         workDir: work,
         fetchMaterial: (id) async {
@@ -284,7 +285,7 @@ void main() {
           UnitReplacement.whole(const [11, 12]),
           UnitReplacement.keepOriginal(),
         ],
-        factory: (taskId) => ExportRunner(
+        factory: (taskId, _) => ExportRunner(
           run: (binary, args) async {
             // 第二条的素材取不到
             await File(args.last).writeAsString('out');
