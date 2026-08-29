@@ -14,6 +14,7 @@ import 'player_panel.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/replacement/replacement_plan.dart';
+import 'agent_focus_request.dart';
 import 'side_panel_tabs.dart';
 import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
@@ -38,6 +39,13 @@ import 'workbench_shortcuts.dart';
 /// 也一并搬入，`WorkbenchPage` 不再需要关心它。
 class WorkbenchBody extends StatefulWidget {
   final SegmentationEditorController editor;
+
+  /// Agent 这一步在看哪儿。**可视模式的跟随就靠它**：Agent 说它在挑
+  /// U3S2 的素材，界面要像人自己点过去那样——选中那一镜、右栏切到
+  /// 「替换素材」。只挪播放头的话，人看到的还是「后台改数据、前台显示结果」。
+  ///
+  /// null = 没人在跟（人自己在操作时界面不许自作主张乱跳）
+  final AgentFocusRequest? agentFocus;
 
   /// 空白任务：分子手动加。有原片的任务为 null（分子是分析切出来的）
   final VoidCallback? onAddUnit;
@@ -96,6 +104,7 @@ class WorkbenchBody extends StatefulWidget {
   const WorkbenchBody({
     super.key,
     required this.editor,
+    this.agentFocus,
     this.onAddUnit,
     this.unitTagEditor,
     this.onDeleteUnit,
@@ -128,6 +137,35 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   /// 右栏当前视图。切分与选材在同一个工作台里交替进行，不再是两个页面。
   SidePanelTab _sideTab = SidePanelTab.inspector;
 
+  /// 上一次跟过的那一步。同一步重复上报（心跳）不重跟——
+  /// 否则选中框会闪、滚动位置会跳，人反而看不清
+  int? _followedStep;
+
+  /// 跟着 Agent 走：**走人自己点过去时走的同一条路**（[_jumpToReplacement]），
+  /// 不另造一套只读的展示——那样人看到的动作和自己操作时不一样，
+  /// 反而更不放心。
+  void _followAgent() {
+    final focus = widget.agentFocus;
+    if (focus == null || focus.step == _followedStep) return;
+    _followedStep = focus.step;
+    final unit = focus.unitIndex;
+    if (unit == null || unit < 0 || unit >= widget.editor.units.length) return;
+
+    // 挑素材就切到候选面板；别的事（分析、改切分）留在属性页
+    if (focus.wantsCandidates) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _jumpToReplacement(unit, focus.shotIndex);
+      });
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.editor.select(focus.shotIndex == null
+          ? EditorSelection.unit(unit)
+          : EditorSelection.shot(unit, focus.shotIndex!));
+    });
+  }
+
   /// 点了时间线上那个数字：选中那一段并把右栏切到「替换素材」。
   ///
   /// 徽标只告诉用户「这儿挑了 3 条」，看不到是哪三条；点它直接落到那一段的
@@ -149,6 +187,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   void initState() {
     super.initState();
     widget.editor.addListener(_reportBlockedEdit);
+    _followAgent();
   }
 
   @override
@@ -158,6 +197,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
       old.editor.removeListener(_reportBlockedEdit);
       widget.editor.addListener(_reportBlockedEdit);
     }
+    _followAgent();
   }
 
   @override

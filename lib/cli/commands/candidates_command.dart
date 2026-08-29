@@ -10,6 +10,8 @@ import '../../features/picking/tag_hit_probe.dart';
 import '../../features/picking/tag_query_narrowing.dart';
 import '../../features/picking/project_exclusion.dart';
 import '../../features/picking/tag_result_usability.dart';
+import '../../core/storage/agent_presence.dart';
+import '../agent_stage.dart';
 import '../candidate_context.dart';
 import '../cli_output.dart';
 
@@ -39,6 +41,10 @@ Future<int> runCandidatesCommand({
   /// 默认不探：一页 50 条各跑一次 ffprobe，慢到人会以为卡死了
   bool probeDurations = false,
   CandidateProbe? probe,
+
+  /// 可视模式：把软件拉起来，选中这一镜、右栏切到「替换素材」，
+  /// 让人看得见 Agent 在挑哪一镜
+  bool? visual,
   int page = 1,
   String tagMode = 'or',
   int pageSize = 50,
@@ -92,6 +98,25 @@ Future<int> runCandidatesCommand({
         '项目 id 在 `ishkafel task <任务>` 的 project 字段里');
     return exitBadUsage;
   }
+
+  // 挑素材是**最该被看见的一步**——人要看着它挑哪一镜、挑出了什么。
+  // 只有这一步和提交方案是真正在做决策的地方
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+  );
+  await stage.begin(
+    shotIndex == null
+        ? '正在给 U${unitIndex + 1} 找素材'
+        : '正在给 U${unitIndex + 1}S${shotIndex + 1} 找素材',
+    focus: AgentFocus(
+      module: 'workbench',
+      unitIndex: unitIndex,
+      shotIndex: shotIndex,
+      panel: AgentPanel.findShots,
+    ),
+  );
 
   final service = contentService ?? MiaoaContentService();
   final projectIds = [?task.project?.id];
@@ -285,5 +310,8 @@ Future<int> runCandidatesCommand({
         },
     ],
   }, out: out);
+  // 结果出来了再停一拍：人得看见候选面板亮出来那一刻，
+  // 不然界面一闪就撤，等于没演
+  stage.end();
   return 0;
 }

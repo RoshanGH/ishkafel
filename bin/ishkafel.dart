@@ -230,6 +230,7 @@ Future<void> main(List<String> args) async {
         keyword: parsed['keyword'] as String?,
         excludeProjects: parsed['exclude-projects'] as String?,
         probeDurations: parsed['probe'] as bool,
+        visual: parsed['visual'] as bool,
         page: int.tryParse(parsed['page'] as String? ?? '') ?? 1,
         tagMode: parsed['tag-mode'] as String,
       ),

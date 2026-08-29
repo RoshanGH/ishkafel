@@ -73,6 +73,7 @@ import '../../core/jianying/renew_jianying_plan.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import 'agent_focus_request.dart';
 import '../shared/long_task_dialog.dart';
 import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/task_lock.dart';
@@ -227,8 +228,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       final now =
           readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
       final was = _agent;
+      // 连镜头和面板一起比：以前只比单元，Agent 从 U3S2 挪到 U3S5
+      // 界面一动不动——人看到的是「它卡住了」
       if (was?.action == now?.action &&
           was?.focus?.unitIndex == now?.focus?.unitIndex &&
+          was?.focus?.shotIndex == now?.focus?.shotIndex &&
+          was?.focus?.panel == now?.focus?.panel &&
           (was == null) == (now == null)) {
         return;
       }
@@ -245,6 +250,22 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         });
       }
     });
+  }
+
+  /// Agent 这一步要界面跟到哪儿。null = 没人在跟。
+  ///
+  /// **「该不该切到候选面板」在这儿判一次**：`findShots` 是人点「添加分镜」
+  /// 弹出来的那个面板，Agent 挑素材时报的就是它——切过去人才看得见它在挑
+  /// 什么，而不是只看到播放头跳一下
+  AgentFocusRequest? get _agentFocusRequest {
+    final focus = _agent?.focus;
+    if (_agent == null || focus == null) return null;
+    return AgentFocusRequest(
+      step: _agent!.step,
+      unitIndex: focus.unitIndex,
+      shotIndex: focus.shotIndex,
+      wantsCandidates: focus.panel == AgentPanel.findShots,
+    );
   }
 
   /// 把播放头挪到第 [index] 个单元的起点——工作台是时间线式的，
@@ -1801,6 +1822,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               ),
             Expanded(
               child: WorkbenchBody(
+                // Agent 在看哪儿，界面就跟到哪儿——像人自己点过去那样
+                agentFocus: _agentFocusRequest,
                 // 整体替换后这一段在成片里多长——时间线上标出来
                 composedDurations: _composedDurations,
                 onBgmResize: _isEditable ? _resizeBgm : null,
