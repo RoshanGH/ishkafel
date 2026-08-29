@@ -105,6 +105,14 @@ class ExportCommands {
     required String out,
     int? candidateDurationMs,
 
+    /// 从素材的第几毫秒开始截。
+    ///
+    /// **不给 = 整条压缩**（老行为）：20 秒的素材塞进 0.5 秒的坑位就是 40 倍
+    /// 快放。真机上将近四成的坑位不到 1.5 秒，而素材库里的分镜普遍 4~30 秒，
+    /// 那些镜头必然是一串快进。给了起点就只截坑位那么长的一段，倍速回到 1.0
+    /// ——人拿剪辑软件做这件事就是这么做的。
+    int? trimStartMs,
+
     /// 要叠在这段切片上的字幕图（镜头替换保留台词字幕用，见
     /// subtitle_overlay.dart）。叠加发生在归一、变速、补帧**之后**：
     /// 显隐时间按切片输出时间轴算，位置随图（图与输出同分辨率）。
@@ -123,7 +131,11 @@ class ExportCommands {
     /// 与 [target] 互斥：预览传 target、导出传 spec；都传时以 target 为准
     ExportSpec? spec,
   }) {
-    final factor = candidateDurationMs == null
+    // 截了一段等长的就不再变速——截完还变速等于白截
+    final trimmed = trimStartMs != null &&
+        candidateDurationMs != null &&
+        candidateDurationMs - trimStartMs >= durationMs;
+    final factor = candidateDurationMs == null || trimmed
         ? 1.0
         : SpeedFit.factorFor(
             candidateMs: candidateDurationMs, slotMs: durationMs);
@@ -137,6 +149,9 @@ class ExportCommands {
     final outFps = target?.fps ?? effectiveSpec?.fps.toDouble();
     return [
       '-y', '-v', 'error',
+      // -ss 摆在 -i 前面：放后面是解码完再丢，从 20 秒素材里取 0.5 秒
+      // 要白解 19.5 秒
+      if (trimmed) ...['-ss', _seconds(trimStartMs!)],
       '-i', input,
       for (final o in subtitleOverlays) ...['-i', o.pngPath],
       '-an',

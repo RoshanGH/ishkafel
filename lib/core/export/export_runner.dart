@@ -492,6 +492,9 @@ class ExportRunner {
               '_${subtitleStyle.fingerprint.hashCode}';
     final key =
         '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
+        // 取段起点进指纹：改了截哪一段却复用上一份切片，
+        // 人看到的是「调了没反应」，而盘上那份是旧画面
+        '_t${segment.trimStartMs ?? 0}'
         '_${renderSpec.fingerprint}$subKey';
     // Future 记忆化：并行渲染时同一段只渲一次，后来的等同一个结果
     return clips[key] ??= () async {
@@ -548,6 +551,7 @@ class ExportRunner {
               input: path,
               durationMs: segment.durationMs,
               candidateDurationMs: await probe(path),
+              trimStartMs: segment.trimStartMs,
               out: out,
               subtitleOverlays: overlays,
               // 规格必须贯穿：这段与原片段进同一条 concat 清单

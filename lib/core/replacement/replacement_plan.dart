@@ -39,13 +39,30 @@ class UnitReplacement {
   /// 镜头替换时，各镜头预览播的是哪一个候选（镜头下标 → 候选 id）
   final Map<int, int> shotPreviewIds;
 
+  /// 人手调过的取段起点：镜头下标 → 候选 id → 从素材第几毫秒起截。
+  ///
+  /// **没有记录的走自动**（见 [CandidateTrim]：素材比坑位长就截中段，
+  /// 倍速 1.0）。只记人调过的那些——把自动值也存下来的话，以后改了默认策略，
+  /// 老方案会永远停在旧值上。
+  final Map<int, Map<int, int>> shotTrimStarts;
+
+  /// 整体替换的取段起点：候选 id → 从素材第几毫秒起截
+  final Map<int, int> wholeTrimStarts;
+
   UnitReplacement._({
     required this.mode,
     required List<int> wholeCandidateIds,
     required Map<int, List<int>> shotCandidateIds,
     int? wholePreviewId,
     Map<int, int> shotPreviewIds = const {},
+    Map<int, Map<int, int>> shotTrimStarts = const {},
+    Map<int, int> wholeTrimStarts = const {},
   })  : wholeCandidateIds = List.unmodifiable(wholeCandidateIds),
+        wholeTrimStarts = Map.unmodifiable(wholeTrimStarts),
+        shotTrimStarts = Map.unmodifiable({
+          for (final e in shotTrimStarts.entries)
+            e.key: Map<int, int>.unmodifiable(e.value),
+        }),
         wholePreviewId = wholeCandidateIds.contains(wholePreviewId)
             ? wholePreviewId
             : (wholeCandidateIds.isEmpty ? null : wholeCandidateIds.first),
@@ -69,17 +86,20 @@ class UnitReplacement {
       );
 
   /// 整体替换。空候选列表等价于「还没选」，因子仍为 1
-  factory UnitReplacement.whole(List<int> candidateIds, {int? previewId}) =>
+  factory UnitReplacement.whole(List<int> candidateIds,
+          {int? previewId, Map<int, int> trimStarts = const {}}) =>
       UnitReplacement._(
         mode: ReplacementMode.whole,
         wholeCandidateIds: _dedupe(candidateIds),
         shotCandidateIds: const {},
         wholePreviewId: previewId,
+        wholeTrimStarts: trimStarts,
       );
 
   /// 镜头级替换
   factory UnitReplacement.perShot(Map<int, List<int>> byShot,
-          {Map<int, int> previewIds = const {}}) =>
+          {Map<int, int> previewIds = const {},
+          Map<int, Map<int, int>> trimStarts = const {}}) =>
       UnitReplacement._(
         mode: ReplacementMode.perShot,
         wholeCandidateIds: const [],
@@ -88,7 +108,14 @@ class UnitReplacement {
             if (e.value.isNotEmpty) e.key: _dedupe(e.value),
         },
         shotPreviewIds: previewIds,
+        shotTrimStarts: trimStarts,
       );
+
+  /// 这个位置上这条候选，人调过的取段起点；没调过返回 null（走自动）
+  int? trimStartOf({int? shotIndex, required int candidateId}) =>
+      shotIndex == null
+          ? wholeTrimStarts[candidateId]
+          : shotTrimStarts[shotIndex]?[candidateId];
 
   /// 这个镜头预览播哪一个候选；没替换这个镜头时返回 null
   int? shotPreviewId(int shotIndex) => shotPreviewIds[shotIndex];
@@ -131,6 +158,17 @@ class UnitReplacement {
         'shotCandidateIds': {
           for (final e in shotCandidateIds.entries) '${e.key}': e.value,
         },
+        if (wholeTrimStarts.isNotEmpty)
+          'wholeTrimStarts': {
+            for (final e in wholeTrimStarts.entries) '${e.key}': e.value,
+          },
+        if (shotTrimStarts.isNotEmpty)
+          'shotTrimStarts': {
+            for (final e in shotTrimStarts.entries)
+              '${e.key}': {
+                for (final t in e.value.entries) '${t.key}': t.value,
+              },
+          },
         'shotPreviewIds': {
           for (final e in shotPreviewIds.entries) '${e.key}': e.value,
         },
@@ -151,17 +189,33 @@ class UnitReplacement {
         return UnitReplacement.keepOriginal();
       case ReplacementMode.whole:
         return UnitReplacement.whole(_intList(raw['wholeCandidateIds']),
+            trimStarts: _previewMap(raw['wholeTrimStarts']),
             previewId: raw['wholePreviewId'] is int
                 ? raw['wholePreviewId'] as int
                 : null);
       case ReplacementMode.perShot:
         return UnitReplacement.perShot(_shotMap(raw['shotCandidateIds']),
+            trimStarts: _trimMap(raw['shotTrimStarts']),
             previewIds: _previewMap(raw['shotPreviewIds']));
     }
   }
 
   /// 镜头下标 → 预览候选 id。畸形条目跳过——预览指向丢了会退回第一个，
   /// 不是什么要紧事，没必要为它把整条方案废掉
+  /// 取段起点表：`{"镜头下标": {"候选 id": 起点毫秒}}`。
+  /// 任何一层读不懂就当那一层没有——一个坏字段不该让整条方案作废
+  static Map<int, Map<int, int>> _trimMap(Object? raw) {
+    if (raw is! Map) return const {};
+    final out = <int, Map<int, int>>{};
+    for (final e in raw.entries) {
+      final shot = int.tryParse('${e.key}');
+      if (shot == null) continue;
+      final inner = _previewMap(e.value);
+      if (inner.isNotEmpty) out[shot] = inner;
+    }
+    return out;
+  }
+
   static Map<int, int> _previewMap(Object? raw) {
     if (raw is! Map) return const {};
     final out = <int, int>{};

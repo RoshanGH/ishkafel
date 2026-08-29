@@ -114,9 +114,16 @@ Future<int> runExportCommand({
   final dest = Directory(outputDir ??
       p.join(Platform.environment['HOME'] ?? '.', 'Desktop',
           'ishkafel-${task.id}'));
+  // 素材时长：镜头层取段要靠它。任务里存过的直接用，
+  // 没存过的这一步不去探（探一遍要几分钟），那些镜头退回整条压缩
+  final materialDurations = {
+    for (final m in task.pickedMaterials)
+      if (m.durationMs case final ms? when ms > 0) m.id: ms,
+  };
   final combos = [
     for (var i = 0; i < validation.plans.length; i++)
-      toCombination(validation.plans[i], units, index: i),
+      toCombination(validation.plans[i], units,
+          index: i, materialDurations: materialDurations),
   ];
 
   // 代价先说清楚——但不拦。要不要继续是调用方的判断

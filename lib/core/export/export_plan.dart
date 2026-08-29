@@ -1,4 +1,5 @@
 import '../models/semantic_unit.dart';
+import '../replacement/candidate_trim.dart';
 import '../replacement/replacement_plan.dart';
 
 /// 成片里的一段。要么用原片这一段，要么用一条候选素材顶上去。
@@ -27,6 +28,11 @@ class ExportSegment {
   /// 变速对齐原坑位，时长不变）。
   final int? composedMs;
 
+  /// 从候选素材的第几毫秒开始截。null = 整条压缩进坑位（老行为）。
+  ///
+  /// 短坑位配长素材时，整条压缩就是十几二十倍的快放；截一段用倍速才回到 1.0
+  final int? trimStartMs;
+
   const ExportSegment({
     required this.startMs,
     required this.endMs,
@@ -34,6 +40,7 @@ class ExportSegment {
     this.shotIndex,
     this.candidateId,
     this.composedMs,
+    this.trimStartMs,
   });
 
   /// 这一段在**成片**里占多长
@@ -214,7 +221,7 @@ class ExportPlanner {
         ];
 
       case ReplacementMode.perShot:
-        return _perShotChoices(unit, replacement);
+        return _perShotChoices(unit, replacement, materialDurations);
     }
   }
 
@@ -222,8 +229,8 @@ class ExportPlanner {
   ///
   /// 同样是里程表顺序（最后一个镜头变化最快），与单元层保持一致——两层用
   /// 不同的顺序，导出目录里的规律就没法用一句话说清了。
-  static List<List<ExportSegment>> _perShotChoices(
-      SemanticUnit unit, UnitReplacement replacement) {
+  static List<List<ExportSegment>> _perShotChoices(SemanticUnit unit,
+      UnitReplacement replacement, Map<int, int> materialDurations) {
     // 每个镜头的候选（没选的用 [null] 表示「就用原画面」）
     final perShot = <List<int?>>[
       for (var s = 0; s < unit.shots.length; s++)
@@ -245,12 +252,12 @@ class ExportPlanner {
     while (true) {
       out.add([
         for (var s = 0; s < unit.shots.length; s++)
-          ExportSegment(
-            startMs: unit.shots[s].startMs,
-            endMs: unit.shots[s].endMs,
-            unitIndex: unit.index,
+          _shotSegment(
+            unit: unit,
             shotIndex: s,
             candidateId: perShot[s][cursor[s]],
+            replacement: replacement,
+            materialDurations: materialDurations,
           ),
       ]);
       var s = perShot.length - 1;
@@ -263,5 +270,44 @@ class ExportPlanner {
       if (s < 0) break;
     }
     return out;
+  }
+
+  /// 造一个镜头位的段，**顺手算好取段**。
+  ///
+  /// 短坑位是这条线最疼的地方：原片快切镜头 0.4~1 秒，素材库里的分镜普遍
+  /// 4~30 秒，整条压缩就是十几二十倍快放。这里按 [trimFor] 截一段——
+  /// 人调过起点就听人的，没调过取素材中段。
+  static ExportSegment _shotSegment({
+    required SemanticUnit unit,
+    required int shotIndex,
+    required int? candidateId,
+    required UnitReplacement replacement,
+    required Map<int, int> materialDurations,
+  }) {
+    final shot = unit.shots[shotIndex];
+    if (candidateId == null) {
+      return ExportSegment(
+        startMs: shot.startMs,
+        endMs: shot.endMs,
+        unitIndex: unit.index,
+        shotIndex: shotIndex,
+      );
+    }
+    final materialMs = materialDurations[candidateId] ?? 0;
+    final cut = trimFor(
+      materialMs: materialMs,
+      slotMs: shot.endMs - shot.startMs,
+      startMs:
+          replacement.trimStartOf(shotIndex: shotIndex, candidateId: candidateId),
+    );
+    return ExportSegment(
+      startMs: shot.startMs,
+      endMs: shot.endMs,
+      unitIndex: unit.index,
+      shotIndex: shotIndex,
+      candidateId: candidateId,
+      // 量不到素材时长时 trimFor 会退回整条压缩，那时不带起点
+      trimStartMs: materialMs > 0 ? cut.startMs : null,
+    );
   }
 }

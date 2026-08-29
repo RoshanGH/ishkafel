@@ -1,4 +1,5 @@
 import '../core/export/export_plan.dart';
+import '../core/replacement/candidate_trim.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
 import '../core/replacement/replacement_plan.dart';
@@ -31,7 +32,18 @@ class PlanUnit {
   /// 镜头下标 → 候选 id
   final Map<int, int> shots;
 
-  const PlanUnit({required this.mode, this.material, this.shots = const {}});
+  /// 镜头下标 → 从素材第几毫秒起截。不给就自动（素材比坑位长时取中段）。
+  ///
+  /// **短坑位必须能截**：原片快切镜头 0.4~1 秒，素材库里的分镜普遍 4~30 秒，
+  /// 整条压缩就是十几二十倍快放
+  final Map<int, int> trimStarts;
+
+  const PlanUnit({
+    required this.mode,
+    this.material,
+    this.shots = const {},
+    this.trimStarts = const {},
+  });
 }
 
 /// 校验结果。[errors] 非空即为不通过
@@ -186,7 +198,24 @@ String? _parseUnit(
         }
         picked[shotIndex] = entry.value as int;
       }
-      into[index] = PlanUnit(mode: 'perShot', shots: picked);
+      // 可选：这一镜从素材的哪儿开始截。不给就自动取中段
+      final trims = <int, int>{};
+      if (raw['trimStarts'] case final Map raw?) {
+        for (final entry in raw.entries) {
+          final shotIndex = int.tryParse('${entry.key}');
+          if (shotIndex == null || !picked.containsKey(shotIndex)) {
+            return '$where 的 U${index + 1} 的 trimStarts 指到了没换素材的'
+                '镜头 ${entry.key}——只有换了素材的镜头才谈得上从哪儿截';
+          }
+          if (entry.value is! int || (entry.value as int) < 0) {
+            return '$where 的 U${index + 1}/S${shotIndex + 1} 的 trimStarts '
+                '不是非负整数（毫秒）';
+          }
+          trims[shotIndex] = entry.value as int;
+        }
+      }
+      into[index] =
+          PlanUnit(mode: 'perShot', shots: picked, trimStarts: trims);
       return null;
 
     default:
@@ -200,7 +229,11 @@ String? _parseUnit(
 /// 没在方案里提到的单元一律**保留原片**——不猜、不补默认值：调用方没说的
 /// 事，我们不替它决定。
 ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
-    {required int index}) {
+    {required int index,
+
+    /// 候选素材各有多长。**镜头层取段要靠它**——短坑位配长素材时，
+    /// 整条压缩就是十几二十倍快放，截一段用倍速才回到 1.0
+    Map<int, int> materialDurations = const {}}) {
   final segments = <ExportSegment>[];
   for (final unit in units) {
     final chosen = plan.units[unit.index];
@@ -223,12 +256,20 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
     }
     for (var s = 0; s < unit.shots.length; s++) {
       final shot = unit.shots[s];
+      final id = chosen.shots[s];
+      final materialMs = id == null ? 0 : (materialDurations[id] ?? 0);
+      final cut = trimFor(
+        materialMs: materialMs,
+        slotMs: shot.endMs - shot.startMs,
+        startMs: chosen.trimStarts[s],
+      );
       segments.add(ExportSegment(
         unitIndex: unit.index,
         shotIndex: s,
         startMs: shot.startMs,
         endMs: shot.endMs,
-        candidateId: chosen.shots[s],
+        candidateId: id,
+        trimStartMs: materialMs > 0 ? cut.startMs : null,
       ));
     }
   }

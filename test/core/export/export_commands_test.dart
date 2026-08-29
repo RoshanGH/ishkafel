@@ -202,4 +202,56 @@ void main() {
       expect(valueAfter(args, '-stream_loop'), '-1');
     });
   });
+
+  /// 替换裂变原本是「整条素材压缩进坑位」：20 秒的素材塞进 0.5 秒的坑位
+  /// 就是 40 倍快放。真机上一条 34 镜的片子里，将近四成的坑位不到 1.5 秒，
+  /// 而素材库里的分镜普遍 4~30 秒——这些镜头必然是一串快进。
+  ///
+  /// 人拿剪辑软件做这件事的方式是**从长素材里截一段**。
+  group('从素材里截一段用，而不是整条压缩', () {
+    test('给了起点就从那儿开始读，长度就是坑位长度', () {
+      final args = ExportCommands.fitCandidateVideo(
+        input: '/tmp/素材.mp4',
+        durationMs: 500,
+        candidateDurationMs: 20000,
+        trimStartMs: 9750,
+        out: '/tmp/out.mp4',
+        spec: ExportSpec.standard,
+      );
+
+      // -ss 必须在 -i 之前：放后面是解码完再丢，20 秒素材要白解 19.75 秒
+      final ss = args.indexOf('-ss');
+      expect(ss, isNot(-1), reason: '没有 -ss 就还是从头读，取段等于没做');
+      expect(double.parse(args[ss + 1]), closeTo(9.75, 0.001));
+      expect(ss, lessThan(args.indexOf('-i')));
+    });
+
+    test('截出来的那一段和坑位等长，就不该再变速', () {
+      final args = ExportCommands.fitCandidateVideo(
+        input: '/tmp/素材.mp4',
+        durationMs: 500,
+        candidateDurationMs: 20000,
+        trimStartMs: 9750,
+        out: '/tmp/out.mp4',
+        spec: ExportSpec.standard,
+      );
+
+      expect(args.join(' '), isNot(contains('setpts')),
+          reason: '截了一段等长的还变速，等于白截');
+    });
+
+    test('不给起点时照旧：整条压缩（老行为不变）', () {
+      final args = ExportCommands.fitCandidateVideo(
+        input: '/tmp/素材.mp4',
+        durationMs: 500,
+        candidateDurationMs: 20000,
+        out: '/tmp/out.mp4',
+        spec: ExportSpec.standard,
+      );
+
+      expect(args, isNot(contains('-ss')));
+      expect(args.join(' '), contains('setpts'));
+    });
+  });
+
 }
