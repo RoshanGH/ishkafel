@@ -62,3 +62,26 @@ CandidateTrim trimFor({
   final from = startMs == null ? latest ~/ 2 : startMs.clamp(0, latest);
   return CandidateTrim(startMs: from, durationMs: slotMs, speed: 1.0);
 }
+
+/// 这条素材的取段起点能挪到哪儿——**界面拖动条的范围**。
+class TrimRange {
+  final int minStartMs;
+  final int maxStartMs;
+
+  const TrimRange({required this.minStartMs, required this.maxStartMs});
+
+  /// 有没有挪的余地。素材不比坑位长时没得挪（整条都要用上还不够）
+  bool get canAdjust => maxStartMs > minStartMs;
+}
+
+/// 算取段起点的可选范围。
+///
+/// 真机数据：一条 34 镜的片子里，102 条候选中有 74 条素材比坑位长 3 倍以上，
+/// 最夸张的 24 倍（19 秒素材配 0.8 秒坑位）。「截哪一段」的选择空间很大，
+/// 自动取中段只是个起点，人得能自己挪。
+TrimRange trimRange({required int materialMs, required int slotMs}) {
+  if (materialMs <= 0 || slotMs <= 0 || materialMs <= slotMs) {
+    return const TrimRange(minStartMs: 0, maxStartMs: 0);
+  }
+  return TrimRange(minStartMs: 0, maxStartMs: materialMs - slotMs);
+}

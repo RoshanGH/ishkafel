@@ -77,4 +77,34 @@ void main() {
       expect(trimFor(materialMs: 1000, slotMs: 3000).isNatural, isFalse);
     });
   });
+
+  /// 真机数据：102 条候选里 74 条素材比坑位长 3 倍以上，最夸张的 24 倍
+  /// （19 秒素材配 0.8 秒坑位）。「截哪一段」的选择空间非常大，
+  /// 自动取中段只是一个赌注——人必须能自己挪，界面要知道能挪到哪儿。
+  group('能挪到哪儿', () {
+    test('素材比坑位长：起点能从 0 挪到「再往后就不够一个坑位」为止', () {
+      final r = trimRange(materialMs: 20000, slotMs: 500);
+
+      expect(r.canAdjust, isTrue);
+      expect(r.minStartMs, 0);
+      expect(r.maxStartMs, 19500);
+    });
+
+    test('素材不够长：没得挪，说清原因', () {
+      final r = trimRange(materialMs: 800, slotMs: 17335);
+
+      expect(r.canAdjust, isFalse);
+      expect(r.minStartMs, 0);
+      expect(r.maxStartMs, 0);
+    });
+
+    test('刚好等长也没得挪', () {
+      expect(trimRange(materialMs: 3000, slotMs: 3000).canAdjust, isFalse);
+    });
+
+    test('量不出素材时长时不假装能挪', () {
+      expect(trimRange(materialMs: 0, slotMs: 500).canAdjust, isFalse);
+    });
+  });
+
 }

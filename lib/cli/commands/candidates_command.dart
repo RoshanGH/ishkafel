@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../../core/miaoa/candidate_probe.dart';
+import '../../core/replacement/candidate_trim.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
@@ -310,10 +311,18 @@ Future<int> runCandidatesCommand({
           'previewUrl': c.previewUrl,
           if (specs[c.id] case final ms?) ...{
             'durationMs': ms,
-            // 塞进这个坑位要多少倍速。1.0 附近最自然，
-            // 离得远就是快进或慢动作——这才是要判断的东西
-            'speedIfPicked':
-                slotMs <= 0 ? null : (ms / slotMs * 100).round() / 100,
+            // 选它之后画面会怎么放。**取段之后多数是 1.0**：素材比坑位长时
+            // 从中间截一段用，而不是整条压缩成快进
+            'speedIfPicked': slotMs <= 0
+                ? null
+                : (trimFor(materialMs: ms, slotMs: slotMs).speed * 100)
+                        .round() /
+                    100,
+            // 截哪一段可以自己定：这是能挪的范围（毫秒）。
+            // 提交方案时用 trimStarts 指定；不指定就自动取中段
+            if (trimRange(materialMs: ms, slotMs: slotMs) case final r
+                when r.canAdjust)
+              'trimRange': {'minStartMs': r.minStartMs, 'maxStartMs': r.maxStartMs},
           },
         },
     ],
