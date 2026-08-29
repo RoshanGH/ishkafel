@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 
@@ -73,9 +74,12 @@ import '../../core/jianying/renew_jianying_plan.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import 'agent_focus_request.dart';
+import '../../cli/plan_submission.dart';
 import '../agent/visual_pace.dart';
 import '../shared/long_task_dialog.dart';
 import '../shared/subtitle_style_sheet.dart';
+import '../../core/storage/agent_request.dart';
+import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
@@ -225,6 +229,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
+      // Agent 请这一页代办的事（提交方案）。**界面占着锁不是冲突，
+      // 是委派的时机**：可视模式要求界面停在这个任务上，而写入要求界面
+      // 不能停在这个任务上——请界面去做，人就能眼看着方案落到时间线上
+      unawaited(_serveAgentRequest(dataDir));
       final now =
           readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
       final was = _agent;
@@ -268,6 +276,78 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       shotIndex: focus.shotIndex,
       wantsCandidates: focus.panel == AgentPanel.findShots,
     );
+  }
+
+  /// 正在处理代办，防重入
+  bool _servingRequest = false;
+
+  /// 代为提交方案：**校验和投影复用 CLI 那一份**（`plan_submission`），
+  /// 不另写一套——两份实现迟早对不上，而这一步定的是成片长什么样。
+  ///
+  /// 做完把方案投影到界面上：人眼看着三条方案落到时间线，这正是
+  /// 「界面占着锁」时最该发生的事。
+  Future<void> _applyPlansFromAgent(
+    String raw,
+    void Function(bool ok, String message, {Map<String, dynamic> payload})
+        reply,
+  ) async {
+    final editor = _editor;
+    if (editor == null) {
+      reply(false, '这一页还没准备好');
+      return;
+    }
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } catch (e) {
+      reply(false, '方案不是合法的 JSON：$e');
+      return;
+    }
+    final validation = parsePlans(decoded, _task);
+    if (!validation.ok) {
+      // 校验不过要原样转达：Agent 得知道是哪一条不合格，而不是「失败了」
+      reply(false, validation.errors.join('；'));
+      return;
+    }
+    final replacements =
+        projectPlansToReplacements(validation.plans, _task.units ?? const []);
+    setState(() => _replacements = replacements);
+    _task = _task.copyWith(replacements: replacements);
+    await _tasks!.savePickingPlan(_task, replacements);
+    reply(true, '方案已经投影到界面上了', payload: {
+      'plans': validation.plans.length,
+      'units': replacements.length,
+    });
+  }
+
+  /// 接住 Agent 的代办并**真的去做**。做的和人自己点是同一件事，
+  /// 不另造一套只读展示——那样人看到的动作和自己操作时不一样，反而更不放心。
+  Future<void> _serveAgentRequest(Directory dataDir) async {
+    if (_servingRequest) return;
+    final req = consumeAgentRequest(dataDir: dataDir, taskId: widget.task.id);
+    if (req == null) return;
+    _servingRequest = true;
+    void reply(bool ok, String message,
+            {Map<String, dynamic> payload = const {}}) =>
+        writeAgentRequestResult(
+            dataDir: dataDir,
+            taskId: widget.task.id,
+            id: req.id,
+            ok: ok,
+            message: message,
+            payload: payload);
+    try {
+      if (UiAction.parse(req.kind) != UiAction.plansApply) {
+        reply(false, '这一页接不了这个动作：${req.kind}');
+        return;
+      }
+      await _applyPlansFromAgent('${req.payload['raw'] ?? ''}', reply);
+    } catch (e) {
+      AppLog.warn('代为提交方案失败（${widget.task.id}）：$e');
+      reply(false, '提交失败：$e');
+    } finally {
+      _servingRequest = false;
+    }
   }
 
   /// 把播放头挪到第 [index] 个单元的起点——工作台是时间线式的，

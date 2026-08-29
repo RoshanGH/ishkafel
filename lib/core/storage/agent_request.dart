@@ -67,8 +67,20 @@ class AgentRequestResult {
   final bool ok;
   final String message;
 
-  const AgentRequestResult(
-      {required this.id, required this.ok, required this.message});
+  /// 界面干完之后要带回来的事实——**比如它到底建出了哪条任务**。
+  ///
+  /// 以前没有这一层：`ui new-task` 只能建完之后去任务库里翻「创建时间最新的
+  /// 那条」，代码注释自己都写着「不给的话只能去 tasks 里翻最后一条猜」。
+  /// 真机上那一猜就出事了：授权框把创建挡住、任务压根没建成，
+  /// CLI 却把上一次的任务报了出来还说「已经建好了」。
+  final Map<String, dynamic> payload;
+
+  const AgentRequestResult({
+    required this.id,
+    required this.ok,
+    required this.message,
+    this.payload = const {},
+  });
 }
 
 File _requestFile(Directory dataDir, String taskId) =>
@@ -130,15 +142,24 @@ AgentRequest? consumeAgentRequest({
 void writeAgentRequestResult({
   required Directory dataDir,
   required String taskId,
-  required String id,
-  required bool ok,
-  required String message,
+  String? id,
+  bool? ok,
+  String? message,
+  AgentRequestResult? result,
+  Map<String, dynamic> payload = const {},
 }) {
+  final r = result ??
+      AgentRequestResult(
+          id: id!, ok: ok!, message: message!, payload: payload);
   try {
     final f = _resultFile(dataDir, taskId);
     f.parent.createSync(recursive: true);
-    f.writeAsStringSync(
-        jsonEncode({'id': id, 'ok': ok, 'message': message}));
+    f.writeAsStringSync(jsonEncode({
+      'id': r.id,
+      'ok': r.ok,
+      'message': r.message,
+      if (r.payload.isNotEmpty) 'payload': r.payload,
+    }));
   } catch (e) {
     AppLog.warn('代办回执写入失败（$taskId）：$e');
   }
@@ -179,6 +200,10 @@ AgentRequestResult? _readResult({
       id: raw['id'] as String,
       ok: raw['ok'] == true,
       message: raw['message'] is String ? raw['message'] as String : '',
+      // 老回执没有这个字段——不能因为多个字段就读不回来
+      payload: raw['payload'] is Map
+          ? Map<String, dynamic>.from(raw['payload'] as Map)
+          : const {},
     );
   } catch (_) {
     return null;

@@ -156,9 +156,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   }
 
   Future<void> _runUiAction(Directory dataDir, AgentRequest req) async {
-    void reply(bool ok, String message) => writeAgentRequestResult(
-        dataDir: dataDir, taskId: globalPresenceSlot,
-        id: req.id, ok: ok, message: message);
+    void reply(bool ok, String message,
+            {Map<String, dynamic> payload = const {}}) =>
+        writeAgentRequestResult(
+            dataDir: dataDir,
+            taskId: globalPresenceSlot,
+            id: req.id,
+            ok: ok,
+            message: message,
+            payload: payload);
 
     final action = UiAction.parse(req.kind);
     if (action == null) {
@@ -179,13 +185,18 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
           Navigator.of(context).pop();
         }
         reply(true, '已关掉新建任务');
+      case UiAction.plansApply:
+        // 这个动作是给工作台的（它占着那条任务的锁）。列表页收到说明
+        // 发错了地方——说清楚，别让 Agent 等到超时
+        reply(false, '提交方案要发给那条任务的工作台，不是任务列表');
     }
   }
 
   Future<void> _runWizardForAgent(
     Directory dataDir,
     AgentRequest req,
-    void Function(bool ok, String message) reply,
+    void Function(bool ok, String message, {Map<String, dynamic> payload})
+        reply,
   ) async {
     final p = req.payload;
     final mode = WizardMode.parse('${p['mode']}');
@@ -253,8 +264,22 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       // 而它要等人退出来才返回——回执压在后面的话，CLI 必然等到超时，
       // 于是「任务建好了但命令报失败」，Agent 照着退出码会去重试、
       // 建出第二个垃圾任务（验收 Agent 实测到的第一个问题）
-      final created = _createFromWizard(ref, context, result, name: wantName);
-      reply(true, '任务已经建好了');
+      // **先建出来拿到 id，再回执**：以前是先回执再建，于是 CLI 只能
+      // 去任务库里翻「最新的那条」猜是哪一条——授权框挡住创建时，
+      // 猜出来的是上一次的任务，还报「已经建好了」（验收 Agent 撞到）
+      //
+      // 但也不能等 created 整个跑完：脚本成片那条路会 await 编导台的路由，
+      // 要等人退出编导台才返回。所以这里只等「建出来」这一段
+      final made = await _createFromWizardHead(ref, context, result,
+          name: wantName);
+      if (made == null) {
+        reply(false, '任务没建成——多半是原片读不到（macOS 可能弹了'
+            '「想访问文稿文件夹」的授权框，需要人点允许），或者导入失败了');
+        return;
+      }
+      final created = _createFromWizardTail(ref, context, result, made);
+      reply(true, '任务已经建好了',
+          payload: {'taskId': made.id, 'kind': made.kind});
       // **撤场要在这儿，不能等 created**：脚本成片那条路会 await 编导台的
       // 路由，而它要等人退出编导台才返回——撤场压在后面的话，播报会一直
       // 停在「正在新建任务」，人看着已经进了编导台却被告知还在建（真机撞到）
@@ -412,7 +437,60 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 拿到向导结果之后怎么建。**人和 Agent 共用这一段**——
   /// Agent 那条路要是另写一份，两边迟早会不一样（这个项目已经因为
   /// 「同一个东西两处算」栽过三次）
-  Future<void> _createFromWizard(
+  /// 刚建出来、还没进页面的脚本成片任务
+  RenewTask? _pendingDirectorTask;
+
+  /// 建完之后进对应的工作页。脚本成片建出来直接进编导台开写；
+  /// 别的两种留在列表上（分析要跑一会儿，人可以先干别的）
+  Future<void> _createFromWizardTail(
+    WidgetRef ref,
+    BuildContext context,
+    NewTaskWizardResult result,
+    ({String id, String kind}) made,
+  ) async {
+    final task = _pendingDirectorTask;
+    _pendingDirectorTask = null;
+    if (made.kind != 'script' || task == null || !context.mounted) return;
+    // **先回到列表页再进新任务**。
+    //
+    // 直接 push 的话，上一个编导台还留在路由栈上活着，新的又建一个
+    // ——两个 mpv 渲染上下文并发存在，`mpv_render_context_create`
+    // 里的断言当场失败、整个 app abort（真机崩了三次，栈一字不差）。
+    //
+    // 之前以为是冷启动竞态，加了几秒缓冲；验收 Agent 拿崩溃报告反证：
+    // 三次崩溃时 app 已经活了 9 分钟、23 分钟、89 秒，缓冲一次都没
+    // 覆盖到。而 `ishkafel open` 那条路一直不崩——它先 popUntil 回
+    // 列表页，同一时刻只有一个编导台。差别就在这儿
+    Navigator.of(context).popUntil((r) => r.isFirst);
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
+    );
+    await ref.read(taskListProvider.notifier).reload();
+  }
+
+  /// 建任务，**并把建出来的那条报回去**。
+  ///
+  /// 返回 null = 没建成（导入失败、文件读不到）。以前这里返回 void，
+  /// 于是 Agent 那头只能建完去任务库里翻「最新的那条」猜——真机上授权框
+  /// 挡住创建、任务压根没建成，猜出来的是上一次的任务，还报「已经建好了」。
+  Future<({String id, String kind})?> _createFromWizard(
+    WidgetRef ref,
+    BuildContext context,
+    NewTaskWizardResult result, {
+    String name = '',
+  }) async {
+    final made = await _createFromWizardHead(ref, context, result, name: name);
+    if (made != null) {
+      await _createFromWizardTail(ref, context, result, made);
+    }
+    return made;
+  }
+
+  /// 只负责**建出来**，不进页面。
+  ///
+  /// 与「进页面」拆开是因为 Agent 那条路要**先拿到 id 再回执**：
+  /// 进页面那一步会 await 到人退出编导台，回执压在后面的话 CLI 必然超时。
+  Future<({String id, String kind})?> _createFromWizardHead(
     WidgetRef ref,
     BuildContext context,
     NewTaskWizardResult result, {
@@ -430,29 +508,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             shotTagPrompt: result.shotTagPrompt,
             project: result.project,
           );
-      if (context.mounted) {
-        // **先回到列表页再进新任务**。
-        //
-        // 直接 push 的话，上一个编导台还留在路由栈上活着，新的又建一个
-        // ——两个 mpv 渲染上下文并发存在，`mpv_render_context_create`
-        // 里的断言当场失败、整个 app abort（真机崩了三次，栈一字不差）。
-        //
-        // 之前以为是冷启动竞态，加了几秒缓冲；验收 Agent 拿崩溃报告反证：
-        // 三次崩溃时 app 已经活了 9 分钟、23 分钟、89 秒，缓冲一次都没
-        // 覆盖到。而 `ishkafel open` 那条路一直不崩——它先 popUntil 回
-        // 列表页，同一时刻只有一个编导台。差别就在这儿
-        Navigator.of(context).popUntil((r) => r.isFirst);
-        await Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
-        );
-        await ref.read(taskListProvider.notifier).reload();
-      }
-      return;
+      _pendingDirectorTask = task;
+      return (id: task.id, kind: 'script');
     }
     final filePath = result.filePath;
     if (filePath == null) {
       // 空白任务：没有原片可导，直接建出来就能编辑
-      await ref.read(taskListProvider.notifier).createBlankTask(
+      final blank = await ref.read(taskListProvider.notifier).createBlankTask(
             name: name.isNotEmpty
                 ? name
                 : '拼片 ${DateTime.now().toString().substring(5, 16)}',
@@ -462,10 +524,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             shotTagPrompt: result.shotTagPrompt,
             project: result.project,
           );
-      return;
+      return (id: blank.id, kind: 'blank');
     }
     try {
-      await ref.read(taskListProvider.notifier).importFile(
+      final task = await ref.read(taskListProvider.notifier).importFile(
             filePath,
             unitTagGroups: result.unitTagGroups,
             shotTagGroups: result.shotTagGroups,
@@ -473,13 +535,16 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             shotTagPrompt: result.shotTagPrompt,
             project: result.project,
           );
+      return task == null ? null : (id: task.id, kind: 'replace');
     } on ImportException catch (e) {
       // message 已是面向用户的中文提示，直接展示；原始异常只进日志
       AppLog.warn('导入失败 $filePath：${e.cause ?? e.message}');
       if (context.mounted) _showSnackBar(context, e.message);
+      return null;
     } catch (e) {
       AppLog.warn('导入失败 $filePath：$e');
       if (context.mounted) _showSnackBar(context, '导入失败，请稍后重试或更换素材。');
+      return null;
     }
   }
 

@@ -318,7 +318,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 导入并自动分析。[unitTagGroups] / [shotTagGroups] 是新建向导选定的两层
   /// miaoa 标签组，随任务落库，分析时据此解析各自的受控词表。
   /// 建一条空白任务。**不排分析**——没有原片可分析，建出来直接可编辑
-  Future<void> createBlankTask({
+  Future<RenewTask> createBlankTask({
     required String name,
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
@@ -326,7 +326,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     String shotTagPrompt = '',
     ProjectRef? project,
   }) async {
-    await ref.read(importServiceProvider).createBlank(
+    final task = await ref.read(importServiceProvider).createBlank(
           name: name,
           project: project,
           unitTagGroups: unitTagGroups,
@@ -335,6 +335,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
           shotTagPrompt: shotTagPrompt,
         );
     await reload();
+    // 把建出来的那条报回去：调用方（尤其是 Agent 那条路）得知道是哪一条，
+    // 而不是建完去任务库里翻「最新的那条」猜
+    return task;
   }
 
   /// 建一条脚本成片任务。**不排分析**——脚本从空白写起，建出来直接进编导台
@@ -358,7 +361,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     return task;
   }
 
-  Future<void> importFile(
+  Future<RenewTask?> importFile(
     String path, {
     List<TagGroupRef> unitTagGroups = const [],
     List<TagGroupRef> shotTagGroups = const [],
@@ -382,13 +385,15 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       // 连重试入口都够不到
       AppLog.warn('任务 ${task.id} 未自动分析：分析管线未配置');
       await _markAnalysisFailed(task, pipelineUnavailableMessage);
-      return;
+      // 任务本身建出来了，只是没能自动分析——照样把它报回去
+      return task;
     }
     if (!_analyzingTaskIds.add(task.id)) {
       AppLog.info('任务 ${task.id} 分析已在进行中，忽略重复触发（并发守卫）');
-      return;
+      return task;
     }
     unawaited(_runAnalyze(pipeline, task));
+    return task;
   }
 
   /// 分析失败反馈：落库 analysisError（保持原状态，通常仍是 analyzing），

@@ -24,10 +24,15 @@ class AgentBroadcastBar extends StatelessWidget {
   /// 谁在干活（'Agent'）。没有就不显示
   final String? holder;
 
+  /// 干的是哪条任务——**人正看着的不一定就是它在动的那条**。
+  /// null = 就在眼前这条上干，不用啰嗦（见 [broadcastScopeLabel]）
+  final String? scopeLabel;
+
   const AgentBroadcastBar({
     super.key,
     required this.broadcast,
     this.holder,
+    this.scopeLabel,
   });
 
   @override
@@ -77,7 +82,10 @@ class AgentBroadcastBar extends StatelessWidget {
               strokeWidth: 1.6, color: AppColors.accentBlue),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Text('$holder 正在操作，请稍候',
+        Text(
+            scopeLabel == null
+                ? '$holder 正在操作，请稍候'
+                : '$holder 正在操作 $scopeLabel，请稍候',
             key: const Key('broadcast-title'),
             style: const TextStyle(
                 fontSize: AppFontSize.caption,

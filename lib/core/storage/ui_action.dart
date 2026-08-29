@@ -25,7 +25,15 @@ enum UiAction {
   wizardSubmit('wizard.submit', '创建任务'),
 
   /// 关掉向导（人喊停、或者参数不合格时收手）
-  wizardCancel('wizard.cancel', '取消新建任务');
+  wizardCancel('wizard.cancel', '取消新建任务'),
+
+  /// 提交替换方案。
+  ///
+  /// **为什么要能委派**：可视模式要求界面停在这个任务上，而写入要求界面
+  /// 不能停在这个任务上（它占着锁）——于是整条流水线里最该让人看见的一步，
+  /// 恰恰因为「人在看」而做不了。以前给的出路是「让界面挪开」，那等于让人
+  /// 别看。委派给界面去做，人就能眼看着三条方案一条条落到时间线上。
+  plansApply('plans.apply', '提交替换方案');
 
   const UiAction(this.wire, this.label);
 

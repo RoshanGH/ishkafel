@@ -134,9 +134,12 @@ void main() {
     for (var i = 0; i < 60; i++) {
       final req = consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot);
       if (req != null) {
+        // 界面把**真正建出来的那条**回传（以前 CLI 只能去任务库里
+        // 翻「最新的那条」猜，授权框挡住创建时就猜成了上一次的任务）
         writeAgentRequestResult(
             dataDir: dir, taskId: globalPresenceSlot, id: req.id,
-            ok: true, message: '任务已经建好了');
+            ok: true, message: '任务已经建好了',
+            payload: const {'taskId': 'new1', 'kind': 'script'});
         break;
       }
       await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -169,4 +172,45 @@ void main() {
     expect(await run(['乱写'], err: err), exitBadUsage);
     expect(err.toString(), contains('new-task'));
   });
+
+  /// 洞 17：macOS 弹了「想访问文稿文件夹」的授权框，没人点允许，
+  /// 任务压根没建成——而 CLI 去任务库里翻「创建时间最新的那条」，
+  /// 把**上一次**建的任务报了出来，还带着 ok:true「任务已经建好了」。
+  ///
+  /// 人照着那个 id 往下走，操作的是另一条任务。这一条对可视化杀伤最大：
+  /// 人就坐在旁边看着，除非他知道 replace 就是替换裂变，
+  /// 否则根本发现不了建错了。
+  test('界面没报出建了哪一条时，不许去猜——宁可失败', () async {
+    // 任务库里躺着一条旧任务：以前会被当成「刚建的」报出去
+    File('${dir.path}/tasks/old.json')
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync(jsonEncode({
+        'id': 'old',
+        'name': '上一次建的',
+        'seq': 1,
+        'status': 'ready',
+        'createdAt': DateTime.now().toIso8601String(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      }));
+
+    final err = StringBuffer();
+    final f = Future(() => run(['new-task'],
+        mode: 'script', tagGroups: '1', err: err,
+        wait: const Duration(seconds: 2)));
+    for (var i = 0; i < 60; i++) {
+      final req = consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot);
+      if (req != null) {
+        // 界面说建好了，但没报是哪一条（老版本的回执就长这样）
+        writeAgentRequestResult(
+            dataDir: dir, taskId: globalPresenceSlot, id: req.id,
+            ok: true, message: '任务已经建好了');
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    expect(await f, isNot(0), reason: '猜一个 id 报出去比失败更糟');
+    expect(err.toString(), contains('没报出'));
+  });
+
 }

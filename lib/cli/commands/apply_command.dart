@@ -17,6 +17,8 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
 import '../agent_lock_holder.dart';
+import '../../core/storage/agent_request.dart';
+import '../../core/storage/ui_action.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
@@ -64,6 +66,20 @@ Future<int> runApplyCommand({
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder ?? agentLockHolder)) {
     final current = lock.read();
+    // **界面占着锁不是冲突，是委派的时机**：可视模式要求界面停在这个任务上，
+    // 而写入要求界面不能停在这个任务上——于是最该让人看见的一步（提交方案，
+    // 成片长什么样就是这一步定的），恰恰因为「人在看」而做不了。
+    // 以前给的出路是「让界面挪开」，那等于让人别看。
+    if (what == 'plans' && isGuiHolder(current?.holder)) {
+      return await _applyPlansViaUi(
+        dataDir: dataDir,
+        task: task,
+        file: file,
+        readStdin: readStdin,
+        sink: sink,
+        out: out,
+      );
+    }
     sink.writeln(guiLockGuidance(
         holder: current?.holder, taskId: task.id));
     return exitLocked;
@@ -330,3 +346,59 @@ String? readSubmittedPlans(Directory dataDir, String taskId) {
 
 Future<String> _readStdin() async =>
     await stdin.transform(utf8.decoder).join();
+
+
+/// 请界面去提交方案——**人不用挪开，还能眼看着方案落到时间线上**。
+///
+/// 与新建任务走同一条委派通道（`AgentRequest`）：下单 → 界面真的去做 →
+/// 回执配对。界面那头做的和人自己点是同一件事，不另造一套只读展示。
+Future<int> _applyPlansViaUi({
+  required Directory dataDir,
+  required RenewTask task,
+  required String? file,
+  required Future<String> Function()? readStdin,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  final String raw;
+  try {
+    raw = file == null
+        ? await (readStdin ?? _readStdin)()
+        : File(file).readAsStringSync();
+  } catch (e) {
+    sink.writeln('读不到方案文件：$e');
+    return exitBadUsage;
+  }
+
+  sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
+  final id = writeAgentRequest(
+    dataDir: dataDir,
+    taskId: task.id,
+    kind: UiAction.plansApply.wire,
+    payload: {'raw': raw},
+  );
+  final result = await waitForAgentRequest(
+      dataDir: dataDir,
+      taskId: task.id,
+      id: id,
+      // 界面要真的把方案投影上去、人还得看得见，给足时间
+      timeout: const Duration(seconds: 90));
+  if (result == null) {
+    // 超时是真失败：活儿没干。报成功的话人会以为方案提交上去了
+    sink.writeln('界面没有回应（等了 90 秒）。'
+        '让用户看一眼那个页面，或者把界面挪开再跑一次：'
+        'ishkafel open <另一个任务 id>');
+    return exitEnv;
+  }
+  if (!result.ok) {
+    sink.writeln('没提交成功：${result.message}');
+    return exitFailed;
+  }
+  emitJson({
+    'ok': true,
+    'via': 'ui',
+    'message': result.message,
+    ...result.payload,
+  }, out: out);
+  return 0;
+}

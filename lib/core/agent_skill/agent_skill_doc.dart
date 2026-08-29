@@ -276,8 +276,13 @@ export ISHKAFEL_APP=/path/to/ishkafel.app
 - 节奏由界面定：它真的展示完一步（滚动停下、面板展开）才回执，你收到
   才走下一步。**不要自己猜时间等几百毫秒**
 
-支持可视的命令：`import`、`export`、`script apply`（全部子类）、
-`review drop/keep`。人说「你把这个视频复刻一版，我看着」——那就是可视模式。
+支持可视的命令：`import`、`analyze`、`candidates`、`apply plans`、
+`export`、`jianying`、`review drop/keep`、`voice generate`、
+`script shots`、`script apply`（全部子类）。
+人说「你把这个视频复刻一版，我看着」——那就是可视模式。
+
+**挑素材和提交方案这两步最该开可视**：那是真正在做决策的地方，
+成片长什么样就是这两步定的。
 
 **新建任务在可视模式下要用 `ui new-task`**：
 
@@ -501,7 +506,7 @@ ishkafel peek --video <素材或成片路径> --ats 0,30000,70000
 |---|---|
 | 点开某条候选看看 | `ishkafel peek <任务> --materials <id,id>` → `framePath` |
 | 看这条候选够不够长、会不会变速 | `ishkafel candidates … --probe` → `durationMs` / `speedIfPicked` |
-| 看原片这一镜长什么样 | `candidates` 直接给 `sourceFramePath`——**要复刻的就是这一帧** |
+| 看原片这一镜长什么样 | `candidates` 的**顶层** `sourceFramePath`（不在 `context` 里）——要复刻的就是这一帧 |
 | 看导出来的成片对不对 | `ishkafel peek --video <成片> --ats 0,30000,70000` |
 | 看这一镜的画面描述、标签、前后文 | `candidates` 的 `context` |
 

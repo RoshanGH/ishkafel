@@ -116,21 +116,31 @@ Future<int> runUiCommand({
     sink.writeln('没有建成：${result.message}');
     return exitFailed;
   }
-  // 把新任务报出来：调用方得知道接下来对谁操作。
-  // 不给的话只能去 tasks 里翻最后一条猜——两个 Agent 同时建就猜错了
-  // findAll 给的是不可变列表，先复制再排
-  final tasks = [...await FileTaskRepository(dataDir).findAll()]
-    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-  final created = tasks.firstOrNull;
+  // 界面把它**真正建出来的那条**回传了，不再去任务库里翻「最新的那条」猜。
+  // 猜的后果真机上撞到过：授权框挡住创建、任务压根没建成，
+  // 猜出来的是上一次的任务，还报「已经建好了」
+  final newId = '${result.payload['taskId'] ?? ''}';
+  if (newId.isEmpty) {
+    sink.writeln('界面说建好了，却没报出是哪一条任务。'
+        '用 ishkafel tasks 看一眼，别照着猜的 id 往下走');
+    return exitFailed;
+  }
+  final created = await FileTaskRepository(dataDir).findById(newId);
+  final kind = '${result.payload['kind'] ?? ''}';
   emitJson({
     'ok': true,
     'via': 'ui',
     'message': result.message,
-    if (created != null) ...{
-      'id': created.id,
-      if (created.seq != null) 'seq': created.seq,
-      'name': created.name,
-      'next': 'ishkafel script show ${created.id}',
+    'id': newId,
+    if (created?.seq != null) 'seq': created!.seq,
+    if (created != null) 'name': created.name,
+    'kind': kind,
+    // **下一步要跟着任务类型走**：以前恒定给 script show，
+    // 而替换裂变任务照着跑会被 CLI 自己拒绝（验收 Agent 撞到）
+    'next': switch (kind) {
+      'script' => 'ishkafel script show $newId',
+      'blank' => 'ishkafel blank tags $newId --unit 0 --tags <标签>',
+      _ => 'ishkafel task $newId',
     },
   }, out: out);
   return 0;

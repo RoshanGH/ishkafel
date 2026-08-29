@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'dart:convert';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -7,6 +9,7 @@ import '../../core/storage/agent_broadcast.dart';
 import '../../core/storage/agent_presence.dart';
 import '../settings/settings_providers.dart';
 import 'agent_broadcast_bar.dart';
+import 'broadcast_scope.dart';
 import 'presence_slots.dart';
 import 'visual_pace.dart';
 
@@ -40,6 +43,9 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
   AgentBroadcast _broadcast = AgentBroadcast.empty;
   String? _holder;
 
+  /// 正在被操作的那条任务的编号
+  int? _actingSeq;
+
   /// 正在播的这条是什么时候上屏的——够 [minHold] 了才回执
   DateTime? _shownAt;
 
@@ -57,6 +63,20 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
   void dispose() {
     _poll?.cancel();
     super.dispose();
+  }
+
+  /// 任务的短编号（#9 那种）。读不到就返回 null——播报少一句话不要紧，
+  /// 但不能因为读盘失败把整条播报卡住
+  int? _seqOf(Directory dataDir, String? taskId) {
+    if (taskId == null || taskId == globalPresenceSlot) return null;
+    try {
+      final f = File('${dataDir.path}/tasks/$taskId.json');
+      if (!f.existsSync()) return null;
+      final raw = jsonDecode(f.readAsStringSync());
+      return raw is Map && raw['seq'] is int ? raw['seq'] as int : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   void _tick() {
@@ -96,6 +116,10 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
       return;
     }
 
+    // 它在动哪条任务——人正看着的不一定就是它在动的那条
+    _actingSeq =
+        liveSlot == globalPresenceSlot ? null : _seqOf(dataDir, liveSlot);
+
     final action = live.action;
     final before = _broadcast.lines.length;
     final after = _broadcast.push(action);
@@ -129,6 +153,11 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
   @override
   Widget build(BuildContext context) => Stack(children: [
         widget.child,
-        AgentBroadcastBar(broadcast: _broadcast, holder: _holder),
+        AgentBroadcastBar(
+            broadcast: _broadcast,
+            holder: _holder,
+            // 人正看着的不一定是它在动的那条：两个会话各干各的时，
+            // 屏幕上写着「Agent 正在操作」而动的是别的任务
+            scopeLabel: broadcastScopeLabel(actingTaskSeq: _actingSeq)),
       ]);
 }
