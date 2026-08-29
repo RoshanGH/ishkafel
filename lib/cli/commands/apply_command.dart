@@ -12,6 +12,9 @@ import '../external_steps.dart';
 import '../task_view.dart';
 import '../todo_view.dart';
 import 'analyze_command.dart';
+import '../../core/miaoa/candidate_probe.dart';
+import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/ffmpeg/process_runner.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
@@ -25,6 +28,10 @@ import '../plan_submission.dart';
 Future<int> runApplyCommand({
   required List<String> rest,
   required Directory dataDir,
+
+  /// 测试注入；真机走真实的 miaoa CLI
+  MiaoaContentService? contentService,
+  CandidateProbe? candidateProbe,
   String? file,
   String holder = 'agent',
   Future<String> Function()? readStdin,
@@ -62,6 +69,8 @@ Future<int> runApplyCommand({
 
   try {
     return await _applyWithLock(
+      contentService: contentService,
+      candidateProbe: candidateProbe,
       what: what,
       id: id,
       task: task,
@@ -89,6 +98,8 @@ Future<int> _applyWithLock({
   required FileTaskRepository repository,
   required StringSink sink,
   required StringSink? out,
+  MiaoaContentService? contentService,
+  CandidateProbe? candidateProbe,
 }) async {
   final String raw;
   try {
@@ -125,11 +136,37 @@ Future<int> _applyWithLock({
   }
 
   _writePlans(dataDir, id, raw);
+  final replacements =
+      projectPlansToReplacements(validation.plans, task.units ?? const []);
+
+  // 顺手把用到的素材连同时长收下来。**取段全靠这个数**：20 秒的素材塞进
+  // 0.5 秒的坑位，得先知道它是 20 秒才知道该截一段。界面挑素材时一直在写，
+  // 这条路一直不写，于是 Agent 交的方案取段全失效、短镜头照样一串快进
+  final used = <int>{
+    for (final r in replacements) ...[
+      ...r.wholeCandidateIds,
+      for (final ids in r.shotCandidateIds.values) ...ids,
+    ],
+  };
+  final content = contentService ?? MiaoaContentService();
+  final probe = candidateProbe ??
+      CandidateProbe(run: const ResolvingProcessRunner().call);
+  final picked = await collectPickedMaterials(
+    candidateIds: used,
+    known: task.pickedMaterials,
+    fetch: content.fetchById,
+    probeDurationMs: (id) async {
+      final m = await content.fetchById(id);
+      final spec =
+          await probe.probe(materialId: id, previewUrl: m?.previewUrl);
+      return spec?.durationMs ?? 0;
+    },
+  );
+
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
   // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
   await repository.save(task.copyWith(
-      replacements:
-          projectPlansToReplacements(validation.plans, task.units ?? const [])));
+      replacements: replacements, pickedMaterials: picked));
   emitJson({
     'ok': true,
     'plans': [

@@ -255,10 +255,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       // 建出第二个垃圾任务（验收 Agent 实测到的第一个问题）
       final created = _createFromWizard(ref, context, result, name: wantName);
       reply(true, '任务已经建好了');
+      // **撤场要在这儿，不能等 created**：脚本成片那条路会 await 编导台的
+      // 路由，而它要等人退出编导台才返回——撤场压在后面的话，播报会一直
+      // 停在「正在新建任务」，人看着已经进了编导台却被告知还在建（真机撞到）
+      clearAgentPresence(dataDir: dataDir, taskId: globalPresenceSlot);
       await created;
     } catch (e) {
       reply(false, '新建任务失败：$e');
     } finally {
+      // 出错的路径同样要撤：上面那次撤过了，再撤一次是幂等的
       clearAgentPresence(dataDir: dataDir, taskId: globalPresenceSlot);
     }
   }

@@ -2,6 +2,8 @@ import '../core/export/export_plan.dart';
 import '../core/replacement/candidate_trim.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
+import '../core/replacement/picked_material.dart';
+import '../core/miaoa/miaoa_content_service.dart';
 import '../core/replacement/replacement_plan.dart';
 
 /// Agent 提交的一条**完整方案**：每个单元用什么，一次说清。
@@ -351,4 +353,43 @@ List<String> plansBlockedByReview(
     }
   }
   return problems;
+}
+
+/// 把方案里用到的素材连同**时长**一起收下来。
+///
+/// **取段全靠这个数**：20 秒的素材塞进 0.5 秒的坑位，得先知道它是 20 秒，
+/// 才知道该截一段而不是压缩成 40 倍快放。而这个数只存在
+/// `task.pickedMaterials` 里——界面挑素材时会写，Agent 提交方案时一直不写，
+/// 于是 Agent 交出来的方案取段全部失效，短镜头照样是一串快进。
+///
+/// 已经存过的不重量：一条素材量一次就够，逐条 ffprobe 是要时间的。
+Future<List<PickedMaterial>> collectPickedMaterials({
+  required Set<int> candidateIds,
+  required List<PickedMaterial> known,
+  required Future<CandidateMaterial?> Function(int id) fetch,
+  required Future<int> Function(int id) probeDurationMs,
+}) async {
+  final byId = {for (final m in known) m.id: m};
+  final out = <PickedMaterial>[];
+  for (final id in candidateIds) {
+    final hit = byId[id];
+    if (hit != null && hit.durationMs != null) {
+      out.add(hit);
+      continue;
+    }
+    // 一条取不到不拦整批：能拿到的照样落下来，取段对它们照样生效
+    final material = await fetch(id);
+    if (material == null) continue;
+    final ms = await probeDurationMs(id);
+    out.add(PickedMaterial(
+      id: id,
+      name: material.name,
+      voiceover: material.voiceover,
+      sceneDescription: material.sceneDescription,
+      thumbPath: hit?.thumbPath,
+      // 量不到就留空。存个 0 进去，取段会以为它是 0 秒——那比没有更糟
+      durationMs: ms > 0 ? ms : null,
+    ));
+  }
+  return List.unmodifiable(out);
 }

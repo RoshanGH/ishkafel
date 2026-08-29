@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
+import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
+import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/plan_submission.dart';
@@ -67,6 +69,11 @@ void main() {
       rest: ['plans', 't1'],
       file: f.path,
       dataDir: dir,
+      // 测试不打网络：提交方案时会去取素材信息（取段要靠它的时长）
+      contentService: MiaoaContentService(
+          gateway: MiaoaGateway(
+              run: (_, _) async => ProcessResult(1, 0, '{"records":[]}', ''),
+              binary: 'miaoa')),
       err: StringBuffer(),
       out: StringBuffer(),
     );
