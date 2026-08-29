@@ -100,4 +100,12 @@ void main() {
         reason: '光有条数不够——有几条真的量到了时长才是关键');
   });
 
+
+  /// `ui new-task` 的返回里有 kind，`task` 里没有——事后想确认一条任务
+  /// 是哪条线，只能看 sourcePath 是不是 null 反推，或者故意跑 script show
+  /// 看它报不报错（验收 Agent 提的）。
+  test('报出这条任务属于哪条线', () {
+    expect(taskToJson(taskWith(units: const []))['kind'], 'replace');
+  });
+
 }

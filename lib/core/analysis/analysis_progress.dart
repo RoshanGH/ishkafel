@@ -8,8 +8,11 @@ enum AnalysisStage {
   extractingAudio,
   separatingVocals,
   transcribing,
-  splitting,
+  // 顺序照着**真实执行**排：镜头切点在前半程（prepare）里出来，
+  // 语义切分在它之后。枚举顺序只用来算「第几步」，
+  // 排错了进度会倒退，人以为出错重来了
   detectingScenes,
+  splitting,
   building,
   taggingUnits,
   taggingShots,

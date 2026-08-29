@@ -6,6 +6,8 @@ import '../ffmpeg/thumbnail_service.dart';
 import '../ai/ai_usage.dart';
 import '../ai/ai_usage_scope.dart';
 import '../log/app_log.dart';
+import 'source_print.dart';
+import 'prepared_cache.dart';
 import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
 import '../models/tag_trace.dart';
@@ -280,6 +282,19 @@ class AnalysisPipeline {
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
     }
+    // **同一条片子重新导入就复用上次的切分**：语义切分是 LLM 干的、
+    // 有随机性——真机上同一个文件导三次切出 3/4/5 个单元，于是方案文件
+    // 不能跨任务复用（`unit 2 shot 3` 在新任务里指向别的画面），
+    // 「1:1 复刻」也打了折扣。顺带省掉一次 ASR + LLM（真金白银）
+    final sourcePrint = sourcePrintOf(sourcePath);
+    final cache = PreparedCache(workDir.parent);
+    if (cache.load(sourcePrint) case final hit?) {
+      AppLog.info('这条片子分析过了，直接用上次的切分（$sourcePrint）');
+      // 切分现成的，直接进组装那一步
+      _report(onProgress, AnalysisStage.building);
+      return hit;
+    }
+
     await workDir.create(recursive: true);
     final pcmPath = analysisPcmPath(workDir, task.id);
 
@@ -303,13 +318,16 @@ class AnalysisPipeline {
     final shotBounds = await boundsFuture;
     final stems = await stemsFuture;
 
-    return PreparedAnalysis(
+    final prepared = PreparedAnalysis(
       sentences: sentences,
       valleys: valleys,
       shotBounds: shotBounds,
       vocalsPath: stems?.vocalsPath,
       backgroundPath: stems?.backgroundPath,
     );
+    // 存下来：下次导入同一条片子直接用，结构才稳得住
+    cache.save(sourcePrint, prepared);
+    return prepared;
   }
 
   /// 用切分草稿组装成单元。**纯本地**，不碰云端。
@@ -345,39 +363,17 @@ class AnalysisPipeline {
     if (info == null) {
       throw StateError('任务 ${task.id} 缺少视频元信息，无法分析');
     }
-    await workDir.create(recursive: true);
-    // 管线始终重新提取（-y 覆盖写）：它是这份 PCM 的权威产出方，
-    // 复用可能残留的半截文件会让 ASR 拿到不完整音频
-    final pcmPath = analysisPcmPath(workDir, task.id);
-
-    _report(onProgress, AnalysisStage.extractingAudio);
-    final samples = await audio.extractSamples(
-        videoPath: sourcePath,
-        outPcmPath: pcmPath,
-        sampleRate: sampleRate);
-    final valleys = silence.detectValleyCenters(samples, sampleRate);
-
-    // 音频到手之后，三条支线互不依赖，同时跑：
-    //   分离（本地 GPU）｜画面切换（本地解码 + 云端复核）｜ASR → 语义切分（云端）
-    // 串行跑它们纯属浪费——实测串行 229 秒里，这三条加起来占 120 秒，
-    // 而并起来只花最长那条的时间。进度按「最慢的那条」报，不然进度条会跳。
-    _report(onProgress, AnalysisStage.separatingVocals);
-    final stemsFuture = _separate(task, sourcePath);
-    final boundsFuture = _detectShotBoundaries(task, sourcePath, info.fps);
-    final sentencesFuture = asr.transcribe(pcmPath);
-
-    _report(onProgress, AnalysisStage.transcribing);
-    final sentences = await sentencesFuture;
-    // ASR 是这份 PCM 的唯一读者，转完就没人看了。一条 96 秒的片子约 18MB，
-    // 留着只会让 analysis_work 只增不减；真要重跑分析，重抽一次只要几秒
-    unawaited(_discardPcm(pcmPath));
+    // **前半程走同一个 prepare**：以前这里自己抄了一遍（抽音频、分离、
+    // 镜头切点、ASR），于是「按源文件复用切分」那个缓存只覆盖了外包那条路，
+    // 内置全流程照样每次重跑——真机上同一条片子导两次还是切出不同的边界。
+    // 同一件事两处实现，改一处漏一处
+    final prepared = await prepare(task, onProgress: onProgress);
+    final sentences = prepared.sentences;
+    final valleys = prepared.valleys;
+    final shotBounds = prepared.shotBounds;
 
     _report(onProgress, AnalysisStage.splitting);
     final drafts = await splitter.split(sentences);
-
-    _report(onProgress, AnalysisStage.detectingScenes);
-    final shotBounds = await boundsFuture;
-    final stems = await stemsFuture;
 
     _report(onProgress, AnalysisStage.building);
     final units = builder.build(
@@ -395,8 +391,8 @@ class AnalysisPipeline {
       status: RenewTaskStatus.ready,
       updatedAt: clock(),
       asrSentences: sentences,
-      vocalsPath: stems?.vocalsPath,
-      backgroundPath: stems?.backgroundPath,
+      vocalsPath: prepared.vocalsPath,
+      backgroundPath: prepared.backgroundPath,
       // 人真正等到这一刻就能进去干活了；只记第一次
       firstReadyMs: task.firstReadyMs ??
           clock().difference(startedAt).inMilliseconds,

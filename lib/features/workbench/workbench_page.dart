@@ -74,6 +74,7 @@ import '../../core/jianying/renew_jianying_plan.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import 'agent_focus_request.dart';
+import 'serve_broadcast.dart';
 import '../../cli/plan_submission.dart';
 import '../agent/visual_pace.dart';
 import '../shared/long_task_dialog.dart';
@@ -296,28 +297,48 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       reply(false, '这一页还没准备好');
       return;
     }
-    final Object? decoded;
+    // **过程要说出来**：活儿是界面干的、CLI 在那头等着，没人报在场状态的话
+    // 播报条一片空白——而 CLI 打印的是「人能看着方案落进去」。
+    // 验收 Agent 密拍 40 帧确认过：一帧播报都没有，那句话没兑现
+    final dataDir = ref.read(dataDirProvider);
+    final voice = dataDir == null
+        ? null
+        : ServeBroadcast(dataDir: dataDir, taskId: widget.task.id);
     try {
-      decoded = jsonDecode(raw);
-    } catch (e) {
-      reply(false, '方案不是合法的 JSON：$e');
-      return;
+      await voice?.sayAndHold('正在核对 Agent 提交的方案');
+      final Object? decoded;
+      try {
+        decoded = jsonDecode(raw);
+      } catch (e) {
+        reply(false, '方案不是合法的 JSON：$e');
+        return;
+      }
+      final validation = parsePlans(decoded, _task);
+      if (!validation.ok) {
+        // 校验不过要原样转达：Agent 得知道是哪一条不合格，而不是「失败了」
+        voice?.say('方案没通过校验，没有改动任何东西');
+        reply(false, validation.errors.join('；'));
+        return;
+      }
+      final replacements =
+          projectPlansToReplacements(validation.plans, _task.units ?? const []);
+      await voice?.sayAndHold(
+          '${validation.plans.length} 条方案通过校验，正在投影到时间线',
+          focus: const AgentFocus(module: 'workbench'));
+      setState(() => _replacements = replacements);
+      _task = _task.copyWith(replacements: replacements);
+      await _tasks!.savePickingPlan(_task, replacements);
+      await voice?.sayAndHold(
+          '投影完了：${replacements.length} 个单元的替换已经落在时间线上',
+          focus: const AgentFocus(module: 'workbench'));
+      reply(true, '方案已经投影到界面上了', payload: {
+        'plans': validation.plans.length,
+        'units': replacements.length,
+      });
+    } finally {
+      // 撤场：不撤的话界面永远停在只读态，人得等心跳超时才能自己动手
+      voice?.done();
     }
-    final validation = parsePlans(decoded, _task);
-    if (!validation.ok) {
-      // 校验不过要原样转达：Agent 得知道是哪一条不合格，而不是「失败了」
-      reply(false, validation.errors.join('；'));
-      return;
-    }
-    final replacements =
-        projectPlansToReplacements(validation.plans, _task.units ?? const []);
-    setState(() => _replacements = replacements);
-    _task = _task.copyWith(replacements: replacements);
-    await _tasks!.savePickingPlan(_task, replacements);
-    reply(true, '方案已经投影到界面上了', payload: {
-      'plans': validation.plans.length,
-      'units': replacements.length,
-    });
   }
 
   /// 接住 Agent 的代办并**真的去做**。做的和人自己点是同一件事，

@@ -18,6 +18,12 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     'seq': task.seq,
     'name': task.name,
     'status': task.status.name,
+    // 这条任务属于哪条线。**ui new-task 给了，这里也要给**——
+    // 不然事后想确认只能看 sourcePath 是不是 null 反推，
+    // 或者故意跑 script show 看它报不报错
+    'kind': task.script != null
+        ? 'script'
+        : (task.sourcePath == null ? 'blank' : 'replace'),
     'sourcePath': task.sourcePath,
     'durationMs': task.videoInfo?.duration.inMilliseconds,
     'fps': task.videoInfo?.fps,
