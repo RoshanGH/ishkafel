@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
 import 'package:ishkafel/core/analysis/prepared_cache.dart';
+import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 
 /// 同一条片子导三次切出 3/4/5 个单元——语义切分是 LLM 干的，有随机性。
@@ -60,4 +61,42 @@ void main() {
     expect(cache.load(null), isNull);
     expect(Directory('${dir.path}/prepared').existsSync(), isFalse);
   });
+
+  /// **语义切分才是随机性的来源**：ASR 句子是稳定的，而按语义分组是 LLM 干的。
+  /// 真机上缓存了 ASR 之后，同一条片子照样切出 4 个和 3 个单元——
+  /// 差别全在这一步。
+  group('语义切分草稿也要缓存', () {
+    List<UnitDraft> drafts() => const [
+          UnitDraft(startMs: 0, endMs: 16033, transcript: '第一段'),
+          UnitDraft(startMs: 16033, endMs: 38000, transcript: '第二段'),
+        ];
+
+    test('存了就能取回来，边界一模一样', () {
+      final cache = PreparedCache(dir);
+      cache.saveDrafts('p1', drafts());
+
+      final got = cache.loadDrafts('p1');
+
+      expect(got, hasLength(2));
+      expect(got![1].startMs, 16033);
+      expect(got[1].endMs, 38000);
+    });
+
+    test('一条读不动就整份作废——缺一段的切分比没有更危险', () {
+      final cache = PreparedCache(dir);
+      cache.saveDrafts('p1', drafts());
+      File('${dir.path}/prepared/p1.drafts.json')
+          .writeAsStringSync('[{"startMs":0,"endMs":100},{"startMs":"坏"}]');
+
+      expect(cache.loadDrafts('p1'), isNull);
+    });
+
+    test('空的切分不存——存了会让下次拿到一个没有单元的片子', () {
+      final cache = PreparedCache(dir);
+      cache.saveDrafts('p2', const []);
+
+      expect(cache.loadDrafts('p2'), isNull);
+    });
+  });
+
 }

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../log/app_log.dart';
 import 'analysis_pipeline.dart';
+import 'segmentation_builder.dart';
 
 /// 分析产物（ASR 句子 + 切点）按**源文件内容**缓存。
 ///
@@ -39,6 +40,43 @@ class PreparedCache {
     } catch (e) {
       AppLog.warn('分析产物缓存读不动（$sourcePrint）：$e');
       return null;
+    }
+  }
+
+  File _draftsFor(String print) => File(p.join(_dir.path, '$print.drafts.json'));
+
+  /// 取语义切分草稿。**这才是真正锁住单元数的那一层**：ASR 句子稳定，
+  /// 而按语义分组是 LLM 干的——真机上同一条片子切出 3/4/5 个单元，
+  /// 差别就在这儿。
+  List<UnitDraft>? loadDrafts(String? sourcePrint) {
+    if (sourcePrint == null || sourcePrint.isEmpty) return null;
+    try {
+      final f = _draftsFor(sourcePrint);
+      if (!f.existsSync()) return null;
+      final raw = jsonDecode(f.readAsStringSync());
+      if (raw is! List || raw.isEmpty) return null;
+      final out = <UnitDraft>[];
+      for (final e in raw) {
+        final d = UnitDraft.tryFromJson(e);
+        // 一条读不动就整份作废：缺一段的切分比没有更危险
+        if (d == null) return null;
+        out.add(d);
+      }
+      return out;
+    } catch (e) {
+      AppLog.warn('切分草稿缓存读不动（$sourcePrint）：$e');
+      return null;
+    }
+  }
+
+  void saveDrafts(String? sourcePrint, List<UnitDraft> drafts) {
+    if (sourcePrint == null || sourcePrint.isEmpty || drafts.isEmpty) return;
+    try {
+      final f = _draftsFor(sourcePrint);
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync(jsonEncode([for (final d in drafts) d.toJson()]));
+    } catch (e) {
+      AppLog.warn('切分草稿缓存写不进（$sourcePrint）：$e');
     }
   }
 

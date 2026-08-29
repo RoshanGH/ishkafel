@@ -372,8 +372,19 @@ class AnalysisPipeline {
     final valleys = prepared.valleys;
     final shotBounds = prepared.shotBounds;
 
+    // **语义切分也要缓存**：ASR 句子是稳定的，而按语义分组是 LLM 干的——
+    // 真机上同一条片子切出 3/4/5 个单元，随机性全在这一步。
+    // 不缓存它的话，之前挑好的素材方案在重导后照样对不上号
     _report(onProgress, AnalysisStage.splitting);
-    final drafts = await splitter.split(sentences);
+    final print2 = sourcePrintOf(sourcePath);
+    final cache2 = PreparedCache(workDir.parent);
+    var drafts = cache2.loadDrafts(print2);
+    if (drafts == null) {
+      drafts = await splitter.split(sentences);
+      cache2.saveDrafts(print2, drafts);
+    } else {
+      AppLog.info('这条片子切过了，直接用上次的语义切分（$print2）');
+    }
 
     _report(onProgress, AnalysisStage.building);
     final units = builder.build(

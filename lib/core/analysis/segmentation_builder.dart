@@ -13,6 +13,23 @@ class UnitDraft {
     required this.endMs,
     required this.transcript,
   });
+
+  Map<String, dynamic> toJson() =>
+      {'startMs': startMs, 'endMs': endMs, 'transcript': transcript};
+
+  /// 宽松解析：**任何一处不对就返回 null**，由调用方当作「没有缓存」。
+  /// 缓存读错比重算一次贵得多——那会把另一条片子的切分安到这条上
+  static UnitDraft? tryFromJson(Object? raw) {
+    if (raw is! Map) return null;
+    final start = raw['startMs'];
+    final end = raw['endMs'];
+    if (start is! int || end is! int || end <= start) return null;
+    return UnitDraft(
+      startMs: start,
+      endMs: end,
+      transcript: raw['transcript'] is String ? raw['transcript'] as String : '',
+    );
+  }
 }
 
 /// 两层构树（纯算法）：
