@@ -9,6 +9,7 @@ import '../../core/storage/agent_presence.dart';
 import '../settings/settings_providers.dart';
 import 'agent_broadcast_bar.dart';
 import 'presence_slots.dart';
+import 'visual_pace.dart';
 
 /// 全局的 Agent 播报层：**套在整个 app 外面**，Agent 走到哪它跟到哪。
 ///
@@ -28,7 +29,7 @@ class AgentStageOverlay extends ConsumerStatefulWidget {
   const AgentStageOverlay({
     super.key,
     required this.child,
-    this.minHold = const Duration(milliseconds: 500),
+    this.minHold = visualStepDwell,
   });
 
   @override
@@ -50,7 +51,7 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
   void initState() {
     super.initState();
     // 500ms 与心跳同量级：跟得上手，也不吃 CPU
-    _poll = Timer.periodic(const Duration(milliseconds: 300), (_) => _tick());
+    _poll = Timer.periodic(visualPollInterval, (_) => _tick());
   }
 
   @override

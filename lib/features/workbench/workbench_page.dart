@@ -74,6 +74,7 @@ import '../../core/subtitle/subtitle_style.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import 'agent_focus_request.dart';
+import '../agent/visual_pace.dart';
 import '../shared/long_task_dialog.dart';
 import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/task_lock.dart';
@@ -242,7 +243,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (unit != null) _seekToUnit(unit);
       if (now != null && now.step > 0) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          Future<void>.delayed(const Duration(milliseconds: 320), () {
+          // 停够再回执：这个值与播报条共用一份（见 visualPace），
+      // 各定各的话谁先回执 Agent 就走，另一头整步扑空
+      Future<void>.delayed(visualStepDwell, () {
             if (!mounted) return;
             writeAgentAck(
                 dataDir: dataDir, taskId: widget.task.id, step: now.step);

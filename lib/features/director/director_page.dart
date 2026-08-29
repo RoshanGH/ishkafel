@@ -54,6 +54,7 @@ import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_id_badge.dart';
 import '../tasks/task_list_controller.dart';
+import '../agent/visual_pace.dart';
 import '../shared/long_task_dialog.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
@@ -1045,7 +1046,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   void _ackAfterPainted(int step) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 滚动是有动画的（_ScrollIntoView 用 animateTo），再等一拍让它停下来
-      Future<void>.delayed(const Duration(milliseconds: 320), () {
+      // 停够再回执：这个值与播报条共用一份（见 visualPace），
+      // 各定各的话谁先回执 Agent 就走，另一头整步扑空
+      Future<void>.delayed(visualStepDwell, () {
         if (!mounted) return;
         final dataDir = ref.read(dataDirProvider);
         if (dataDir == null) return;

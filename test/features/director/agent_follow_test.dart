@@ -9,6 +9,7 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/agent/visual_pace.dart';
 import 'package:ishkafel/features/director/director_page.dart';
 
 /// Agent 干活时，这块屏要跟着它走——用户原话：
@@ -113,8 +114,11 @@ void main() {
       step: 4,
       focus: const AgentFocus(module: 'director', lineIndex: 9),
     ));
+    // 轮询看到 → 上屏 → 停够 visualStepDwell → 才回执，
+    // 每一环都要推一拍定时器
     await tester.pump(const Duration(milliseconds: 600));
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(visualStepDwell);
+    await tester.pump(const Duration(milliseconds: 600));
 
     expect(readAgentAck(dataDir: dir, taskId: 't1'), 4,
         reason: '收到就回的话人还没看清界面已经翻篇了');
