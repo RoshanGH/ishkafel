@@ -14,6 +14,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../agent_stage.dart';
@@ -40,7 +41,7 @@ Future<int> runScriptApplyCommand({
   required List<String> rest,
   required Directory dataDir,
   String? file,
-  String holder = 'Agent',
+  String? holder,
 
   /// 可视模式：把软件拉起来、每步等界面展示完（见 AgentStage）
   bool? visual,
@@ -92,7 +93,7 @@ Future<int> runScriptApplyCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     final current = lock.read();
     sink.writeln(guiLockGuidance(
         holder: current?.holder, taskId: task.id));
@@ -102,7 +103,7 @@ Future<int> runScriptApplyCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
   );
   // 可视模式下这一句会把软件拉起来、落到这个任务、等界面真的展示完
   await stage.begin(_actionOf(what, payload), focus: _focusOf(what, payload));
@@ -112,7 +113,7 @@ Future<int> runScriptApplyCommand({
       dataDir: dataDir,
       taskId: task.id,
       presence: AgentPresence(
-        holder: holder,
+        holder: holder ?? agentLockHolder,
         at: DateTime.now(),
         action: _actionOf(what, payload),
         focus: _focusOf(what, payload),
@@ -162,7 +163,7 @@ Future<int> runScriptApplyCommand({
     return 0;
   } finally {
     stage.end();
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 

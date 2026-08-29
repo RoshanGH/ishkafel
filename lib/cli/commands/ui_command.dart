@@ -6,6 +6,7 @@ import '../../core/storage/agent_request.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_action.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../app_locator.dart';
 
@@ -28,7 +29,7 @@ Future<int> runUiCommand({
 
   /// 任务名。不给就用软件的默认命名（「脚本 08-27 20:57」这种）
   String? name,
-  String holder = 'Agent',
+  String? holder,
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
 

@@ -11,6 +11,7 @@ import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../app_locator.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
@@ -42,7 +43,7 @@ Future<int> runReviewCommand({
 
   /// 一整份决定（`{"decisions": [...]}`），给批量改用
   String? file,
-  String holder = 'Agent',
+  String? holder,
   bool? visual,
 
   /// 界面开着时等它代办多久。超时算失败——活儿没干
@@ -100,7 +101,7 @@ Future<int> runReviewCommand({
     file: file,
     dataDir: dataDir,
     repository: repository,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
     visual: visual,
     waitForUi: waitForUi,
     out: out,
@@ -190,7 +191,7 @@ Future<int> _changeCandidates({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     final current = lock.read();
     // 界面占着 ≠ 冲突：人正开着审片台看着指挥你，那就把活儿交给界面去做。
     // 它剔掉的卡是界面里的临时状态，人按「确认」才落盘——你自己写盘会让
@@ -214,7 +215,7 @@ Future<int> _changeCandidates({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
   );
   try {
     // 一条一条地走：人看的是过程——那张卡滚进视野、变成已剔除，再下一张
@@ -241,7 +242,7 @@ Future<int> _changeCandidates({
           dataDir: dataDir,
           taskId: task.id,
           presence: AgentPresence(
-            holder: holder,
+            holder: holder ?? agentLockHolder,
             at: DateTime.now(),
             action: action,
             focus: focus,
@@ -280,7 +281,7 @@ Future<int> _changeCandidates({
     stage.end();
     // 静默模式下 heartbeat 不写文件，但保险起见一并撤掉
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 

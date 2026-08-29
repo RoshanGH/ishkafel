@@ -16,6 +16,7 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
@@ -34,7 +35,7 @@ Future<int> runApplyCommand({
   MiaoaContentService? contentService,
   CandidateProbe? candidateProbe,
   String? file,
-  String holder = 'agent',
+  String? holder,
   Future<String> Function()? readStdin,
   StringSink? out,
   StringSink? err,
@@ -61,7 +62,7 @@ Future<int> runApplyCommand({
 
   // 别人正持着锁就不写——两边同时写会互相覆盖，而且悄无声息
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     final current = lock.read();
     sink.writeln(guiLockGuidance(
         holder: current?.holder, taskId: task.id));
@@ -85,7 +86,7 @@ Future<int> runApplyCommand({
   } finally {
     // 命令跑完立刻还锁。不还的话要等心跳超时 60 秒，这期间人在 app 里
     // 打开这个任务只能看不能改，还不知道为什么
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 

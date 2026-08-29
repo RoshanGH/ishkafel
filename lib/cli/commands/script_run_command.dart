@@ -24,6 +24,7 @@ import '../../core/storage/task_seq.dart';
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
 import '../agent_stage.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
@@ -73,7 +74,7 @@ Future<int> runScriptNewCommand({
 Future<int> runScriptExtractCommand({
   required List<String> rest,
   required Directory dataDir,
-  String holder = 'Agent',
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -100,17 +101,17 @@ Future<int> runScriptExtractCommand({
     return exitEnv;
   }
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   writeAgentPresence(
       dataDir: dataDir,
       taskId: task.id,
       presence: AgentPresence(
-          holder: holder, at: DateTime.now(), action: '正在识别参考片的台词'));
+          holder: holder ?? agentLockHolder, at: DateTime.now(), action: '正在识别参考片的台词'));
   try {
     final transcriber = ScriptTranscriber(
       audio: AudioExtractor(run: const ResolvingProcessRunner().call),
@@ -126,7 +127,7 @@ Future<int> runScriptExtractCommand({
           dataDir: dataDir,
           taskId: task.id,
           presence: AgentPresence(
-              holder: holder, at: DateTime.now(), action: stage.label));
+              holder: holder ?? agentLockHolder, at: DateTime.now(), action: stage.label));
       sink.writeln('· ${stage.label}');
     });
     final doc = ScriptDoc(lines,
@@ -141,7 +142,7 @@ Future<int> runScriptExtractCommand({
   } finally {
     heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -154,7 +155,7 @@ Future<int> runScriptVoiceCommand({
   required Directory dataDir,
   int? line,
   String? voiceId,
-  String holder = 'Agent',
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -201,12 +202,12 @@ Future<int> runScriptVoiceCommand({
       VoiceCatalog.all.first.ref.id;
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   final service = factory(task);
   final failed = <String>[];
   try {
@@ -217,7 +218,7 @@ Future<int> runScriptVoiceCommand({
         dataDir: dataDir,
         taskId: task.id,
         presence: AgentPresence(
-          holder: holder,
+          holder: holder ?? agentLockHolder,
           at: DateTime.now(),
           action: '正在给第 ${i + 1} 句配音（${k + 1}/${targets.length}）',
           focus: AgentFocus(lineIndex: i, panel: AgentPanel.voice),
@@ -259,7 +260,7 @@ Future<int> runScriptVoiceCommand({
   } finally {
     heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -268,7 +269,7 @@ Future<int> runScriptExportCommand({
   required List<String> rest,
   required Directory dataDir,
   String? outputDir,
-  String holder = 'Agent',
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -298,12 +299,12 @@ Future<int> runScriptExportCommand({
       '${stamp.minute.toString().padLeft(2, '0')}.mp4';
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final runner = ScriptExportRunner(
       workDir: Directory(p.join(dataDir.path, 'script_export', task.id)),
@@ -321,7 +322,7 @@ Future<int> runScriptExportCommand({
             dataDir: dataDir,
             taskId: task.id,
             presence: AgentPresence(
-                holder: holder,
+                holder: holder ?? agentLockHolder,
                 at: DateTime.now(),
                 action: '正在导出：${progress.step}'));
       },
@@ -339,7 +340,7 @@ Future<int> runScriptExportCommand({
   } finally {
     heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -354,7 +355,7 @@ Future<int> runScriptExportCommand({
 Future<int> runScriptJianyingCommand({
   required List<String> rest,
   required Directory dataDir,
-  String holder = 'Agent',
+  String? holder,
   bool? visual,
   StringSink? out,
   StringSink? err,
@@ -379,7 +380,7 @@ Future<int> runScriptJianyingCommand({
   // 生成草稿不写任务数据，但要占锁：素材落地期间人在界面上换素材，
   // 草稿会拿到一半新一半旧
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
     return exitLocked;
   }
@@ -387,12 +388,12 @@ Future<int> runScriptJianyingCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
   );
   await stage.begin('正在生成剪映草稿',
       focus: const AgentFocus(module: 'director'));
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final writer = JianyingWriter(
       sourceOf: (shot) {
@@ -440,6 +441,6 @@ Future<int> runScriptJianyingCommand({
   } finally {
     heartbeat.cancel();
     stage.end();
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }

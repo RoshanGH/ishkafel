@@ -19,6 +19,7 @@ import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../plan_submission.dart';
 import 'apply_command.dart';
@@ -38,7 +39,7 @@ Future<int> runExportCommand({
   String? bitrate,
   String? codec,
   String? format,
-  String holder = 'agent',
+  String? holder,
 
   /// 可视模式：把 app 拉起来落到这个任务，导出进度实时显示在横幅上
   bool? visual,
@@ -106,7 +107,7 @@ Future<int> runExportCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，导不了');
     return exitLocked;
   }
@@ -136,7 +137,7 @@ Future<int> runExportCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
   );
   await stage.begin('正在导出 ${combos.length} 条成片',
       focus: const AgentFocus(module: 'workbench'));
@@ -210,7 +211,7 @@ Future<int> runExportCommand({
     ),
   ]));
   stage.end();
-  lock.release(holder);
+  lock.release(holder ?? agentLockHolder);
 
   emitJson({
     'outputDir': dest.path,

@@ -8,6 +8,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 import 'analyze_command.dart';
@@ -24,7 +25,7 @@ Future<int> runBlankCommand({
   String? tagGroups,
   int? unit,
   String? tags,
-  String holder = 'agent',
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -61,7 +62,7 @@ Future<int> runBlankCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，改不了');
     return exitLocked;
   }
@@ -78,7 +79,7 @@ Future<int> runBlankCommand({
         }(),
     };
   } finally {
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 

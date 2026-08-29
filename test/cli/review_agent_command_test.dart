@@ -108,10 +108,14 @@ void main() {
     });
 
     test('另一个 Agent 占着就写不进去，明说是谁', () async {
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('agent:$pid');
+      // 用**别的**进程号：同一个持有者不算冲突，会直接写进去。
+      // 不能拿 pid+1——并行跑测试时那个进程可能真的存在，
+      // 锁到底算不算失效就成了掷骰子（真机上全量跑时挂过）
+      final other = 'agent:$pid 的另一个会话';
+      TaskLockFile(dataDir: dir, taskId: 'r1').acquire(other);
       final err = StringBuffer();
       expect(await run(['drop', 'r1'], items: '0:-:100', err: err), exitLocked);
-      expect(err.toString(), contains('agent:$pid'));
+      expect(err.toString(), contains(other));
     });
   });
 

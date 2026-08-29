@@ -12,6 +12,7 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import '../agent_stage.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../../core/storage/task_seq.dart';
 
@@ -23,7 +24,7 @@ import '../../core/storage/task_seq.dart';
 Future<int> runJianyingCommand({
   required List<String> rest,
   required Directory dataDir,
-  String holder = 'Agent',
+  String? holder,
   bool? visual,
   StringSink? out,
   StringSink? err,
@@ -49,7 +50,7 @@ Future<int> runJianyingCommand({
 
   // 占锁：素材落地期间人在界面上换素材，草稿会拿到一半新一半旧
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
     return exitLocked;
   }
@@ -57,12 +58,12 @@ Future<int> runJianyingCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder,
+    holder: holder ?? agentLockHolder,
   );
   await stage.begin('正在生成剪映草稿',
       focus: const AgentFocus(module: 'workbench'));
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final media = TaskMedia(dataDir: dataDir, taskId: task.id);
 
@@ -136,7 +137,7 @@ Future<int> runJianyingCommand({
   } finally {
     heartbeat.cancel();
     stage.end();
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 

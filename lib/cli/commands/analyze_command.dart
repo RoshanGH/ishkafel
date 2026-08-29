@@ -16,6 +16,7 @@ import '../../core/models/renew_task.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 
@@ -30,7 +31,7 @@ Future<int> runAnalyzeCommand({
   required List<String> rest,
   required Directory dataDir,
   String? external,
-  String holder = 'agent',
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -84,13 +85,13 @@ Future<int> runAnalyzeCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
+  if (!lock.acquire(holder ?? agentLockHolder)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，分析不了');
     return exitLocked;
   }
   // 分析要跑好几分钟，中途得续命，否则锁会在 60 秒后被判失效
   final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder));
+      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
 
   try {
     if (external0.isEmpty) {
@@ -152,7 +153,7 @@ Future<int> runAnalyzeCommand({
     return 1;
   } finally {
     heartbeat.cancel();
-    lock.release(holder);
+    lock.release(holder ?? agentLockHolder);
   }
 }
 
