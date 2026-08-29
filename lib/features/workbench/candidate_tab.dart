@@ -1,3 +1,5 @@
+import 'agent_focus_request.dart';
+import 'follow_mode.dart';
 import 'dart:async';
 
 import 'package:collection/collection.dart';
@@ -86,8 +88,14 @@ class CandidateTab extends StatefulWidget {
   final CandidateProbe? candidateProbe;
   final MiaoaTagService? tagService;
 
+  /// Agent 这一步要界面跟到哪儿。**要给某一镜挑素材时，界面得先切到
+  /// 「镜头替换」**——否则播报说「正在给 U2S3 挑素材」，右栏却写着
+  /// 「这个单元保留原片」，两句话打架（人第一次看 Agent 干活就撞上）
+  final AgentFocusRequest? agentFocus;
+
   const CandidateTab({
     super.key,
+    this.agentFocus,
     required this.editor,
     required this.shotTagGroups,
     this.unitTagGroups = const [],
@@ -185,9 +193,35 @@ class CandidateTabState extends State<CandidateTab> {
   List<int> get _projectIds =>
       widget.project == null ? const [] : [widget.project!.id];
 
+  /// 上一次跟过的那一步，同一步不重复切
+  int? _followedStep;
+
+  /// Agent 要给某一镜挑素材：**先切到镜头替换**，跟人自己动手时同一条路。
+  ///
+  /// 不切的话，播报说「正在给 U2S3 挑素材」而右栏写着「这个单元保留原片，
+  /// 要替换的话先在上方选择模式」——两句话打架，而这是最常见的场景：
+  /// 任何一条新任务第一次挑素材时都处在这个状态。
+  void _followAgentMode() {
+    final focus = widget.agentFocus;
+    if (focus == null || focus.step == _followedStep) return;
+    _followedStep = focus.step;
+    if (!shouldEnterShotMode(focus,
+        canUsePerShot: _picking.canUsePerShot,
+        alreadyPerShot:
+            _picking.currentMode == ReplacementMode.perShot)) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _picking.setMode(ReplacementMode.perShot);
+      if (focus.shotIndex case final s?) _picking.selectShot(s);
+    });
+  }
+
   @override
   void didUpdateWidget(CandidateTab oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _followAgentMode();
     // 用户在「标签组设置」里换了项目：检索范围要当场跟着变，
     // 否则右栏还在按上一个项目的素材给候选
     if (oldWidget.project?.id != widget.project?.id) {

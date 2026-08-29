@@ -1958,6 +1958,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,
                 onBgmSegmentTap: _isEditable ? _editBgmSegment : null,
                 candidatePanel: CandidateTab(
+                  // Agent 要给某一镜挑素材时，右栏得先切到镜头替换——
+                  // 否则播报和右栏说的是两回事
+                  agentFocus: _agentFocusRequest,
                   editor: editor,
                   shotTagGroups: _task.shotTagGroups,
                   unitTagGroups: _task.unitTagGroups,
