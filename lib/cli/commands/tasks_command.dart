@@ -36,7 +36,7 @@ Future<int> runTasksCommand({
   return 0;
 }
 
-/// `ishkafel task delete <id> --yes` —— 删掉一条任务，连同它的物料。
+/// `ishkafel task-delete <id> --yes` —— 删掉一条任务，连同它的物料。
 ///
 /// 验收 Agent 卡在这儿：让它「验完自己删掉」，CLI 却没有这条命令。
 /// 它的原话——「不是我懒，是 CLI 真的没有这条路」，只能看着界面上的
@@ -52,7 +52,7 @@ Future<int> runTaskDeleteCommand({
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
-    sink.writeln('用法：ishkafel task delete <任务 id> --yes');
+    sink.writeln('用法：ishkafel task-delete <任务 id> --yes');
     return exitBadUsage;
   }
   final repository = FileTaskRepository(dataDir);

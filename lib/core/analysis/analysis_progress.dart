@@ -12,6 +12,8 @@ enum AnalysisStage {
   // 语义切分在它之后。枚举顺序只用来算「第几步」，
   // 排错了进度会倒退，人以为出错重来了
   detectingScenes,
+  /// 这条片子分析过了，前半程直接用上次的结果
+  reusingPrepared,
   splitting,
   building,
   taggingUnits,
@@ -29,6 +31,7 @@ const _labels = <AnalysisStage, String>{
   AnalysisStage.detectingScenes: '正在识别画面切换',
   AnalysisStage.transcribing: '正在识别台词',
   AnalysisStage.splitting: '正在按语义切分台词',
+  AnalysisStage.reusingPrepared: '这条片子分析过了，直接用上次的切分',
   AnalysisStage.building: '正在生成切分结构',
   AnalysisStage.taggingUnits: '正在为台词语义单元打标签',
   AnalysisStage.taggingShots: '正在为视觉镜头打标签',

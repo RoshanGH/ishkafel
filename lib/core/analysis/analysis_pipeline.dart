@@ -290,8 +290,9 @@ class AnalysisPipeline {
     final cache = PreparedCache(workDir.parent);
     if (cache.load(sourcePrint) case final hit?) {
       AppLog.info('这条片子分析过了，直接用上次的切分（$sourcePrint）');
-      // 切分现成的，直接进组装那一步
-      _report(onProgress, AnalysisStage.building);
+      // **说清是复用不是重跑**：报成 building 的话，后面真的 building
+      // 时会再报一次，人看着像倒退了
+      _report(onProgress, AnalysisStage.reusingPrepared);
       return hit;
     }
 
