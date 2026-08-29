@@ -18,6 +18,7 @@ import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
 import 'package:ishkafel/cli/commands/bgm_command.dart';
+import 'package:ishkafel/cli/commands/clean_command.dart';
 import 'package:ishkafel/core/audio/bgm_library.dart';
 import 'package:ishkafel/cli/commands/voice_command.dart';
 import 'package:ishkafel/cli/commands/voices_command.dart';
@@ -163,6 +164,8 @@ Future<void> main(List<String> args) async {
     'jianying' => await runJianyingCommand(
         rest: rest, dataDir: dataDir, visual: parsed['visual'] as bool),
     // voice generate <任务> 与 voice <任务>：前者真合成，后者只定方案
+    'clean' => await runCleanCommand(
+        rest: rest, dataDir: dataDir, confirmed: parsed['yes'] as bool),
     'bgm' => await runBgmCommand(
         rest: rest,
         dataDir: dataDir,
@@ -281,6 +284,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 用法：ishkafel <命令> [参数]
 
 命令：
+  clean [--yes]    把盘上没主的东西清掉（不给 --yes 只报会删什么）
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
   bgm <task> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]

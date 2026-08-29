@@ -12,6 +12,7 @@ const List<String> topLevelCommands = [
   'bgm',
   'blank',
   'candidates',
+  'clean',
   'doctor',
   'export',
   'import',
