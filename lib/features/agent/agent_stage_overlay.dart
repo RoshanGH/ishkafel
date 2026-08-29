@@ -8,6 +8,7 @@ import '../../core/storage/agent_broadcast.dart';
 import '../../core/storage/agent_presence.dart';
 import '../settings/settings_providers.dart';
 import 'agent_broadcast_bar.dart';
+import 'presence_slots.dart';
 
 /// 全局的 Agent 播报层：**套在整个 app 外面**，Agent 走到哪它跟到哪。
 ///
@@ -63,16 +64,18 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
 
-    // 全局槽 + 当前正在被操作的任务：Agent 可能在任一处报进度
-    final slots = <String>{globalPresenceSlot, ..._activeTaskIds(dataDir)};
+    // 全局槽 + 当前正在被操作的任务：Agent 可能在任一处报进度。
+    // **取心跳最新的那条**，不是遇到第一个就停——目录顺序是文件系统给的，
+    // 撞上一个陈旧的槽就会把真正在干活的那条挡住
+    final slots = <String>{globalPresenceSlot, ...presenceTaskIds(dataDir)};
     AgentPresence? live;
     String? liveSlot;
     for (final slot in slots) {
       final p = readAgentPresence(dataDir: dataDir, taskId: slot);
-      if (p != null) {
+      if (p == null) continue;
+      if (live == null || p.at.isAfter(live.at)) {
         live = p;
         liveSlot = slot;
-        break;
       }
     }
 
@@ -123,20 +126,6 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
 
   /// 哪些任务上可能有人在干活。只看 presence 目录里现成的文件，
   /// 不去翻整个任务库——这是每 300ms 跑一次的循环
-  Iterable<String> _activeTaskIds(Directory dataDir) {
-    try {
-      final dir = Directory('${dataDir.path}/presence');
-      if (!dir.existsSync()) return const [];
-      return [
-        for (final f in dir.listSync())
-          if (f.path.endsWith('.json') && !f.path.endsWith('.ack.json'))
-            f.uri.pathSegments.last.replaceAll('.json', ''),
-      ];
-    } catch (_) {
-      return const [];
-    }
-  }
-
   @override
   Widget build(BuildContext context) => Stack(children: [
         widget.child,
