@@ -190,7 +190,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     final p = req.payload;
     final mode = WizardMode.parse('${p['mode']}');
     if (mode == null) {
-      reply(false, 'mode 要是 script / renew / blank 之一，给的是 ${p['mode']}');
+      reply(false, 'mode 要是 replace / blank / script 之一，给的是 ${p['mode']}');
       return;
     }
     final ids = [

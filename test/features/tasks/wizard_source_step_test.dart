@@ -21,7 +21,6 @@ void main() {
         filePath: null,
         onPickFile: _noop,
         onPickBlank: _noop,
-        onPickScript: _noop,
       )));
 
       expect(find.byKey(const Key('wizard-line-replace')), findsOneWidget);
@@ -38,7 +37,6 @@ void main() {
         line: WizardLine.replace,
         onPickFile: _noop,
         onPickBlank: _noop,
-        onPickScript: _noop,
       )));
 
       expect(find.byKey(const Key('wizard-pick-local-file')), findsOneWidget);
@@ -53,7 +51,6 @@ void main() {
         line: WizardLine.script,
         onPickFile: _noop,
         onPickBlank: _noop,
-        onPickScript: _noop,
       )));
 
       expect(find.byKey(const Key('wizard-pick-local-file')), findsNothing);

@@ -2,7 +2,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:ishkafel/core/jianying/renew_jianying_plan.dart';
-import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';

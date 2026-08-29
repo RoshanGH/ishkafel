@@ -67,7 +67,8 @@ void main() {
     expect(await run(['new-task'], mode: '随便写', tagGroups: '1', err: err),
         exitBadUsage);
     expect(err.toString(), contains('script'));
-    expect(err.toString(), contains('renew'));
+    expect(err.toString(), contains('replace'),
+          reason: '报错里要给现在的词——人照着报错去敲，写出来的就是它');
     expect(err.toString(), contains('blank'));
   });
 

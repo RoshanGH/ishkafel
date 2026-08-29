@@ -14,7 +14,6 @@ import '../app_locator.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
-import 'open_command.dart';
 
 /// `ishkafel review <task>` —— 把 app 拉起来进**审核模式**，人过一遍
 /// 挑好的候选、勾选去留、确认。

@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
 
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';

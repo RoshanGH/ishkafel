@@ -90,9 +90,7 @@ class WizardBody extends StatelessWidget {
             onPickLine: onPickLine,
             onPickFile: onPickFile,
             blank: blank,
-            onPickBlank: onPickBlank,
-            script: script,
-            onPickScript: onPickScript),
+            onPickBlank: onPickBlank),
         const SizedBox(height: AppSpacing.lg),
         const _StepLabel('第 2 步 · 项目与标签组（素材从哪儿来、按什么打标）'),
         // 项目在最上面：先定「上哪儿找素材」，再定「按什么打标」

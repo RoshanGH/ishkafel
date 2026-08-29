@@ -6,7 +6,6 @@ import '../../core/storage/agent_request.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_action.dart';
-import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../app_locator.dart';
 
@@ -44,17 +43,19 @@ Future<int> runUiCommand({
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty || rest.first != 'new-task') {
-    sink.writeln('用法：ishkafel ui new-task --mode <script|renew|blank> '
+    sink.writeln('用法：ishkafel ui new-task --mode <replace|blank|script> '
         '--tag-groups <id,id> [--file <原片>]');
     return exitBadUsage;
   }
 
   final parsed = WizardMode.parse(mode);
   if (parsed == null) {
-    sink.writeln('--mode 要是 script / renew / blank 之一：\n'
-        '  script  从台词造一条新片（不需要原片）\n'
-        '  renew   拿一条现成的片子换画面（要 --file）\n'
-        '  blank   拼画面、没有台词与配音');
+    // 报错里的词必须是现在的词：人照着报错去敲，写出来的就是这几个。
+    // 这儿曾经还写着废弃的 renew，而手册早改成 replace 了
+    sink.writeln('--mode 要是 replace / blank / script 之一：\n'
+        '  replace  替换裂变，拿一条现成的片子换画面（要 --file）\n'
+        '  blank    替换裂变但不用原片：拼画面、没有台词与配音\n'
+        '  script   脚本成片，从台词造一条新片');
     return exitBadUsage;
   }
   final ids = <int>[

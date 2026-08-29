@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../../core/audio/bgm_plan.dart';
-import 'package:path/path.dart' as p;
 
 import '../../core/script/bgm_rail.dart';
 import '../../core/script/script_cover.dart';

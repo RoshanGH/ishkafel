@@ -11,7 +11,6 @@ import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
-import '../../core/subtitle/subtitle_style.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../../core/storage/task_seq.dart';

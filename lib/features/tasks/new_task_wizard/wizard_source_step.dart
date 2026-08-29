@@ -35,9 +35,6 @@ class WizardSourceStep extends StatelessWidget {
   final bool blank;
   final VoidCallback onPickBlank;
 
-  /// 选了「脚本成片」这一路。此时 [filePath] 一定为 null
-  final bool script;
-  final VoidCallback onPickScript;
 
   /// 选线。null 时只展示（单测用）
   final void Function(WizardLine line)? onPickLine;
@@ -50,8 +47,6 @@ class WizardSourceStep extends StatelessWidget {
     required this.onPickFile,
     this.blank = false,
     required this.onPickBlank,
-    this.script = false,
-    required this.onPickScript,
   });
 
   static const miaoaChannelNote = '本期未开放：需要 miaoa 成片下载通道。'
@@ -138,17 +133,6 @@ class WizardSourceStep extends StatelessWidget {
         description: '手动加分子、打标签，用标签搜素材拼片',
         selected: blank,
         onTap: onPickBlank,
-      );
-
-  /// 「脚本即成片」：编导写脚本，配音/镜头/字幕从脚本长出来。
-  /// 与「替换裂变」互为镜像——一个从成片出发换画面，一个从脚本出发长成片
-  Widget _scriptCard() => _SourceCard(
-        cardKey: const Key('wizard-script-source'),
-        icon: Icons.edit_note,
-        title: '脚本成片',
-        description: '写脚本，配音配镜长出成片',
-        selected: script,
-        onTap: onPickScript,
       );
 
   // 卡面只写短句（四卡一行，长文案会把整行撑高、把下方「重试」等按钮

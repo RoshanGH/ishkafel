@@ -240,7 +240,7 @@ Set<int> _bgmIdsOf(RenewTask task) {
   // 替换裂变：**一段可以选好几首互为备选**，导出时按变体轮流取。
   // 只算 previewIndex 那一首的话，其余备选会被当孤儿删掉，
   // 导第二条变体时就没曲子了
-  for (final seg in task.bgm?.segments ?? const []) {
+  for (final seg in task.bgm.segments) {
     for (final m in seg.materials) {
       ids.add(m.id);
     }

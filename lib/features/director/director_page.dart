@@ -2955,7 +2955,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                         final line = _doc.lines[index];
                         final next = [...line.shots]..removeAt(j);
                         // 删镜后剩下的按根重新均分——空出的时长不能凭空消失
-                        final root = ShotAllocation.rootMsOf(line);
                         _mutate((d) => d.setShotsById(
                             line.id,
                             next.isEmpty ? next : reallocShots(line, next)));
