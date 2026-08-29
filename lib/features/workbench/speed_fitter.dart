@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/export/export_commands.dart';
+import '../../core/replacement/candidate_trim.dart';
 import '../../core/ffmpeg/media_spec.dart';
 import '../../core/ffmpeg/rendered_cache.dart';
 import '../../core/log/app_log.dart';
@@ -192,7 +193,13 @@ class SpeedFitter extends ChangeNotifier {
         ? ''
         : '|sub${[for (final l in lines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
             '|${subtitleStyle.fingerprint}';
-    final cacheKey = 'fit|$candidatePath|$slotMs|$candidateMs|$target$subKey';
+    // **和导出、剪映走同一个函数**：那两条路都改成「从素材里截一段」了，
+    // 预览要是还整条压缩，人在软件里看到的是快进、导出来却不是——
+    // 比两边都快进更糟，因为人会照着预览下判断
+    final cut = trimFor(materialMs: candidateMs ?? 0, slotMs: slotMs);
+    // 取段起点进指纹：换了截哪一段却复用旧切片，人看到的是「调了没反应」
+    final cacheKey =
+        'fit|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target$subKey';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -225,6 +232,7 @@ class SpeedFitter extends ChangeNotifier {
           input: candidatePath,
           durationMs: slotMs,
           candidateDurationMs: candidateMs,
+          trimStartMs: (candidateMs ?? 0) > 0 ? cut.startMs : null,
           out: dest,
           // 和原片一个规格，播放器换段时才不用重建解码器
           target: target,
