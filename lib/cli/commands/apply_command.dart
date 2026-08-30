@@ -230,22 +230,16 @@ Map<String, Object?> planApplyReport({
       'frameUnchecked': picked.where((m) => !m.burnedTextChecked).length,
     },
     // 影响成片的降级要说出来，不能等人拿到片子才发现有几镜在快放
-    if (trimUnavailableNotice(
-            total: picked.length,
-            withDuration: withDuration,
-            shortSlots: shortSlots)
-        case final notice?)
-      'notice': notice,
+    'notice': ?trimUnavailableNotice(
+        total: picked.length, withDuration: withDuration, shortSlots: shortSlots),
     // 画面上本来就烧着字的那几条要点名——成片会出现两层字幕
-    if (burnedTextNotice(picked) case final warn?) 'burnedText': warn,
+    'burnedText': ?burnedTextNotice(picked),
     // 挑的素材里出现了不止一个品牌——台词说的和画面里摆的对不上。
     // 两条互补的判据：候选之间打架 / 候选一致但整条跑到别家去了
-    if (brandConflictNotice(picked) ??
-            brandMismatchNotice(
-                picked: picked,
-                sourceBrand: sourceBrandOf(task.units ?? const []))
-        case final warn?)
-      'brandConflict': warn,
+    'brandConflict': ?(brandConflictNotice(picked) ??
+        brandMismatchNotice(
+            picked: picked,
+            sourceBrand: sourceBrandOf(task.units ?? const []))),
   };
 }
 

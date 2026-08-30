@@ -40,7 +40,7 @@ void main() {
   });
 
   test('老的回执没有 payload 也读得动——不能因为多个字段就读不回来', () async {
-    File('${dir.path}/presence/${globalPresenceSlot}.request-result.json')
+    File('${dir.path}/presence/$globalPresenceSlot.request-result.json')
       ..parent.createSync(recursive: true)
       ..writeAsStringSync('{"id":"r2","ok":true,"message":"好了"}');
 

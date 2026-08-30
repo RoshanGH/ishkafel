@@ -56,11 +56,11 @@ class LineTextPickerState extends State<LineTextPicker> {
       takenCharRanges(widget.text, widget.words, widget.takenWordRanges);
 
   @override
-  void didUpdateWidget(LineTextPicker old) {
-    super.didUpdateWidget(old);
-    if (old.text != widget.text ||
-        old.words != widget.words ||
-        old.takenWordRanges != widget.takenWordRanges) {
+  void didUpdateWidget(LineTextPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text ||
+        oldWidget.words != widget.words ||
+        oldWidget.takenWordRanges != widget.takenWordRanges) {
       _taken =
           takenCharRanges(widget.text, widget.words, widget.takenWordRanges);
       _from = null;

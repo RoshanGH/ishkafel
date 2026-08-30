@@ -12,7 +12,7 @@ Iterable<String> presenceTaskIds(Directory dataDir) {
     if (!dir.existsSync()) return const [];
     return [
       for (final f in dir.listSync())
-        if (_taskIdOf(f.uri.pathSegments.last) case final id?) id,
+        ?_taskIdOf(f.uri.pathSegments.last),
     ];
   } catch (_) {
     return const [];

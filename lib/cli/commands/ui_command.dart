@@ -95,7 +95,7 @@ Future<int> runUiCommand({
     kind: UiAction.wizardOpen.wire,
     payload: {
       'mode': parsed.wire,
-      if (file != null) 'filePath': file,
+      'filePath': ?file,
       if ((name ?? '').trim().isNotEmpty) 'name': name!.trim(),
       'tagGroupIds': ids,
     },

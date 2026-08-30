@@ -47,7 +47,7 @@ void writeUiWake(
     ..writeAsStringSync(jsonEncode({
       'task': taskId,
       'review': review,
-      if (module != null) 'module': module,
+      'module': ?module,
       'at': DateTime.now().toIso8601String(),
     }));
 }

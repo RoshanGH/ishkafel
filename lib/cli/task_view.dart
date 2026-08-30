@@ -83,7 +83,7 @@ Map<String, dynamic> taskToJson(RenewTask task) {
       'subtitleCoverage': {
         'unitsWith': subtitleCoverage(r).unitsWith,
         'unitsWithout': subtitleCoverage(r).unitsWithout,
-        if (subtitleGapNotice(r) case final note?) 'note': note,
+        'note': ?subtitleGapNotice(r),
       },
     'exports': [
       for (final e in task.exports)

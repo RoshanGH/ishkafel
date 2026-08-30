@@ -40,7 +40,7 @@ void main() {
         dataDir: dir,
         videoPath: '/v/a.mp4',
         atMs: 500,
-        extract: (_, __, ___) async {
+        extract: (_, _, _) async {
           ran++;
           return true;
         },
@@ -72,7 +72,7 @@ void main() {
         dataDir: dir,
         videoPath: '/v/坏.mp4',
         atMs: 0,
-        extract: (_, __, ___) async => false,
+        extract: (_, _, _) async => false,
       );
       expect(got, isNull);
     });

@@ -63,7 +63,7 @@ void main() {
       waitForUi: waitForUi ?? const Duration(milliseconds: 400),
       out: out,
       err: err,
-      run: (_, __) async => ProcessResult(0, 0, '', ''),
+      run: (_, _) async => ProcessResult(0, 0, '', ''),
     );
   }
 

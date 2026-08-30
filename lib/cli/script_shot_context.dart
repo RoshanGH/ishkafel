@@ -39,7 +39,7 @@ Map<String, dynamic> scriptShotContext(
           // 本地首帧：**让 Agent 真的看见这一镜长什么样**，
           // 而不是只读一句画面描述。描述是别人（打标 AI）总结的，
           // 看图才是第一手
-          if (refFrameOf?.call(k) case final f?) 'framePath': f,
+          'framePath': ?refFrameOf?.call(k),
         };
       }(),
   ];

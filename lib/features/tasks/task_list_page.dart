@@ -278,7 +278,12 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             '「想访问文稿文件夹」的授权框，需要人点允许），或者导入失败了');
         return;
       }
-      final created = _createFromWizardTail(ref, context, result, made);
+      // 建这一段是异步的，跑完时列表页可能已经不在树上了（人自己退出去了）。
+      // 那就只剩「进不进页面」这一件事做不了——**任务是真的建好了，
+      // 回执和撤场照发**，否则 Agent 会一直等到超时，最后报一个假的失败
+      final created = mounted
+          ? _createFromWizardTail(ref, context, result, made)
+          : Future<void>.value();
       reply(true, '任务已经建好了',
           payload: {'taskId': made.id, 'kind': made.kind});
       // **撤场要在这儿，不能等 created**：脚本成片那条路会 await 编导台的
@@ -432,6 +437,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       prefillProject: recent?.project,
     );
     if (result == null) return;
+    // 向导是个异步的对话框，关掉的时候列表页可能已经不在了
+    if (!context.mounted) return;
     await _createFromWizard(ref, context, result);
   }
 
@@ -481,7 +488,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     String name = '',
   }) async {
     final made = await _createFromWizardHead(ref, context, result, name: name);
-    if (made != null) {
+    // 建好了但页面没了：任务照样是建成的，只是没法再替人进去
+    if (made != null && context.mounted) {
       await _createFromWizardTail(ref, context, result, made);
     }
     return made;

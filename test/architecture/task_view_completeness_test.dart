@@ -18,13 +18,13 @@ import 'package:ishkafel/core/script/script_doc.dart';
 /// 就得报什么。以后再加字段也跑不掉，不用记得回来补测试。
 void main() {
   _scriptViewTests();
-  Map _shotJson(Shot shot) {
+  Map shotJson(Shot shot) {
     final json = taskToJson(_task(shots: [shot]));
     final units = json['units'] as List;
     return ((units.single as Map)['shots'] as List).single as Map;
   }
 
-  Map _pickedJson(PickedMaterial m) {
+  Map pickedJson(PickedMaterial m) {
     final json = taskToJson(_task(picked: [m]));
     return ((json['pickedMaterials'] as Map)['items'] as List).single as Map;
   }
@@ -37,7 +37,7 @@ void main() {
       description: '一句话',
       productBrand: '滴露',
     );
-    final reported = _shotJson(shot);
+    final reported = shotJson(shot);
     for (final key in shot.toJson().keys) {
       // trace/boundaryTrace 是给「标签为什么是这个」留痕用的大对象，
       // 命令行不报是有意的——它们有专门的看法（tag-trace）
@@ -61,7 +61,7 @@ void main() {
       productBrand: '滴露',
       framesSeen: 3,
     );
-    final reported = _pickedJson(m);
+    final reported = pickedJson(m);
     for (final key in m.toJson().keys) {
       // 首帧图的本地路径是界面自己的事，命令行报出去没有用处
       if (key == 'thumbPath') continue;

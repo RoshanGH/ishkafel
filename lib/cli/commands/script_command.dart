@@ -421,7 +421,7 @@ Future<int> runScriptCommand({
             'projectIds': projectIds,
             'tagCount': tagIds.length,
           },
-          if (narrowing.notice case final n?) 'notice': n,
+          'notice': ?narrowing.notice,
           'candidates': [
             for (final m in page.items)
               {
@@ -841,7 +841,7 @@ Future<int> runScriptFramesCommand({
         'shotIndex': k,
         'startMs': a,
         'endMs': b,
-        if (f != null) 'framePath': f,
+        'framePath': ?f,
         if ((meta?.description ?? '').isNotEmpty) 'description': meta!.description,
         if ((meta?.tags ?? const []).isNotEmpty) 'tags': meta!.tags,
         'asr': target.reference!.segmentText(k, ''),
@@ -871,8 +871,8 @@ Future<int> runScriptFramesCommand({
       if (s.burnedText != null) 'burnedText': s.burnedText,
       if (s.productBrand != null) 'productBrand': s.productBrand,
       if (s.framesSeen != null) 'framesSeen': s.framesSeen,
-      if (local != null) 'videoPath': local,
-      if (frame != null) 'framePath': frame,
+      'videoPath': ?local,
+      'framePath': ?frame,
       if (local == null)
         'note': '这条素材还没下到本地——script peek --materials ${s.materialId} 会下',
     });

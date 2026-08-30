@@ -25,7 +25,7 @@ void main() {
             text: src,
             words: words,
             takenWordRanges: taken,
-            onPick: onPick ?? (_, __) {},
+            onPick: onPick ?? (_, _) {},
           ),
         ),
       ));
@@ -101,7 +101,7 @@ void main() {
           text: src,
           words: words,
           takenWordRanges: const [],
-          onPick: (_, __) {},
+          onPick: (_, _) {},
           onTapText: () => tapped++,
         ),
       ),
@@ -120,7 +120,7 @@ void main() {
           text: src,
           words: const [],
           takenWordRanges: const [],
-          onPick: (_, __) {},
+          onPick: (_, _) {},
         ),
       ),
     ));

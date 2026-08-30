@@ -146,7 +146,7 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
     'type': line.type == ScriptLineType.voiced ? 'voiced' : 'visual',
     'text': line.text,
     if (line.tags.isNotEmpty) 'tags': line.tags,
-    if (root != null) 'rootMs': root,
+    'rootMs': ?root,
     // 划词建镜要用的三样：每个字落在哪、哪些字已经被占住、现在能不能划。
     // 人在界面上是用眼睛看的，Agent 得有等价的东西
     'canPickWords': (vo?.words ?? const []).isNotEmpty,

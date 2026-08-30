@@ -95,7 +95,7 @@ Future<int> runCandidatesCommand({
 
   final excluded = <int>{
     for (final raw in (excludeProjects ?? '').split(','))
-      if (int.tryParse(raw.trim()) case final id?) id,
+      ?int.tryParse(raw.trim()),
   };
   if ((excludeProjects ?? '').trim().isNotEmpty && excluded.isEmpty) {
     sink.writeln('--exclude-projects 认不出来：'
@@ -277,7 +277,7 @@ Future<int> runCandidatesCommand({
   final cache = frameCheckCacheIn(dataDir);
   final frameChecks = <int, FrameCheck>{
     for (final c in filtered.items)
-      if (cache.get(c.id) case final hit?) c.id: hit,
+      c.id: ?cache.get(c.id),
   };
 
   final specs = <int, int>{};
