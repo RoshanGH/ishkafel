@@ -12,6 +12,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/project_ref.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/replacement/brand_consistency.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../picking/candidate_panel.dart';
@@ -661,6 +662,11 @@ class CandidateTabState extends State<CandidateTab> {
           onProbeTagHits: _probeTagHits,
           projectName: widget.project?.name,
           picked: _pickedItems,
+          // 品牌冲突要按**整条片子**算：人是一个单元一个单元挑下来的，
+          // 每一屏里都只有一个牌子，错位只在合起来看时才现形
+          allPicked: _picked.values.toList(growable: false),
+          // 原片露的是什么牌子——候选全跑到别家去时，光比候选之间看不出来
+          sourceBrand: sourceBrandOf(_picking.units),
           onRemovePicked:
               widget.readOnly ? null : _picking.toggleCandidate,
           onSetPreviewPicked:

@@ -16,6 +16,7 @@ import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/export/export_spec.dart';
 import '../../core/audio/voice_catalog.dart';
+import '../../core/script/shot_frame_check.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/bgm_rail.dart';
@@ -910,6 +911,48 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   void _onMediaCache() {
     if (mounted) setState(() {});
     unawaited(_backfillMeasuredDurations());
+    // 素材落地了就顺手看一眼画面：烧没烧字、露的是谁家产品。
+    // **两样都只有看图才发现得了、而且会毁掉整片**——脚本成片自己要给
+    // 台词烧一行字幕，素材再自带一层就是两层字叠在一起
+    unawaited(_backfillFrameChecks());
+  }
+
+  /// 正在看的，避免同一条素材反复看
+  final Set<int> _checkingFrames = {};
+
+  /// 素材落地就做一次画面自查。
+  ///
+  /// 和实测时长走同一个时机（「文件都在本地了，量一下几十毫秒的事」）：
+  /// 挑素材那一刻素材还没下载、看不了，落地之后就能抽帧。
+  /// **能看清的时候就该看**，而不是让人拿到成片才发现素材上烧着别家的字。
+  ///
+  /// 先查跨任务缓存：一条素材看一次就够，不是每个任务看一次。
+  Future<void> _backfillFrameChecks() async {
+    final cache = _mediaCache;
+    final dataDir = ref.read(dataDirProvider);
+    if (cache == null || dataDir == null) return;
+    final todo = shotsNeedingFrameCheck(
+      doc: _doc,
+      localPathOf: (id) =>
+          _checkingFrames.contains(id) ? null : cache.localPathOf(id),
+    );
+    if (todo.isEmpty) return;
+    final checker =
+        ref.read(shotFrameCheckFactoryProvider)?.call(dataDir, _task.id);
+    if (checker == null) return; // 没配 AI 凭据：记成「没查过」，不冒充没问题
+    _checkingFrames.addAll(todo.map((s) => s.materialId));
+    for (final shot in todo) {
+      try {
+        final result = await checker(shot.materialId, shot.durationMs);
+        if (mounted) {
+          _mutate((d) => d.withFrameCheck(shot.materialId, result));
+        }
+      } catch (err) {
+        AppLog.warn('素材 ${shot.materialId} 的画面没看成：$err');
+      } finally {
+        _checkingFrames.remove(shot.materialId);
+      }
+    }
   }
 
   /// 正在量的，避免同一条素材反复量

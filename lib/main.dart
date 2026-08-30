@@ -37,6 +37,7 @@ import 'features/tasks/task_artifact_cleaner.dart';
 import 'features/tasks/task_list_controller.dart';
 import 'features/workbench/voice_swap_runner.dart';
 import 'features/export/export_dialog.dart';
+import 'core/ai/frame_check_wiring.dart';
 import 'features/picking/picking_providers.dart';
 import 'features/workbench/bgm_picker_sheet.dart';
 import 'core/miaoa/material_downloader.dart';
@@ -123,6 +124,14 @@ Future<void> main(List<String> args) async {
       // 参考视觉镜头打标（多帧 vision：标签 + 画面描述）
       refShotTaggerProvider
           .overrideWithValue(buildRefShotTagger(credentials)),
+      // 挑中素材时顺手看一眼首帧图：烧没烧字、露的是谁家产品
+      // ——一次调用问两件事，只对挑中的那几条跑
+      frameCheckerProvider.overrideWithValue(buildFrameChecker(credentials)),
+      // 编导台：素材落地后看一眼画面（烧字 + 产品露出品牌）。
+      // 装配在 core，命令行那头共用同一份
+      shotFrameCheckFactoryProvider.overrideWithValue(
+          (dir, taskId) => buildShotFrameCheck(
+              arkApiKey: credentials.arkApiKey, dataDir: dir, taskId: taskId)),
       mediaToolsStatusProvider.overrideWithValue(mediaTools),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里

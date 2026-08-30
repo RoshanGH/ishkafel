@@ -8,6 +8,7 @@
 /// 清空文案自动变画面行——编导只管写，不用理解「类型」这个概念。
 library;
 
+import '../ai/frame_check.dart';
 import 'sound_mix.dart';
 import '../audio/bgm_plan.dart';
 import '../analysis/providers.dart' show AsrSentence, AsrWord;
@@ -356,6 +357,24 @@ class LineShot {
   final String? fileKey;
   final int? durationMs;
 
+  /// 画面上烧着的文字（字幕、贴片文案、品牌角标）。
+  ///
+  /// **null 是「还没看过」，空列表才是「看过、画面干净」**——两者绝不能混。
+  /// 脚本成片给每句台词烧一行字幕，素材上本来有字就是两层字叠在一起、
+  /// 内容还毫不相干，片子直接废。而素材库给的画面描述里一个字都看不出来。
+  final List<String>? burnedText;
+
+  /// 画面里露出的产品是谁家的（读画面上的包装、logo）。
+  ///
+  /// 产品露出的镜头**不能跨品牌换**。这条线上比替换裂变更难发现：
+  /// 没有原片，就没有「本片是什么牌子」的现成参照——只能靠挑中的素材
+  /// 之间互相比。
+  final String? productBrand;
+
+  /// 上面两条是看了几帧得出的。1 帧看不全（产品可能只在某几秒里出现），
+  /// 3 帧才算看全。null = 没查过
+  final int? framesSeen;
+
   /// 从素材的哪一刻开始截（框选起点，素材内坐标毫秒）
   final int trimStartMs;
 
@@ -408,6 +427,9 @@ class LineShot {
     this.thumbnailUrl,
     this.fileKey,
     this.durationMs,
+    this.burnedText,
+    this.productBrand,
+    this.framesSeen,
     this.trimStartMs = 0,
     this.speed = 1.0,
     this.allocMs,
@@ -417,6 +439,38 @@ class LineShot {
     this.endWord,
     this.legacySubtitleText,
   });
+
+  /// 记下这次画面自查的结果。其余字段原样——取段起点、速度、分配时长
+  /// 都是人调过的，丢一个都是回退
+  LineShot withFrameCheck(FrameCheck check) => LineShot(
+        materialId: materialId,
+        name: name,
+        voiceover: voiceover,
+        sceneDescription: sceneDescription,
+        thumbnailUrl: thumbnailUrl,
+        fileKey: fileKey,
+        durationMs: durationMs,
+        burnedText: List.unmodifiable(check.burnedText),
+        productBrand: check.productBrand,
+        framesSeen: check.framesSeen,
+        trimStartMs: trimStartMs,
+        speed: speed,
+        allocMs: allocMs,
+        localSource: localSource,
+        sourceVolume: sourceVolume,
+        startWord: startWord,
+        endWord: endWord,
+        legacySubtitleText: legacySubtitleText,
+      );
+
+  /// 画面看过没有。没看过时界面要说「未检查」，不能显示成「没问题」
+  bool get frameChecked => burnedText != null;
+
+  /// 确定画面上烧着字
+  bool get hasBurnedText => burnedText?.isNotEmpty ?? false;
+
+  /// 画面里有产品露出。这类镜头不能跨品牌换
+  bool get hasProduct => productBrand != null;
 
   /// 从 [trimStartMs] 起、按 [speed] 播，这条素材最多还能出多少**成片时长**。
   /// 素材时长未知时给一个「足够大」——探测失败不该把镜头卡死。
@@ -448,6 +502,9 @@ class LineShot {
         thumbnailUrl: thumbnailUrl,
         fileKey: fileKey,
         durationMs: durationMs,
+        burnedText: burnedText,
+        productBrand: productBrand,
+        framesSeen: framesSeen,
         trimStartMs: trimStartMs ?? this.trimStartMs,
         speed: speed ?? this.speed,
         allocMs: allocMs == _unsetAlloc ? this.allocMs : allocMs as int?,
@@ -494,6 +551,9 @@ class LineShot {
         thumbnailUrl: thumbnailUrl,
         fileKey: fileKey,
         durationMs: ms,
+        burnedText: burnedText,
+        productBrand: productBrand,
+        framesSeen: framesSeen,
         // 留得下这一镜要用的那一段：起点 + 用量不能超过素材总长
         trimStartMs: ms <= 0
             ? trimStartMs
@@ -521,6 +581,10 @@ class LineShot {
         if (thumbnailUrl != null) 'thumbnailUrl': thumbnailUrl,
         if (fileKey != null) 'fileKey': fileKey,
         if (durationMs != null) 'durationMs': durationMs,
+        // 画面自查：没查过时整个键不出现——空数组会被读成「画面干净」
+        if (burnedText != null) 'burnedText': burnedText,
+        if (productBrand != null) 'productBrand': productBrand,
+        if (framesSeen != null) 'framesSeen': framesSeen,
         if (trimStartMs != 0) 'trimStartMs': trimStartMs,
         if (speed != 1.0) 'speed': speed,
         if (allocMs != null) 'allocMs': allocMs,
@@ -545,6 +609,15 @@ class LineShot {
           raw['thumbnailUrl'] is String ? raw['thumbnailUrl'] as String : null,
       fileKey: raw['fileKey'] is String ? raw['fileKey'] as String : null,
       durationMs: raw['durationMs'] is int ? raw['durationMs'] as int : null,
+      burnedText: raw['burnedText'] is List
+          ? List.unmodifiable([
+              for (final e in raw['burnedText'] as List)
+                if (e is String) e,
+            ])
+          : null,
+      productBrand:
+          raw['productBrand'] is String ? raw['productBrand'] as String : null,
+      framesSeen: raw['framesSeen'] is int ? raw['framesSeen'] as int : null,
       trimStartMs:
           raw['trimStartMs'] is int ? raw['trimStartMs'] as int : 0,
       speed: raw['speed'] is num ? (raw['speed'] as num).toDouble() : 1.0,
@@ -1131,6 +1204,29 @@ class ScriptDoc {
   /// 只是以前被摆在主预览下面当总音量用——画面行不参与这条规则，
   /// 所以拉它对画面行永远没反应。现在总音量是 [mix]，这里回归本名
   double get sourceVolume => mix.duckedSourceVolume;
+
+  /// 把一条素材的画面自查结果写回**每一句用到它的台词**上。
+  ///
+  /// 同一条素材常常配给好几句：查一次、写回多处。写回时其余字段原样——
+  /// 取段起点、速度、分配时长都是人调过的，丢一个都是回退。
+  ScriptDoc withFrameCheck(int materialId, FrameCheck check) => ScriptDoc(
+        [
+          for (final line in lines)
+            line.withShots([
+              for (final shot in line.shots)
+                if (shot.materialId == materialId)
+                  shot.withFrameCheck(check)
+                else
+                  shot,
+            ]),
+        ],
+        subtitle: subtitle,
+        bgmSegments: bgmSegments,
+        refVideoPath: refVideoPath,
+        mix: mix,
+        defaultVoiceId: defaultVoiceId,
+        defaultSpeechRate: defaultSpeechRate,
+      );
 
   ScriptDoc(
     List<ScriptLine> lines, {

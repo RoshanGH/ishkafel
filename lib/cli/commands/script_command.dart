@@ -865,6 +865,12 @@ Future<int> runScriptFramesCommand({
       if (s.allocMs != null) 'allocMs': s.allocMs,
       'trimStartMs': s.trimStartMs,
       'speed': s.speed,
+      // 画面自查：烧没烧字、露的是谁家产品。**两样都只有看图才知道**，
+      // 而且都会毁掉整片——这条线自己要给台词烧一行字幕，素材再自带一层
+      // 就是两层字叠在一起。framesSeen 为 null = 没看成，不是「没问题」
+      if (s.burnedText != null) 'burnedText': s.burnedText,
+      if (s.productBrand != null) 'productBrand': s.productBrand,
+      if (s.framesSeen != null) 'framesSeen': s.framesSeen,
       if (local != null) 'videoPath': local,
       if (frame != null) 'framePath': frame,
       if (local == null)

@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 
 import '../core/ai/ai_credentials.dart';
 import '../core/ai/ark_chat_client.dart';
+import '../core/ai/frame_check.dart';
 import '../core/ai/volcano_asr_provider.dart';
 import '../core/ai/volcano_semantic_splitter.dart';
 import '../core/analysis/analysis_pipeline.dart';
@@ -58,6 +59,13 @@ LineTagger? buildLineTagger(AiCredentials credentials) {
     tagger: UnitTagger(chat: ArkChatClient(apiKey: credentials.arkApiKey)),
     vocabulary: MiaoaTagVocabularySource(MiaoaTagService()),
   );
+}
+
+/// 素材画面自查（烧字 + 产品露出品牌）。方舟凭据缺失时返回 null——那时
+/// 已选素材标成「未检查」，绝不冒充「画面没问题」。
+FrameChecker? buildFrameChecker(AiCredentials credentials) {
+  if (credentials.arkApiKey.isEmpty) return null;
+  return ArkFrameChecker(ArkChatClient(apiKey: credentials.arkApiKey));
 }
 
 AnalysisPipeline? buildAnalysisPipeline(

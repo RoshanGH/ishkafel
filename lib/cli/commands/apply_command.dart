@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import '../frame_check_wiring.dart';
 
 import 'package:path/path.dart' as p;
 
@@ -13,6 +14,10 @@ import '../task_view.dart';
 import '../todo_view.dart';
 import 'analyze_command.dart';
 import '../../core/miaoa/candidate_probe.dart';
+import '../../core/ai/frame_check.dart';
+import '../../core/replacement/brand_consistency.dart';
+import '../../core/replacement/picked_material.dart';
+import '../../core/replacement/replacement_plan.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
@@ -118,6 +123,7 @@ Future<int> _applyWithLock({
   required StringSink? out,
   MiaoaContentService? contentService,
   CandidateProbe? candidateProbe,
+  Future<FrameCheck> Function(int id)? frameCheckOf,
 }) async {
   final String raw;
   try {
@@ -157,9 +163,119 @@ Future<int> _applyWithLock({
   final replacements =
       projectPlansToReplacements(validation.plans, task.units ?? const []);
 
-  // 顺手把用到的素材连同时长收下来。**取段全靠这个数**：20 秒的素材塞进
-  // 0.5 秒的坑位，得先知道它是 20 秒才知道该截一段。界面挑素材时一直在写，
-  // 这条路一直不写，于是 Agent 交的方案取段全失效、短镜头照样一串快进
+  final picked = await gatherPickedMaterials(
+    replacements: replacements,
+    task: task,
+    dataDir: dataDir,
+    contentService: contentService,
+    candidateProbe: candidateProbe,
+    frameCheckOf: frameCheckOf,
+  );
+
+  // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
+  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
+  await repository.save(task.copyWith(
+      replacements: replacements, pickedMaterials: picked));
+  emitJson({
+    'ok': true,
+    ...planApplyReport(
+        plans: validation.plans,
+        picked: picked,
+        task: task,
+        shortSlots: shortSlotsOf(task)),
+  }, out: out);
+  return 0;
+}
+
+/// 把方案里用到的素材连同**时长**和**画面自查**一起收下来。
+///
+/// **取段全靠时长**：20 秒的素材塞进 0.5 秒的坑位，得先知道它是 20 秒才知道
+/// 该截一段而不是整条压缩成 40 倍快放。
+///
+/// **画面自查是烧字 + 产品露出品牌**：两样都只有看图才发现得了，而且都会
+/// 毁掉整片——烧着别家字幕的素材换上去成片出现两层字，露着竞品的素材会让
+/// 台词说滴露而画面是若也。
+///
+/// 单独提出来是因为 `apply plans` 有**两条路**（界面没开时 CLI 直写、
+/// 界面开着时委派给界面），两条路都得收。委派那条一度不收——于是出现了
+/// 最难发现的组合：**人在旁边看着的时候，检查反而不做**。
+/// 提交方案之后要告诉调用方的一切。
+///
+/// **两条路（直写 / 委派）共用这一份**。分开写的后果验收 Agent 撞到过：
+/// 委派返回只有 `{ok, via, message, plans, units}`——检查跑了、界面上也
+/// 报了那条橙色警告，**只有 Agent 拿不到**。它的原话：「不是『人能干的事
+/// Agent 干不了』，是**人能看到的信息 Agent 拿不到**。」
+///
+/// 而且它试了四种条件也没找出什么时候走哪条路——**同一条命令的返回结构
+/// 在同样的表面条件下会变**，那样「拿到 burnedText 就换素材」这段逻辑
+/// 根本没法写。
+Map<String, Object?> planApplyReport({
+  required List<SubmittedPlan> plans,
+  required List<PickedMaterial> picked,
+  required RenewTask task,
+  required int shortSlots,
+}) {
+  final withDuration = picked.where((m) => (m.durationMs ?? 0) > 0).length;
+  return {
+    'plans': [
+      for (final plan in plans) {'name': plan.name, 'units': plan.units.length},
+    ],
+    'materials': {
+      'count': picked.length,
+      'withDuration': withDuration,
+      // **「都干净」和「一条都没看成」得分得开**。只看 burnedText 在不在
+      // 是分不清的：两种情况这个键都不出现，而一个是「没问题」、
+      // 一个是「不知道有没有问题」
+      'frameChecked': picked.where((m) => m.burnedTextChecked).length,
+      'frameUnchecked': picked.where((m) => !m.burnedTextChecked).length,
+    },
+    // 影响成片的降级要说出来，不能等人拿到片子才发现有几镜在快放
+    if (trimUnavailableNotice(
+            total: picked.length,
+            withDuration: withDuration,
+            shortSlots: shortSlots)
+        case final notice?)
+      'notice': notice,
+    // 画面上本来就烧着字的那几条要点名——成片会出现两层字幕
+    if (burnedTextNotice(picked) case final warn?) 'burnedText': warn,
+    // 挑的素材里出现了不止一个品牌——台词说的和画面里摆的对不上。
+    // 两条互补的判据：候选之间打架 / 候选一致但整条跑到别家去了
+    if (brandConflictNotice(picked) ??
+            brandMismatchNotice(
+                picked: picked,
+                sourceBrand: sourceBrandOf(task.units ?? const []))
+        case final warn?)
+      'brandConflict': warn,
+  };
+}
+
+/// 短坑位有几个：取段就是为它们做的，量不到时长时这些镜头会退回快进
+int shortSlotsOf(RenewTask task) => [
+      for (final u in task.units ?? const [])
+        for (final shot in u.shots)
+          if (shot.endMs - shot.startMs < 1500) shot,
+    ].length;
+
+/// 把共用的画面自查接成 `collectPickedMaterials` 要的形状。
+/// 素材时长在 known 里就有——**传下去**，头中尾三个采样点按它算
+Future<FrameCheck> Function(int id)? _wired(Directory dataDir, RenewTask task) {
+  final check = defaultShotFrameCheck(dataDir: dataDir, taskId: task.id);
+  if (check == null) return null;
+  final knownMs = {
+    for (final m in task.pickedMaterials)
+      if (m.durationMs != null) m.id: m.durationMs!,
+  };
+  return (id) => check(id, knownMs[id]);
+}
+
+Future<List<PickedMaterial>> gatherPickedMaterials({
+  required List<UnitReplacement> replacements,
+  required RenewTask task,
+  required Directory dataDir,
+  MiaoaContentService? contentService,
+  CandidateProbe? candidateProbe,
+  Future<FrameCheck> Function(int id)? frameCheckOf,
+}) async {
   final used = <int>{
     for (final r in replacements) ...[
       ...r.wholeCandidateIds,
@@ -169,58 +285,27 @@ Future<int> _applyWithLock({
   final content = contentService ?? MiaoaContentService();
   final probe = candidateProbe ??
       CandidateProbe(run: const ResolvingProcessRunner().call);
-  final picked = await collectPickedMaterials(
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+  return collectPickedMaterials(
     candidateIds: used,
     known: task.pickedMaterials,
     // 本地已经有这条素材时就不去问名字了：那是给人看的字段，
     // 而每问一次就是一次网络往返（102 条素材实测差出几十秒）
     fetch: (id) async =>
-        TaskMedia(dataDir: dataDir, taskId: task.id).localMaterial(id) != null
-            ? null
-            : content.fetchById(id),
+        media.localMaterial(id) != null ? null : content.fetchById(id),
     probeDurationMs: (id) async {
       // 素材已经下到本地就读本地：联网量一条要一秒，一百多条就是一百多秒，
       // 而且网络那条路会失败——失败了取段就退回快进
-      final local = TaskMedia(dataDir: dataDir, taskId: task.id)
-          .localMaterial(id);
+      final local = media.localMaterial(id);
       final m = local != null ? null : await content.fetchById(id);
       final spec = await probe.probe(
           materialId: id, previewUrl: m?.previewUrl, localPath: local);
       return spec?.durationMs ?? 0;
     },
+    checkFrame: frameCheckOf ?? _wired(dataDir, task),
   );
-
-  // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
-  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
-  await repository.save(task.copyWith(
-      replacements: replacements, pickedMaterials: picked));
-  // 短坑位有几个：取段就是为它们做的，量不到时长时这些镜头会退回快进
-  final shortSlots = [
-    for (final u in task.units ?? const [])
-      for (final shot in u.shots)
-        if (shot.endMs - shot.startMs < 1500) shot,
-  ].length;
-  final notice = trimUnavailableNotice(
-    total: picked.length,
-    withDuration: picked.where((m) => (m.durationMs ?? 0) > 0).length,
-    shortSlots: shortSlots,
-  );
-
-  emitJson({
-    'ok': true,
-    'plans': [
-      for (final plan in validation.plans)
-        {'name': plan.name, 'units': plan.units.length},
-    ],
-    'materials': {
-      'count': picked.length,
-      'withDuration': picked.where((m) => (m.durationMs ?? 0) > 0).length,
-    },
-    // 影响成片的降级要说出来，不能等人拿到片子才发现有几镜在快放
-    if (notice != null) 'notice': notice,
-  }, out: out);
-  return 0;
 }
+
 
 /// 收下切分，组装成单元、落库，并把下一件待办交出去（如果还有）。
 ///
@@ -359,6 +444,9 @@ Future<int> _applyPlansViaUi({
   required Future<String> Function()? readStdin,
   required StringSink sink,
   required StringSink? out,
+  MiaoaContentService? contentService,
+  CandidateProbe? candidateProbe,
+  Future<FrameCheck> Function(int id)? frameCheckOf,
 }) async {
   final String raw;
   try {
@@ -370,12 +458,44 @@ Future<int> _applyPlansViaUi({
     return exitBadUsage;
   }
 
+  // **素材在这一头收，不在界面那头收**：探时长要 ffprobe、看画面要 AI 凭据，
+  // 这些都在命令行这边。界面只负责把方案投影出来给人看。
+  //
+  // 一度只把 raw 递过去就完事——于是委派这条路上取段全失效（用不到素材
+  // 时长）、画面自查一次不跑，出现了最难发现的组合：**人在旁边看着的时候，
+  // 检查反而不做**，而那正是他最信任的一次。
+  List<PickedMaterial> picked = task.pickedMaterials;
+  List<SubmittedPlan> plans = const [];
+  try {
+    final validation = parsePlans(jsonDecode(raw), task);
+    if (validation.ok) {
+      plans = validation.plans;
+      picked = await gatherPickedMaterials(
+        replacements:
+            projectPlansToReplacements(validation.plans, task.units ?? const []),
+        task: task,
+        dataDir: dataDir,
+        contentService: contentService,
+        candidateProbe: candidateProbe,
+        frameCheckOf: frameCheckOf,
+      );
+    }
+  } catch (e) {
+    // 方案本身有问题的话，界面那头会给出准确的报错——这里不抢话。
+    // 收不到素材也照样递过去：让界面报「哪一条不合格」比这里含糊地失败强
+    stderr.writeln('提交前没能把素材收齐（$e）——'
+        '取段和画面自查这一轮会缺，方案本身照常提交');
+  }
+
   sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
   final id = writeAgentRequest(
     dataDir: dataDir,
     taskId: task.id,
     kind: UiAction.plansApply.wire,
-    payload: {'raw': raw},
+    payload: {
+      'raw': raw,
+      'pickedMaterials': [for (final m in picked) m.toJson()],
+    },
   );
   final result = await waitForAgentRequest(
       dataDir: dataDir,
@@ -399,6 +519,15 @@ Future<int> _applyPlansViaUi({
     'via': 'ui',
     'message': result.message,
     ...result.payload,
+    // **和直写给出同一份报告**。不给的话就出现了最别扭的一种缺口：
+    // 检查跑了、界面上那条橙色警告也报了，**只有 Agent 拿不到**——
+    // 而委派正是人在旁边看着时走的那条路，人扭头问「它刚才说啥了」，
+    // Agent 答不上来
+    ...planApplyReport(
+        plans: plans,
+        picked: picked,
+        task: task,
+        shortSlots: shortSlotsOf(task)),
   }, out: out);
   return 0;
 }

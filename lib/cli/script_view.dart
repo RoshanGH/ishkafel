@@ -49,6 +49,22 @@ Map<String, dynamic> scriptTaskJson(RenewTask task) {
     // 老字段名，等同 sound.duckedSourceVolume（口播时原声压到多少）
     'sourceVolume': doc.sourceVolume,
     'totalMs': totalMs,
+    // 画面自查做到哪一步了。**「没查过」和「这个版本没这功能」长得一模
+    // 一样**——都是镜头上那几个键不存在。给个汇总才分得开：拿到一份没有
+    // burnedText 的输出时，到底该不该信任它「画面干净」。
+    // 参考片截的那种（本地源）不算——它的画面就是原片自己的
+    'frameCheck': {
+      'checked': [
+        for (final l in doc.lines)
+          for (final s in l.shots)
+            if (s.localSource == null && s.frameChecked) s,
+      ].length,
+      'unchecked': [
+        for (final l in doc.lines)
+          for (final s in l.shots)
+            if (s.localSource == null && !s.frameChecked) s,
+      ].length,
+    },
     'lines': [
       for (var i = 0; i < doc.lines.length; i++) _lineJson(doc, i),
     ],
@@ -203,6 +219,12 @@ Map<String, dynamic> _shotJson(LineShot shot, int index,
       // 还能出多长成片：挑镜头与分时长都靠它
       if (shot.durationMs != null) 'availableMs': shot.availableMs,
       if (shot.localSource != null) 'localSource': shot.localSource,
+      // 画面自查：烧没烧字、露的是谁家产品。**两样都只有看图才知道**，
+      // 而且都会毁掉整片——这条线自己要给台词烧一行字幕，素材再自带一层
+      // 就是两层字叠在一起。framesSeen 为 null = 没看成，不是「没问题」
+      if (shot.burnedText != null) 'burnedText': shot.burnedText,
+      if (shot.productBrand != null) 'productBrand': shot.productBrand,
+      if (shot.framesSeen != null) 'framesSeen': shot.framesSeen,
       if (shot.sourceVolume != null) 'sourceVolume': shot.sourceVolume,
       // 这一镜的画面要看的话，用 script frames --line N
       // （它会抽出**成片里真正出现的那一帧**，不是素材开头）

@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import '../frame_check_wiring.dart';
+import '../../core/script/shot_frame_check.dart';
 
 import '../../core/audio/bgm_plan.dart';
 
@@ -45,6 +47,10 @@ Future<int> runScriptApplyCommand({
 
   /// 可视模式：把软件拉起来、每步等界面展示完（见 AgentStage）
   bool? visual,
+
+  /// 测试注入：怎么看一条素材的画面（烧字 + 产品露出品牌）。
+  /// 不传就用真的（抽本地素材的头中尾三帧）
+  ShotFrameCheck? frameCheckOf,
   Future<String> Function()? readStdin,
   StringSink? out,
   StringSink? err,
@@ -137,7 +143,8 @@ Future<int> runScriptApplyCommand({
       return exitBadUsage;
     }
 
-    final next = _apply(what, doc, payload);
+    final next = await _apply(what, doc, payload,
+        dataDir: dataDir, taskId: task.id, frameCheckOf: frameCheckOf);
     // 封面 = 成片第一帧。Agent 挑完镜头，列表页上这条片子就该有画面了，
     // 不然它和一个空任务长得一模一样
     final cover = await ensureScriptCover(
@@ -280,16 +287,32 @@ List<ApplyIssue> _validate(
   }
 }
 
-ScriptDoc _apply(String what, ScriptDoc doc, Map<String, dynamic> payload) {
+Future<ScriptDoc> _apply(
+  String what,
+  ScriptDoc doc,
+  Map<String, dynamic> payload, {
+  required Directory dataDir,
+  required String taskId,
+  ShotFrameCheck? frameCheckOf,
+}) async {
   var next = doc;
   switch (what) {
     case 'shots':
       final offered = _offeredMaterials(payload);
+      // **画面自查**：素材上烧着别家的字，我们再给台词烧一行，就是两层字
+      // 叠在一起；画面里露的是竞品，台词说的和画面里摆的对不上——两样都
+      // 只有看图才发现得了，而且都会毁掉整片。替换裂变那边在 apply 时查，
+      // 这条线一开始整条缺席（见 shot_frame_check.dart）
+      final checker =
+          frameCheckOf ?? defaultShotFrameCheck(dataDir: dataDir, taskId: taskId);
       for (final pick in _picks(payload)) {
         final line = next.lines[pick.lineIndex];
-        final shots = [
-          for (final id in pick.materialIds) offered[id]!,
-        ];
+        final shots = checker == null
+            ? [for (final id in pick.materialIds) offered[id]!]
+            : await checkedShots(
+                shots: [for (final id in pick.materialIds) offered[id]!],
+                check: (s) => checker(s.materialId, s.durationMs),
+              );
         // 落盘时必须跟着分时长，否则 allocMs 为 null，这一行进不了预览
         final root = ShotAllocation.rootMsOf(line.withShots(shots));
         next = next.setShotsById(

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:meta/meta.dart';
+
 import 'ark_chat_client.dart';
 import 'tag_dimension.dart';
 
@@ -62,10 +64,25 @@ class ShotUnderstanding {
   /// 检索，编一句不如没有。
   final String? description;
 
+  /// 画面里露出的产品是谁家的。**本片是什么品牌，只能从原片自己的产品
+  /// 露出镜头看出来**——候选素材之间品牌打架能自己比出来，但「候选和本片
+  /// 对不对得上」要有一个参照。null = 没有产品露出，或认不出牌子。
+  final String? productBrand;
+
+  /// 画面里烧着的文字（字幕、贴片文案、品牌角标）。
+  ///
+  /// **这条素材能不能用，往往就看它**：拿去换画面时我们还要再烧一行台词
+  /// 字幕，两套字幕叠在一起、而且内容毫不相干——片子直接废。
+  /// 而它在画面描述里一个字都看不出来（真机：描述写「成人给小孩按摩额头」，
+  /// 画面底部烧着别家品牌的「冰冰凉凉的好舒服呀」）。
+  final List<String> burnedText;
+
   const ShotUnderstanding({
     this.tags = const [],
     this.tagsByDimension = const {},
     this.description,
+    this.burnedText = const [],
+    this.productBrand,
     this.rawReply,
   });
 }
@@ -93,7 +110,7 @@ class ShotTagger {
     // 等于把这条路一起堵死。
     if (frames.isEmpty) return const ShotUnderstanding();
     final content = await chat.chatVisionFrames(
-      prompt: _shotPrompt(frames.length, dimensions, constraint),
+      prompt: buildShotUnderstandingPrompt(frames.length, dimensions, constraint),
       frames: frames,
       maxTokens: 768,
       temperature: 0,
@@ -104,6 +121,8 @@ class ShotTagger {
       tags: parsed.flatTags,
       tagsByDimension: parsed.byDimension,
       description: _parseDescription(content),
+      burnedText: _parseBurnedText(content),
+      productBrand: _parseProductBrand(content),
       rawReply: content,
     );
   }
@@ -111,7 +130,8 @@ class ShotTagger {
 
 /// 提示词必须说明「这几张是同一镜头的连续采样」——不说的话模型会把它们
 /// 当成几张无关的图分别描述
-String _shotPrompt(
+@visibleForTesting
+String buildShotUnderstandingPrompt(
     int frameCount, List<TagDimension> dimensions, String? constraint) {
   final head = frameCount > 1
       ? '这 $frameCount 张图是同一个短视频镜头按时间先后连续采样的画面'
@@ -120,7 +140,49 @@ String _shotPrompt(
   return '$head\n${buildDimensionPrompt(dimensions, constraint: constraint)}\n'
       '另外用一句话描述这个镜头在拍什么（主体、场景、动作），放在 '
       '"description" 键下。这句话会被拿去检索画面相近的素材，'
-      '所以要具体、不要复述台词。';
+      '所以要具体、不要复述台词。\n'
+      // **画面里烧着的字是致命信息**：拿这条素材去换画面时，我们还要往上
+      // 烧一行台词字幕，两套字幕会打架，而且那句话跟本片台词毫无关系
+      // ——片子直接废。而它在画面描述里一个字都看不出来（真机撞到：
+      // 描述写「成人给小孩按摩额头」，画面底部烧着「冰冰凉凉的好舒服呀」）
+      '最后：画面里如果**烧着文字**（字幕、贴片文案、品牌角标），'
+      '把看到的文字原样放在 "burnedText" 键下（数组，没有就给空数组）。'
+      '这一条很要紧——这条素材被拿去换画面时还要再烧一行字，'
+      '两套字幕叠在一起片子就废了。\n'
+      // **本片是什么品牌，只能从原片自己的产品露出镜头看出来**。
+      // 候选素材之间品牌打架能自己比出来，但「候选和本片对不对得上」
+      // 要有个参照，那个参照只能来自这里。而且这一句是白问的：
+      // 视觉打标本来就在看图、本来就是一次调用
+      '还有：画面里如果有**产品露出**（有人拿着、摆着、或在用某个商品），'
+      '把那个产品的品牌写进 "productBrand"（读包装和 logo）；'
+      '画面里没有产品、或者认不出是什么牌子，一律给 null'
+      '——瞎猜一个牌子比承认不知道更糟。';
+}
+
+/// 画面里露出的产品是谁家的。**本片是什么品牌，只能从这里看出来**——
+/// 候选素材之间品牌打架能自己比出来，但「候选和本片对不对得上」要有一个
+/// 参照。null = 画面里没有产品露出，或认不出牌子（瞎猜一个牌子更糟）。
+String? _parseProductBrand(String content) {
+  final raw = _tryJson(content)?['productBrand'];
+  if (raw is! String) return null;
+  final t = raw.trim();
+  return t.isEmpty || _notABrand.contains(t.toLowerCase()) ? null : t;
+}
+
+/// 「看不出来」的各种说法。模型有时不肯给 null，改说「无」「未知」
+const Set<String> _notABrand = {
+  '无', '没有', '未知', '不确定', '看不清', '不清楚', '空',
+  'none', 'null', 'n/a', 'na', 'unknown', 'unclear', 'no', 'nil',
+};
+
+/// 画面里烧着的文字。**只有看图才发现得了**，而它决定这条素材能不能用
+List<String> _parseBurnedText(String content) {
+  final raw = _tryJson(content)?['burnedText'];
+  if (raw is! List) return const [];
+  return [
+    for (final e in raw)
+      if (e is String && e.trim().isNotEmpty) e.trim(),
+  ];
 }
 
 String? _parseDescription(String content) {

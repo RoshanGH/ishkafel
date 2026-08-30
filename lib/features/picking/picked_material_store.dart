@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import '../../core/ai/frame_check.dart';
 import '../../core/log/app_log.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/replacement/picked_material.dart';
@@ -22,7 +23,15 @@ class PickedMaterialStore {
   final Directory dir;
   final BytesFetcher fetch;
 
-  PickedMaterialStore({required this.dir, required this.fetch});
+  /// 顺手对首帧图做一次画面自查（烧字 + 产品露出品牌）。
+  /// 没配就记「没查过」——不冒充「画面没问题」。
+  final FrameChecker? frameChecker;
+
+  PickedMaterialStore({
+    required this.dir,
+    required this.fetch,
+    this.frameChecker,
+  });
 
   /// 把一条候选转成可落地的记录。
   ///
@@ -39,7 +48,33 @@ class PickedMaterialStore {
       sceneDescription: material.sceneDescription,
       durationMs: durationMs,
     );
-    return record.withThumb(await _thumb(material));
+    final withThumb = record.withThumb(await _thumb(material));
+    return _checkFrame(withThumb);
+  }
+
+  /// 首帧图已经在本地了，顺手问一句「画面上烧字了吗、露的是谁家产品」——
+  /// 不额外下视频、不额外抽帧，只对**挑中的**那几条跑，不是对整页检索结果。
+  /// 两件事一次调用问完：多问一个问题几乎不加钱，多跑一次调用是成倍的。
+  ///
+  /// **这里只有一帧，看得不全**：产品可能只在素材的某几秒里出现（真机：
+  /// 素材 114801 首帧是滴露瓶、中段是微波炉内部）。挑素材这一刻素材本体
+  /// 还没下载，抽不了多帧——所以结论标成「看过 1 帧」，等提交方案时素材
+  /// 已经在本地，那边会拿头中尾三帧再看一次顶掉它
+  /// （见 `plan_submission.dart` 的 `_checked`）。
+  ///
+  /// 看不成就保持「没查过」（[PickedMaterial.burnedText] 为 null）。
+  /// 把看不成当成「画面没问题」，就是把一条会毁掉整片的素材静默放行。
+  Future<PickedMaterial> _checkFrame(PickedMaterial record) async {
+    final checker = frameChecker;
+    final path = record.thumbPath;
+    if (checker == null || path == null) return record;
+    try {
+      return record.withFrameCheck(await checker.check([path]));
+    } catch (e) {
+      AppLog.warn('已选素材 ${record.id} 的画面没看成（$e）——'
+          '这条素材会标成「未检查」，不会当成画面没问题');
+      return record;
+    }
   }
 
   Future<String?> _thumb(CandidateMaterial material) async {

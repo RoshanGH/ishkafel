@@ -1,4 +1,6 @@
 import 'dart:io';
+import '../../core/ai/frame_check_wiring.dart';
+import '../../core/ai/frame_check.dart';
 
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/replacement/candidate_trim.dart';
@@ -184,6 +186,11 @@ Future<int> runCandidatesCommand({
             'droppedTags': dropped,
             'note': '这些标签命中 0 条或宽到等于没筛，已从检索键中剔除',
           };
+          // **这是它在改主意，不是流水账**：人正是靠看懂这一步才敢
+          // 把花钱的活交给静默模式（见 BroadcastKind.judgement）
+          await stage.think(
+              '「${dropped.take(2).join('」「')}」这些标签筛不出东西，先剔掉',
+              focus: _focus(unitIndex, shotIndex));
         }
       }
     } catch (e) {
@@ -229,6 +236,9 @@ Future<int> runCandidatesCommand({
         want: pageSize,
         firstPage: page,
       );
+      await stage.think(
+          '标签命中 ${byTags.total} 条，宽到等于没筛，改用画面描述再搜一轮',
+          focus: _focus(unitIndex, shotIndex));
       fallbackNote = {
         'from': 'tags',
         'to': 'description',
@@ -263,6 +273,13 @@ Future<int> runCandidatesCommand({
 
   // 时长要不要探：探了才知道「选它会变速多少」——那才是真正要判断的东西。
   // 以前一律不给，Agent 只能凭 description 猜，17 秒的坑位全靠赌
+  // 以前看过的画面自查结果（跨任务共用）。**只读缓存，不现查**
+  final cache = frameCheckCacheIn(dataDir);
+  final frameChecks = <int, FrameCheck>{
+    for (final c in filtered.items)
+      if (cache.get(c.id) case final hit?) c.id: hit,
+  };
+
   final specs = <int, int>{};
   final media = TaskMedia(dataDir: dataDir, taskId: task.id);
   if (probeDurations) {
@@ -326,6 +343,15 @@ Future<int> runCandidatesCommand({
           'description': c.sceneDescription,
           'voiceover': c.voiceover,
           'tags': c.tags,
+          // 这条素材以前看过没有（跨任务共用）。**只报已经知道的，
+          // 不为检索现查**——一页 50 条各跑一次视觉调用太贵。
+          // 没这一段的话，Agent 只能先提交、等 apply 报错再回来重挑
+          // （验收 Agent 原话：「人挑一次，我挑两次」）
+          if (frameChecks[c.id] case final check?) ...{
+            'burnedText': check.burnedText,
+            if (check.productBrand != null) 'productBrand': check.productBrand,
+            'framesSeen': check.framesSeen,
+          },
           'thumbnailUrl': c.thumbnailUrl,
           'previewUrl': c.previewUrl,
           if (specs[c.id] case final ms?) ...{

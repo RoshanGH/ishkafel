@@ -16,6 +16,7 @@ import 'picking_controller.dart';
 import 'picking_messages.dart';
 import 'picking_scope.dart';
 import 'tag_query_narrowing.dart';
+import '../../core/replacement/picked_material.dart';
 import 'picked_tray.dart';
 import 'picking_widgets.dart';
 
@@ -70,6 +71,13 @@ class CandidatePanel extends StatelessWidget {
   /// 和当前这一页的检索结果是什么完全无关——见 [PickedTray]
   final List<PickedItem> picked;
 
+  /// **整条片子**挑的全部素材（不只是当前作用域的 [picked]）。
+  /// 品牌冲突按它算——见 [PickedTray.allPicked]
+  final List<PickedMaterial> allPicked;
+
+  /// 原片露的是什么牌子——「候选对不对得上本片」的参照（见 [PickedTray.sourceBrand]）
+  final String? sourceBrand;
+
   /// 取消勾选 / 设为预览版 / 重新下载素材本体
   final ValueChanged<int>? onRemovePicked;
   final ValueChanged<int>? onSetPreviewPicked;
@@ -110,6 +118,8 @@ class CandidatePanel extends StatelessWidget {
     this.onProbeTagHits,
     this.projectName,
     this.picked = const [],
+    this.allPicked = const [],
+    this.sourceBrand,
     this.onRemovePicked,
     this.onSetPreviewPicked,
     this.onRetryPickedMedia,
@@ -705,6 +715,8 @@ class CandidatePanel extends StatelessWidget {
   /// 候选区上方那条「已选」托盘
   Widget _tray() => PickedTray(
         items: picked,
+        allPicked: allPicked,
+        sourceBrand: sourceBrand,
         onRemove: onRemovePicked ?? (_) {},
         onSetPreview: onSetPreviewPicked ?? (_) {},
         onRetryMedia: onRetryPickedMedia,

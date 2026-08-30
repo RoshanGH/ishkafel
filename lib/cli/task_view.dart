@@ -1,3 +1,4 @@
+import '../core/export/subtitle_coverage.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
 import '../core/replacement/replacement_plan.dart';
@@ -44,13 +45,46 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     // 不报出来的话，Agent 没法确认取段到底生没生效，只能盲猜
     'pickedMaterials': {
       'count': task.pickedMaterials.length,
+      // **「没查过」和「这个版本没这功能」长得一模一样**——都是键不存在。
+      // 给个汇总才分得开：拿到一份没有 burnedText 的输出时，
+      // 到底该不该信任它「画面干净」
+      'frameChecked':
+          task.pickedMaterials.where((m) => m.burnedTextChecked).length,
+      'frameUnchecked':
+          task.pickedMaterials.where((m) => !m.burnedTextChecked).length,
       'withDuration':
           task.pickedMaterials.where((m) => (m.durationMs ?? 0) > 0).length,
       'items': [
         for (final m in task.pickedMaterials)
-          {'id': m.id, 'name': m.name, 'durationMs': m.durationMs},
+          {
+            'id': m.id,
+            'name': m.name,
+            // 这条素材原本在说什么 / 画面拍的是什么。Agent 要判断
+            // 「这一条到底合不合适」，光有 id 和名字判不出来
+            if (m.voiceover.isNotEmpty) 'voiceover': m.voiceover,
+            if (m.sceneDescription.isNotEmpty)
+              'sceneDescription': m.sceneDescription,
+            'durationMs': m.durationMs,
+            // 画面上烧着的字。**没查过时整个键不出现**——空数组会被读成
+            // 「画面干净」，而那正是把一条会毁掉整片的素材静默放行
+            if (m.burnedText != null) 'burnedText': m.burnedText,
+            // 画面里露出的产品是谁家的。产品露出镜头不能跨品牌换
+            if (m.productBrand != null) 'productBrand': m.productBrand,
+            // 上面两条是看了几帧得出的。1 帧看不全产品露出，
+            // 3 帧才算看全——Agent 据此判断这个结论有多硬
+            if (m.framesSeen != null) 'framesSeen': m.framesSeen,
+          },
       ],
     },
+    // 成片里哪几段会有台词字幕。**两种替换模式在这件事上不一样**，
+    // 而这个差别此前在界面上和命令行里都看不见：镜头替换会把字幕重渲上去，
+    // 整体替换原样接上、和原坑位对不齐，那一段就没有台词字幕
+    if (task.replacements case final r? when r.isNotEmpty)
+      'subtitleCoverage': {
+        'unitsWith': subtitleCoverage(r).unitsWith,
+        'unitsWithout': subtitleCoverage(r).unitsWithout,
+        if (subtitleGapNotice(r) case final note?) 'note': note,
+      },
     'exports': [
       for (final e in task.exports)
         {
@@ -78,6 +112,10 @@ Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
             'endMs': unit.shots[i].endMs,
             'durationMs': unit.shots[i].endMs - unit.shots[i].startMs,
             'description': unit.shots[i].description,
+            // 这一镜露的是谁家产品——**「本片是什么品牌」的唯一可靠来源**。
+            // 判断候选对不对得上本片，参照只能从这里来
+            if (unit.shots[i].productBrand != null)
+              'productBrand': unit.shots[i].productBrand,
             'tags': unit.shots[i].tags,
           },
       ],

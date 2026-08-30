@@ -326,6 +326,8 @@ class TaggingService {
       return shot.copyWith(
         tags: r.tags,
         description: r.description,
+        // 这一镜露的是谁家产品——「本片是什么品牌」的唯一可靠来源
+        productBrand: r.productBrand,
         tagsStale: false,
         trace: _traceOf(r, shotVocabulary,
             constraint: task.shotTagPrompt,

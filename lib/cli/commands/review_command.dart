@@ -77,6 +77,12 @@ Future<int> runReviewCommand({
         env: env, appExists: appExists, sink: sink);
   }
   if (rest.first == 'list') {
+    // **审核正是最需要信息的地方**：人在审片台上看得到画面、能悬停播放、
+    // 一眼看出「这条烧着字」；Agent 一度只拿到一个数字，不知道它叫什么、
+    // 画面是什么、烧没烧字、什么牌子。人说「第 3 条删掉」它能删，
+    // 人问「第 3 条是什么」它答不上来——而这些 task --json 里全都有，
+    // 同一份数据换个地方就没了
+    final byId = {for (final m in task.pickedMaterials) m.id: m};
     emitJson({
       'taskId': task.id,
       'total': candidates.length,
@@ -88,6 +94,17 @@ Future<int> runReviewCommand({
             'unit': i.unit,
             'shot': i.shot,
             'material': i.material,
+            if (byId[i.material] case final m?) ...{
+              'name': m.name,
+              if (m.voiceover.isNotEmpty) 'voiceover': m.voiceover,
+              if (m.sceneDescription.isNotEmpty)
+                'sceneDescription': m.sceneDescription,
+              if (m.durationMs != null) 'durationMs': m.durationMs,
+              // 会毁掉整片的那两条，审核这一步尤其该看见
+              if (m.burnedText != null) 'burnedText': m.burnedText,
+              if (m.productBrand != null) 'productBrand': m.productBrand,
+              if (m.framesSeen != null) 'framesSeen': m.framesSeen,
+            },
           },
       ],
     }, out: out);
@@ -191,7 +208,7 @@ Future<int> _changeCandidates({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!lock.acquire(holder)) {
     final current = lock.read();
     // 界面占着 ≠ 冲突：人正开着审片台看着指挥你，那就把活儿交给界面去做。
     // 它剔掉的卡是界面里的临时状态，人按「确认」才落盘——你自己写盘会让
@@ -215,7 +232,7 @@ Future<int> _changeCandidates({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder,
   );
   try {
     // 一条一条地走：人看的是过程——那张卡滚进视野、变成已剔除，再下一张
@@ -242,7 +259,7 @@ Future<int> _changeCandidates({
           dataDir: dataDir,
           taskId: task.id,
           presence: AgentPresence(
-            holder: holder ?? agentLockHolder,
+            holder: holder,
             at: DateTime.now(),
             action: action,
             focus: focus,
@@ -281,7 +298,7 @@ Future<int> _changeCandidates({
     stage.end();
     // 静默模式下 heartbeat 不写文件，但保险起见一并撤掉
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
+    lock.release(holder);
   }
 }
 

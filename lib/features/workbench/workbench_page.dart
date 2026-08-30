@@ -74,6 +74,8 @@ import '../../core/jianying/renew_jianying_plan.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import 'agent_focus_request.dart';
+import '../../core/replacement/brand_consistency.dart';
+import '../picking/burned_text_warning.dart';
 import 'serve_broadcast.dart';
 import '../../cli/plan_submission.dart';
 import '../agent/visual_pace.dart';
@@ -290,8 +292,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   Future<void> _applyPlansFromAgent(
     String raw,
     void Function(bool ok, String message, {Map<String, dynamic> payload})
-        reply,
-  ) async {
+        reply, {
+    List<PickedMaterial> picked = const [],
+  }) async {
     final editor = _editor;
     if (editor == null) {
       reply(false, '这一页还没准备好');
@@ -322,6 +325,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       }
       final replacements =
           projectPlansToReplacements(validation.plans, _task.units ?? const []);
+      // 素材连同时长（取段靠它）和画面自查结果一起收下——不存的话，
+      // 委派这条路上取段全失效、烧字和品牌问题一个都报不出来
+      if (picked.isNotEmpty) {
+        _task = _task.copyWith(pickedMaterials: picked);
+      }
       await voice?.sayAndHold(
           '${validation.plans.length} 条方案通过校验，正在投影到时间线',
           focus: const AgentFocus(module: 'workbench'));
@@ -331,6 +339,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       await voice?.sayAndHold(
           '投影完了：${replacements.length} 个单元的替换已经落在时间线上',
           focus: const AgentFocus(module: 'workbench'));
+      // **会毁掉整片的两件事要当场说出来**：素材画面上烧着别家的字
+      // （成片两层字幕）、画面里露的是竞品（台词说的和画面里摆的对不上）。
+      // 不说的话，人看到的是「一切正常，方案落好了」——而那两件事只有
+      // 看图才发现得了，等他自己去托盘上一条条翻是不现实的
+      await _warnAboutPickedMaterials(voice);
       reply(true, '方案已经投影到界面上了', payload: {
         'plans': validation.plans.length,
         'units': replacements.length,
@@ -338,6 +351,57 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     } finally {
       // 撤场：不撤的话界面永远停在只读态，人得等心跳超时才能自己动手
       voice?.done();
+    }
+  }
+
+  /// Agent 请我们把导出对话框打开、参数填好。
+  ///
+  /// 和提交方案的区别：那件事做完就是做完了，这件事**故意停在人手上**——
+  /// 导出跑几分钟、直接产出要交付的片子、而且花钱。界面占着锁说明人正在
+  /// 旁边看着，最后那一下让他自己点才对。
+  Future<void> _openExportForAgent(
+    AgentRequest req,
+    void Function(bool ok, String message, {Map<String, dynamic> payload})
+        reply,
+  ) async {
+    if (_editor == null) {
+      reply(false, '这一页还没准备好');
+      return;
+    }
+    final dataDir = ref.read(dataDirProvider);
+    final voice = dataDir == null
+        ? null
+        : ServeBroadcast(dataDir: dataDir, taskId: widget.task.id);
+    try {
+      await voice?.sayAndHold('正在打开导出，参数按 Agent 给的填',
+          focus: const AgentFocus(module: 'workbench'));
+      // 回执要在对话框打开之前发：对话框会一直开着等人点，
+      // 等它关掉才回执的话，Agent 那头会先超时
+      reply(true, '导出对话框已经打开、参数填好了，等用户点「开始导出」');
+      await voice?.sayAndHold('导出对话框开着了——最后那一下请你点',
+          focus: const AgentFocus(module: 'workbench'));
+      voice?.done();
+      if (mounted) await _openExport();
+    } catch (e) {
+      AppLog.warn('代为打开导出失败（${widget.task.id}）：$e');
+      voice?.done();
+    }
+  }
+
+  /// 把「会毁掉整片」的发现当场播报出来。
+  ///
+  /// 播报条一行就那么宽，这里只说一句「出了什么事、多严重」；细节在托盘
+  /// 胶囊和导出确认页上，人要细看就去那儿。
+  Future<void> _warnAboutPickedMaterials(ServeBroadcast? voice) async {
+    if (voice == null) return;
+    final picked = _task.pickedMaterials;
+    if (burnedTextBroadcastLine(picked) case final line?) {
+      await voice.warnAndHold(line);
+    }
+    if (brandBroadcastLine(
+            picked: picked, sourceBrand: sourceBrandOf(_task.units ?? const []))
+        case final line?) {
+      await voice.warnAndHold(line);
     }
   }
 
@@ -358,11 +422,26 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             message: message,
             payload: payload);
     try {
-      if (UiAction.parse(req.kind) != UiAction.plansApply) {
-        reply(false, '这一页接不了这个动作：${req.kind}');
-        return;
+      switch (UiAction.parse(req.kind)) {
+        case UiAction.plansApply:
+          break;
+        case UiAction.exportOpen:
+          // **只打开、填好，不替人点导出**：导出跑几分钟、直接出交付物、
+          // 还花钱。人正在旁边看着（不然界面不会占着锁），
+          // 最后那一下让他自己点才对
+          await _openExportForAgent(req, reply);
+          return;
+        default:
+          reply(false, '这一页接不了这个动作：${req.kind}');
+          return;
       }
-      await _applyPlansFromAgent('${req.payload['raw'] ?? ''}', reply);
+      await _applyPlansFromAgent(
+        '${req.payload['raw'] ?? ''}',
+        reply,
+        // 素材是命令行那头收好递过来的（探时长要 ffprobe、看画面要 AI
+        // 凭据，都在那一边）。界面只负责存下来并把结果摆给人看
+        picked: PickedMaterial.parseList(req.payload['pickedMaterials']),
+      );
     } catch (e) {
       AppLog.warn('代为提交方案失败（${widget.task.id}）：$e');
       reply(false, '提交失败：$e');
@@ -1764,6 +1843,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return PickedMaterialStore(
       dir: Directory(p.join(dataDir.path, 'picked_thumbs', widget.task.id)),
       fetch: httpBytes,
+      frameChecker: ref.read(frameCheckerProvider),
     );
   }
 

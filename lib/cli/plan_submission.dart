@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import '../core/ai/frame_check.dart';
 import '../core/export/export_plan.dart';
 import '../core/replacement/candidate_trim.dart';
 import '../core/models/renew_task.dart';
@@ -362,19 +365,28 @@ List<String> plansBlockedByReview(
 /// `task.pickedMaterials` 里——界面挑素材时会写，Agent 提交方案时一直不写，
 /// 于是 Agent 交出来的方案取段全部失效，短镜头照样是一串快进。
 ///
+/// 同时对每条素材做一次**画面自查**（[checkFrame]）：烧没烧字、露的是谁家
+/// 产品。两样都是只有看图才知道、而且能毁掉整片的事，素材库给的画面描述里
+/// 一个字都看不出来。界面挑素材时会看（`PickedMaterialStore`），Agent 这条
+/// 路上不看就只做了一半——而 Agent 恰恰是那个一口气挑几十条、人来不及
+/// 一张张看图的角色。
+///
 /// 已经存过的不重量：一条素材量一次就够，逐条 ffprobe 是要时间的。
 Future<List<PickedMaterial>> collectPickedMaterials({
   required Set<int> candidateIds,
   required List<PickedMaterial> known,
   required Future<CandidateMaterial?> Function(int id) fetch,
   required Future<int> Function(int id) probeDurationMs,
+  Future<FrameCheck> Function(int id)? checkFrame,
 }) async {
   final byId = {for (final m in known) m.id: m};
   final out = <PickedMaterial>[];
   for (final id in candidateIds) {
     final hit = byId[id];
     if (hit != null && hit.durationMs != null) {
-      out.add(hit);
+      // 时长齐了但画面还没看全：补看一次。「时长齐了」不代表这条素材
+      // 没问题——两件事各查各的
+      out.add(await _checked(hit, checkFrame));
       continue;
     }
     // **时长比名字要紧**：取段只认时长，名字和描述是给人看的。
@@ -383,17 +395,53 @@ Future<List<PickedMaterial>> collectPickedMaterials({
     final ms = await probeDurationMs(id);
     // 两样都没有才真的没什么可留：留一条空记录只会让人以为它是好的
     if (material == null && ms <= 0) continue;
-    out.add(PickedMaterial(
-      id: id,
-      name: material?.name ?? '素材 $id',
-      voiceover: material?.voiceover ?? '',
-      sceneDescription: material?.sceneDescription ?? '',
-      thumbPath: hit?.thumbPath,
-      // 量不到就留空。存个 0 进去，取段会以为它是 0 秒——那比没有更糟
-      durationMs: ms > 0 ? ms : null,
+    out.add(await _checked(
+      PickedMaterial(
+        id: id,
+        name: material?.name ?? '素材 $id',
+        voiceover: material?.voiceover ?? '',
+        sceneDescription: material?.sceneDescription ?? '',
+        thumbPath: hit?.thumbPath,
+        // 量不到就留空。存个 0 进去，取段会以为它是 0 秒——那比没有更糟
+        durationMs: ms > 0 ? ms : null,
+        burnedText: hit?.burnedText,
+        productBrand: hit?.productBrand,
+        framesSeen: hit?.framesSeen,
+      ),
+      checkFrame,
     ));
   }
   return List.unmodifiable(out);
+}
+
+/// 看一眼画面（烧字 + 产品露出品牌）。已经看过的不重看；没接检查器或看不成
+/// 时保持「没查过」——**绝不冒充「画面没问题」**，那等于把一条会毁掉整片的
+/// 素材静默放行。
+Future<PickedMaterial> _checked(
+    PickedMaterial m, Future<FrameCheck> Function(int id)? check) async {
+  // 看过一帧不算看全：界面挑素材那一刻只有首帧图，一帧会漏报产品露出。
+  // 这里素材已经在本地、能抽头中尾三帧，正是补看的时机
+  if (check == null || m.frameCheckComplete) return m;
+  try {
+    return m.withFrameCheck(await check(m.id));
+  } catch (e) {
+    stderr.writeln('素材 ${m.id} 的画面没看成（$e）——'
+        '这条会标成「未检查」，不会当成画面没问题');
+    return m;
+  }
+}
+
+/// 有素材画面上烧着字时，**点名是哪几条、烧的是什么**。都干净或都没查过时
+/// 返回 null。笼统一句「有素材有问题」等于让人自己去一条条翻，那还不如不说。
+String? burnedTextNotice(List<PickedMaterial> picked) {
+  final bad = [
+    for (final m in picked)
+      if (m.hasBurnedText) '素材 ${m.id}：${m.burnedText!.join('、')}',
+  ];
+  if (bad.isEmpty) return null;
+  return '有 ${bad.length} 条素材画面上本来就烧着字。'
+      '换上它之后还要再烧一行台词字幕，成片会出现两层字——建议换掉：\n'
+      '${bad.join('\n')}';
 }
 
 /// 有素材量不到时长时，说清后果。全都量到、或压根没有短坑位时返回 null。

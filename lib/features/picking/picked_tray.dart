@@ -6,6 +6,8 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/replacement/picked_material.dart';
+import '../../core/replacement/brand_consistency.dart';
+import 'burned_text_warning.dart';
 import 'picked_media_cache.dart';
 import 'picking_messages.dart';
 
@@ -64,11 +66,27 @@ class PickedTray extends StatelessWidget {
   /// 设为预览版
   final ValueChanged<int> onSetPreview;
 
+  /// 原片里露出的产品是什么牌子（[sourceBrandOf] 算出来的）。
+  ///
+  /// 光看「候选之间打不打架」有个缺口：一条片子的候选全是若也（而原片是
+  /// 滴露）时候选之间毫无冲突，可整条都错了。null = 说不出来（老任务
+  /// 打标那会儿还没记品牌），那时只靠候选之间那一条判据。
+  final String? sourceBrand;
+
+  /// **整条片子**挑的全部素材（不只是当前作用域的 [items]）。
+  ///
+  /// 品牌冲突是整条片子的事：U1 挑滴露、U3 挑若也，站在 U1 的托盘上看
+  /// 只有一个牌子——按当前作用域算就永远不报警，而那正是真实的出错方式，
+  /// 人是一个单元一个单元挑下来的。
+  final List<PickedMaterial> allPicked;
+
   const PickedTray({
     super.key,
     required this.items,
     required this.onRemove,
     required this.onSetPreview,
+    this.allPicked = const [],
+    this.sourceBrand,
     this.onRetryMedia,
     this.mediaTracked = false,
   });
@@ -114,6 +132,8 @@ class PickedTray extends StatelessWidget {
             _thumb(item),
             const SizedBox(width: AppSpacing.xs),
             if (mediaTracked) _mediaDot(item),
+            ?_burnedWarning(item),
+            ?_brandWarning(item),
             Expanded(
               child: Text(
                 _label(item),
@@ -206,6 +226,59 @@ class PickedTray extends StatelessWidget {
   }
 
   /// 素材名/台词都没有时退回 id——总比一片空白强，用户至少能拿它去库里对
+  /// 素材画面上本来就烧着字：换上它之后我们还要再烧一行台词字幕，
+  /// 两层字叠在一起，片子就废了。这一条必须在**挑选现场**看得见，
+  /// 等到导出才说就晚了
+  Widget? _burnedWarning(PickedItem item) {
+    final text = burnedTextWarning(item.material);
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: Tooltip(
+        message: text,
+        child: Icon(
+          key: Key('burned-warn-${item.candidateId}'),
+          Icons.subtitles_off,
+          size: 13,
+          color: AppColors.orange,
+        ),
+      ),
+    );
+  }
+
+  /// 这条片子挑的素材里出现了不止一个品牌。
+  ///
+  /// **按整条片子算，不是按当前这一屏**：单看一条素材判不出品牌错位
+  /// （一条片子全用若也的素材没问题，问题是两个牌子同时出现）；
+  /// 只看当前作用域同样判不出——人是一个单元一个单元挑下来的，
+  /// 每一屏里都只有一个牌子，错位只在合起来看时才现形
+  List<PickedMaterial> get _all =>
+      allPicked.isEmpty ? [for (final i in items) ?i.material] : allPicked;
+
+  bool get _brandsClash =>
+      brandConflict(_all) != null ||
+      brandMismatchNotice(picked: _all, sourceBrand: sourceBrand) != null;
+
+  /// 产品露出镜头**不能跨品牌换**：台词说「滴露新款消毒液」而画面是若也
+  /// 洗发水直播间，片子自己打自己的脸。真机上交付过这样一条成片
+  Widget? _brandWarning(PickedItem item) {
+    if (!_brandsClash) return null;
+    final text = brandWarning(item.material, conflicting: true);
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(right: 2),
+      child: Tooltip(
+        message: text,
+        child: Icon(
+          key: Key('brand-warn-${item.candidateId}'),
+          Icons.storefront,
+          size: 13,
+          color: AppColors.red,
+        ),
+      ),
+    );
+  }
+
   static String _label(PickedItem item) {
     final material = item.material;
     if (material == null) return '素材 #${item.candidateId}（读取中…）';

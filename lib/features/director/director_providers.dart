@@ -1,7 +1,11 @@
 
 import 'package:file_selector/file_selector.dart';
 
+import 'dart:io';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../core/script/shot_frame_check.dart';
 
 import '../../core/ai/taggers.dart';
 import '../../core/miaoa/candidate_probe.dart';
@@ -56,6 +60,15 @@ class ShotSearchServices {
   const ShotSearchServices(
       {required this.content, required this.probe, required this.tags});
 }
+
+/// 素材画面自查（烧字 + 产品露出品牌）的装配。
+///
+/// 为 null 表示这台机器上没接（方舟凭据缺失或测试环境）——那时镜头记成
+/// 「未检查」，**绝不冒充「画面没问题」**。装配逻辑在 core
+/// （`frame_check_wiring.dart`），命令行那头共用同一份。
+final shotFrameCheckFactoryProvider =
+    Provider<ShotFrameCheck? Function(Directory dataDir, String taskId)?>(
+        (ref) => null);
 
 /// 按任务造「生成配音」服务。null = 语音凭据不全，配音节禁用并说明原因。
 /// 装配逻辑在 core（`script_service_wiring.dart`），CLI 与界面共用同一份

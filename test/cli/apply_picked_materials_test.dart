@@ -1,7 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/plan_submission.dart';
+import 'package:ishkafel/core/ai/frame_check.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 
@@ -12,6 +11,7 @@ import 'package:ishkafel/core/replacement/picked_material.dart';
 /// 结果：Agent 交出来的方案，取段全部退回「整条压缩」，
 /// 短镜头照样是十几二十倍快放。修短镜头那一轮做的事，在 Agent 这条路上等于没做。
 void main() {
+  _burnedTextTests();
   CandidateMaterial mat(int id, {String name = 'm'}) => CandidateMaterial(
         id: id,
         name: name,
@@ -124,4 +124,117 @@ void main() {
     expect(picked.single.durationMs, 20000);
   });
 
+}
+
+/// 素材画面上本来就烧着字，是**只有看图才发现得了、而且会毁掉整片**的问题：
+/// 换上去之后我们还要再烧一行台词字幕，两层字叠在一起、内容还毫不相干。
+///
+/// 界面挑素材时会看一眼（`PickedMaterialStore`），Agent 这条路上如果不看，
+/// 「所有人能干的事情 Agent 都要能干」就只剩一半——而 Agent 恰恰是那个
+/// 一口气挑几十条、人来不及一张张看图的角色。
+void _burnedTextTests() {
+  CandidateMaterial mat(int id) => CandidateMaterial(
+        id: id,
+        name: 'm$id',
+        sceneDescription: '成人给小孩按摩额头',
+        thumbnailUrl: null,
+        previewUrl: 'https://c/$id.mov',
+        fileKey: 'k$id',
+        tags: const [],
+      );
+
+  test('提交方案时顺手看一眼素材画面：烧字 + 产品露出品牌', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+      checkFrame: (_) async => const FrameCheck(burnedText: ['冰冰凉凉的好舒服呀']),
+    );
+    expect(picked.single.burnedText, ['冰冰凉凉的好舒服呀']);
+  });
+
+  test('没接检查：记成「没查过」，不许冒充画面没问题', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+    );
+    expect(picked.single.burnedTextChecked, isFalse);
+  });
+
+  test('看不成也不冒充干净', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+      checkFrame: (_) async => throw StateError('看不了'),
+    );
+    expect(picked.single.burnedTextChecked, isFalse);
+  });
+
+  test('已经看全（三帧）的不重查——一条素材看一次就够', () async {
+    final asked = <int>[];
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [
+        PickedMaterial(
+            id: 11,
+            name: 'm11',
+            durationMs: 20000,
+            burnedText: [],
+            framesSeen: 3),
+      ],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+      checkFrame: (id) async {
+        asked.add(id);
+        return const FrameCheck();
+      },
+    );
+    expect(asked, isEmpty);
+    expect(picked.single.burnedTextChecked, isTrue);
+  });
+
+  test('时长有了但还没查过烧字：要补查，不能因为时长齐了就跳过', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [PickedMaterial(id: 11, name: 'm11', durationMs: 20000)],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+      checkFrame: (_) async => const FrameCheck(burnedText: ['已售罄']),
+    );
+    expect(picked.single.burnedText, ['已售罄']);
+    // 补查烧字不该把已经量好的时长弄丢
+    expect(picked.single.durationMs, 20000);
+  });
+
+  test('产品露出的品牌也一起收下来——同一次调用问的，不额外花钱', () async {
+    final picked = await collectPickedMaterials(
+      candidateIds: {11},
+      known: const [],
+      fetch: (id) async => mat(id),
+      probeDurationMs: (_) async => 20000,
+      checkFrame: (_) async => const FrameCheck(productBrand: '若也 Rove'),
+    );
+    expect(picked.single.productBrand, '若也 Rove');
+    expect(picked.single.hasProduct, isTrue);
+  });
+
+  test('点名哪几条烧着字——笼统一句「有素材有问题」等于没说', () {
+    expect(
+      burnedTextNotice(const [
+        PickedMaterial(id: 11, name: 'a', burnedText: ['冰冰凉凉的好舒服呀']),
+        PickedMaterial(id: 12, name: 'b', burnedText: []),
+      ]),
+      allOf(contains('11'), contains('冰冰凉凉的好舒服呀'), isNot(contains('12'))),
+    );
+    expect(burnedTextNotice(const []), isNull);
+    expect(
+      burnedTextNotice(const [PickedMaterial(id: 11, name: 'a', burnedText: [])]),
+      isNull,
+    );
+  });
 }
