@@ -56,7 +56,7 @@ void main() {
     final screens = line.subtitleScreensAt(maxChars: 4);
     expect(screens.length, greaterThan(1));
     // 但细分不能跨出划词镜的边界
-    expect(screens.first.text!.length, lessThanOrEqualTo(4 * 3));
+    expect(screens.first.text.length, lessThanOrEqualTo(4 * 3));
   });
 
   test('一个划词镜都没有：还是原来那套自动分屏', () {

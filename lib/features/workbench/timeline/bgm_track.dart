@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 
 import '../../../core/audio/bgm_plan.dart';
-import '../../../core/audio/bgm_range.dart';
 export '../../../core/audio/bgm_range.dart' show unitRangeMs;
 import '../../../core/models/semantic_unit.dart';
 

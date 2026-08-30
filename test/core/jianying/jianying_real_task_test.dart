@@ -14,7 +14,6 @@ import 'package:path/path.dart' as p;
 /// 需要本机存在 ishkafel 的数据目录与 2 号任务；不满足时整组跳过，
 /// 不让 CI 因为别人机器上没有这份数据而红。
 void main() {
-  final home = Platform.environment['HOME'] ?? '';
   // **读固定下来的 fixture，不读本机的活数据**。
   //
   // 这条测试原来直接读 `~/Library/.../tasks/<id>.json`——用户在界面上动一下

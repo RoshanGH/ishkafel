@@ -64,7 +64,7 @@ void main() {
         UnitReplacement.whole(List.generate(11, (i) => i)),
         UnitReplacement.whole(List.generate(11, (i) => 100 + i)),
       ]);
-      final text = combinationSummaryText(plan)!;
+      final text = combinationSummaryText(plan);
 
       expect(text, contains('121'));
       expect(text, contains('100'), reason: '人要知道导出来的不是全部');

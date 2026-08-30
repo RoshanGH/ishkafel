@@ -151,7 +151,7 @@ class ExportCommands {
       '-y', '-v', 'error',
       // -ss 摆在 -i 前面：放后面是解码完再丢，从 20 秒素材里取 0.5 秒
       // 要白解 19.5 秒
-      if (trimmed) ...['-ss', _seconds(trimStartMs!)],
+      if (trimmed) ...['-ss', _seconds(trimStartMs)],
       '-i', input,
       for (final o in subtitleOverlays) ...['-i', o.pngPath],
       '-an',
