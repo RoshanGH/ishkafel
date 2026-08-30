@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../export_warnings.dart';
+
 import '../../core/jianying/jianying_plan.dart' show JianyingPlanException;
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/renew_jianying_plan.dart';
@@ -54,6 +56,19 @@ Future<int> runJianyingCommand({
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
     return exitLocked;
   }
+  // 这批素材有什么问题先说清楚。剪映草稿也是一份要交付的东西——
+  // 人打开草稿看到的每一条轨道上都是这些素材，烧着别家字幕、露着竞品的
+  // 那几条不说出来，等于让他自己在几十条轨道里找
+  for (final warn in exportWarnings(
+      picked: task.pickedMaterials,
+      units: task.units ?? const [],
+      // 字幕样式一起看：白描边盖不住素材自带的字，那是两行字打架
+      subtitle: task.subtitle,
+      // 整体替换的段落不烧台词字幕——这决定了烧字警告有多严重
+      replacements: task.replacements ?? const [])) {
+    sink.writeln(warn);
+  }
+
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,

@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/export/diverse_pick.dart';
 import '../../core/replacement/picked_material.dart';
+import '../../core/export/subtitle_coverage.dart';
+import '../../core/replacement/brand_consistency.dart';
+import '../picking/burned_text_warning.dart';
 import '../../core/export/export_spec.dart';
 import 'export_options_panel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -438,6 +441,9 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
           style: const TextStyle(
               color: AppColors.textTertiary, fontSize: AppFontSize.caption),
         ),
+        ?_burnedTextNotice(),
+        ?_brandNotice(),
+        ?_subtitleGapNotice(),
         const SizedBox(height: AppSpacing.xs),
         // 导到哪儿要能改，也要能一眼看见——此前是写死在「影片」下的一个
         // 子目录，用户点完关闭就不知道片子在哪了
@@ -467,6 +473,89 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
             style: TextStyle(
                 color: AppColors.textTertiary, fontSize: AppFontSize.micro)),
       ],
+    );
+  }
+
+  /// 有几条素材画面上**本来就烧着字**。
+  ///
+  /// 换上它之后我们还要再烧一行台词字幕，两层字叠在一起、内容还毫不相干，
+  /// 片子直接废。托盘上挑选时已经标过一次，这里再点一次名是因为：导出是
+  /// 花钱花时间的那一步，而人挑完一圈之后未必还记得哪条有问题。
+  Widget? _burnedTextNotice() {
+    final byId = {for (final m in widget.pickedMaterials) m.id: m};
+    final picks = <({String label, PickedMaterial material})>[];
+    for (var i = 0; i < widget.replacements.length; i++) {
+      final r = widget.replacements[i];
+      for (final id in r.wholeCandidateIds) {
+        if (byId[id] case final m?) picks.add((label: 'U${i + 1}', material: m));
+      }
+      for (final e in r.shotCandidateIds.entries) {
+        for (final id in e.value) {
+          if (byId[id] case final m?) {
+            picks.add((label: 'U${i + 1} 的 S${e.key + 1}', material: m));
+          }
+        }
+      }
+    }
+    final text = burnedTextSummary(picks);
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text(
+        text,
+        key: const Key('export-burned-text'),
+        style: const TextStyle(
+            color: AppColors.orange,
+            fontSize: AppFontSize.caption,
+            height: 1.5),
+      ),
+    );
+  }
+
+  /// 挑的素材里出现了不止一个品牌。
+  ///
+  /// 台词说「滴露新款消毒液」，画面却是若也洗发水直播间——片子自己打自己
+  /// 的脸。真机上交付过这样一条成片（U3S2 的直播带货镜头用了别家直播间）。
+  /// 托盘上挑选时已经标过一次，导出前再点一次名：这是花钱花时间的那一步，
+  /// 而人挑完一圈之后未必还记得哪条有问题。
+  Widget? _brandNotice() {
+    // 两条互补的判据：一条抓「候选之间打架」，一条抓「候选一致、
+    // 但整条都跑到别家去了」——后者只有拿原片当参照才看得出来
+    final text = brandConflictNotice(widget.pickedMaterials) ??
+        brandMismatchNotice(
+          picked: widget.pickedMaterials,
+          sourceBrand: sourceBrandOf(widget.units),
+        );
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text(
+        text,
+        key: const Key('export-brand-conflict'),
+        style: const TextStyle(
+            color: AppColors.red, fontSize: AppFontSize.caption, height: 1.5),
+      ),
+    );
+  }
+
+  /// 哪几段成片里没有台词字幕。
+  ///
+  /// **整体替换原样接上、时长随候选**，和原坑位对不齐——按原片时间戳算的
+  /// 字幕没法直接烧上去，那一段就没字。镜头替换会变速对齐回原坑位并重渲。
+  /// 一条片子两种模式混着用，字幕就是断断续续的，而人点导出时看不见这件事。
+  Widget? _subtitleGapNotice() {
+    final text = subtitleGapNotice(widget.replacements);
+    if (text == null) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text(
+        text,
+        key: const Key('export-subtitle-gap'),
+        style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: AppFontSize.caption,
+            height: 1.5),
+      ),
     );
   }
 

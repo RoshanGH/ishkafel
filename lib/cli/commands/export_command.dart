@@ -1,5 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import '../../core/storage/ui_action.dart';
+import '../../core/storage/agent_request.dart';
+import '../../core/models/renew_task.dart';
+
+import '../export_warnings.dart';
 
 import 'package:path/path.dart' as p;
 
@@ -106,11 +111,6 @@ Future<int> runExportCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，导不了');
-    return exitLocked;
-  }
 
   final dest = Directory(outputDir ??
       p.join(Platform.environment['HOME'] ?? '.', 'Desktop',
@@ -126,6 +126,43 @@ Future<int> runExportCommand({
       toCombination(validation.plans[i], units,
           index: i, materialDurations: materialDurations),
   ];
+
+  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
+  if (!lock.acquire(holder ?? agentLockHolder)) {
+    final current = lock.read();
+    // **界面占着锁不是冲突，是委派的时机**——和提交方案同一个死结：
+    // 可视模式要求界面停在这个任务上，而导出要求界面不能停在这个任务上，
+    // 于是人最想看着的一步恰恰因为「人在看」而做不了。
+    //
+    // 但导出跑几分钟、又花钱，不适合一路替人点到底：委派的是
+    // 「把导出对话框打开、参数填好」，最后那一下由人点
+    if (isGuiHolder(current?.holder)) {
+      return _openExportInUi(
+        dataDir: dataDir,
+        task: task,
+        outputDir: dest.path,
+        spec: spec,
+        sink: sink,
+        out: out,
+      );
+    }
+    sink.writeln('${current?.holder ?? '别人'} 正在操作这个任务，导不了');
+    return exitLocked;
+  }
+
+  // 这批素材有什么问题先说清楚——**不拦，但绝不能不说**。
+  // 界面上的导出确认页会点名，这条路一度一声不吭：Agent 查得到
+  // （task --json 里有），导出时不提，等于把「要不要用这条素材」
+  // 这个判断悄悄跳过了
+  for (final warn in exportWarnings(
+      picked: task.pickedMaterials,
+      units: task.units ?? const [],
+      // 字幕样式一起看：白描边盖不住素材自带的字，那是两行字打架
+      subtitle: task.subtitle,
+      // 整体替换的段落不烧台词字幕——这决定了烧字警告有多严重
+      replacements: task.replacements ?? const [])) {
+    sink.writeln(warn);
+  }
 
   // 代价先说清楚——但不拦。要不要继续是调用方的判断
   sink.writeln('将导出 ${combos.length} 条到 ${dest.path}'
@@ -297,4 +334,58 @@ ExportSpec? _parseSpec({
     spec = spec.copyWith(format: value);
   }
   return spec;
+}
+
+
+/// 请界面把导出对话框打开、参数填好——**人不用挪开，最后那一下他自己点**。
+///
+/// 为什么不替人点到底：导出跑几分钟、直接产出交付物、而且花钱。
+/// 提交方案那种「下单 -> 界面做完 -> 回执」的节奏在这儿不合适，
+/// 人在旁边时让他确认一下反而是对的。
+Future<int> _openExportInUi({
+  required Directory dataDir,
+  required RenewTask task,
+  required String outputDir,
+  required ExportSpec spec,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  final id = writeAgentRequest(
+    dataDir: dataDir,
+    taskId: task.id,
+    kind: UiAction.exportOpen.wire,
+    payload: {
+      'outputDir': outputDir,
+      'resolution': '${spec.height}',
+      'fps': '${spec.fps}',
+      'codec': spec.encoderName,
+      'format': spec.fileExtension,
+    },
+  );
+  sink.writeln('这个任务的页面正开着，已请界面把导出对话框打开、参数填好'
+      '——最后那一下让用户点（导出跑几分钟、直接出交付物，不替他点）');
+  final result = await waitForAgentRequest(
+      dataDir: dataDir,
+      taskId: task.id,
+      id: id,
+      timeout: const Duration(seconds: 30));
+  if (result == null) {
+    sink.writeln('界面没有回应（等了 30 秒）。让用户看一眼那个页面，'
+        '或者把界面挪开再跑一次');
+    return exitEnv;
+  }
+  if (!result.ok) {
+    sink.writeln('没能打开导出：${result.message}');
+    return exitFailed;
+  }
+  emitJson({
+    'ok': true,
+    'via': 'ui',
+    'message': result.message,
+    // **还没有成片**：对话框只是开着，人还没点。别让调用方以为导完了
+    'exported': false,
+    'next': '等用户在界面上点「开始导出」。导完了用 ishkafel task <任务> '
+        '看 exports 里最新那一次',
+  }, out: out);
+  return 0;
 }

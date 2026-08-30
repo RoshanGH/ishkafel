@@ -9,6 +9,7 @@ import 'package:ishkafel/core/subtitle/subtitle_style.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/features/export/export_dialog.dart';
 
 /// 假 ffmpeg：不起进程，按需失败
@@ -54,6 +55,8 @@ Future<void> _open(
   String? pickedDir,
   Future<void> Function(String)? reveal,
   List<ExportRecord> exports = const [],
+  List<PickedMaterial> pickedMaterials = const [],
+  List<SemanticUnit>? units,
 }) async {
   _recorded.clear();
   _revealed.clear();
@@ -91,7 +94,7 @@ Future<void> _open(
                 taskId: 't1',
                 taskName: '滴露',
                 sourcePath: '/v/a.mp4',
-                units: _units(),
+                units: units ?? _units(),
                 replacements: replacements,
                 outputDir: out,
                 pickDirectory: () async => pickedDir,
@@ -99,6 +102,7 @@ Future<void> _open(
                 onExported: (r) async => _recorded.add(r),
                 now: () => DateTime.utc(2026, 8, 9, 10, 30),
                 exports: exports,
+                pickedMaterials: pickedMaterials,
               ),
               child: const Text('打开'),
             ),
@@ -112,6 +116,9 @@ Future<void> _open(
 }
 
 void main() {
+  _subtitleGapTests();
+  _brandConflictTests();
+  _burnedTextTests();
   _dedupBreakdownTests();
   _breakdownTests();
   testWidgets('先说清要导出几条、每条多长、导到哪儿', (tester) async {
@@ -455,5 +462,126 @@ void _dedupBreakdownTests() {
     expect(text, contains('2 × 2 = 4'));
     expect(text, contains('去掉同一条素材出现两次的 1 条'));
     expect(text, contains('剩 3 条'));
+  });
+}
+
+/// 素材画面上本来就烧着字：换上去之后我们还要再烧一行台词字幕，两层字
+/// 叠在一起，片子直接废。这一条要在**按下导出之前**说清是哪几条，
+/// 不能等成片出来了让人自己看。
+void _burnedTextTests() {
+  testWidgets('确认页点名画面上烧着字的那几条', (tester) async {
+    await _open(
+      tester,
+      replacements: [
+        UnitReplacement.whole(const [11]),
+        UnitReplacement.whole(const [12]),
+      ],
+      pickedMaterials: const [
+        PickedMaterial(id: 11, name: 'a', burnedText: ['冰冰凉凉的好舒服呀']),
+        PickedMaterial(id: 12, name: 'b', burnedText: []),
+      ],
+    );
+    final warn = find.byKey(const Key('export-burned-text'));
+    expect(warn, findsOneWidget);
+    final text = tester.widget<Text>(warn).data!;
+    expect(text, contains('冰冰凉凉的好舒服呀'));
+    expect(text, contains('U1'));
+    expect(text, isNot(contains('U2')));
+  });
+
+  testWidgets('都干净就不打扰', (tester) async {
+    await _open(
+      tester,
+      replacements: [UnitReplacement.whole(const [11])],
+      pickedMaterials: const [PickedMaterial(id: 11, name: 'a', burnedText: [])],
+    );
+    expect(find.byKey(const Key('export-burned-text')), findsNothing);
+  });
+}
+
+/// 产品露出镜头**不能跨品牌换**：台词说「滴露新款消毒液」而画面是若也
+/// 洗发水直播间。真机上交付过这样一条成片——导出前必须点名。
+void _brandConflictTests() {
+  testWidgets('挑的素材里有两个牌子：确认页点名', (tester) async {
+    await _open(
+      tester,
+      replacements: [
+        UnitReplacement.whole(const [11]),
+        UnitReplacement.whole(const [12]),
+      ],
+      pickedMaterials: const [
+        PickedMaterial(id: 11, name: 'a', burnedText: [], productBrand: '滴露'),
+        PickedMaterial(
+            id: 12, name: 'b', burnedText: [], productBrand: '若也 Rove'),
+      ],
+    );
+    final warn = find.byKey(const Key('export-brand-conflict'));
+    expect(warn, findsOneWidget);
+    final text = tester.widget<Text>(warn).data!;
+    expect(text, contains('滴露'));
+    expect(text, contains('若也 Rove'));
+  });
+
+  /// 「候选之间打架」漏得掉的那一半：候选**全**是别家的，彼此毫无冲突，
+  /// 可整条片子都跑到别家去了。这只有拿原片当参照才看得出来。
+  testWidgets('候选全是别家的：候选之间不打架，也要报', (tester) async {
+    await _open(
+      tester,
+      replacements: [UnitReplacement.whole(const [11])],
+      units: const [
+        SemanticUnit(
+          index: 0,
+          startMs: 0,
+          endMs: 2000,
+          transcript: 'U1',
+          shots: [Shot(startMs: 0, endMs: 2000, productBrand: '滴露')],
+        ),
+      ],
+      pickedMaterials: const [
+        PickedMaterial(
+            id: 11, name: 'a', burnedText: [], productBrand: '若也 Rove'),
+      ],
+    );
+    final warn = find.byKey(const Key('export-brand-conflict'));
+    expect(warn, findsOneWidget);
+    final text = tester.widget<Text>(warn).data!;
+    expect(text, contains('滴露'), reason: '要说清原片是什么牌子');
+    expect(text, contains('若也 Rove'));
+  });
+
+  testWidgets('都是一个牌子就不打扰', (tester) async {
+    await _open(
+      tester,
+      replacements: [UnitReplacement.whole(const [11])],
+      pickedMaterials: const [
+        PickedMaterial(id: 11, name: 'a', burnedText: [], productBrand: '滴露'),
+      ],
+    );
+    expect(find.byKey(const Key('export-brand-conflict')), findsNothing);
+  });
+}
+
+/// 整体替换的段落不烧台词字幕——成片里那几段没字。
+/// 这件事此前**界面上也看不见**：人点导出的时候不知道自己要拿到一条
+/// 字幕断断续续的片子。
+void _subtitleGapTests() {
+  testWidgets('用了整体替换：确认页要说清哪几段没有字幕', (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11]),
+      UnitReplacement.perShot(const {0: [12]}),
+    ]);
+    final gap = find.byKey(const Key('export-subtitle-gap'));
+    expect(gap, findsOneWidget);
+    final text = tester.widget<Text>(gap).data!;
+    expect(text, contains('U1'));
+    expect(text, isNot(contains('U2')));
+  });
+
+  testWidgets('全是镜头替换就不提——那几段字幕都会重渲上去', (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.perShot(const {0: [11]}),
+      UnitReplacement.keepOriginal(),
+    ]);
+    expect(find.byKey(const Key('export-subtitle-gap')), findsNothing);
   });
 }
