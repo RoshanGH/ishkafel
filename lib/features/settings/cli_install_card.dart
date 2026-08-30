@@ -130,7 +130,8 @@ class _CliInstallCardState extends ConsumerState<CliInstallCard> {
 
   String get _explain => switch (_status) {
         CliStatus.installed =>
-          '终端里执行 ishkafel --help 看用法。给 Agent 用的操作手册在 docs/AGENT_SKILL.md。',
+          '终端里执行 ishkafel --help 看用法。给 Agent 用的操作手册就在下面'
+              '那张卡片里，点「复制全文」粘给它即可。',
         CliStatus.stale => 'app 换过位置，命令指向的还是老路径，现在敲会报找不到文件。重装一次即可。',
         CliStatus.foreign =>
           '/usr/local/bin/ishkafel 已经存在，但不是本应用装的。为免覆盖别人的东西这里不动它——'

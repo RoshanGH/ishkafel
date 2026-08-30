@@ -74,10 +74,12 @@ class _AgentSkillCardState extends ConsumerState<AgentSkillCard> {
         title: 'Agent 说明书',
         children: [
           const SettingsNote(
-              '教 Agent 用 ishkafel 做替换裂变的完整手册（一份 Markdown）。\n'
+              '教 Agent 用 ishkafel 出片的完整手册（一份 Markdown），'
+              '替换裂变和脚本成片两条线都在里面。\n'
               '「复制全文」后粘给任何 Agent 即可——文档开头就是给它的自装'
               '指令，它会自己装成技能并回报装到了哪儿。之后直接说'
-              '「用 ishkafel 把这条片子换一批画面」。\n'
+              '「用 ishkafel 把这条片子换一批画面」或者'
+              '「照这份稿子做一条新片」，它就知道该走哪条线。\n'
               '要发给同事就「存成文件」，微信发过去即可。'),
           if (_message != null) ...[
             const SizedBox(height: AppSpacing.sm),
