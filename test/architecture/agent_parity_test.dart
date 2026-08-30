@@ -67,12 +67,82 @@ void main() {
     }
   });
 
-  test('会静默毁掉成片的两条自查必须在手册里', () {
-    // 这两条都「不拦导出」，所以更危险：片子导得出来，但里面是坏的
+  /// 一级命令对、**二级子命令写错**同样让人第一次就撞墙——而且更隐蔽，
+  /// 因为「命令存在」这道检查照样绿。
+  ///
+  /// 验收 Agent 撞到的原样：手册新写的两节里是 `apply plan`（单数），
+  /// 实际命令是 `apply plans`。它照着跑，退出码 2、「认不出「plan」」。
+  test('二级子命令也要真的存在——一级对了不代表能跑', () {
+    final subs = <String, Set<String>>{
+      'apply': {'plans', 'segment', 'tags'},
+      'review': {'list', 'drop', 'keep'},
+      'voice': {'generate'},
+      'ui': {'new-task'},
+    };
+    for (final entry in subs.entries) {
+      for (final m in RegExp('ishkafel ${entry.key} ([a-z][a-z-]*)')
+          .allMatches(agentSkillMarkdown)) {
+        final sub = m.group(1)!;
+        // 「ishkafel voice <任务>」这种直接跟参数的不算子命令
+        if (sub.startsWith('<')) continue;
+        expect(entry.value, contains(sub),
+            reason: '手册里写着 `ishkafel ${entry.key} \$sub`，'
+                '但 ${entry.key} 只认 ${entry.value.join(' / ')}。'
+                '照着跑第一次就撞墙');
+      }
+    }
+  });
+
+  /// 手册自己用一整段警告「null 不是干净」，给的命令却是
+  /// `jq '.burnedText // "画面都干净"'`——`//` 在 jq 里正是
+  /// 「null 就用右边这个」。**手册给的命令做的就是它警告不要做的事**。
+  ///
+  /// 配上「委派路径不报这个字段」，后果是：查出来「画面都干净」，
+  /// 而实际上烧着 5 条字。
+  test('三态字段不许用 jq 的 // 折叠掉 null', () {
+    // 只看真要敲的那些行——注释里举反面例子是允许的（正是在教别这么写）
+    final commands = agentSkillMarkdown
+        .split('\n')
+        .where((l) => !l.trimLeft().startsWith('#'))
+        .join('\n');
+    for (final field in ['burnedText', 'productBrand']) {
+      expect(
+        RegExp('\\.$field // "[^"]*干净').hasMatch(commands),
+        isFalse,
+        reason: '手册用 `.$field // "…干净"` 把「没看成」显示成「干净」——'
+            '而这一节整段都在说这两件事不是一回事',
+      );
+    }
+  });
+
+  /// 手册里那几节是带序号的（① ② ③…）。插一节忘了顺延后面的，
+  /// 就会出现两个 ⑤——读的人以为漏了一节，或者以为自己看错了。
+  test('分节序号不重不漏', () {
+    final marks = RegExp(r'^### ([①②③④⑤⑥⑦⑧⑨])', multiLine: true)
+        .allMatches(agentSkillMarkdown)
+        .map((m) => m.group(1)!)
+        .toList();
+    expect(marks.toSet().length, marks.length,
+        reason: '手册里有重复的分节序号：$marks');
+    const order = '①②③④⑤⑥⑦⑧⑨';
+    for (var i = 1; i < marks.length; i++) {
+      expect(order.indexOf(marks[i]), greaterThan(order.indexOf(marks[i - 1])),
+          reason: '分节序号没按顺序：$marks');
+    }
+  });
+
+  test('会静默毁掉成片的几条自查必须在手册里', () {
+    // 这几条都「不拦导出」，所以更危险：片子导得出来，但里面是坏的
     expect(agentSkillMarkdown, contains('stale'),
         reason: '配音过期不拦导出——会混出一条前后两个人说话的片子');
     expect(agentSkillMarkdown, contains('subtitle-too-short'),
         reason: '字幕盖不住语音不拦导出——配音在念、字幕停着不动');
+    expect(agentSkillMarkdown, contains('burnedText'),
+        reason: '素材画面上本来就烧着字，换上去再烧一行台词字幕就是两层字'
+            '——只有看图才发现得了，Agent 必须知道去哪儿看这个信号');
+    expect(agentSkillMarkdown, contains('productBrand'),
+        reason: '产品露出镜头不能跨品牌换——台词说滴露而画面是若也直播间，'
+            '真机上交付过这样一条成片；--exclude-projects 还会放大这个风险');
   });
 
   /// 这份清单和 bin 里的分发是**同一个东西的两处写法**——加了新命令只改一处，
