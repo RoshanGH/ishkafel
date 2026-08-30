@@ -17,6 +17,9 @@ import '../../core/storage/agent_broadcast.dart';
 /// - **压在内容之上、不挤走内容**：毛玻璃浮层，人还能看清界面在变什么
 /// - **最新的一条在最下**，往上依次变淡：视线自然落在底部，像聊天记录
 /// - **只有最新一条在走**，前面的打勾变灰——一眼看出走到哪儿了
+/// - **三类播报一眼分得开**（见 [BroadcastKind]）：进度是流水账，
+///   判断是「它为什么改主意了」，发现问题是「人可能要当场喊停」。
+///   混成一种样式的话，最该被看见的那一条会跟着流水账一起划过去
 /// - 不拦点击：播报只是让人看见，不该挡住人接手
 class AgentBroadcastBar extends StatelessWidget {
   final AgentBroadcast broadcast;
@@ -97,23 +100,47 @@ class AgentBroadcastBar extends StatelessWidget {
                 fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
       ]);
 
+  /// 这一类用什么颜色说话。
+  ///
+  /// 只在**判断**和**发现问题**上用色，进度保持原样——三类都上色的话
+  /// 整条栏花得像圣诞树，等于一类都没突出。
+  static Color _colorOf(BroadcastLine line) => switch (line.kind) {
+        // 发现问题：橙色。这是「人可能要当场喊停」的一条，
+        // 走过去了也不变灰——人回头要找得到它
+        BroadcastKind.warning => AppColors.orange,
+        // 判断：蓝色。它很值钱（人正是靠看懂它的想法才敢放手），
+        // 但出现得频繁，用比警告克制一档的颜色
+        BroadcastKind.judgement => AppColors.accentBlueLight,
+        BroadcastKind.step =>
+          line.done ? AppColors.textSecondary : AppColors.textPrimary,
+      };
+
+  /// 这一类前面摆什么符号
+  static Widget _markOf(BroadcastLine line) => switch (line.kind) {
+        BroadcastKind.warning => const Icon(Icons.report_problem_outlined,
+            size: 11, color: AppColors.orange),
+        BroadcastKind.judgement => const Icon(Icons.lightbulb_outline,
+            size: 11, color: AppColors.accentBlueLight),
+        BroadcastKind.step => line.done
+            ? const Icon(Icons.check, size: 11, color: AppColors.green)
+            : const Text('▸',
+                style: TextStyle(
+                    fontSize: AppFontSize.micro,
+                    color: AppColors.accentBlueLight)),
+      };
+
   Widget _line(BroadcastLine line, {required int depth}) {
-    // 越旧越淡，但不淡到看不清——人可能正想回头确认上一步做了什么
-    final opacity = (1.0 - depth * 0.18).clamp(0.4, 1.0);
+    // 越旧越淡，但不淡到看不清——人可能正想回头确认上一步做了什么。
+    // 发现问题的那条不跟着变淡：人走开一会儿回来，要找的就是它
+    final opacity = line.kind == BroadcastKind.warning
+        ? 1.0
+        : (1.0 - depth * 0.18).clamp(0.4, 1.0);
     return Padding(
       padding: const EdgeInsets.only(top: 3),
       child: Opacity(
         opacity: opacity,
         child: Row(children: [
-          SizedBox(
-            width: 16,
-            child: line.done
-                ? const Icon(Icons.check, size: 11, color: AppColors.green)
-                : const Text('▸',
-                    style: TextStyle(
-                        fontSize: AppFontSize.micro,
-                        color: AppColors.accentBlueLight)),
-          ),
+          SizedBox(width: 16, child: _markOf(line)),
           Expanded(
             child: Text(
               line.text,
@@ -122,8 +149,10 @@ class AgentBroadcastBar extends StatelessWidget {
               style: TextStyle(
                 fontSize: AppFontSize.caption,
                 height: 1.4,
-                color:
-                    line.done ? AppColors.textSecondary : AppColors.textPrimary,
+                color: _colorOf(line),
+                fontWeight: line.kind == BroadcastKind.warning
+                    ? FontWeight.w600
+                    : FontWeight.w400,
               ),
             ),
           ),

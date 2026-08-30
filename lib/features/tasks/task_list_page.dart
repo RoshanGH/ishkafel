@@ -186,9 +186,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         }
         reply(true, '已关掉新建任务');
       case UiAction.plansApply:
-        // 这个动作是给工作台的（它占着那条任务的锁）。列表页收到说明
+      case UiAction.exportOpen:
+        // 这两个动作是给工作台的（它占着那条任务的锁）。列表页收到说明
         // 发错了地方——说清楚，别让 Agent 等到超时
-        reply(false, '提交方案要发给那条任务的工作台，不是任务列表');
+        reply(false, '${action.label}要发给那条任务的工作台，不是任务列表');
     }
   }
 

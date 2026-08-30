@@ -115,6 +115,49 @@ void main() {
     expect(err.toString(), contains('人把向导关掉了'));
   });
 
+  /// 洞 17（真机撞到、当轮最严重的一条）：macOS 弹了「想访问文稿文件夹」
+  /// 的授权框，没人点允许，任务**压根没建成**——而 CLI 去任务库里翻
+  /// 「创建时间最新的那条」，把**上一次**建的任务报了出来，还带着
+  /// `ok:true`「任务已经建好了」。
+  ///
+  /// 后果是 Agent 拿着一个错任务的 id 一路往下走：给它挑素材、提交方案、
+  /// 导出——每一步都「成功」，人最后拿到的是一条完全无关的片子。
+  test('界面说建好了却没报是哪一条：宁可失败，也绝不去列表里猜', () async {
+    // 盘上放一条**旧**任务：以前 CLI 就是把这条当成「刚建的」报出去的
+    Directory('${dir.path}/tasks').createSync(recursive: true);
+    File('${dir.path}/tasks/old1.json').writeAsStringSync(jsonEncode({
+      'id': 'old1',
+      'name': '上一次建的',
+      'seq': 8,
+      'status': 'ready',
+      'createdAt': DateTime.now().toIso8601String(),
+      'updatedAt': DateTime.now().toIso8601String(),
+      'units': <dynamic>[],
+    }));
+    final out = StringBuffer();
+    final err = StringBuffer();
+    final f = Future(() => run(['new-task'],
+        mode: 'script', tagGroups: '1', out: out, err: err,
+        wait: const Duration(seconds: 2)));
+    for (var i = 0; i < 60; i++) {
+      final req = consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot);
+      if (req != null) {
+        // 界面报了成功，但 payload 里没有 taskId
+        writeAgentRequestResult(
+            dataDir: dir, taskId: globalPresenceSlot, id: req.id,
+            ok: true, message: '任务已经建好了');
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+
+    expect(await f, isNot(0), reason: '报 ok:true 的话，Agent 会拿着错 id 一路往下走');
+    expect(out.toString(), isNot(contains('old1')),
+        reason: '**绝不能把上一次的任务当成刚建的报出去**——'
+            '这正是洞 17 的原样');
+    expect(err.toString(), contains('别照着猜'));
+  });
+
   test('建成之后要报出是哪一条任务——不然调用方只能去列表里猜', () async {
     // 先放一条任务在盘上，模拟界面刚建好的那一条
     Directory('${dir.path}/tasks').createSync(recursive: true);

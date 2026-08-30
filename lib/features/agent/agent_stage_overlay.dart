@@ -122,7 +122,7 @@ class _AgentStageOverlayState extends ConsumerState<AgentStageOverlay> {
 
     final action = live.action;
     final before = _broadcast.lines.length;
-    final after = _broadcast.push(action);
+    final after = _broadcast.push(action, kind: live.kind);
     if (after.lines.length != before ||
         (after.lines.isNotEmpty &&
             _broadcast.lines.isNotEmpty &&

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../core/log/app_log.dart';
+import '../core/storage/agent_broadcast.dart';
 import '../core/storage/agent_presence.dart';
 import '../core/storage/ui_wake.dart';
 import 'app_locator.dart';
@@ -84,7 +85,23 @@ class AgentStage {
   ///
   /// 节奏由界面决定而不是猜时间——界面滚动完、面板展开完才回执。
   /// 机器快的时候不白等，慢的时候也不会一闪而过没看清
-  Future<void> show(String action, {AgentFocus? focus}) async {
+  /// 说一句「它为什么改主意了」。
+  ///
+  /// 和进度分开报是有讲究的：进度是流水账（「正在给 U2S4 挑素材」），
+  /// 判断才是人真正想看的（「标签命中 5318 条太宽，改用画面描述再搜一轮」）。
+  /// **人肯把花钱的活交给静默模式，靠的正是看懂过它是怎么想的。**
+  Future<void> think(String action, {AgentFocus? focus}) =>
+      show(action, focus: focus, kind: BroadcastKind.judgement);
+
+  /// 说一句「发现问题了」——人可能要当场喊停。
+  ///
+  /// 只用在**会毁掉整片**的发现上（素材烧着别家的字、画面里露的是竞品），
+  /// 不用在能自己接着走的小磕碰上。喊多了狼来了，真出事那次就没人看了。
+  Future<void> warn(String action, {AgentFocus? focus}) =>
+      show(action, focus: focus, kind: BroadcastKind.warning);
+
+  Future<void> show(String action,
+      {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) async {
     if (!visual) return;
     // 换模块了就唤醒界面把人带过去——它可能停在任务列表、也可能停在
     // 另一个模块。跨模块跳转走唤醒文件，模块内部的定位走在场状态
@@ -106,6 +123,7 @@ class AgentStage {
         at: DateTime.now(),
         action: action,
         step: _step,
+        kind: kind,
         focus: focus,
       ),
     );
@@ -131,7 +149,8 @@ class AgentStage {
   }
 
   /// 心跳：长活儿（配音、导出）每隔一会儿报一次，让界面知道它还在
-  void heartbeat(String action, {AgentFocus? focus}) {
+  void heartbeat(String action,
+      {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) {
     if (!visual) return;
     writeAgentPresence(
       dataDir: dataDir,
@@ -141,6 +160,7 @@ class AgentStage {
         at: DateTime.now(),
         action: action,
         step: _step,
+        kind: kind,
         focus: focus,
       ),
     );

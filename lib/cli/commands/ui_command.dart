@@ -1,12 +1,9 @@
 import 'dart:io';
 
-import 'package:collection/collection.dart';
-
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/ui_action.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../app_locator.dart';
 

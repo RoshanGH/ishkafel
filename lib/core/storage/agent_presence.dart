@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'agent_broadcast.dart';
+
 import 'package:path/path.dart' as p;
 
 import '../log/app_log.dart';
@@ -28,6 +30,13 @@ class AgentPresence {
   /// 正在做什么，**人话**：「正在给第 10 句挑镜头」。直接显示在横幅上
   final String action;
 
+  /// 这一句是进度、是判断，还是发现了问题。
+  ///
+  /// 三类混在一种样式里，人只会当成一串流水账划过去——而「这条素材烧着
+  /// 别家的字」恰恰是他该当场喊停的一条。老版本写的状态文件里没有这个键，
+  /// 读回来按进度处理（那是绝大多数）。
+  final BroadcastKind kind;
+
   /// 界面该把哪儿摆到眼前；null = 它还没动到具体某一行（在读、在想）
   final AgentFocus? focus;
 
@@ -42,6 +51,7 @@ class AgentPresence {
     required this.holder,
     required this.at,
     required this.action,
+    this.kind = BroadcastKind.step,
     this.focus,
     this.step = 0,
   });
@@ -54,6 +64,9 @@ class AgentPresence {
         'at': at.toIso8601String(),
         'action': action,
         'step': step,
+        // 进度是默认值，不写进文件——老版本的界面读到陌生的键也不会怎样，
+        // 但少写一个键就少一处要维护的兼容
+        if (kind != BroadcastKind.step) 'kind': kind.name,
         if (focus != null) 'focus': focus!.toJson(),
       };
 
@@ -69,6 +82,10 @@ class AgentPresence {
       at: at,
       action: raw['action'] is String ? raw['action'] as String : '',
       step: raw['step'] is int ? raw['step'] as int : 0,
+      // 认不出来的一律当进度：把一句普通播报误染成红色，
+      // 比把一条真警告显示成流水账好不到哪儿去，但至少不会喊狼来了
+      kind: BroadcastKind.values.firstWhere((k) => k.name == raw['kind'],
+          orElse: () => BroadcastKind.step),
       focus: AgentFocus.tryFromJson(raw['focus']),
     );
   }

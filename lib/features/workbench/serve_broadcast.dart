@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../../core/storage/agent_broadcast.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent/visual_pace.dart';
 
@@ -23,13 +24,22 @@ class ServeBroadcast {
   ///
   /// 校验和投影本身是瞬间的，不停的话三句话一闪而过等于没说。
   /// 停多久用全软件同一份节奏（见 [visualStepDwell]）。
-  Future<void> sayAndHold(String action, {AgentFocus? focus}) async {
-    say(action, focus: focus);
+  Future<void> sayAndHold(String action,
+      {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) async {
+    say(action, focus: focus, kind: kind);
     await Future<void>.delayed(visualStepDwell);
   }
 
+  /// 发现了会毁掉整片的问题——人可能要当场喊停。
+  /// 停得比普通一步久：这一条值得人多看两眼
+  Future<void> warnAndHold(String action, {AgentFocus? focus}) async {
+    say(action, focus: focus, kind: BroadcastKind.warning);
+    await Future<void>.delayed(visualStepDwell * 2);
+  }
+
   /// 说一句。步号递增——播报条据此判断是不是新一步
-  void say(String action, {AgentFocus? focus}) {
+  void say(String action,
+      {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) {
     _step++;
     writeAgentPresence(
       dataDir: dataDir,
@@ -39,6 +49,7 @@ class ServeBroadcast {
         at: DateTime.now(),
         action: action,
         step: _step,
+        kind: kind,
         focus: focus,
       ),
     );
