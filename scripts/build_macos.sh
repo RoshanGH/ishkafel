@@ -43,4 +43,33 @@ case "$MODE" in
   --release) OUT="build/macos/Build/Products/Release/ishkafel.app" ;;
   *)         OUT="build/macos/Build/Products/Debug/ishkafel.app" ;;
 esac
+# 用固定的自签名证书签一次。
+#
+# **不签的话每次重新编译都会重新弹一遍隐私授权框**（「ishkafel 想访问
+# 文稿文件夹」）：adhoc 签名没有稳定身份，macOS 只能按二进制哈希认它，
+# 编译一次哈希就变一次，系统当成另一个 app。真机上因此还出过更糟的：
+# 授权框挡住了建任务，而命令行那头报了「已经建好了」。
+#
+# 证书是本地自签的（`.secrets/codesign.p12`，不进 git、不联网、
+# 不涉及任何账号）。没有它就退回 adhoc——授权框会照旧每次弹，
+# 但不影响构建。
+CERT_P12=".secrets/codesign.p12"
+if [ -f "$CERT_P12" ]; then
+  IDENTITY="ishkafel Local Signing"
+  if ! security find-certificate -c "$IDENTITY" >/dev/null 2>&1; then
+    echo "把签名证书导入钥匙串（只做一次）…"
+    security import "$CERT_P12" -k ~/Library/Keychains/login.keychain-db \
+      -T /usr/bin/codesign -P "$(cat .secrets/codesign.pass)" >/dev/null
+  fi
+  # --deep 连同内嵌的 framework 一起签：少签一个，系统就认为整包无效
+  if codesign --force --sign "$IDENTITY" --deep "$OUT" 2>/dev/null; then
+    echo "已签名（${IDENTITY}）——隐私授权不会每次重新编译都再问一遍"
+  else
+    echo "签名失败，退回 adhoc：授权框每次重新编译还会再弹一次" >&2
+  fi
+else
+  echo "没有 .secrets/codesign.p12，产物是 adhoc 签名——" >&2
+  echo "每次重新编译都会重新弹一次隐私授权框" >&2
+fi
+
 echo "已构建（凭据已编入产物）：$OUT"

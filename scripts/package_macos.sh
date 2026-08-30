@@ -65,9 +65,29 @@ done
 echo "命令行工具的凭据已随包带上"
 # 往签好名的 app 里塞东西有可能破坏封签，那样对方双击会报「已损坏」——
 # 而这件事要等包发出去才暴露，必须在这儿挡住
+# **先签塞进去的命令行工具本身**：`--deep` 只管 Frameworks 和嵌套 bundle，
+# Resources 下的独立可执行文件它不签。不签的话那两份二进制没有稳定身份，
+# 而它和 app 同名——人看到的还是一模一样的「ishkafel 想访问文稿文件夹」，
+# 只是这次问的是命令行那半
+if security find-certificate -c "ishkafel Local Signing" >/dev/null 2>&1; then
+  for BIN in "$APP/Contents/Resources/cli"/*/bundle/bin/ishkafel; do
+    [ -f "$BIN" ] && codesign --force --sign "ishkafel Local Signing" "$BIN" 2>/dev/null || true
+  done
+fi
+
 if ! codesign --verify --deep --strict "$APP" 2>/dev/null; then
   echo "塞进 CLI 之后 app 签名不过，重签一遍…"
-  codesign --force --deep --sign - "$APP"
+  # **要用和构建时同一张证书**，不能退回 `--sign -`（adhoc）：
+  # adhoc 没有稳定身份，macOS 只能按二进制哈希认它，于是每次重新打包
+  # 都要重弹一遍隐私授权框（「ishkafel 想访问文稿文件夹」）。
+  # 真机上因此还出过更糟的：授权框挡住建任务，命令行那头却报「已经建好了」
+  SIGN_AS="-"
+  if security find-certificate -c "ishkafel Local Signing" >/dev/null 2>&1; then
+    SIGN_AS="ishkafel Local Signing"
+  else
+    echo "找不到签名证书，退回 adhoc——隐私授权框每次打包还会再弹一次" >&2
+  fi
+  codesign --force --deep --sign "$SIGN_AS" "$APP"
   codesign --verify --deep --strict "$APP" || {
     echo "重签之后签名仍然不过，别把这个包发出去。" >&2; exit 1
   }

@@ -92,5 +92,27 @@ exec "$(cd "$(dirname "$0")" && pwd)/cli/dist/ishkafel" "$@"
 SHIM
 chmod 755 build/ishkafel
 
+# 给命令行工具也签上名。
+#
+# **它和 app 同名（都叫 ishkafel）**，所以它读 ~/Documents 下的原片时，
+# 系统弹的是一模一样的「ishkafel 想访问文稿文件夹」——人根本分不清这次
+# 是谁在问。而它没签名，每次重新编译都换一个身份，于是授权永远记不住：
+# app 那半签好了，这半还在天天弹。
+CERT_P12=".secrets/codesign.p12"
+if [ -f "$CERT_P12" ]; then
+  SIGN_ID="ishkafel Local Signing"
+  if ! security find-certificate -c "$SIGN_ID" >/dev/null 2>&1; then
+    security import "$CERT_P12" -k ~/Library/Keychains/login.keychain-db \
+      -T /usr/bin/codesign -P "$(cat .secrets/codesign.pass)" >/dev/null 2>&1 || true
+  fi
+  for BIN in "$DIST"/../*/bundle/bin/ishkafel; do
+    [ -f "$BIN" ] && codesign --force --sign "$SIGN_ID" "$BIN" 2>/dev/null || true
+  done
+  echo "命令行工具已签名——授权框不会每次重新编译都再问一遍"
+else
+  echo "没有 .secrets/codesign.p12，命令行工具是未签名的——" >&2
+  echo "它读文稿目录时会反复弹授权框（和 app 同名，看不出是谁在问）" >&2
+fi
+
 echo "好了：build/ishkafel  →  $DIST/ishkafel"
 [[ "$BOTH" == 1 ]] && echo "两个架构都在：macos_arm64 + macos_x64"
