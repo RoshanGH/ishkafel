@@ -3068,6 +3068,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     playingLineId: _playingLineId,
                     previewLineIndex: _previewLineIndex,
                     focusLineIndex: _agent?.focus?.lineIndex,
+                    // 「正在给这一行找镜头」：那一步是纯检索，要过一会儿
+                    // 才有东西填进来。不给个动静的话，人看到的是播报在
+                    // 热火朝天地报「找到 946 条」，而界面一动不动
+                    searchingLineIndex:
+                        _agent?.focus?.panel == AgentPanel.findShots
+                            ? _agent?.focus?.lineIndex
+                            : null,
                     inlineKey: _inlineKey,
                     inlineVideo: _inlineVideo,
                     inlinePosition: _inlinePositionMs,

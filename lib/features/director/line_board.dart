@@ -187,6 +187,9 @@ class LineBoard extends StatelessWidget {
   /// 预览播放位置当前落在的行：块点亮并自动滚到可见（预览是主角）
   final int? previewLineIndex;
 
+  /// Agent 正在为哪一行找镜头（`script shots` 那一步，还没写进来）
+  final int? searchingLineIndex;
+
   /// 要把哪一行滚到眼前（Agent 干活时界面跟着它走）。
   /// 给了就压过 [previewLineIndex]——人得看见 Agent 正在动哪一行
   final int? focusLineIndex;
@@ -213,6 +216,7 @@ class LineBoard extends StatelessWidget {
     required this.playingLineId,
     this.previewLineIndex,
     this.focusLineIndex,
+    this.searchingLineIndex,
     this.inlineKey,
     this.inlineVideo,
     this.inlinePosition,
@@ -234,6 +238,7 @@ class LineBoard extends StatelessWidget {
           index: i,
           line: doc.lines[i],
           agentFocused: focusLineIndex == i,
+          searchingShots: searchingLineIndex == i,
           voiceState: doc.voiceStateOf(doc.lines[i]),
           selected: multiSelected.isEmpty
               ? i == selected
@@ -542,6 +547,14 @@ class _LineBand extends StatelessWidget {
   final int index;
   final ScriptLine line;
 
+  /// Agent 正在**为这一行找镜头**（`script shots` 那一步）。
+  ///
+  /// 找镜头只是检索、还没写进来，所以这段时间里坑位一直是「+ 找镜头」
+  /// ——而播报那头在热火朝天地报「找到 946 条、20/20 条能用、正在挑」。
+  /// 人看到的是：它在忙，可界面什么都没发生，和没干一模一样。
+  /// 所以这一格自己得动起来
+  final bool searchingShots;
+
   /// Agent 此刻正在做的就是这一行。**比人自己选中更醒目**——
   /// 可视模式的全部意义就是让人一眼看出「它现在在动哪儿」，
   /// 和普通选中长一个样的话，人得盯着播报条读字才知道
@@ -571,6 +584,7 @@ class _LineBand extends StatelessWidget {
     required this.index,
     required this.line,
     required this.agentFocused,
+    required this.searchingShots,
     required this.voiceState,
     required this.selected,
     required this.expandedShot,
@@ -1228,18 +1242,42 @@ class _LineBand extends StatelessWidget {
         onTap: () => handlers.onFindShots(index),
         borderRadius: BorderRadius.circular(AppRadius.sm),
         hoverColor: AppColors.hover,
-        child: Container(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
           width: 74,
           decoration: BoxDecoration(
+            color: searchingShots
+                ? Color.lerp(
+                    Colors.transparent, AppColors.accentBlue, 0.12)
+                : null,
             borderRadius: BorderRadius.circular(AppRadius.sm),
-            border: Border.all(color: AppColors.border),
+            border: Border.all(
+                color:
+                    searchingShots ? AppColors.accentBlue : AppColors.border),
           ),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-            const Icon(Icons.add, size: 16, color: AppColors.textSecondary),
-            const SizedBox(height: 2),
-            Text(line.shots.isEmpty ? '找镜头' : '添加分镜',
-                style: const TextStyle(
-                    fontSize: AppFontSize.micro, color: AppColors.textSecondary)),
+            // **正在给这一行找镜头时，这一格自己转起来**：找镜头是纯检索，
+            // 要过一会儿才有东西填进来，这段时间里一动不动的加号
+            // 和「没在干活」没有区别
+            if (searchingShots) ...[
+              const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 1.6, color: AppColors.accentBlue)),
+              const SizedBox(height: 4),
+              const Text('正在找…',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.accentBlue)),
+            ] else ...[
+              const Icon(Icons.add, size: 16, color: AppColors.textSecondary),
+              const SizedBox(height: 2),
+              Text(line.shots.isEmpty ? '找镜头' : '添加分镜',
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textSecondary)),
+            ],
           ]),
         ),
       );
