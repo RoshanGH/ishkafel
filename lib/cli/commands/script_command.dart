@@ -160,6 +160,7 @@ Future<int> runScriptCommand({
       return runScriptExportCommand(
         rest: rest.sublist(1),
         dataDir: dataDir,
+        visual: visual,
         outputDir: outputDir,
         out: out,
         err: err,

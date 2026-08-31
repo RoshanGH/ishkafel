@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../core/analysis/audio_extractor.dart';
+import '../../core/audio/bgm_cache_factory.dart';
+import '../../core/audio/bgm_plan.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/ai/volcano_asr_provider.dart';
 import '../../core/ffmpeg/process_runner.dart';
@@ -16,6 +18,7 @@ import '../../core/script/shot_allocation.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/agent_broadcast.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
@@ -285,6 +288,7 @@ Future<int> runScriptVoiceCommand({
 Future<int> runScriptExportCommand({
   required List<String> rest,
   required Directory dataDir,
+  bool? visual,
   String? outputDir,
   String? holder,
   StringSink? out,
@@ -327,6 +331,38 @@ Future<int> runScriptExportCommand({
   final heartbeat =
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
+    // **配乐得先下下来**。此前命令行这条路根本没接配乐：只要方案里铺了
+    // 曲子，导出必然报「配乐在本地找不到……到配乐色带上重试下载」——
+    // 而那正是手册说不该必要的手动操作，命令行也确实没有任何命令能拉它。
+    // 验收 Agent 全程走到最后一步，卡在这儿没导出成。
+    //
+    // 下载要说出来：一首两三兆，网络慢的时候是实打实的等待
+    final bgmPaths = <int, String>{};
+    if (doc.bgmSegments.isNotEmpty) {
+      final cache = bgmCache(dataDir, task.id);
+      final wanted = <int, BgmMaterial>{
+        for (final seg in doc.bgmSegments) seg.material.id: seg.material,
+      };
+      var k = 0;
+      for (final entry in wanted.entries) {
+        k++;
+        writeAgentPresence(
+            dataDir: dataDir,
+            taskId: task.id,
+            presence: AgentPresence(
+                holder: holder ?? agentLockHolder,
+                at: DateTime.now(),
+                action: '正在下载配乐「${entry.value.name}」（$k/${wanted.length}）'));
+        sink.writeln('· 正在下载配乐「${entry.value.name}」（$k/${wanted.length}）');
+        try {
+          bgmPaths[entry.key] = await cache.fetch(entry.value);
+        } catch (e) {
+          sink.writeln('配乐「${entry.value.name}」下不下来：$e\n'
+              '把这一段配乐去掉再导，或者过一会儿重试。');
+          return exitFailed;
+        }
+      }
+    }
     final runner = ScriptExportRunner(
       workDir: Directory(p.join(dataDir.path, 'script_export', task.id)),
       localPathOf: (id) {
@@ -337,6 +373,7 @@ Future<int> runScriptExportCommand({
     );
     final output = await runner.export(
       doc: doc,
+      bgmPathOf: (id) => bgmPaths[id],
       outPath: p.join(dir, name),
       onProgress: (progress) {
         writeAgentPresence(
@@ -357,6 +394,22 @@ Future<int> runScriptExportCommand({
     return 0;
   } on ScriptExportException catch (e) {
     sink.writeln(e.message);
+    // **失败要在界面上留下痕迹**。此前只写 stderr，而 finally 立刻把在场
+    // 状态清掉——人盯着屏幕看到的是「转了一会儿，然后什么都没发生」，
+    // 完全不知道导出被拒了、更不知道为什么（验收 Agent 报的原话：
+    // 「导出被拒，窗口没有横幅、没有错误、什么都没有」）
+    if (AgentStageMode.from(visual: visual) == AgentStageMode.visual) {
+      writeAgentPresence(
+          dataDir: dataDir,
+          taskId: task.id,
+          presence: AgentPresence(
+              holder: holder ?? agentLockHolder,
+              at: DateTime.now(),
+              kind: BroadcastKind.warning,
+              action: '导出没成：${e.message}'));
+      // 停一下再让 finally 清掉，否则这句话一闪而过等于没说
+      await Future<void>.delayed(const Duration(seconds: 4));
+    }
     return exitFailed;
   } finally {
     heartbeat.cancel();

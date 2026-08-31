@@ -171,6 +171,20 @@ Future<int> runScriptApplyCommand({
     // 验收 Agent 只能自己摸出「先 peek 把素材拉下来，再原样重提一遍」，
     // 而正是那一轮才查出有条素材底部烧着别的片子的台词：照第一轮直接导出，
     // 交付的就是两层字幕打架的废片
+    // **回读一遍：报的是「存进去了什么」，不是「你提交了什么」。**
+    //
+    // 真机上第 20、24 行拿到 {"ok":true,"applied":1,"changed":"给 1 行挑了
+    // 镜头"}，而盘上是 0 个镜头——界面诚实地写着「还没挑镜头」，命令行
+    // 撒了谎。只信退出码的 Agent 会交付两个空坑位的片子，而且没人会察觉。
+    final emptied = what == 'shots' ? _picksThatLandedEmpty(payload, next) : const <int>[];
+    if (emptied.isNotEmpty) {
+      sink.writeln('这几行提交了镜头，落盘之后却是空的：'
+          '${emptied.map((i) => '第 ${i + 1} 行').join('、')}。\n'
+          '**这一步没成**——素材时长拿不到（还没下到本地）时会走到这里。'
+          '先 ishkafel script peek <任务> --materials <id,id> 把素材拉下来，'
+          '再重提一次；提完用 script show --json 核一眼那几行的 shots。');
+      return exitFailed;
+    }
     final unchecked = what == 'shots' ? _uncheckedMaterialIds(next) : const <int>[];
     emitJson({
       'ok': true,
@@ -741,4 +755,20 @@ List<int> _uncheckedMaterialIds(ScriptDoc doc) {
     }
   }
   return ids.toList()..sort();
+}
+
+
+/// 提交了镜头、落盘之后却是空的那些行（返回行下标）。
+///
+/// 「报你存的东西，不是报你收到的请求」——这条在这个项目里是有价钱的：
+/// 命令行说 applied:1，盘上是 0，而界面同时诚实地写着「还没挑镜头」。
+/// 两边说的不一样时，**信盘上的**。
+List<int> _picksThatLandedEmpty(Map<String, dynamic> payload, ScriptDoc next) {
+  final bad = <int>[];
+  for (final pick in _picks(payload)) {
+    if (pick.materialIds.isEmpty) continue;
+    if (pick.lineIndex < 0 || pick.lineIndex >= next.lines.length) continue;
+    if (next.lines[pick.lineIndex].shots.isEmpty) bad.add(pick.lineIndex);
+  }
+  return bad;
 }
