@@ -1186,6 +1186,18 @@ class ScriptDoc {
   /// 提取脚本的来源视频（行的 reference 区间都指向它）；手写脚本为 null
   final String? refVideoPath;
 
+  /// 这一行的参考片到底是哪个文件：**行级优先，没有就用文档级**。
+  ///
+  /// 两级不是可选项而是常态——`script extract` 整片提取时每行的
+  /// `reference.videoPath` 就是 null（行级那个字段只给「单独给某一行传
+  /// 一份参考」用）。少了这一层回落，整片提取出来的脚本会被当成手写脚本。
+  ///
+  /// 收敛成这一个入口是有代价教训的：界面读对了、CLI 三处各写各的都没回落，
+  /// 于是参考片复刻在命令行上从第一步就断了，而报出来的话是
+  /// 「手写的脚本没有参考镜」——把人往完全错的方向引。
+  String? refVideoOf(ScriptLine line) =>
+      line.reference?.videoPath ?? refVideoPath;
+
   /// 三条声音轨的总控（原声 / 口播 / 配乐）与闪避设置。见 [SoundMix]
   final SoundMix mix;
 

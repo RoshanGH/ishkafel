@@ -232,7 +232,7 @@ Future<int> runScriptCommand({
       try {
         // 先给参考镜抽本地首帧：**让 Agent 真的看见要复刻的是什么画面**，
         // 而不是只读一句别人总结的描述。抽过的直接用，不重跑 ffmpeg
-        final refVideo = doc.lines[line - 1].reference?.videoPath;
+        final refVideo = doc.refVideoOf(doc.lines[line - 1]);
         if (refVideo != null && File(refVideo).existsSync()) {
           await shotsStage.show('正在看参考片这一句的画面',
               focus: AgentFocus(
@@ -705,11 +705,22 @@ Future<int> runScriptTagRefCommand({
   }
   final target = doc.lines[index];
   final ref = target.reference;
-  final video = ref?.videoPath;
-  if (ref == null || video == null || !File(video).existsSync()) {
+  final video = doc.refVideoOf(target);
+  // 三种情况分开说。混成一句「手写的脚本没有参考镜」害过人：参考片明明在，
+  // 只是文件当时读不到，而那句话把人往「你这是手写脚本」上引，
+  // 于是他去重装、删任务、重建任务，全白干
+  if (ref == null || video == null) {
     sink.writeln('第 $line 行没有参考片可打标。'
         '手写的脚本没有参考镜——用 script shots --by content --keyword "画面描述" 直接搜');
     return exitBadUsage;
+  }
+  if (!File(video).existsSync()) {
+    sink.writeln('参考片读不到：$video\n'
+        '**这一行是有参考镜的**，只是文件此刻打不开。常见两种：\n'
+        '· 文件被移动或删掉了——把它放回原处，或重新 script extract 一次\n'
+        '· 它在「文稿」「桌面」「下载」这类目录下，而命令行工具还没拿到访问'
+        '授权——系统会弹一次「ishkafel 想访问…文件夹」，点允许之后重跑这条');
+    return exitFailed;
   }
 
   // 走 CLI 那份凭据加载：它会去 <dataDir>/credentials 找，
@@ -830,7 +841,7 @@ Future<int> runScriptFramesCommand({
   // 一、参考镜：要复刻的目标长什么样。**不依赖打标**——抽帧不花钱，
   // 打标才花钱，没道理因为没打标就不让人看见画面
   final refFrames = <Map<String, dynamic>>[];
-  final refVideo = target.reference?.videoPath;
+  final refVideo = doc.refVideoOf(target);
   if (refVideo != null && File(refVideo).existsSync()) {
     final segs = target.reference!.segments;
     for (var k = 0; k < segs.length; k++) {

@@ -1835,9 +1835,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   // ---- 参考段（这一句在参考片里的原始画面）----
 
-  /// 这一行的参考视频路径：行级上传的优先，其次整片提取的来源
-  String? _refVideoOf(ScriptLine line) =>
-      line.reference?.videoPath ?? _doc.refVideoPath;
+  /// 这一行的参考视频路径。取法在 [ScriptDoc.refVideoOf] 里只有一份——
+  /// 界面和 CLI 各写各的时候，CLI 那三处全漏了回落
+  String? _refVideoOf(ScriptLine line) => _doc.refVideoOf(line);
 
   /// 参考分镜缩略图：取该镜中点帧（两端常踩转场），按 (行,镜) 缓存
   void _ensureRefThumb(ScriptLine line, int segIndex) {
