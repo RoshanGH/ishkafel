@@ -49,20 +49,31 @@ Future<bool> acquireYieldingFromUi({
     final result = await waitForAgentRequest(
         dataDir: dataDir, taskId: taskId, id: id, timeout: waitForUi);
     if (result != null && result.ok && lock.acquire(holder)) return true;
-    // 界面没应（多半停在别的页面上，没人接单）——那就没人在看这个任务，
-    // 落到下面按「另一个进程占着」处理
+    // **界面没应就直接接管，不要在这儿干等。**
+    //
+    // 接单的是那个任务的工作页；没人接说明界面根本不在这个任务上
+    // （多半停在任务列表），那就没人在看它，锁只是上一次打开时留下的。
+    // 而界面的锁**不会自己放**，等下去就是等到天荒地老——
+    // 真机上正是这样：一改成「等」，人看到的是每条命令一开始就卡死，
+    // 比原来一撞就退还糟。
+    onWait?.call('这个任务的写锁是界面留下的，而界面已经不在这一页了'
+        '（没人接让位请求）——直接接管。');
+    lock.forceTakeover(holder);
+    return true;
   }
 
   // 另一个 Agent 进程占着：等它干完，而不是把活儿丢回去。
   // **等的时候要出声**，否则调用方看到的是一条命令挂在那儿不动
   final deadline = DateTime.now().add(waitForAgent);
-  var announced = false;
+  var lastSaid = DateTime.fromMillisecondsSinceEpoch(0);
   while (DateTime.now().isBefore(deadline)) {
     if (lock.acquire(holder)) return true;
     final who = lock.read();
     if (who == null) continue;
-    if (!announced) {
-      announced = true;
+    // **每隔一会儿就再说一声**：等十几分钟一声不吭，和卡死没有区别。
+    // 顺便把对方正在干什么一起报出来，人就知道进度在往前走
+    if (DateTime.now().difference(lastSaid) > const Duration(seconds: 30)) {
+      lastSaid = DateTime.now();
       final busy = readAgentPresence(dataDir: dataDir, taskId: taskId)?.action;
       onWait?.call('这个任务正被「${who.holder}」占着'
           '${busy == null ? '' : '（$busy）'}——**在等它干完，不是卡住了**。'

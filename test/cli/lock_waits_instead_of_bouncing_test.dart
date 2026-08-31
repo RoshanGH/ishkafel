@@ -88,4 +88,26 @@ void main() {
     );
     expect(ok, isTrue, reason: '等到了就该继续，这正是「等它」的意义');
   });
+
+  test('界面留下的锁、而界面已不在那一页：直接接管，绝不干等', () async {
+    lockFor('人（编导台）').acquire('人（编导台）');
+    final said = <String>[];
+    final started = DateTime.now();
+    final ok = await acquireYieldingFromUi(
+      lock: lockFor('agent:5'),
+      holder: 'agent:5',
+      dataDir: dir,
+      taskId: 't1',
+      // 界面根本不存在，这个请求没人接
+      waitForUi: const Duration(milliseconds: 100),
+      waitForAgent: const Duration(minutes: 20),
+      onWait: said.add,
+    );
+    expect(ok, isTrue,
+        reason: '界面的锁不会自己放。落进「等它干完」的循环就是等到天荒地老'
+            '——真机上人看到的是每条命令一开始就卡死，比原来一撞就退还糟');
+    expect(DateTime.now().difference(started).inSeconds, lessThan(5),
+        reason: '这一步必须是快的');
+    expect(said.join(), contains('直接接管'));
+  });
 }
