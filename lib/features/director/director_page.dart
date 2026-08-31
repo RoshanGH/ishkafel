@@ -1093,7 +1093,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 收到就回的话，人还没看清界面已经翻篇了——那还不如不做可视
       if (now != null && now.step > 0) _ackAfterPainted(now.step);
       // 它干完走了：把它改的东西载进来——不载的话人随手一改就把它的活覆盖了
-      if (leaving) unawaited(_reloadAfterAgent());
+      if (leaving) {
+        // 让出去的锁要收回来，不然人接着改，改到保存那一下才发现写不进去
+        if (_yieldedToAgent) {
+          _yieldedToAgent = false;
+          _acquireLock();
+        }
+        unawaited(_reloadAfterAgent());
+      }
     });
   }
 
@@ -1162,6 +1169,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   bool _servingRequest = false;
 
+  /// 这一页把写锁让给 Agent 了。它收工之后要**自己把锁拿回来**，
+  /// 否则人接着改会一路改到保存被拒才发现
+  bool _yieldedToAgent = false;
+
   /// Agent 请这一页做一件事。目前只有一件：**让出写锁**。
   ///
   /// 让位之后这一页转成只读跟随（和「Agent 占着锁时人打开这一页」同一套
@@ -1195,7 +1206,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _lockHeartbeat = null;
         _lock?.release(_holder);
         _lock = null;
-        setState(() => _blockedBy = 'Agent');
+        // **别设 _blockedBy**：那个字段的意思是「被另一个界面挡住了」，
+        // 它渲染的是一张「等它结束再进」的空白拦截页——而人打开这一页
+        // 正是为了看 Agent 干活，拦掉等于把要看的东西挡在门外。
+        // 只读跟随靠的是在场状态（_agent），那一套已经有了
+        _yieldedToAgent = true;
         reply(true, '写锁让给你了，人还在这一页看着——'
             '记得把每一步都播报出来');
       default:

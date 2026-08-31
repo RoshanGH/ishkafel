@@ -43,4 +43,20 @@ void main() {
         File('lib/cli/commands/script_apply_command.dart').readAsStringSync();
     expect(apply, contains('acquireYieldingFromUi'));
   });
+
+  test('让位之后是只读跟随，不是一张拦截页', () {
+    final src =
+        File('lib/features/director/director_page.dart').readAsStringSync();
+    // _blockedBy 渲染的是「等它结束再进」那张空白页——人打开这一页
+    // 正是为了看 Agent 干活，拦掉等于把要看的东西挡在门外
+    final yieldBlock = src.substring(
+        src.indexOf('case UiAction.lockYield:'),
+        src.indexOf("default:\n        reply(false, '这一页接不了这个动作"));
+    expect(yieldBlock.contains('_blockedBy ='), isFalse,
+        reason: '让位不该走「被另一个界面挡住」那条路——那会渲染成空白拦截页，'
+            '真机上就是这么变成一块黑板的');
+    expect(src, contains('_yieldedToAgent'),
+        reason: '让出去的锁要在 Agent 收工后收回来，'
+            '不然人接着改，改到保存那一下才发现写不进去');
+  });
 }
