@@ -1165,10 +1165,33 @@ ishkafel script shots <任务> --line 3 --json
 **先看 `framePath` 那张图**，再看描述——描述是别人总结的二手信息，
 图才是第一手。看完你自己判断该搜什么。
 
+### 标签是所有检索的公共筛选层——**它归你调**
+
+人在找镜头面板上做的第一件事，往往不是选检索方式，而是**动标签**：
+把参考镜打出来但不合适的去掉，把自己想要的加上。标签不是某一种检索方式，
+它贴在**每一种**方式上当约束。
+
+```bash
+# 有哪些标签可选（每组里的词表都列出来）
+ishkafel tag-groups
+
+# 这次只用这两个标签，配合画面描述搜
+ishkafel script shots <任务> --line 3 --by content --keyword "厨房台面上的喷雾瓶" \
+  --tags "痛点,产品展示"
+
+# 这一次不带任何标签约束（搜得宽一点）
+ishkafel script shots <任务> --line 3 --by content --keyword "…" --tags ""
+```
+
+不给 `--tags` 就沿用参考镜打出来的那几个（和界面预填 chips 是一回事）。
+
+**什么时候该动它**：`narrowedBy` 里 `tagCount` 很大却只搜出个位数结果，
+说明标签把路堵死了——减几个再搜。反过来搜出几百条无从下手，就加一个。
+
 ### 五种检索方式，和界面上人能用的一样
 
 ```bash
-ishkafel script shots <任务> --line 3 --by <方式> [--keyword "…"] [--materials <id>]
+ishkafel script shots <任务> --line 3 --by <方式> [--keyword "…"] [--materials <id>] [--tags "标签1,标签2"]
 ```
 
 | `--by` | 靠什么找 | 什么时候用 |

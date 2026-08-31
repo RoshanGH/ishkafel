@@ -15,6 +15,7 @@ import '../../core/audio/bgm_library.dart';
 import '../../core/ai/tag_dimension.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/shot_allocation.dart';
 import '../ref_shot_tagging.dart';
 import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
@@ -59,6 +60,14 @@ Future<int> runScriptCommand({
 
   /// 检索方式（tags / content / image / voiceover / name）
   String? by,
+
+  /// 这次检索用哪些标签（逗号分隔）。**不给就用参考镜打出来的那几个。**
+  ///
+  /// 人在找镜头面板上做的第一件事往往是「把不合适的标签去掉、把想要的
+  /// 加上」——标签是所有检索维度的公共筛选层。此前 Agent 只能被动接受
+  /// 参考镜的标签，加不了也减不了，等于少了一个最关键的旋钮。
+  /// 给 `--tags ""`（空串）就是这一次不带任何标签约束
+  String? searchTags,
 
   /// `export` 用：输出目录
   String? outputDir,
@@ -219,6 +228,22 @@ Future<int> runScriptCommand({
         sink.writeln('要指定行号：ishkafel script shots <任务> --line <行号>');
         return exitBadUsage;
       }
+      // **没配音就别挑画面。**
+      //
+      // 这条线的时间根是配音时长（rootMs = voiceover.durationMs）。没有它，
+      // 这一行的坑位时长是 0——挑出来的镜头够不够铺、要不要变速，全都无从
+      // 判断，等于瞎挑。用户的原话：「我们到底是用什么样的时间去做画面对齐
+      // 的？我们用的是口播的时间呀。」
+      if (doc.lines[line - 1].type == ScriptLineType.voiced &&
+          ShotAllocation.rootMsOf(doc.lines[line - 1]) == null) {
+        sink.writeln('第 $line 行还没配音，挑不了画面。\n'
+            '**这条线的时间根是配音时长**：这一句念多久，这一行就多长，'
+            '画面被切、被变速去凑那个长度。没有它，这一镜该多少秒、'
+            '素材够不够铺、要不要变速，全都无从判断。\n'
+            '先配音：ishkafel script voice ${task.id}'
+            '（音色不对就先 apply baseline 换掉，配完再换要重配一轮）');
+        return exitBadUsage;
+      }
       // 找镜头是**最该被看见的一步**：人要看着它在给哪一行找、找出了什么。
       // 以前这条命令收了 --visual 却从不上报，于是软件既不拉起、界面也不跟——
       // 人开着别的任务时，看到的是「Agent 说在给第 4 行找镜头」而界面纹丝不动
@@ -338,10 +363,18 @@ Future<int> runScriptCommand({
         );
 
         final services = content ?? MiaoaContentService();
+        // 标签：**Agent 给了就听它的**（这正是人在面板上做的那一步：
+        // 去掉不合适的、加上想要的）；没给才回落到参考镜打出来的那几个
+        final wantTags = searchTags == null
+            ? (refShots.isEmpty
+                ? const <String>[]
+                : (refShots.first['tags'] as List).cast<String>())
+            : [
+                for (final t in searchTags.split(','))
+                  if (t.trim().isNotEmpty) t.trim(),
+              ];
         final tagIds = await _tagIdsOf(
-          tags: refShots.isEmpty
-              ? const <String>[]
-              : (refShots.first['tags'] as List).cast<String>(),
+          tags: wantTags,
           groups: [...task.shotTagGroups, ...task.unitTagGroups],
           service: tags,
         );
@@ -802,6 +835,12 @@ Future<int> runScriptTagRefCommand({
     doc = doc.setReferenceById(
         doc.lines[index].id, doc.lines[index].reference!.withShotMeta(meta));
     taggedSoFar++;
+    // **每打完一镜就落盘**，不等整行做完。
+    //
+    // 界面是靠读盘跟上进度的：攒到整行才写一次，人看到的就是「播报都到
+    // 第 7 个参考镜了，画面上还一个都没出现」，然后忽然整行刷出来。
+    // 用户反复说的就是这件事——**一步一步长出来，不是全做完再刷一下**。
+    await repository.save(task.copyWith(script: doc, updatedAt: DateTime.now()));
     done.add({
       'shotIndex': k,
       'description': meta.description,

@@ -150,7 +150,11 @@ Future<int> runScriptApplyCommand({
     }
 
     final next = await _apply(what, doc, payload,
-        dataDir: dataDir, taskId: task.id, frameCheckOf: frameCheckOf);
+        dataDir: dataDir,
+        taskId: task.id,
+        frameCheckOf: frameCheckOf,
+        onLineDone: (partial) =>
+            repository.save(fresh!.copyWith(script: partial)));
     // 封面 = 成片第一帧。Agent 挑完镜头，列表页上这条片子就该有画面了，
     // 不然它和一个空任务长得一模一样
     final cover = await ensureScriptCover(
@@ -332,6 +336,12 @@ Future<ScriptDoc> _apply(
   required Directory dataDir,
   required String taskId,
   ShotFrameCheck? frameCheckOf,
+
+  /// 每处理完一行就回调一次，让调用方落盘。
+  ///
+  /// **界面是靠读盘跟上进度的**：整批处理完才写一次的话，人看到的是
+  /// 十几行忽然一起冒出来。一行一写，画面才是一格格长出来的
+  Future<void> Function(ScriptDoc partial)? onLineDone,
 }) async {
   var next = doc;
   switch (what) {
@@ -343,6 +353,8 @@ Future<ScriptDoc> _apply(
       // 这条线一开始整条缺席（见 shot_frame_check.dart）
       final checker =
           frameCheckOf ?? defaultShotFrameCheck(dataDir: dataDir, taskId: taskId);
+      // 一行一落盘：Agent 就算一次提交十几行，界面也要**一行行长出来**，
+      // 而不是全处理完忽然刷一下。人反复说的就是这件事
       for (final pick in _picks(payload)) {
         final line = next.lines[pick.lineIndex];
         final shots = checker == null
@@ -359,6 +371,7 @@ Future<ScriptDoc> _apply(
                 ? shots
                 : ShotAllocation.fillBySlowdown(
                     reallocShots(line, shots), root));
+        await onLineDone?.call(next);
       }
     case 'subtitles':
       for (final sub in _subtitles(payload)) {

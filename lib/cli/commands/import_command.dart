@@ -106,14 +106,23 @@ Future<int> runImportCommand({
   return 0;
 }
 
-/// `ishkafel tag-groups` —— 当前企业下有哪些标签组，供 import 选用
+/// `ishkafel tag-groups` —— 当前企业下有哪些标签组、每组里有哪些标签。
+///
+/// **词表也要给出来**：人在找镜头面板上能把不要的标签去掉、把想要的加上，
+/// 那是检索最关键的旋钮之一。而 Agent 此前只拿得到组名——它不知道有哪些
+/// 标签可选，也就无从「加上想要的」，只能被动接受参考镜打出来的那几个。
 Future<int> runTagGroupsCommand({StringSink? out, StringSink? err}) async {
   try {
     final groups =
         await MiaoaTagService().listGroups();
     emitJson({
       'groups': [
-        for (final g in groups) {'id': g.id, 'name': g.name},
+        for (final g in groups)
+          {
+            'id': g.id,
+            'name': g.name,
+            if (g.tags.isNotEmpty) 'tags': g.tags,
+          },
       ],
     }, out: out);
     return 0;

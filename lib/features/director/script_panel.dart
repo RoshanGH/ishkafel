@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -159,6 +160,47 @@ class _LineRowState extends State<_LineRow> {
       TextEditingController(text: widget.line.text);
   bool _hovered = false;
 
+  /// 还没写进文档的编辑。
+  ///
+  /// **不能每敲一个键就写文档**：那会让整个编导台重建一次，而中文输入法
+  /// 在拼音阶段（composing）同样会触发 onChanged——组合状态被打断，
+  /// 于是**中文根本打不出来**（真机上手写脚本时撞到）。
+  /// 何况改台词还可能弹「划词的分镜要清掉」的确认框，打字打到一半
+  /// 弹个对话框出来更是没法用。
+  ///
+  /// 所以照旁边那个字幕输入框的规矩来：**手停下来、或者离开这一行时才写**。
+  Timer? _commitDebounce;
+  String? _pending;
+
+  @override
+  void initState() {
+    super.initState();
+    // 手离开这一行就落盘：防抖没到点也算数
+    _focus.addListener(() {
+      if (!_focus.hasFocus) _commitNow();
+    });
+  }
+
+  /// 把手上这一版写进文档。没有改动就什么都不做
+  void _commitNow() {
+    _commitDebounce?.cancel();
+    final text = _pending;
+    _pending = null;
+    if (text == null) return;
+    widget.onTextChanged(text);
+  }
+
+  /// 打字时只记在手上，停手一会儿再落盘。
+  ///
+  /// 一秒二是估出来的：中文输入法敲拼音、选词的间隔远比它短，
+  /// 所以整个组合过程都不会被打断；而人真停下来时也不会觉得「没保存」
+  void _onTyped(String text) {
+    _pending = text;
+    _commitDebounce?.cancel();
+    _commitDebounce =
+        Timer(const Duration(milliseconds: 1200), _commitNow);
+  }
+
   @override
   void didUpdateWidget(covariant _LineRow old) {
     super.didUpdateWidget(old);
@@ -177,6 +219,9 @@ class _LineRowState extends State<_LineRow> {
 
   @override
   void dispose() {
+    // 这一行被拆掉之前把手上那一版写回去，别让人白打
+    _commitNow();
+    _commitDebounce?.cancel();
     _focus.dispose();
     _controller.dispose();
     super.dispose();
@@ -274,8 +319,11 @@ class _LineRowState extends State<_LineRow> {
                 autofocus: widget.autofocus,
                 textInputAction: TextInputAction.done,
                 onTap: widget.onSelect,
-                onChanged: widget.onTextChanged,
-                onSubmitted: (_) => widget.onSubmit(),
+                onChanged: _onTyped,
+                onSubmitted: (_) {
+                  _commitNow();
+                  widget.onSubmit();
+                },
                 cursorColor: AppColors.accentBlue,
                 style: const TextStyle(
                     fontSize: AppFontSize.emphasis,

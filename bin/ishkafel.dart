@@ -101,7 +101,10 @@ Future<void> main(List<String> args) async {
         help: 'export 用：recommended/higher/lower 或 kbps 数字')
     ..addOption('codec', help: 'export 用：h264/hevc')
     ..addOption('format', help: 'export 用：mp4/mov')
-    ..addOption('tags', help: 'blank tags 用：标签，逗号分隔')
+    ..addOption('tags',
+        help: 'blank tags 用：标签，逗号分隔。'
+            'script shots 也用它：这次检索带哪些标签'
+            '（不给就用参考镜打出来的；给空串就不带标签约束）')
     ..addOption('external',
         help: 'analyze 用：哪几步交给调用方做（segment,tag）')
     ..addFlag('help', abbr: 'h', negatable: false, help: '显示这份用法');
@@ -235,6 +238,7 @@ Future<void> main(List<String> args) async {
     'script' => await runScriptCommand(
         rest: rest,
         dataDir: dataDir,
+        searchTags: parsed['tags'] as String?,
         line: int.tryParse(parsed['line'] as String? ?? ''),
         file: parsed['file'] as String?,
         voiceId: parsed['voice'] as String?,

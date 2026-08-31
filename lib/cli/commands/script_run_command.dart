@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/audio/bgm_cache_factory.dart';
+import '../../core/audio/voice_catalog.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/ai/volcano_asr_provider.dart';
@@ -146,11 +147,37 @@ Future<int> runScriptExtractCommand({
               holder: holder ?? agentLockHolder, at: DateTime.now(), action: stage.label));
       sink.writeln('· ${stage.label}');
     });
+    // **一开始就得有音色。**
+    //
+    // 这条线的时间根是配音时长：`rootMs = voiceover.durationMs`。没有配音
+    // 就没有 rootMs，挑镜头时拿到的坑位时长是 0——**Agent 在完全不知道
+    // 这一镜要多长的情况下挑画面**，也就无从判断素材够不够铺、要不要变速。
+    // 用户的原话：「你都没有选音色去克隆口播，你怎么知道后面的镜头是多少秒
+    // 呢？它必须要有一个默认的音色，这个是必选的，来确定它的时长。」
+    //
+    // 所以这里先落一个默认音色（人和 Agent 都能改），而不是留空等着谁想起来
+    final baseline = task.script?.defaultVoiceId ?? VoiceCatalog.all.first.ref.id;
+    final baselineName = VoiceCatalog.byId(baseline)?.ref.name ?? baseline;
     final doc = ScriptDoc(lines,
         subtitle: task.script?.subtitle ?? const SubtitleStyle(),
-        refVideoPath: video);
+        refVideoPath: video,
+        defaultVoiceId: baseline);
     await repository.save(task.copyWith(script: doc));
-    emitJson({'ok': true, 'taskId': task.id, 'lines': lines.length}, out: out);
+    if (task.script?.defaultVoiceId == null) {
+      sink.writeln('· 本片音色先定为「$baselineName」'
+          '——这条线的时间根是配音时长，没有它后面挑画面就不知道每一镜多长。'
+          '\n  要换：ishkafel voices 看有哪些，再 '
+          'ishkafel script apply baseline ${task.id} --file b.json'
+          '\n  **趁还没配音赶紧换**，配完再换要重配一轮');
+    }
+    emitJson({
+      'ok': true,
+      'taskId': task.id,
+      'lines': lines.length,
+      'defaultVoiceId': baseline,
+      'next': 'ishkafel script voice ${task.id}'
+          '（先配音——配音时长是每一行的时间根，没有它挑不了画面）',
+    }, out: out);
     return 0;
   } on ScriptTranscribeException catch (e) {
     sink.writeln(e.message);

@@ -282,6 +282,8 @@ void main() {
 
     expect(find.textContaining('画面行（无台词'), findsWidgets);
     await tester.enterText(find.byType(TextField).first, '世界上只有两种人');
+    // 打字期间不写文档（不然中文输入法的组合会被打断），停手才落盘
+    await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('band-generate-0')), findsOneWidget,
@@ -307,6 +309,9 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField).first, '要落盘的一句');
+    // 停手 1.2 秒才写文档，再加上文档自身的落盘防抖
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 1));
 
     final saved = await repo.findById('t1');
@@ -477,6 +482,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField).first, '你好呀改了');
+      await tester.pump(const Duration(seconds: 2));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('配音是旧的'), findsOneWidget);

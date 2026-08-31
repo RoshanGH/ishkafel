@@ -91,7 +91,9 @@ void main() {
 
     // 试着改台词：应该被拦下并说清怎么办
     await tester.enterText(find.byType(TextField).first, '人改的');
-    await tester.pump(const Duration(milliseconds: 900));
+    // 打字期间不写文档（中文输入法的组合不能被打断），停手 1.2 秒才提交
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
     final saved = await repo.findById('t1');
     expect(saved!.script!.lines.first.text, isNot('人改的'),
         reason: '两边同时写会把彼此的活覆盖掉');

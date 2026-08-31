@@ -1163,9 +1163,24 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (dataDir != null) {
       clearAgentPresence(dataDir: dataDir, taskId: _task.id);
     }
+    // **人接手了，这一页就不再自动让位。**
+    //
+    // 让位机制是为「人在旁边看着它干活」做的；人一旦按了这个按钮，
+    // 意思正相反：他要自己动手了。不记这一笔的话，Agent 下一条命令
+    // 一来，这一页又乖乖把锁让出去——**接手按钮等于白按**
+    //（真机上人按完还没来得及操作，Agent 就又接着写了）。
+    _humanTookOver = true;
+    _yieldedToAgent = false;
+    // 界面自己在跑的自动铺片也要停：人按这个按钮的意思是「我来」，
+    // 不是「你们俩一起来」
+    _cancelDraft();
+    if (_lock == null) _acquireLock();
     setState(() => _agent = null);
     await _reloadAfterAgent();
   }
+
+  /// 人按过「我来接手」。在他离开这一页之前，不再把写锁让给 Agent
+  bool _humanTookOver = false;
 
   bool _servingRequest = false;
 
@@ -1195,6 +1210,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
     switch (UiAction.parse(req.kind)) {
       case UiAction.lockYield:
+        if (_humanTookOver) {
+          reply(false, '人已经按了「我来接手」，这个任务现在由他自己动手——'
+              '**停下来问他**，别再往这条任务里写');
+          return;
+        }
         if (_lock == null) {
           reply(true, '这一页本来就没占着写锁');
           return;
@@ -2525,6 +2545,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 直接开播。一次确认把费用说清，之后人只做否决和替换——这是产品的北极星
   Future<void> _offerDraftAfterExtract() async {
     if (!mounted) return;
+    // **Agent 正在干这条任务时不插嘴。**
+    //
+    // 「自动铺一版」是给人自己用的：一次确认，软件把空位全填满，人只做
+    // 否决和替换。而 Agent 那条路的形状正相反——软件把候选连同画面一起
+    // 给它，**由它看图判断该用哪一镜**，再提交回来。
+    //
+    // 两条路混在一起，人看到的就是：Codex 明明停了，界面还在一句句地铺；
+    // 按「我来接手」也停不下来。用户的原话：「这说明找镜头这个动作根本
+    // 不是 Agent 在做——是它敲了一条命令，然后软件自己在跑。」
+    if (_agent != null) return;
     final tagger = ref.read(lineTaggerProvider);
     final voiceFactory = ref.read(lineVoiceFactoryProvider);
     final voiced = [
@@ -2784,16 +2814,30 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   void setStateProgress(String step, String what, int i, int total) =>
       _draftProgress = (step, what, i, total);
 
+  /// 自动铺片被叫停了。
+  ///
+  /// 它一次要跑几十句配音加几十次识图，十几分钟起步——**跑起来却没有任何
+  /// 停下来的办法**（真机上人按「我来接手」也停不掉，只能看着它把钱烧完）。
+  bool _draftCancelled = false;
+
+  /// 叫停自动铺片。已经铺好的那几句留着，没轮到的不动
+  void _cancelDraft() {
+    if (_draftProgress == null) return;
+    _draftCancelled = true;
+    _toast('正在停下来——这一句做完就收手，已经铺好的都留着。');
+  }
+
   Future<void> _runDraftPipeline({
     required List<String> needVoice,
     required List<String> needShots,
     required String defaultVoice,
   }) async {
+    _draftCancelled = false;
     var voiceFailed = 0;
     var shotFailed = 0;
     // 一、配音
     for (var i = 0; i < needVoice.length; i++) {
-      if (!mounted) return;
+      if (!mounted || _draftCancelled) break;
       final line = _doc.lines.where((l) => l.id == needVoice[i]).firstOrNull;
       if (line == null) continue; // 生成期间被删了
       setState(() =>
@@ -2810,7 +2854,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final tagIds =
         needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
     for (var i = 0; i < needShots.length; i++) {
-      if (!mounted) return;
+      if (!mounted || _draftCancelled) break;
       final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
       if (line == null) continue;
       setState(() => setStateProgress(
