@@ -53,4 +53,22 @@ void main() {
     expect(run, contains('/\${targets.length}'),
         reason: '配音的「（19/25）」是这套东西的样板');
   });
+
+  test('导出也要把界面带进任务、跟着渲染的那一行走', () {
+    final run =
+        File('lib/cli/commands/script_run_command.dart').readAsStringSync();
+    final body = run.substring(run.indexOf('runScriptExportCommand'));
+    expect(body, contains('exportStage'),
+        reason: '导出是最长的一步、直接出交付物，此前只写了一句话到在场状态'
+            '——没有模块也没有焦点，界面根本不进那个任务');
+    expect(body, contains('progress.lineIndex'),
+        reason: '「渲染第 10 行第 1 镜」得让界面真的滚到第 10 行，'
+            '否则人看到的只是任务列表上一行滚动的字');
+  });
+
+  test('导出进度带得动位置——不是只有一句话', () {
+    final exp = File('lib/core/script/script_export.dart').readAsStringSync();
+    expect(exp, contains('final int? lineIndex'),
+        reason: '进度对象只有 step 字符串的话，界面无从跟随');
+  });
 }

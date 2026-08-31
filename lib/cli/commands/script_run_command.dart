@@ -371,20 +371,42 @@ Future<int> runScriptExportCommand({
       localSourceOk: (path) => File(path).existsSync(),
       run: const ResolvingProcessRunner().call,
     );
+    // 导出是**最长的一步**（几分钟），也最该让人看着——它直接出交付物。
+    // 此前只写了一句话到在场状态：没有模块、没有焦点，于是界面根本不进
+    // 那个任务，人盯着任务列表上一行滚动的字，画面纹丝不动
+    // （用户当场问的就是这个：「可视化模式吗？为什么只有播报没有界面动效」）
+    final exportStage = AgentStage(
+      mode: AgentStageMode.from(visual: visual),
+      dataDir: dataDir,
+      taskId: task.id,
+      holder: holder ?? agentLockHolder,
+    );
+    await exportStage.begin('正在导出成片',
+        focus: const AgentFocus(module: 'director', lineIndex: 0));
     final output = await runner.export(
       doc: doc,
       bgmPathOf: (id) => bgmPaths[id],
       outPath: p.join(dir, name),
       onProgress: (progress) {
+        // 渲染一镜就是一次 ffmpeg，几百毫秒到几秒——**不等界面回执**，
+        // 等的话导出会被界面的节奏拖成两倍慢。只写状态，界面自己跟
         writeAgentPresence(
             dataDir: dataDir,
             taskId: task.id,
             presence: AgentPresence(
                 holder: holder ?? agentLockHolder,
                 at: DateTime.now(),
-                action: '正在导出：${progress.step}'));
+                action: '正在导出：${progress.step}',
+                focus: progress.lineIndex == null
+                    ? null
+                    : AgentFocus(
+                        module: 'director',
+                        lineIndex: progress.lineIndex!,
+                        shotIndex: progress.shotIndex,
+                        panel: AgentPanel.shot)));
       },
     );
+    exportStage.end();
     await repository.save(task.copyWith(exports: [
       ...task.exports,
       ExportRecord(

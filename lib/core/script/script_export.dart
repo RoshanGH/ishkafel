@@ -26,7 +26,17 @@ class ScriptExportException implements Exception {
 class ScriptExportProgress {
   final String step;
   final double fraction;
-  const ScriptExportProgress(this.step, this.fraction);
+
+  /// 正在处理哪一行、哪一镜（都从 0 起；不针对具体某行时为 null）。
+  ///
+  /// **给可视模式用**：只有一句「正在导出：渲染第 10 行第 1 镜」的话，
+  /// 界面不知道该看哪儿——人盯着屏幕看到的就是任务列表上一行滚动的字，
+  /// 而画面本身纹丝不动
+  final int? lineIndex;
+  final int? shotIndex;
+
+  const ScriptExportProgress(this.step, this.fraction,
+      {this.lineIndex, this.shotIndex});
 }
 
 /// 「脚本 → 成片」的导出编排：
@@ -102,8 +112,9 @@ class ScriptExportRunner {
     final totalShots =
         lines.fold(0, (a, e) => a + e.line.shots.length) + lines.length + 2;
     var done = 0;
-    void tick(String step) =>
-        onProgress?.call(ScriptExportProgress(step, ++done / totalShots));
+    void tick(String step, {int? lineIndex, int? shotIndex}) =>
+        onProgress?.call(ScriptExportProgress(step, ++done / totalShots,
+            lineIndex: lineIndex, shotIndex: shotIndex));
 
     for (final entry in lines) {
       final line = entry.line;
@@ -156,7 +167,8 @@ class ScriptExportRunner {
         );
         videoParts.add(out);
         shotAtMs += allocMs;
-        tick('渲染第 ${lineIndex + 1} 行第 ${j + 1} 镜');
+        tick('渲染第 ${lineIndex + 1} 行第 ${j + 1} 镜',
+            lineIndex: lineIndex, shotIndex: j);
       }
       // 行音频：配音行 = 配音（截/补到行画面长）；画面行 = 素材原声
       final lineSpanMs = shotAtMs;
@@ -223,7 +235,7 @@ class ScriptExportRunner {
         }
       }
       audioParts.add(audioOut);
-      tick('铺第 ${lineIndex + 1} 行声音');
+      tick('铺第 ${lineIndex + 1} 行声音', lineIndex: lineIndex);
     }
 
     // 拼接与合流
