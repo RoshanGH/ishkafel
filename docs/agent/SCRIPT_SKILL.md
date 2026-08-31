@@ -433,7 +433,7 @@ ishkafel script apply word-shots <任务> --file w.json
 ```json
 {
   "picks": [{"lineIndex": 2, "startWord": 0, "endWord": 8, "materialId": 105378}],
-  "offered": [ ... ishkafel script shots 返回过的候选 ... ]
+  "candidates": [ ... ishkafel script shots 返回过的候选，原样带上 ... ]
 }
 ```
 
@@ -492,7 +492,7 @@ ishkafel script apply bgm <任务> --file b.json
     {"startLine": 6, "endLine": 9},
     {"startLine": 10, "endLine": 27, "materialId": 8802}
   ],
-  "offered": [ ... 候选曲子 ... ]
+  "candidates": [ ... bgm-candidates 返回的候选曲子，原样带上 ... ]
 }
 ```
 
@@ -500,7 +500,7 @@ ishkafel script apply bgm <任务> --file b.json
 连续段、铺满全片」，所以「不铺」也要占一段说出来。`volume` 是**相对值**，
 乘在配乐轨总音量上（见 `apply mix`）。
 
-`offered` 里填 `bgm-candidates` 返回的 materialId；不铺的那几段不用管。
+`candidates` 把 `bgm-candidates` 返回的那一份**原样带上**；不铺的那几段不用管。（写成 `offered` 也认——两个名字这份代码都收。）
 
 ## 七、读错误
 

@@ -26,6 +26,7 @@ import '../voice_baseline.dart';
 import '../agent_stage.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../lock_yield.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
 /// 脚本成片这条线的**执行类**命令：建任务、提取脚本、配音、导出。
@@ -101,7 +102,11 @@ Future<int> runScriptExtractCommand({
     return exitEnv;
   }
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!await acquireYieldingFromUi(
+      lock: lock,
+      holder: holder ?? agentLockHolder,
+      dataDir: dataDir,
+      taskId: task.id)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
@@ -213,7 +218,11 @@ Future<int> runScriptVoiceCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!await acquireYieldingFromUi(
+      lock: lock,
+      holder: holder ?? agentLockHolder,
+      dataDir: dataDir,
+      taskId: task.id)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
@@ -307,7 +316,11 @@ Future<int> runScriptExportCommand({
       '${stamp.minute.toString().padLeft(2, '0')}.mp4';
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!await acquireYieldingFromUi(
+      lock: lock,
+      holder: holder ?? agentLockHolder,
+      dataDir: dataDir,
+      taskId: task.id)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
     return exitLocked;
   }
@@ -388,7 +401,11 @@ Future<int> runScriptJianyingCommand({
   // 生成草稿不写任务数据，但要占锁：素材落地期间人在界面上换素材，
   // 草稿会拿到一半新一半旧
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!await acquireYieldingFromUi(
+      lock: lock,
+      holder: holder ?? agentLockHolder,
+      dataDir: dataDir,
+      taskId: task.id)) {
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
     return exitLocked;
   }

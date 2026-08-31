@@ -32,6 +32,8 @@ import '../../core/storage/doc_watch.dart';
 import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/agent_request.dart';
+import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_repository.dart';
 import 'dart:io';
 
@@ -1049,6 +1051,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
+      // 编导台此前**接不了任何 Agent 请求**——脚本成片这条线在可视模式下
+      // 一个委派都做不了。最要紧的一条是「让出写锁但留在页面」：
+      // 不让位，Agent 就写不进来；让界面退出去，人就什么都看不见了
+      _serveAgentRequest(dataDir);
       final now = readAgentPresence(dataDir: dataDir, taskId: _task.id);
       final was = _agent;
       final leaving = was != null && now == null;
@@ -1152,6 +1158,49 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }
     setState(() => _agent = null);
     await _reloadAfterAgent();
+  }
+
+  bool _servingRequest = false;
+
+  /// Agent 请这一页做一件事。目前只有一件：**让出写锁**。
+  ///
+  /// 让位之后这一页转成只读跟随（和「Agent 占着锁时人打开这一页」同一套
+  /// 状态），人能眼看着它一行行往下做；要抢回来点横幅上的「我来接手」。
+  void _serveAgentRequest(Directory dataDir) {
+    if (_servingRequest) return;
+    final req = consumeAgentRequest(dataDir: dataDir, taskId: _task.id);
+    if (req == null) return;
+    _servingRequest = true;
+    void reply(bool ok, String message) {
+      writeAgentRequestResult(
+          dataDir: dataDir,
+          taskId: _task.id,
+          id: req.id,
+          ok: ok,
+          message: message,
+          payload: const {});
+      _servingRequest = false;
+    }
+
+    switch (UiAction.parse(req.kind)) {
+      case UiAction.lockYield:
+        if (_lock == null) {
+          reply(true, '这一页本来就没占着写锁');
+          return;
+        }
+        // **先把没落盘的改动冲下去再让**：人可能刚拖过一镜、改过一句台词，
+        // 让位之后这一页就写不进去了，不冲就丢了
+        _flushNow();
+        _lockHeartbeat?.cancel();
+        _lockHeartbeat = null;
+        _lock?.release(_holder);
+        _lock = null;
+        setState(() => _blockedBy = 'Agent');
+        reply(true, '写锁让给你了，人还在这一页看着——'
+            '记得把每一步都播报出来');
+      default:
+        reply(false, '这一页接不了这个动作：${req.kind}');
+    }
   }
 
   void _acquireLock() {

@@ -492,6 +492,21 @@ ishkafel task <任务> --json | jq -r '.pickedMaterials.items[]
 **`burnedText` 为 `null` 是「没看成」，不是「画面干净」**——空数组才是干净。
 没看成通常是素材还没落到本地，或这台机器没配方舟凭据。别把 null 当成放行。
 
+**没看成怎么办：把素材拉到本地，再原样重提一遍。**
+刚挑好的素材多半还没下载，所以第一次提交时画面自查会整批跳过——
+`apply shots` 的输出里会点名是哪几条（`uncheckedMaterials`）。
+
+```bash
+# 1）把它们拉到本地
+ishkafel script peek <任务> --materials 105475,114798,108973
+# 2）把刚才那份提交**原样再提一次**——这次才会真的抽头中尾三帧看图
+ishkafel script apply shots <任务> --file p.json
+```
+
+**别省这一步。** 真机上正是这一轮才查出有条素材底部烧着别的片子的台词，
+位置恰好是我们要烧字幕的地方——照第一轮直接导出，交付的就是两层字打架
+的废片。
+
 有烧字的就换一条：那一段重新 `ishkafel candidates` 挑，别硬用。
 
 ### ⑤ 整体替换的那几段，成片里没有台词字幕
@@ -1323,7 +1338,7 @@ ishkafel script apply word-shots <任务> --file w.json
 ```json
 {
   "picks": [{"lineIndex": 2, "startWord": 0, "endWord": 8, "materialId": 105378}],
-  "offered": [ ... ishkafel script shots 返回过的候选 ... ]
+  "candidates": [ ... ishkafel script shots 返回过的候选，原样带上 ... ]
 }
 ```
 
@@ -1382,7 +1397,7 @@ ishkafel script apply bgm <任务> --file b.json
     {"startLine": 6, "endLine": 9},
     {"startLine": 10, "endLine": 27, "materialId": 8802}
   ],
-  "offered": [ ... 候选曲子 ... ]
+  "candidates": [ ... bgm-candidates 返回的候选曲子，原样带上 ... ]
 }
 ```
 
@@ -1390,7 +1405,7 @@ ishkafel script apply bgm <任务> --file b.json
 连续段、铺满全片」，所以「不铺」也要占一段说出来。`volume` 是**相对值**，
 乘在配乐轨总音量上（见 `apply mix`）。
 
-`offered` 里填 `bgm-candidates` 返回的 materialId；不铺的那几段不用管。
+`candidates` 把 `bgm-candidates` 返回的那一份**原样带上**；不铺的那几段不用管。（写成 `offered` 也认——两个名字这份代码都收。）
 
 ## 七、读错误
 

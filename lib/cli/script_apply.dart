@@ -272,12 +272,20 @@ List<ApplyIssue> validateBgmSubmission({
     // 占一段说出来。原来这里拿 -1 去查候选，于是空段必定被拒——
     // 手册明写允许，实际提交不了（验收 Agent 撞上：连空段都过不去）
     if (seg.materialId >= 0 && !offered.contains(seg.materialId)) {
+      // **「一条候选都没给」和「这个 id 不在候选里」要分开说**。
+      // 混成一句的话，人会去查自己的 id 对不对——而真正的问题是
+      // 那份候选清单根本没被读到（验收 Agent 就这么试了两种形状都失败，
+      // 最后放弃配乐，交付的成片全片没有配乐）
       issues.add((
         lineIndex: seg.startLine,
         shotIndex: null,
-        message: '配乐 ${seg.materialId} 不在候选里。'
-            '曲子要从 ishkafel script bgm-candidates 拿；'
-            '这几行不想铺配乐的话，把 materialId 整个省掉'
+        message: offered.isEmpty
+            ? '这次提交里没有候选清单，所以任何 materialId 都对不上。'
+                '把 ishkafel script bgm-candidates 返回的 candidates '
+                '原样放进 candidates 字段（写成 offered 也认）'
+            : '配乐 ${seg.materialId} 不在候选里。'
+                '曲子要从 ishkafel script bgm-candidates 拿；'
+                '这几行不想铺配乐的话，把 materialId 整个省掉'
       ));
     }
     if (seg.volume < 0 || seg.volume > 1) {

@@ -18,6 +18,7 @@ import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../lock_yield.dart';
 import '../gui_lock_guidance.dart';
 import '../agent_stage.dart';
 import '../script_apply.dart';
@@ -99,7 +100,11 @@ Future<int> runScriptApplyCommand({
   }
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
+  if (!await acquireYieldingFromUi(
+      lock: lock,
+      holder: holder ?? agentLockHolder,
+      dataDir: dataDir,
+      taskId: task.id)) {
     final current = lock.read();
     sink.writeln(guiLockGuidance(
         holder: current?.holder, taskId: task.id));
@@ -159,6 +164,14 @@ Future<int> runScriptApplyCommand({
       script: next,
       coverPath: cover ?? fresh.coverPath,
     ));
+    // **有素材没看成画面就要点名**，不能只往日志里写一行 warn。
+    //
+    // 素材还没落到本地时画面自查整批跳过，于是 framesSeen 全是 null。
+    // 手册反复讲「null 是没看成、不是没问题」，却没给过补救的路——
+    // 验收 Agent 只能自己摸出「先 peek 把素材拉下来，再原样重提一遍」，
+    // 而正是那一轮才查出有条素材底部烧着别的片子的台词：照第一轮直接导出，
+    // 交付的就是两层字幕打架的废片
+    final unchecked = what == 'shots' ? _uncheckedMaterialIds(next) : const <int>[];
     emitJson({
       'ok': true,
       'what': what,
@@ -166,6 +179,16 @@ Future<int> runScriptApplyCommand({
       'applied': _countOf(what, payload),
       // 说清改了什么，别让调用方靠 applied 的数字去猜
       'changed': _changedOf(what, payload),
+      if (unchecked.isNotEmpty) ...{
+        'uncheckedMaterials': unchecked,
+        'warning': '这 ${unchecked.length} 条素材的画面**没看成**'
+            '（多半是还没落到本地）——不是「没问题」，是「不知道有没有问题」。'
+            '素材上要是烧着别的片子的字，我们再烧一行台词就是两层字打架，'
+            '整条片子废掉。',
+        'next': 'ishkafel script peek <任务> --materials '
+            '${unchecked.join(',')} 把它们拉到本地，'
+            '然后把刚才这份提交**原样再提一次**，这次才会真的看图',
+      },
     }, out: out);
     return 0;
   } finally {
@@ -456,7 +479,7 @@ List<ShotPick> _picks(Map<String, dynamic> payload) => [
 /// 候选：素材 id → 它能出多长成片。Agent 提交时要把这份一起带上，
 /// 否则我们无从判断它选的东西存不存在、够不够铺
 Map<int, int> _offeredShots(Map<String, dynamic> payload) => {
-      for (final m in (payload['candidates'] as List? ?? const []))
+      for (final m in _offeredList(payload))
         if (m is Map && m['materialId'] is int)
           m['materialId'] as int: (m['availableMs'] as int?) ??
               (m['durationMs'] as int?) ??
@@ -464,7 +487,7 @@ Map<int, int> _offeredShots(Map<String, dynamic> payload) => {
     };
 
 Map<int, LineShot> _offeredMaterials(Map<String, dynamic> payload) => {
-      for (final m in (payload['candidates'] as List? ?? const []))
+      for (final m in _offeredList(payload))
         if (m is Map && m['materialId'] is int)
           m['materialId'] as int: LineShot(
             materialId: m['materialId'] as int,
@@ -512,13 +535,33 @@ List<BgmSubmission> _bgms(Map<String, dynamic> payload) => [
           ),
     ];
 
+
+/// 提交里那份「候选清单」。**两个名字都认**：手册的样例 JSON 写的是
+/// `offered`，而这份代码原本只读 `candidates`——配乐那节又恰好只提
+/// offered，于是 `apply bgm` 照手册写必错，报的还是「配乐 108 不在候选里」
+/// （验收 Agent 两种形状都试了都拒，交付的成片全片没有配乐）。
+List<dynamic> _offeredList(Map<String, dynamic> payload) {
+  for (final key in const ['candidates', 'offered']) {
+    final v = payload[key];
+    if (v is List && v.isNotEmpty) return v;
+  }
+  return const [];
+}
+
+/// 配乐候选的 id 集合。测试要用，所以是公开的
+Set<int> offeredBgmIds(Map<String, dynamic> payload) => _offeredBgm(payload);
+
+/// 挑镜头候选的 id 集合。测试要用，所以是公开的
+Set<int> offeredShotIds(Map<String, dynamic> payload) =>
+    _offeredShots(payload).keys.toSet();
+
 Set<int> _offeredBgm(Map<String, dynamic> payload) => {
-      for (final m in (payload['candidates'] as List? ?? const []))
+      for (final m in _offeredList(payload))
         if (m is Map && m['materialId'] is int) m['materialId'] as int,
     };
 
 Map<int, BgmMaterial> _offeredBgmMaterials(Map<String, dynamic> payload) => {
-      for (final m in (payload['candidates'] as List? ?? const []))
+      for (final m in _offeredList(payload))
         if (m is Map && m['materialId'] is int)
           m['materialId'] as int: BgmMaterial(
             id: m['materialId'] as int,
@@ -682,3 +725,20 @@ int _countOf(String what, Map<String, dynamic> payload) => switch (what) {
       'baseline' || 'mix' => 1,
       _ => 0,
     };
+
+
+/// 挑进方案、但画面**没看成**的素材（去重）。
+///
+/// 「没看成」和「没问题」长得一模一样——两种情况 burnedText 都是空的。
+/// 分不开的话，一条烧着别人台词的素材会一路混到成片里。
+List<int> _uncheckedMaterialIds(ScriptDoc doc) {
+  final ids = <int>{};
+  for (final line in doc.lines) {
+    for (final shot in line.shots) {
+      if (shot.framesSeen == null || shot.framesSeen == 0) {
+        ids.add(shot.materialId);
+      }
+    }
+  }
+  return ids.toList()..sort();
+}

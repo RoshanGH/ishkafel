@@ -204,9 +204,11 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         reply(true, '已回到任务列表，锁松开了');
       case UiAction.plansApply:
       case UiAction.exportOpen:
-        // 这两个动作是给工作台的（它占着那条任务的锁）。列表页收到说明
-        // 发错了地方——说清楚，别让 Agent 等到超时
-        reply(false, '${action.label}要发给那条任务的工作台，不是任务列表');
+      case UiAction.lockYield:
+        // 这几个动作是给那条任务的工作页的（它占着锁）。列表页收到说明
+        // 发错了地方——说清楚，别让 Agent 等到超时。
+        // 让位这一条尤其要说明白：列表页本来就没占任何任务的写锁
+        reply(false, '${action.label}要发给那条任务的工作页，不是任务列表');
     }
   }
 
