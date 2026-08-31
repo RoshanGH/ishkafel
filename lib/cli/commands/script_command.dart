@@ -14,11 +14,13 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/audio/bgm_library.dart';
 import '../../core/ai/tag_dimension.dart';
 import '../../core/script/script_service_wiring.dart';
+import '../../core/script/script_doc.dart';
 import '../ref_shot_tagging.dart';
 import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
+import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../line_evidence.dart';
 import '../search_narrowing.dart';
@@ -126,6 +128,7 @@ Future<int> runScriptCommand({
         rest: rest.sublist(1),
         dataDir: dataDir,
         line: line,
+        visual: visual,
         out: out,
         err: err,
       );
@@ -673,6 +676,8 @@ Future<int> runScriptTagRefCommand({
   required List<String> rest,
   required Directory dataDir,
   int? line,
+  bool? visual,
+  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -749,11 +754,40 @@ Future<int> runScriptTagRefCommand({
     AppLog.warn('拉标签词表失败（只出画面描述）：$e');
   }
 
+  // **打标是全流程里最慢最贵的一段**：25 句、47 个参考镜、十几分钟、
+  // 每一镜一次识图。此前它一声不吭——人对着任务列表干等一刻钟，
+  // 看不出它在干什么、到哪一步了、是不是卡死了（验收时人在旁边看着，
+  // 那是整条流程里唯一一段纯黑屏）。
+  //
+  // 进度要带**分母**，而且是**整片的分母**：人要的不是「正在打标」，
+  // 是「看着数字在往前走」。tag-ref 是按行调用的，所以这里从整份脚本
+  // 算总数与已完成数，跨调用也接得上
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
+  final totalShots = _refShotCount(doc);
+  var taggedSoFar = _taggedRefShotCount(doc);
+  await stage.begin(
+      '正在看参考片的画面（第 $line 句，全片 $taggedSoFar/$totalShots 镜）',
+      focus: AgentFocus(
+          module: 'director', lineIndex: index, panel: AgentPanel.findShots));
+
   final done = <Map<String, dynamic>>[];
   for (var k = 0; k < ref.segments.length; k++) {
     if ((ref.metaAt(ref.segments[k].$1)?.description ?? '').isNotEmpty) {
       continue; // 打过的跳过：这一步花钱
     }
+    await stage.show(
+        '正在看第 $line 句的第 ${k + 1} 个参考镜'
+        '（全片 ${taggedSoFar + 1}/$totalShots 镜）',
+        focus: AgentFocus(
+            module: 'director',
+            lineIndex: index,
+            shotIndex: k,
+            panel: AgentPanel.findShots));
     final meta = await tagRefShot(
       line: doc.lines[index],
       videoPath: video,
@@ -766,6 +800,7 @@ Future<int> runScriptTagRefCommand({
     if (meta == null) continue;
     doc = doc.setReferenceById(
         doc.lines[index].id, doc.lines[index].reference!.withShotMeta(meta));
+    taggedSoFar++;
     done.add({
       'shotIndex': k,
       'description': meta.description,
@@ -774,6 +809,7 @@ Future<int> runScriptTagRefCommand({
     });
   }
   await repository.save(task.copyWith(script: doc, updatedAt: DateTime.now()));
+  stage.end();
   emitJson({
     'ok': true,
     'lineIndex': index,
@@ -903,4 +939,29 @@ Future<int> runScriptFramesCommand({
         '再问清楚他要的是什么方向，别直接换个词重搜',
   }, out: out);
   return 0;
+}
+
+
+/// 整份脚本一共有多少个参考镜、其中打过标的有几个。
+///
+/// 进度要有**整片的分母**——按行调用时只报「这一行第 2/3 镜」，人还是
+/// 不知道整件事走到哪了。要的是看着一个数字一路涨到头
+int _refShotCount(ScriptDoc doc) {
+  var n = 0;
+  for (final line in doc.lines) {
+    n += line.reference?.segments.length ?? 0;
+  }
+  return n;
+}
+
+int _taggedRefShotCount(ScriptDoc doc) {
+  var n = 0;
+  for (final line in doc.lines) {
+    final ref = line.reference;
+    if (ref == null) continue;
+    for (final (start, _) in ref.segments) {
+      if ((ref.metaAt(start)?.description ?? '').isNotEmpty) n++;
+    }
+  }
+  return n;
 }

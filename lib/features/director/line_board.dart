@@ -1159,30 +1159,46 @@ class _LineBand extends StatelessWidget {
                   ),
                 ),
               ),
+              // **「在忙」要一眼看得出来**：此前下载中只有角落里一个 9 像素的
+              // 小转圈，人看到的就是一块黑图——和「坏了」长得一模一样。
+              // 验收时人在旁边指着屏幕问的就是这个：「这红按钮、没首帧，
+              // 是不是出问题了？」其实只是还在下载
               if (status == PickedMediaStatus.downloading)
-                const Positioned(
-                  left: 3,
-                  bottom: 3,
-                  child: SizedBox(
-                      width: 9,
-                      height: 9,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 1.2, color: Colors.white)),
+                Positioned.fill(
+                  child: Tooltip(
+                    message: '正在下载这条素材…',
+                    child: Container(
+                      color: Colors.black.withValues(alpha: 0.45),
+                      child: const Center(
+                        child: SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white)),
+                      ),
+                    ),
+                  ),
                 )
               else if (status == PickedMediaStatus.failed)
-                Positioned(
-                  left: 1,
-                  bottom: 1,
-                  child: InkWell(
-                    key: ValueKey('band-retry-$index-$j'),
-                    onTap: () => handlers.onRetryDownload(shot.materialId),
-                    child: Container(
-                      padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(
-                          color: AppColors.red.withValues(alpha: 0.85),
-                          borderRadius: BorderRadius.circular(3)),
-                      child: const Icon(Icons.refresh,
-                          size: 10, color: Colors.white),
+                Positioned.fill(
+                  child: Tooltip(
+                    message: '这条素材没下下来，点一下重试',
+                    child: InkWell(
+                      key: ValueKey('band-retry-$index-$j'),
+                      onTap: () => handlers.onRetryDownload(shot.materialId),
+                      child: Container(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                                color: AppColors.red.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(4)),
+                            child: const Icon(Icons.refresh,
+                                size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),

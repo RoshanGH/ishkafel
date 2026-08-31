@@ -99,6 +99,12 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   bool _handlingWake = false;
   String? _reviewOpenFor;
 
+  /// 现在停在哪个模块的哪条任务上（'director' / 'workbench'）。
+  /// **用来判断「已经在这一页了」**——Agent 每条命令都会唤醒一次，
+  /// 不判断就每次都把页面销毁重建，视图弹回第一行
+  String? _openedModule;
+  String? _openedTaskFor;
+
   /// Agent 在干不属于任何一个任务的活儿（导入、批处理）。
   ///
   /// 有任务的活儿在各模块自己的横幅上说；**没任务的那几秒**只能在这里说——
@@ -391,15 +397,33 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       // 任务类型）。这是全软件导航的落点：人停在任意页面都能被带到目标
       final wantsReview = wake.module == 'review' || (wake.module == null && wake.review);
       if (wake.module == 'director') {
+        // **已经在这一页就别重建**。Agent 每跑一条命令都是一个新进程，
+        // 每个新进程都会唤醒一次；无条件 pop + push 等于把编导台销毁重来，
+        // 滚动位置、展开的镜头全丢——人看到的是**画面不停地弹回第一行**。
+        // 而手册教的正是「一次做一件事」，于是 24 条命令跳 24 次
+        // （验收时人在旁边看着，第一句话就是「怎么老往第一行跳」）。
+        // 审核页早就这么防了，这两个模块漏了
+        if (_openedModule == 'director' && _openedTaskFor == task.id) return;
+        _openedModule = 'director';
+        _openedTaskFor = task.id;
         Navigator.of(context).popUntil((r) => r.isFirst);
-        unawaited(Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
-        ));
+        unawaited(Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => DirectorPage(task: task)))
+            .whenComplete(() {
+          _openedModule = null;
+          _openedTaskFor = null;
+        }));
       } else if (wake.module == 'workbench') {
+        if (_openedModule == 'workbench' && _openedTaskFor == task.id) return;
+        _openedModule = 'workbench';
+        _openedTaskFor = task.id;
         Navigator.of(context).popUntil((r) => r.isFirst);
-        unawaited(Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
-        ));
+        unawaited(Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)))
+            .whenComplete(() {
+          _openedModule = null;
+          _openedTaskFor = null;
+        }));
       } else if (wantsReview) {
         // 同一条任务的审核页已经开着时不再叠一层——Agent 重复跑 review
         // 只该把窗口带到前台
