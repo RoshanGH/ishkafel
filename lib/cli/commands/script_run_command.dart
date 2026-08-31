@@ -109,8 +109,16 @@ Future<int> runScriptExtractCommand({
       lock: lock,
       holder: holder ?? agentLockHolder,
       dataDir: dataDir,
-      taskId: task.id)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
+      taskId: task.id,
+      onWait: sink.writeln)) {
+    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
+    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
+    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
+    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
+        '占着，先不动它了。\n'
+        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
+        '看看活儿是不是其实已经干完了\n'
+        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
     return exitLocked;
   }
   final heartbeat =
@@ -225,12 +233,32 @@ Future<int> runScriptVoiceCommand({
       lock: lock,
       holder: holder ?? agentLockHolder,
       dataDir: dataDir,
-      taskId: task.id)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
+      taskId: task.id,
+      onWait: sink.writeln)) {
+    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
+    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
+    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
+    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
+        '占着，先不动它了。\n'
+        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
+        '看看活儿是不是其实已经干完了\n'
+        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
     return exitLocked;
   }
   final heartbeat =
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
+  // **开工先说清这一轮要配几句、已经好了几句**。
+  //
+  // 不说的话「续配」看起来和「重来」一模一样：真机上第一次配音被锁挡住
+  // 只完成了 17 句，后面几次是在补剩下的 8 句，而人在旁边看到的是
+  // 「它又在配音了」，以为白烧了一轮钱。播报里那个 (k/total) 藏在句尾，
+  // 一闪而过，人抓不住
+  final voicedTotal =
+      doc.lines.where((l) => l.type == ScriptLineType.voiced).length;
+  final already = voicedTotal - targets.length;
+  sink.writeln(already > 0
+      ? '这一轮要配 ${targets.length} 句（另外 $already 句已经好了，不重做）'
+      : '这一轮要配 ${targets.length} 句');
   final service = factory(task);
   final failed = <String>[];
   try {
@@ -324,8 +352,16 @@ Future<int> runScriptExportCommand({
       lock: lock,
       holder: holder ?? agentLockHolder,
       dataDir: dataDir,
-      taskId: task.id)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务');
+      taskId: task.id,
+      onWait: sink.writeln)) {
+    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
+    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
+    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
+    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
+        '占着，先不动它了。\n'
+        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
+        '看看活儿是不是其实已经干完了\n'
+        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
     return exitLocked;
   }
   final heartbeat =
@@ -480,8 +516,11 @@ Future<int> runScriptJianyingCommand({
       lock: lock,
       holder: holder ?? agentLockHolder,
       dataDir: dataDir,
-      taskId: task.id)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
+      taskId: task.id,
+      onWait: sink.writeln)) {
+    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
+        '占着，先不动它了。如果那是你自己起的进程，'
+        '用 ishkafel script show <任务> --json 看看活儿是不是已经干完了');
     return exitLocked;
   }
   final stage = AgentStage(

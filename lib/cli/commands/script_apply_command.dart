@@ -104,7 +104,8 @@ Future<int> runScriptApplyCommand({
       lock: lock,
       holder: holder ?? agentLockHolder,
       dataDir: dataDir,
-      taskId: task.id)) {
+      taskId: task.id,
+      onWait: sink.writeln)) {
     final current = lock.read();
     sink.writeln(guiLockGuidance(
         holder: current?.holder, taskId: task.id));
