@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'scroll_into_view.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -225,12 +227,13 @@ class LineBoard extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.md),
       itemCount: doc.lines.length,
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-      itemBuilder: (context, i) => _ScrollIntoView(
+      itemBuilder: (context, i) => ScrollIntoView(
         key: ValueKey('band-${doc.lines[i].id}'),
         active: i == (focusLineIndex ?? previewLineIndex),
         child: _LineBand(
           index: i,
           line: doc.lines[i],
+          agentFocused: focusLineIndex == i,
           voiceState: doc.voiceStateOf(doc.lines[i]),
           selected: multiSelected.isEmpty
               ? i == selected
@@ -534,39 +537,15 @@ class _HoverRevealState extends State<_HoverReveal> {
 }
 
 /// 播放跟到哪一行，就把那一行块滚到可见——人看着自己的片子走，
-/// 不用自己追着滚
-class _ScrollIntoView extends StatefulWidget {
-  final bool active;
-  final Widget child;
-
-  const _ScrollIntoView({super.key, required this.active, required this.child});
-
-  @override
-  State<_ScrollIntoView> createState() => _ScrollIntoViewState();
-}
-
-class _ScrollIntoViewState extends State<_ScrollIntoView> {
-  @override
-  void didUpdateWidget(_ScrollIntoView old) {
-    super.didUpdateWidget(old);
-    if (widget.active && !old.active) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !widget.active) return;
-        Scrollable.ensureVisible(context,
-            alignment: 0.25,
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic);
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.child;
-}
 
 class _LineBand extends StatelessWidget {
   final int index;
   final ScriptLine line;
+
+  /// Agent 此刻正在做的就是这一行。**比人自己选中更醒目**——
+  /// 可视模式的全部意义就是让人一眼看出「它现在在动哪儿」，
+  /// 和普通选中长一个样的话，人得盯着播报条读字才知道
+  final bool agentFocused;
 
   /// 这一行配音的**有效**状态（doc.voiceStateOf 算好的）。
   /// 不在这儿用 line.voiceState 自己算：那个看不见基调变化，
@@ -591,6 +570,7 @@ class _LineBand extends StatelessWidget {
   const _LineBand({
     required this.index,
     required this.line,
+    required this.agentFocused,
     required this.voiceState,
     required this.selected,
     required this.expandedShot,
@@ -615,17 +595,32 @@ class _LineBand extends StatelessWidget {
       // 点亮/选中的过渡要有呼吸（180ms）：播放跟随换行时块与块之间
       // 不再闪跳；左缘 3px 播放条是真实元素，不是投影 hack
       child: AnimatedContainer(
+        key: agentFocused ? const Key('agent-focus-band') : null,
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOut,
         decoration: BoxDecoration(
-          color: previewing
+          color: agentFocused
               ? Color.lerp(
-                  AppColors.surfaceRaised, AppColors.accentBlue, 0.06)!
-              : AppColors.surfaceRaised,
+                  AppColors.surfaceRaised, AppColors.accentBlue, 0.10)!
+              : previewing
+                  ? Color.lerp(
+                      AppColors.surfaceRaised, AppColors.accentBlue, 0.06)!
+                  : AppColors.surfaceRaised,
           borderRadius: BorderRadius.circular(AppRadius.md),
           border: Border.all(
-              color: selected ? AppColors.accentBlue : AppColors.border,
-              width: selected ? 1.2 : 1),
+              color:
+                  (agentFocused || selected) ? AppColors.accentBlue : AppColors.border,
+              width: agentFocused ? 2 : (selected ? 1.2 : 1)),
+          // 正在被操作的那一行**发光**：滚过来的同时人眼就被带过去了，
+          // 不用去读播报条上的字
+          boxShadow: agentFocused
+              ? [
+                  BoxShadow(
+                      color: AppColors.accentBlue.withValues(alpha: 0.28),
+                      blurRadius: 16,
+                      spreadRadius: 1),
+                ]
+              : null,
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(children: [

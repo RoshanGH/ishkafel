@@ -157,14 +157,24 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
   Future<void> _runUiAction(Directory dataDir, AgentRequest req) async {
     void reply(bool ok, String message,
-            {Map<String, dynamic> payload = const {}}) =>
-        writeAgentRequestResult(
-            dataDir: dataDir,
-            taskId: globalPresenceSlot,
-            id: req.id,
-            ok: ok,
-            message: message,
-            payload: payload);
+        {Map<String, dynamic> payload = const {}}) {
+      writeAgentRequestResult(
+          dataDir: dataDir,
+          taskId: globalPresenceSlot,
+          id: req.id,
+          ok: ok,
+          message: message,
+          payload: payload);
+      // **回执一发出就放行下一个动作**，不等这个 Future 走完。
+      //
+      // 建脚本成片任务那条路会 `await` 进编导台的路由，而它要等**人退出
+      // 编导台**才返回——压在 whenComplete 上的话，这把互斥锁就永远不放，
+      // 之后每一条可视动作都被静默挡掉，Agent 只能等到超时。
+      // （撤场当初躲过了这个坑，见 _runWizardForAgent 里那段注释；
+      // 这把锁没躲过——验收 Agent 建完任务紧接着 `ui tasks`，
+      // 连着两次白等 90 秒。）
+      _handlingAction = false;
+    }
 
     final action = UiAction.parse(req.kind);
     if (action == null) {

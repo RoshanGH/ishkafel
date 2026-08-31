@@ -29,6 +29,7 @@ import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/doc_watch.dart';
+import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_repository.dart';
@@ -1072,6 +1073,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       focus.shotIndex != null
                   ? (focus.lineIndex, focus.shotIndex!)
                   : null;
+          // **先粗滚过去，那一行才建得出来**。右栏一屏只放得下三四行卡片，
+          // ListView 又是懒构建的：焦点落在第 11 行时它压根不在树上，
+          // 行内那个「滚到眼前」等不到任何回调——Agent 一过第 4 行，
+          // 界面就再也不动了，可视模式退化成一条播报（真机上就是这样）
+          ensureIndexVisible(
+              controller: _boardScroll,
+              index: focus.lineIndex,
+              count: _doc.lines.length);
         }
       });
       // **等这一帧真的画出来再回执**：Agent 靠它决定什么时候走下一步。
