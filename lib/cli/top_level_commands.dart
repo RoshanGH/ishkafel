@@ -22,6 +22,7 @@ const List<String> topLevelCommands = [
   'review',
   'script',
   'skill',
+  'status',
   'subtitle',
   'tag-groups',
   'task',

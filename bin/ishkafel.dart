@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/analyze_command.dart';
+import 'package:ishkafel/cli/commands/status_command.dart';
 import 'package:ishkafel/cli/commands/blank_command.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
 import 'package:ishkafel/cli/commands/candidates_command.dart';
@@ -245,6 +246,9 @@ Future<void> main(List<String> args) async {
       ),
     'task' => await runTaskCommand(rest: rest, dataDir: dataDir),
     'tasks' => await runTasksCommand(dataDir: dataDir),
+    // 接手用：每条任务干到哪了、下一步敲什么、现场有没有别人在动
+    'status' => await runStatusCommand(
+        rest: rest, dataDir: dataDir, json: parsed['json'] as bool),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
         rest: rest, dataDir: dataDir, file: parsed['file'] as String?),
@@ -285,6 +289,8 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 
 命令：
   clean [--yes]    把盘上没主的东西清掉（不给 --yes 只报会删什么）
+  status [<任务>]   **接手先看这条**：每条任务干到哪了、下一步敲什么、
+                   现场有没有别人在动。打断之后接着干，全靠它
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
   bgm <task> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]
