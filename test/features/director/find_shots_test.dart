@@ -137,7 +137,7 @@ void main() {
     expect(find.text('6.8s'), findsWidgets, reason: '规格探测出的时长要上卡');
   });
 
-  testWidgets('三维度可切：画面描述维度独立输入；找相似没有目标时先提示',
+  testWidgets('三维度可切：画面描述维度独立输入；画面相似没有查询帧时先指路',
       (tester) async {
     final cli = _FakeCli();
     final line = ScriptLine.create(text: '细菌怕它');
@@ -155,8 +155,10 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('shots-dim-similar')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('先在下面的候选卡上点「找相似」'), findsOneWidget,
-        reason: '没有查询帧时不能空转，要说清怎么发起');
+    expect(find.textContaining('参考镜卡上的「画面相似」'), findsOneWidget,
+        reason: '没有查询帧时不能空转，要说清怎么发起——'
+            '而且**先指参考镜那条路**：复刻要找的就是那一帧像的画面，'
+            '从候选出发反而绕了一圈');
   });
 
   testWidgets('按名称兜底：切过去自动摘掉标签，切回来标签原样还回去',

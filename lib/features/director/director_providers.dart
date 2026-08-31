@@ -1,3 +1,7 @@
+import '../settings/settings_providers.dart';
+import '../../core/miaoa/query_frame_uploader.dart';
+import '../../core/miaoa/miaoa_gateway.dart';
+import 'package:path/path.dart' as p;
 
 import 'package:file_selector/file_selector.dart';
 
@@ -42,6 +46,29 @@ Future<String?> pickRefFile() async {
 /// 参考视觉镜头打标（多帧 vision，一次给标签 + 画面描述——与 U 层
 /// 视觉镜头打标同一个 ShotTagger）。null = 方舟凭据缺失
 final refShotTaggerProvider = Provider<ShotTagger?>((ref) => null);
+
+/// 「画面相似」用的查询帧上传器。
+///
+/// 妙啊的以图搜视频只吃 OSS key，而参考镜的首帧只在本地（打标时抽的），
+/// 所以要先传上去。传到一个专门放查询帧的二级文件夹里，别混进正经素材；
+/// 按内容指纹记着，同一张不重复传。
+///
+/// null = 还没有数据目录（缓存索引没地方放）
+final queryFrameUploaderProvider = Provider<QueryFrameUploader?>((ref) {
+  final dataDir = ref.watch(dataDirProvider);
+  if (dataDir == null) return null;
+  return QueryFrameUploader(
+    gateway: MiaoaGateway(),
+    folderId: queryFrameFolderId,
+    cacheDir: Directory(p.join(dataDir.path, 'query_frames')),
+  );
+});
+
+/// 查询帧落在哪个二级文件夹。
+///
+/// 这些图只是搜索用的中间物，单独放一处——混进正经素材里，
+/// 别人搜素材时会翻到一堆莫名其妙的截图
+const queryFrameFolderId = 2689;
 
 /// 找镜头面板的三件套：内容检索、规格探测、标签体系。
 /// 默认真实实例（构造不起子进程，真正调用才 exec）；单测 override

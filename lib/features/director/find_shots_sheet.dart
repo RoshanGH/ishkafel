@@ -11,6 +11,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/script/line_tagger.dart';
+import '../../core/miaoa/query_frame_uploader.dart';
 import '../../core/script/script_doc.dart';
 import '../picking/candidate_search_controller.dart';
 import 'director_providers.dart';
@@ -60,6 +61,9 @@ Future<FindShotsResult?> showFindShotsSheet(
   /// 参考还没切过视觉镜头时，**在面板里**切一次并返回切好的行——
   /// 面板开着 loading 等它，而不是先展示旧数据、关掉重开才对
   Future<ScriptLine?> Function()? prepareRef,
+
+  /// 把本地帧变成妙啊的查询帧（「画面相似」要它）
+  QueryFrameUploader? queryFrames,
 }) =>
     showDialog<FindShotsResult>(
       context: context,
@@ -74,6 +78,7 @@ Future<FindShotsResult?> showFindShotsSheet(
         refVideoPath: refVideoPath,
         tagRefShot: tagRefShot,
         prepareRef: prepareRef,
+        queryFrames: queryFrames,
       ),
     );
 
@@ -89,6 +94,10 @@ class _FindShotsSheet extends StatefulWidget {
   final Future<RefShotMeta?> Function(int segIndex)? tagRefShot;
   final Future<ScriptLine?> Function()? prepareRef;
 
+  /// 把本地帧变成妙啊的查询帧（以图搜视频只吃 OSS key）。
+  /// null = 这台机器还没接上素材库
+  final QueryFrameUploader? queryFrames;
+
   const _FindShotsSheet({
     required this.services,
     required this.tagger,
@@ -100,6 +109,7 @@ class _FindShotsSheet extends StatefulWidget {
     this.refVideoPath,
     this.tagRefShot,
     this.prepareRef,
+    this.queryFrames,
   });
 
   @override
@@ -335,7 +345,44 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
     }
   }
 
-  /// 找相似：拿一条候选的首帧当查询帧，切到「找相似」维度
+  /// **拿一张本地图去妙啊搜像的画面**（参考镜的首帧走这条）。
+  ///
+  /// 妙啊的以图搜视频只吃 OSS key，本地图得先传上去。传过的按内容指纹
+  /// 记着，同一张不重复传。
+  Future<void> _searchSimilarByFrame(File frame, String label) async {
+    final uploader = widget.queryFrames;
+    if (uploader == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('这台机器还没接上素材库，搜不了相似画面。')));
+      return;
+    }
+    setState(() {
+      _dim = _SearchDim.similar;
+      _similarToName = label;
+      _similarFileKey = null;
+    });
+    try {
+      // 上传要花几秒（一张几十 KB 的图 + 建记录），先说一声，
+      // 别让人对着不动的面板猜
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            duration: Duration(seconds: 2),
+            content: Text('正在把这一帧交给素材库做查询帧…')));
+      }
+      final key = await uploader.keyFor(frame);
+      if (!mounted) return;
+      setState(() => _similarFileKey = key);
+      await _runSearch();
+    } catch (e) {
+      if (!mounted) return;
+      // **不悄悄退回文字搜**：人点的是「画面相似」，给他一批按文字搜出来的
+      // 东西，他不会知道自己看的根本不是相似画面
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('拿这一帧去搜没成：$e')));
+    }
+  }
+
+  /// 画面相似：拿一条候选的首帧当查询帧，切到「画面相似」维度
   Future<void> _searchSimilar(CandidateEntry entry) async {
     final fileKey = entry.material.fileKey;
     if (fileKey == null || fileKey.isEmpty) {
@@ -626,17 +673,49 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                               color: AppColors.textTertiary
                                   .withValues(alpha: 0.8))),
                     ),
-                  InkWell(
-                    key: ValueKey('shots-use-ref-$k'),
-                    onTap: widget.refVideoPath == null
-                        ? null
-                        : () => _useRefAtom(k, seg),
-                    child: const Text('直接用原片这段',
-                        style: TextStyle(
-                            fontSize: AppFontSize.micro,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.accentBlueLight)),
-                  ),
+                  Row(children: [
+                    InkWell(
+                      key: ValueKey('shots-use-ref-$k'),
+                      onTap: widget.refVideoPath == null
+                          ? null
+                          : () => _useRefAtom(k, seg),
+                      child: const Text('直接用原片这段',
+                          style: TextStyle(
+                              fontSize: AppFontSize.micro,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.accentBlueLight)),
+                    ),
+                    const Spacer(),
+                    // **拿这一镜的首帧去妙啊搜像的画面。**
+                    //
+                    // 这是复刻场景最该走的一条路：要复刻的那张画面就在手上，
+                    // 直接拿它去找同类，比让 AI 先写成一句话、再拿那句话去
+                    // 匹配别人写的另一句话准得多——中间那层转译不稳，同一个
+                    // 镜头两次写出来的措辞不一样，搜出来的东西就不一样。
+                    //
+                    // 此前这个入口只长在候选卡上：手里攥着要复刻的那一帧，
+                    // 却得先用文字搜一轮、从结果里挑一条差不多的，再拿它找相似
+                    Tooltip(
+                      message: (meta?.framePath ?? '').isEmpty
+                          ? '这一镜还没打标，没有首帧图可拿去搜——先点一下这张卡'
+                          : '拿这一镜的首帧去妙啊找画面像的素材',
+                      child: InkWell(
+                        key: ValueKey('shots-ref-similar-$k'),
+                        onTap: (meta?.framePath ?? '').isEmpty
+                            ? null
+                            : () => _searchSimilarByFrame(
+                                File(meta!.framePath!),
+                                '参考第 ${k + 1} 镜'),
+                        child: Text('画面相似',
+                            style: TextStyle(
+                                fontSize: AppFontSize.micro,
+                                fontWeight: FontWeight.w600,
+                                color: (meta?.framePath ?? '').isEmpty
+                                    ? AppColors.textTertiary
+                                    : AppColors.accentBlueLight)),
+                      ),
+                    ),
+                  ]),
                 ]),
           ),
         ]),
@@ -765,10 +844,12 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           if (_descKw.text.trim().isNotEmpty) _runSearch();
         }, key: const ValueKey('shots-dim-description')),
         const SizedBox(width: AppSpacing.xs),
-        _modePill('找相似', _dim == _SearchDim.similar, () {
+        _modePill('画面相似', _dim == _SearchDim.similar, () {
           if (_similarFileKey == null) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                content: Text('先在下面的候选卡上点「找相似」，以那条的首帧为查询帧。')));
+                content: Text('点参考镜卡上的「画面相似」，'
+                    '拿那一镜的首帧去搜；也可以在下面的候选卡上点，'
+                    '拿那条素材的首帧去搜。')));
             return;
           }
           setState(() {
@@ -1095,7 +1176,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                 left: 4,
                 bottom: 4,
                 child: Tooltip(
-                  message: '找相似画面',
+                  message: '画面相似：拿这条的首帧去找像的',
                   child: InkWell(
                     key: ValueKey('shot-similar-${m.id}'),
                     onTap: () => _searchSimilar(entry),

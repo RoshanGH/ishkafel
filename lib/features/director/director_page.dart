@@ -1490,6 +1490,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         return _refThumbs['${line.id}_$segIndex'];
       },
       refVideoPath: _refVideoOf(line),
+      // 「画面相似」：拿参考镜的首帧去妙啊搜像的画面
+      queryFrames: ref.read(queryFrameUploaderProvider),
       tagRefShot: (segIndex) => _tagRefShot(line.id, segIndex),
       // 参考没切过视觉镜头：在面板里切（面板开着 loading），切完把
       // 新的行回给面板——不让人看旧数据、也不必关掉重开
@@ -1580,6 +1582,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _ensureRefThumb(line, segIndex);
         return _refThumbs['${line.id}_$segIndex'];
       },
+      queryFrames: ref.read(queryFrameUploaderProvider),
       tagRefShot: (segIndex) => _tagRefShot(line.id, segIndex),
       prepareRef: () async {
         await _ensureRefCuts(line.id);
