@@ -185,6 +185,13 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
           Navigator.of(context).pop();
         }
         reply(true, '已关掉新建任务');
+      case UiAction.tasksOpen:
+        // 把压在列表上面的页面全弹掉（工作台/编导台/它们的子页）。
+        // 那些页面一退出就松锁，Agent 接着就能写这条任务
+        if (mounted) {
+          Navigator.of(context).popUntil((r) => r.isFirst);
+        }
+        reply(true, '已回到任务列表，锁松开了');
       case UiAction.plansApply:
       case UiAction.exportOpen:
         // 这两个动作是给工作台的（它占着那条任务的锁）。列表页收到说明

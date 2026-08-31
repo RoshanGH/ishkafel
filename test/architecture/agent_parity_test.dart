@@ -77,8 +77,12 @@ void main() {
       'apply': {'plans', 'segment', 'tags'},
       'review': {'list', 'drop', 'keep'},
       'voice': {'generate'},
-      'ui': {'new-task'},
+      'ui': {'new-task', 'tasks'},
     };
+    // 这份名单是**手写**的，所以它漏过东西：`script` 压根没进来，
+    // 于是手册里那条根本不存在的 `script from-video` 一直没人查。
+    // script 现在由 script_subcommands_real_test 从代码里自动抓，
+    // 这里剩下的几条哪天也该照做
     for (final entry in subs.entries) {
       for (final m in RegExp('ishkafel ${entry.key} ([a-z][a-z-]*)')
           .allMatches(agentSkillMarkdown)) {

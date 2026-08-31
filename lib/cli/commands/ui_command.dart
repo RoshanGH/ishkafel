@@ -40,10 +40,24 @@ Future<int> runUiCommand({
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
-  if (rest.isEmpty || rest.first != 'new-task') {
-    sink.writeln('用法：ishkafel ui new-task --mode <replace|blank|script> '
-        '--tag-groups <id,id> [--file <原片>]');
+  if (rest.isEmpty ||
+      (rest.first != 'new-task' && rest.first != 'tasks')) {
+    sink.writeln('用法：\n'
+        '  ishkafel ui new-task --mode <replace|blank|script> '
+        '--tag-groups <id,id> [--file <原片>]\n'
+        '  ishkafel ui tasks     让界面退回任务列表，松开它占着的任务锁');
     return exitBadUsage;
+  }
+  if (rest.first == 'tasks') {
+    return _backToTaskList(
+      dataDir: dataDir,
+      run: run,
+      env: env,
+      appExists: appExists,
+      waitForUi: waitForUi,
+      out: out,
+      err: err,
+    );
   }
 
   final parsed = WizardMode.parse(mode);
@@ -134,8 +148,14 @@ Future<int> runUiCommand({
     'kind': kind,
     // **下一步要跟着任务类型走**：以前恒定给 script show，
     // 而替换裂变任务照着跑会被 CLI 自己拒绝（验收 Agent 撞到）
+    // 界面这会儿正停在新任务上占着锁，而下一步多半要写这条任务。
+    // 不说的话 Agent 会直接撞上「人（编导台）正在操作这个任务」，
+    // 而它看不出这是常态、更看不出出路在哪（验收 Agent 卡在这儿过）
+    'note': '界面正停在这条任务上，它占着写锁。接下来要写这条任务的话'
+        '（script extract / analyze 这些），先让界面退回列表：'
+        'ishkafel ui tasks',
     'next': switch (kind) {
-      'script' => 'ishkafel script show $newId',
+      'script' => 'ishkafel ui tasks && ishkafel script extract $newId <参考片>',
       'blank' => 'ishkafel blank tags $newId --unit 0 --tags <标签>',
       _ => 'ishkafel task $newId',
     },
@@ -153,4 +173,50 @@ Future<bool> _appIsRunning(
   } catch (_) {
     return false;
   }
+}
+
+
+/// `ishkafel ui tasks` —— 让界面退回任务列表，**松开它占着的那把锁**。
+///
+/// 可视模式下这是 Agent 唯一的解锁出路。`ui new-task` 建完任务后界面就
+/// 停在那条任务上，而下一步（`script extract` / `analyze`）必须写它——
+/// 「建完立刻干活」这条最自然的路因此走不通。
+///
+/// 以前的绕法是 `open <另一条任务>` 把界面支开。那只在**恰好还有第二条
+/// 任务**时成立：验收 Agent 就是这么绕的，等它把老任务删光，就彻底卡死了。
+Future<int> _backToTaskList({
+  required Directory dataDir,
+  Future<ProcessResult> Function(String, List<String>)? run,
+  Map<String, String>? env,
+  bool Function(String path)? appExists,
+  Duration waitForUi = const Duration(seconds: 90),
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  final failure =
+      await launchApp(run: run ?? Process.run, env: env, exists: appExists);
+  if (failure != null) {
+    sink.writeln(failure);
+    return exitEnv;
+  }
+  final id = writeAgentRequest(
+    dataDir: dataDir,
+    taskId: globalPresenceSlot,
+    kind: UiAction.tasksOpen.wire,
+    payload: const {},
+  );
+  final result = await waitForAgentRequest(
+      dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
+  if (result == null) {
+    sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。'
+        '它可能没开——那样也就没有锁挡着，直接往下走试试');
+    return exitEnv;
+  }
+  if (!result.ok) {
+    sink.writeln('退不回列表：${result.message}');
+    return exitFailed;
+  }
+  emitJson({'ok': true, 'via': 'ui', 'message': result.message}, out: out);
+  return 0;
 }

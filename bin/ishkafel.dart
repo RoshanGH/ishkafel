@@ -323,6 +323,9 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   ui new-task --mode <replace|blank|script> --tag-groups <id,id> [--file <原片>]
                    **当着人的面**新建任务：软件弹出来、向导打开、字段填上、
                    点创建。人在旁边看着时用它；人不在场用 script new 更快
+  ui tasks         让界面退回任务列表，**松开它占着的任务锁**。
+                   建完任务界面就停在那条任务上，而下一步多半要写它——
+                   撞上「人（编导台）正在操作这个任务」时敲这条
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
   review drop <id> --items 0:-:100,1:2:202
                    替人剔掉这几条——人在审片台看着说「删掉哪几条」时用它
