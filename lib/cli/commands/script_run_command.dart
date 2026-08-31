@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/ai/volcano_asr_provider.dart';
-import '../../core/audio/voice_catalog.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/models/export_record.dart';
 import '../../core/models/renew_task.dart';
@@ -23,6 +22,7 @@ import '../../core/storage/task_media.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
+import '../voice_baseline.dart';
 import '../agent_stage.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
@@ -182,12 +182,28 @@ Future<int> runScriptVoiceCommand({
         'speech_access_token 放到 <数据目录>/credentials 或 ./.secrets');
     return exitEnv;
   }
-  // 指定行就只配那一行，否则把所有还没配音/配音过期的都补上
+  // 音色先定下来再说。**不定就不开工**——音色不对整片得重配，
+  // 而每一句都是花钱的（界面早就这么卡了，CLI 这边一直在撞运气）
+  final baseline = resolveVoiceBaseline(doc: doc, explicit: voiceId);
+  if (baseline.reject != null) {
+    sink.writeln(baseline.reject!);
+    return exitBadUsage;
+  }
+  final defaultVoice = baseline.voiceId!;
+  // --voice 给的音色**写成本片基调，不钉进每一行**。钉进行里的话，
+  // 以后换基调那些行不认，混出一条前后音色不一样的片子
+  if (voiceId != null && doc.defaultVoiceId != voiceId) {
+    doc = doc.withDefaultVoiceId(voiceId);
+  }
+
+  // 指定行就只配那一行，否则把所有还没配音/配音过期的都补上。
+  // **拿 doc.voiceStateOf 判，不是 line.voiceState**：后者看不见基调变化，
+  // 于是「改完基调重新生成」这件事在命令行上根本触发不了
   final targets = <int>[
     for (var i = 0; i < doc.lines.length; i++)
       if (doc.lines[i].type == ScriptLineType.voiced &&
           (line == null
-              ? doc.lines[i].voiceState != LineVoiceState.fresh
+              ? doc.voiceStateOf(doc.lines[i]) != LineVoiceState.fresh
               : i == line - 1))
         i,
   ];
@@ -195,11 +211,6 @@ Future<int> runScriptVoiceCommand({
     emitJson({'ok': true, 'generated': 0, 'note': '没有需要配音的行'}, out: out);
     return 0;
   }
-  final defaultVoice = voiceId ??
-      doc.lines
-          .lastWhere((l) => l.voiceId != null, orElse: () => doc!.lines.first)
-          .voiceId ??
-      VoiceCatalog.all.first.ref.id;
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!lock.acquire(holder ?? agentLockHolder)) {
@@ -233,9 +244,6 @@ Future<int> runScriptVoiceCommand({
           speechRate: doc.speechRateOf(target),
         );
         doc = doc.setVoiceoverById(lineId, vo);
-        if (target.voiceId == null) {
-          doc = doc.setVoiceId(i, defaultVoice);
-        }
         // 配音时长是这一行的根：根变了，镜头分配跟着重算
         final updated = doc.lines.firstWhere((l) => l.id == lineId);
         if (updated.shots.isNotEmpty) {

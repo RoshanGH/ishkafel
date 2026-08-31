@@ -70,6 +70,7 @@ class ScriptPanel extends StatelessWidget {
               key: ValueKey(doc.lines[i].id),
               index: i,
               line: doc.lines[i],
+              voiceState: doc.voiceStateOf(doc.lines[i]),
               selected: i == selected,
               autofocus: doc.lines[i].id == autofocusLineId,
               deletable: doc.lines.length > 1,
@@ -118,6 +119,11 @@ class _AppendLineButton extends StatelessWidget {
 class _LineRow extends StatefulWidget {
   final int index;
   final ScriptLine line;
+
+  /// 这一行配音的**有效**状态（doc.voiceStateOf 算好的）。
+  /// 不用 line.voiceState 自己算：那个看不见基调变化，换了全片音色之后
+  /// 点还是绿的，人以为都好了，导出才发现前后音色不一样
+  final LineVoiceState voiceState;
   final bool selected;
   final bool autofocus;
   final bool deletable;
@@ -130,6 +136,7 @@ class _LineRow extends StatefulWidget {
     super.key,
     required this.index,
     required this.line,
+    required this.voiceState,
     required this.selected,
     required this.autofocus,
     required this.deletable,
@@ -233,7 +240,7 @@ class _LineRowState extends State<_LineRow> {
               child: Tooltip(
                 message: visual
                     ? '画面行'
-                    : switch (widget.line.voiceState) {
+                    : switch (widget.voiceState) {
                         LineVoiceState.none => '还没生成配音',
                         LineVoiceState.fresh => '配音已生成',
                         LineVoiceState.stale => '内容已改，配音是旧的',
@@ -245,7 +252,7 @@ class _LineRowState extends State<_LineRow> {
                     shape: BoxShape.circle,
                     color: visual
                         ? Colors.transparent
-                        : switch (widget.line.voiceState) {
+                        : switch (widget.voiceState) {
                             LineVoiceState.none => AppColors.textSecondary,
                             LineVoiceState.fresh => AppColors.green,
                             LineVoiceState.stale => AppColors.orange,

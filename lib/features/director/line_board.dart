@@ -231,6 +231,7 @@ class LineBoard extends StatelessWidget {
         child: _LineBand(
           index: i,
           line: doc.lines[i],
+          voiceState: doc.voiceStateOf(doc.lines[i]),
           selected: multiSelected.isEmpty
               ? i == selected
               : multiSelected.contains(i),
@@ -566,6 +567,11 @@ class _ScrollIntoViewState extends State<_ScrollIntoView> {
 class _LineBand extends StatelessWidget {
   final int index;
   final ScriptLine line;
+
+  /// 这一行配音的**有效**状态（doc.voiceStateOf 算好的）。
+  /// 不在这儿用 line.voiceState 自己算：那个看不见基调变化，
+  /// 换了全片音色之后点还是绿的，人以为都好了，导出才发现前后音色不一样
+  final LineVoiceState voiceState;
   final bool selected;
   final int? expandedShot;
   final ValueChanged<int?> onExpandShot;
@@ -585,6 +591,7 @@ class _LineBand extends StatelessWidget {
   const _LineBand({
     required this.index,
     required this.line,
+    required this.voiceState,
     required this.selected,
     required this.expandedShot,
     required this.onExpandShot,
@@ -769,7 +776,7 @@ class _LineBand extends StatelessWidget {
   // ---- 块头：行号 · 状态点 · 台词（只读，编辑在左栏）----
 
   Widget _header() {
-    final state = line.voiceState;
+    final state = voiceState;
     return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Container(
         margin: const EdgeInsets.only(top: 3),
