@@ -67,7 +67,10 @@ class PickedMediaCache extends ChangeNotifier {
   PickedMediaCache({
     required this.fetch,
     required this.cacheDir,
-    this.concurrency = 2,
+    // **同时下几条**。素材是几兆的小片子，两条两条地下，一条脚本几十条
+    // 素材要等很久——人刚铺完片想点开看一眼，得到的是「素材还没下载好」。
+    // 它们之间没有任何依赖，本来就该一起下
+    this.concurrency = 6,
     this.quotaBytes = 10 * 1024 * 1024 * 1024,
     this.extension = 'mp4',
   });

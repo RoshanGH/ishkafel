@@ -2116,8 +2116,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final src =
         shot.localSource ?? _mediaCache?.localPathOf(shot.materialId);
     if (src == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('素材还没下载好，稍等一下再播。')));
+      // **说清还差几条**：只说「还没下载好」，人不知道是差一条还是差四十条，
+      // 也不知道该等三秒还是三分钟
+      final left = _mediaCache?.notReady.length ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(left > 1
+              ? '这一镜的素材还在下（一共还差 $left 条），下好就能播。'
+              : '这一镜的素材还在下，马上就好。')));
       return;
     }
     // 该镜在行时间轴上的起点 = 前面镜头的 alloc 累计（配音同轴）
