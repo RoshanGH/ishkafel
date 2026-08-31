@@ -699,13 +699,19 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                       message: (meta?.framePath ?? '').isEmpty
                           ? '这一镜还没打标，没有首帧图可拿去搜——先点一下这张卡'
                           : '拿这一镜的首帧去妙啊找画面像的素材',
-                      child: InkWell(
-                        key: ValueKey('shots-ref-similar-$k'),
+                      // **吃掉这一下点击**：整张参考镜卡本身也是可点的
+                      // （点它=用这一镜的画面描述搜）。不拦住的话，点「画面
+                      // 相似」会顺带触发卡片的点击，模式又被改回「按画面
+                      // 描述」——搜是按图搜了，界面却显示成另一个模式，
+                      // 底下还继续提示「去点画面相似」
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
                         onTap: (meta?.framePath ?? '').isEmpty
                             ? null
                             : () => _searchSimilarByFrame(
                                 File(meta!.framePath!),
                                 '参考第 ${k + 1} 镜'),
+                        key: ValueKey('shots-ref-similar-$k'),
                         child: Text('画面相似',
                             style: TextStyle(
                                 fontSize: AppFontSize.micro,
@@ -845,6 +851,13 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         }, key: const ValueKey('shots-dim-description')),
         const SizedBox(width: AppSpacing.xs),
         _modePill('画面相似', _dim == _SearchDim.similar, () {
+          // 已经有查询帧了就直接切回这个模式重搜——
+          // 不分青红皂白提示「去点画面相似」，人明明刚点过
+          if ((_similarFileKey ?? '').isNotEmpty) {
+            setState(() => _dim = _SearchDim.similar);
+            unawaited(_runSearch());
+            return;
+          }
           if (_similarFileKey == null) {
             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
                 content: Text('点参考镜卡上的「画面相似」，'

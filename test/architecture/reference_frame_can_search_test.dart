@@ -47,4 +47,23 @@ void main() {
         reason: '人点的是「画面相似」。给他一批按文字搜出来的东西，'
             '他不会知道自己看的根本不是相似画面');
   });
+
+  test('点「画面相似」不许冒泡到整张参考镜卡', () {
+    final src =
+        File('lib/features/director/find_shots_sheet.dart').readAsStringSync();
+    final btn = src.substring(src.indexOf("shots-ref-similar-") - 900,
+        src.indexOf("shots-ref-similar-") + 200);
+    expect(btn, contains('HitTestBehavior.opaque'),
+        reason: '整张参考镜卡本身也可点（点它=用这一镜的画面描述搜）。'
+            '不拦住这一下，点「画面相似」会顺带把模式改回「按画面描述」'
+            '——搜是按图搜了，界面却显示成另一个模式');
+  });
+
+  test('已经有查询帧时，点「画面相似」直接切回去，不再提示「去点」', () {
+    final src =
+        File('lib/features/director/find_shots_sheet.dart').readAsStringSync();
+    final pill = src.substring(src.indexOf("_modePill('画面相似'"));
+    expect(pill.substring(0, 400), contains('_similarFileKey ?? '),
+        reason: '人明明刚点过，还提示他去点，是把他当没做过');
+  });
 }
