@@ -1390,8 +1390,21 @@ class ScriptDoc {
     });
   }
 
+  /// 换配乐段。
+  ///
+  /// **字段要带全**：这里曾经漏掉 mix / defaultVoiceId / defaultSpeechRate，
+  /// 于是「铺一段配乐」顺手把全片音色、语速、三条声轨的音量总控全部重置。
+  /// 真机上人看到的是：编导台顶上写着「本片 · 未定音色」、每行都是
+  /// 「选择音色」，可每行又都有精确到 0.1 秒的时长、而且正在导出——
+  /// 时长来自已经生成好的音频，音色标识却没了。mix 被打回默认更隐蔽：
+  /// 成片的声音配比变了，而没有任何地方会提示。
   ScriptDoc withBgmSegments(List<ScriptBgmSegment> next) => ScriptDoc(lines,
-      subtitle: subtitle, bgmSegments: next, refVideoPath: refVideoPath);
+      subtitle: subtitle,
+      bgmSegments: next,
+      refVideoPath: refVideoPath,
+      mix: mix,
+      defaultVoiceId: defaultVoiceId,
+      defaultSpeechRate: defaultSpeechRate);
 
   ScriptDoc insertAfter(int index, {String text = ''}) {
     final next = [...lines];
@@ -1592,12 +1605,47 @@ class ScriptDoc {
       refVideoPath: raw['refVideoPath'] is String
           ? raw['refVideoPath'] as String
           : null,
-      // 老档没有基调：读出来是「还没设过」，行为和以前一样
-      defaultVoiceId:
-          raw['defaultVoiceId'] is String ? raw['defaultVoiceId'] as String : null,
+      // 老档没有基调：读出来是「还没设过」，行为和以前一样。
+      //
+      // **但有一种是被弄丢的，不是没设过**：`withBgmSegments` 曾经漏带这个
+      // 字段，于是「铺一段配乐」把全片音色抹成 null，而配音文件还在。
+      // 界面于是显示「未定音色」「选择音色」，每行却都有精确时长——
+      // 人一眼就看出不对。这种情况从已生成的配音里把它认回来：
+      // 认回来的值与音频实际用的音色一致，所以**不会触发重配**
+      // （重设一次基调要白烧 25 句 TTS）。
+      // 只有所有配音都用同一个音色时才认——混着的说明本来就是逐行设的
+      defaultVoiceId: raw['defaultVoiceId'] is String
+          ? raw['defaultVoiceId'] as String
+          : _voiceIdSharedByAllLines(lines),
       defaultSpeechRate: raw['defaultSpeechRate'] is int
           ? raw['defaultSpeechRate'] as int
           : 0,
     );
   }
+}
+
+/// 已生成的配音是不是清一色同一个音色；是就返回它，否则 null。
+///
+/// 用来把被 [ScriptDoc.withBgmSegments] 抹掉的全片基调认回来——它曾经漏带
+/// 这个字段，于是「铺一段配乐」把全片音色抹成 null，而配音文件还在。
+/// 界面因此显示「本片 · 未定音色」「选择音色」，每行却都有精确到 0.1 秒的
+/// 时长、还在正常导出——人一眼就看出不对。
+///
+/// 认回来的值与音频实际用的音色一致，所以**不会把这些行判成过期**
+/// （重设一次基调要白烧 25 句 TTS）。只有所有配音清一色同一个音色时才认，
+/// 混着的说明本来就是逐行设的，不该由文档级去代表。
+String? _voiceIdSharedByAllLines(List<ScriptLine> lines) {
+  String? seen;
+  for (final line in lines) {
+    // 行上单独设过的不参与：那是人有意为之，跟文档级基调是两回事
+    if (line.voiceId != null) return null;
+    final id = line.voiceover?.voiceId;
+    if (id == null || id.isEmpty) continue;
+    if (seen == null) {
+      seen = id;
+    } else if (seen != id) {
+      return null;
+    }
+  }
+  return seen;
 }
