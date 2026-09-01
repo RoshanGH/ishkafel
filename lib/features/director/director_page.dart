@@ -2653,6 +2653,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         if (l.type == ScriptLineType.voiced) l.id,
     ];
     if (voiced.isEmpty) return;
+    // 花钱的事按**分镜**算：一句里 9 个分镜就是 9 次识图，按句报会少报一截
+    var extractSegCount = 0;
+    for (final id in voiced) {
+      final l = _doc.lines.where((x) => x.id == id).firstOrNull;
+      extractSegCount += l?.reference?.segments.length ?? 1;
+    }
     final canTag = tagger != null && _task.unitTagGroups.isNotEmpty;
     final canVoice = voiceFactory != null;
     final defaultVoice = VoiceCatalog.all.first.ref.name;
@@ -2665,8 +2671,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           if (canTag) '· 给每句打上标签（${voiced.length} 次 AI 调用）',
           if (canVoice)
             '· 用「$defaultVoice」配上声音（${voiced.length} 次语音合成，之后每句可换）',
-          '· 看懂参考片的每一镜，去妙啊找像的画面，每句配一个'
-              '（${voiced.length} 次 AI 识图）',
+          '· 看懂参考片的每一镜，去妙啊找像的画面——'
+              '**参考里这一句有几个分镜就铺几个**，时长按参考的比例切'
+              '（一共 $extractSegCount 个分镜，同样次数的 AI 识图）',
           '铺完直接播出来，不满意的随手换。',
         ].join('\n')),
         actions: [
@@ -2783,6 +2790,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (picked == null || !mounted) return;
       _mutate((d) => d.withDefaultVoiceId(picked.$1));
     }
+    // **费用要按分镜算，不是按句算**：一句里有 9 个分镜就是 9 次检索、
+    // 最多 9 次识图。按句报的话人以为花 5 块，实际花 30——花钱的事先说清
+    var draftSegCount = 0;
+    var draftUntagged = 0;
+    for (final id in needShots) {
+      final l = _doc.lines.where((x) => x.id == id).firstOrNull;
+      final segs = l?.reference?.segments ?? const <(int, int)>[];
+      draftSegCount += segs.length;
+      for (final (from, _) in segs) {
+        final m = l!.reference!.metaAt(from);
+        if (m == null || m.description.trim().isEmpty) draftUntagged++;
+      }
+    }
     // 批量时绝不弹 27 次选择器：全片一个基调，逐句要改在行内改
     final defaultVoice = _doc.defaultVoiceId ?? VoiceCatalog.all.first.ref.id;
     final defaultVoiceName =
@@ -2796,8 +2816,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             '· 给 ${needVoice.length} 句配上「$defaultVoiceName」的声音'
                 '（${needVoice.length} 次语音合成，每句之后可单独换）',
           if (needShots.isNotEmpty)
-            '· 照着参考片这一镜的画面，给 ${needShots.length} 句各找一个像的镜头'
-                '（要先看懂参考片，${needShots.length} 次 AI 识图）',
+            '· 照着参考片的画面，给 ${needShots.length} 句铺上镜头——'
+                '**参考里这一句有几个分镜就铺几个**，时长按参考的比例切'
+                '（一共 $draftSegCount 个分镜；没打过标的要先看懂，'
+                '$draftUntagged 次 AI 识图）',
           if (noRef.isNotEmpty)
             '· 另有 ${noRef.length} 句没有参考片可依据，这次不铺镜头——'
                 '去右栏「找镜头」挑，或先上传一段参考视频',
@@ -2948,10 +2970,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (!mounted || _draftCancelled) break;
       final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
       if (line == null) continue;
+      // 进度带分母**到镜**：一行可能有 9 个分镜，只报「第 3 句 / 27 句」
+      // 的话，人看着它在一句上停半分钟，不知道是卡了还是在干活
+      final segTotal = line.reference?.segments.length ?? 1;
       setState(() => setStateProgress(
-          '照着参考片找镜头', line.text.trim(), i, needShots.length));
-      final ok = await _autoPickShotByReference(line.id, tagIds);
-      if (!ok) shotFailed++;
+          '照着参考片找镜头',
+          segTotal > 1
+              ? '${line.text.trim()}（这一句 $segTotal 个分镜）'
+              : line.text.trim(),
+          i,
+          needShots.length));
+      final missed = await _autoPickShotByReference(
+        line.id,
+        tagIds,
+        onProgress: (done, total) {
+          if (!mounted || total <= 1) return;
+          setState(() => setStateProgress('照着参考片找镜头',
+              '${line.text.trim()}（第 ${done + 1}/$total 个分镜）',
+              i, needShots.length));
+        },
+      );
+      shotFailed += missed.length;
     }
     if (!mounted) return;
     // 三、完成一拍 + 开播——魔法时刻要有个 crescendo：进度收束成
@@ -2975,7 +3014,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (voiceFailed > 0) '$voiceFailed 句配音没成',
       // 配出来了但没听成参考片的念法：那几句是默认语气，听起来会平
       if (flat > 0) '$flat 句用的是默认语气（没听成参考片怎么念）',
-      if (shotFailed > 0) '$shotFailed 句没找到像的镜头',
+      // 数的是**镜**不是句：一句里 9 个分镜可能只缺 1 个，说成「1 句没找到」
+      // 会让人以为整句是空的
+      if (shotFailed > 0) '$shotFailed 个分镜没找到像的画面',
     ];
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(problems.isEmpty
@@ -3022,76 +3063,116 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   ///
   /// 没有参考镜可依据时**直接放弃**，不退回去瞎捞：宁可这一行空着
   /// （空着一眼就看得出「这里还没做」），也不铺一堆不相干的画面让人逐个删。
-  Future<bool> _autoPickShotByReference(
-      String lineId, Map<String, int> tagIds) async {
+  /// 「自动铺一版」的配镜：**这一行的参考里有几个分镜，就铺几个**。
+  ///
+  /// 产品负责人定的规矩：「第三行里面有 9 个分镜，你就要找 9 个，然后自动
+  /// 去切对应的时间——这是机械化的程序。」此前这里只看第一个参考镜、
+  /// 只找一条素材塞给整行：9 个镜头的行铺出来是一整条，参考片的节奏全丢了。
+  ///
+  /// 每一镜各自按**它自己的画面描述**去搜（不拿第一镜代表整行），时长按
+  /// 参考的比例分（见 [ShotAllocation.distributeByReference]），素材偏短的
+  /// 用放慢补满。
+  ///
+  /// 某一镜没搜到不静默跳过：其余的照铺，把没铺上的镜号报出去让人补。
+  /// 返回没铺上的镜号（从 1 起），空表示这一行全铺上了。
+  Future<List<int>> _autoPickShotByReference(
+    String lineId,
+    Map<String, int> tagIds, {
+    void Function(int done, int total)? onProgress,
+  }) async {
+    final missed = <int>[];
     try {
       final services = ref.read(shotSearchServicesProvider);
       final line = _doc.lines.where((l) => l.id == lineId).firstOrNull;
-      if (line == null) return false;
+      if (line == null) return [1];
       final refSegs = line.reference?.segments ?? const <(int, int)>[];
-      if (refSegs.isEmpty) return false;
+      if (refSegs.isEmpty) return [1];
 
-      // 参考片这一镜长什么样：打过标就直接用，没打过现打一次
-      var meta = line.reference!.metaAt(refSegs.first.$1);
-      if (meta == null || meta.description.trim().isEmpty) {
-        meta = await _tagRefShot(lineId, 0);
-      }
-      final description = meta?.description.trim() ?? '';
-      if (description.isEmpty) return false;
-
-      // 参考镜自己的画面标签当约束（比行的话术标签更贴画面）
-      final ids = [
-        for (final t in meta!.tags) ?tagIds[t],
-      ];
-
-      final page = await services.content.searchByDescription(
-        keyword: description,
-        tagIds: ids,
-        projectIds: [if (_task.project != null) _task.project!.id],
-        pageSize: 10,
-      );
-      final used = <int>{
-        for (final l in _doc.lines)
-          for (final s in l.shots)
-            if (s.localSource == null) s.materialId,
-      };
-      final pick = page.items
-          .where((m) => !used.contains(m.id) && m.previewUrl != null)
-          .firstOrNull;
-      if (pick == null) return false;
-      // 本地已经有就读本地：联网量一条要一秒，而且会失败
+      final picked = <LineShot>[];
+      final usedSegs = <(int, int)>[];
       final dir = ref.read(dataDirProvider);
-      final spec = await services.probe.probe(
-        materialId: pick.id,
-        previewUrl: pick.previewUrl,
-        localPath: dir == null
-            ? null
-            : TaskMedia(dataDir: dir, taskId: _task.id)
-                .localMaterial(pick.id),
-      );
-      final shot = LineShot(
-        materialId: pick.id,
-        name: pick.name,
-        voiceover: pick.voiceover,
-        sceneDescription: pick.sceneDescription,
-        thumbnailUrl: pick.thumbnailUrl,
-        fileKey: pick.fileKey,
-        durationMs: spec?.durationMs,
-      );
+      for (var k = 0; k < refSegs.length; k++) {
+        if (!mounted || _draftCancelled) break;
+        onProgress?.call(k, refSegs.length);
+        final seg = refSegs[k];
+        // 参考片这一镜长什么样：打过标就直接用，没打过现打一次
+        var meta = _doc.lines
+            .firstWhere((l) => l.id == lineId)
+            .reference
+            ?.metaAt(seg.$1);
+        if (meta == null || meta.description.trim().isEmpty) {
+          meta = await _tagRefShot(lineId, k);
+        }
+        final description = meta?.description.trim() ?? '';
+        if (description.isEmpty) {
+          missed.add(k + 1);
+          continue;
+        }
+        // 参考镜自己的画面标签当约束（比行的话术标签更贴画面）
+        final ids = [
+          for (final t in meta!.tags) ?tagIds[t],
+        ];
+        final page = await services.content.searchByDescription(
+          keyword: description,
+          tagIds: ids,
+          projectIds: [if (_task.project != null) _task.project!.id],
+          pageSize: 10,
+        );
+        // 已经用过的不再用：同一条素材在整片里反复出现，一眼就看出是机器
+        // 铺的。这一行里刚挑中的也算用过
+        final used = <int>{
+          for (final l in _doc.lines)
+            for (final sh in l.shots)
+              if (sh.localSource == null) sh.materialId,
+          for (final sh in picked) sh.materialId,
+        };
+        final pick = page.items
+            .where((m) => !used.contains(m.id) && m.previewUrl != null)
+            .firstOrNull;
+        if (pick == null) {
+          missed.add(k + 1);
+          continue;
+        }
+        // 本地已经有就读本地：联网量一条要一秒，而且会失败
+        final spec = await services.probe.probe(
+          materialId: pick.id,
+          previewUrl: pick.previewUrl,
+          localPath: dir == null
+              ? null
+              : TaskMedia(dataDir: dir, taskId: _task.id)
+                  .localMaterial(pick.id),
+        );
+        picked.add(LineShot(
+          materialId: pick.id,
+          name: pick.name,
+          voiceover: pick.voiceover,
+          sceneDescription: pick.sceneDescription,
+          thumbnailUrl: pick.thumbnailUrl,
+          fileKey: pick.fileKey,
+          durationMs: spec?.durationMs,
+        ));
+        usedSegs.add(seg);
+      }
+      onProgress?.call(refSegs.length, refSegs.length);
+      if (picked.isEmpty) return missed.isEmpty ? [1] : missed;
+
       final current = _doc.lines.firstWhere((l) => l.id == lineId);
-      final withShot = current.withShots([...current.shots, shot]);
-      final root = ShotAllocation.rootMsOf(withShot);
-      // 素材短于行时长就放慢充满——自动配的镜头不许留「没充满」的尾巴
+      final withShots = current.withShots([...current.shots, ...picked]);
+      final root = ShotAllocation.rootMsOf(withShots);
       _mutate((d) => d.setShotsById(
           lineId,
           root == null
-              ? withShot.shots
+              ? withShots.shots
+              // 先按参考比例分时长，再把素材偏短的缺口用放慢补满——
+              // 自动配的镜头不许留「没充满」的尾巴
               : ShotAllocation.fillBySlowdown(
-                  reallocShots(withShot, withShot.shots), root)));
-      return true;
+                  ShotAllocation.distributeByReference(
+                      withShots.shots, root, usedSegs),
+                  root)));
+      return missed;
     } catch (e) {
       AppLog.warn('自动配镜失败（line=$lineId）：$e');
-      return false;
+      return missed.isEmpty ? [1] : missed;
     }
   }
 

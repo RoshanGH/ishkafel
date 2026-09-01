@@ -184,6 +184,8 @@ Map<String, dynamic> _lineJson(ScriptDoc doc, int i) {
         'hasWordTimings': vo.words.isNotEmpty,
         if (line.voiceDefectText != null) 'defect': line.voiceDefectText,
       },
+    // **这一行的视觉镜头（原子）**。铺画面时有几个就铺几个：
+    // 一个原子一条素材，时长按各原子在参考里的比例切
     'shots': [
       for (var j = 0; j < line.shots.length; j++)
         _shotJson(line.shots[j], j, words: vo?.words ?? const []),
@@ -251,9 +253,9 @@ Map<String, dynamic> _referenceJson(LineRef ref) {
     // 台词层的区间（这一句什么时候说的）
     'startMs': ref.startMs,
     'endMs': ref.endMs,
-    // 视觉镜头层的跨度：这几镜是**完整镜头**，比台词长是正常的
-    // （一镜可能同时是上一句/下一句的画面）。缺这两个字段 = 老档，
-    // 参考镜还是按台词边界切出来的，别拿它当镜头边界用
+    // 老档遗留：那一版把镜头跨度单独记着，因为当时一个镜头可能横跨好几行。
+    // 现在一行就是一个台词语义单元（分子），行内的 shots 就是它的镜头
+    // （原子），不会跨行——新提取的行没有这两个字段，也不需要
     if (ref.hasWholeShots) 'shotStartMs': ref.shotsStartMs,
     if (ref.hasWholeShots) 'shotEndMs': ref.shotsEndMs,
     if (ref.videoPath != null) 'videoPath': ref.videoPath,

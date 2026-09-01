@@ -54,6 +54,55 @@ abstract final class ShotAllocation {
     return result;
   }
 
+  /// **按参考镜的比例分配**：参考里那一镜占这一行的几分之几，
+  /// 铺出来就占几分之几。
+  ///
+  /// 这是「自动铺一版」对齐时间的方式——它是机械执行，不做判断：
+  /// 参考片里这一行有几个镜头就铺几个，每个镜头多长照着参考的比例来。
+  /// 均分不行：参考片里 0.5 秒的快切和 3 秒的定格被拉成一样长，
+  /// 节奏就没了，而节奏正是复刻要复刻的东西。
+  ///
+  /// 比例只决定**怎么分**，不改总量：行内 allocMs 之和恒等于 [rootMs]。
+  /// [refSegments] 为空、或个数和镜头对不上时退回 [distribute] 均分——
+  /// 对不上就别假装对得上。
+  static List<LineShot> distributeByReference(
+      List<LineShot> shots, int rootMs, List<(int, int)> refSegments) {
+    if (shots.isEmpty) return shots;
+    if (refSegments.length != shots.length) {
+      return distribute(shots, rootMs);
+    }
+    final weights = [
+      for (final (s, e) in refSegments) (e - s) > 0 ? e - s : 1,
+    ];
+    final total = weights.fold<int>(0, (a, w) => a + w);
+    if (total <= 0) return distribute(shots, rootMs);
+
+    final result = <LineShot>[];
+    for (var i = 0; i < shots.length; i++) {
+      final want = (rootMs * weights[i] / total).round();
+      result.add(shots[i]
+          .copyWith(allocMs: want.clamp(minShotMs, shots[i].availableMs)));
+    }
+    // 四舍五入和 clamp 都会让总数偏离——差多少就从还有余量的镜头上找补，
+    // 总长必须严丝合缝（行内 allocMs 之和 = 行时长，这是硬约束）
+    var left = rootMs - result.fold(0, (a, s) => a + (s.allocMs ?? 0));
+    for (var i = 0; i < result.length && left > 0; i++) {
+      final room = result[i].availableMs - (result[i].allocMs ?? 0);
+      if (room <= 0) continue;
+      final add = left < room ? left : room;
+      result[i] = result[i].copyWith(allocMs: (result[i].allocMs ?? 0) + add);
+      left -= add;
+    }
+    for (var i = result.length - 1; i >= 0 && left < 0; i--) {
+      final room = (result[i].allocMs ?? 0) - minShotMs;
+      if (room <= 0) continue;
+      final cut = -left < room ? -left : room;
+      result[i] = result[i].copyWith(allocMs: (result[i].allocMs ?? 0) - cut);
+      left += cut;
+    }
+    return result;
+  }
+
   /// 混合分配：**划词镜的时长定死，自由镜均分剩下的**。
   ///
   /// 一句 8 秒的话，划了头 2 秒、尾 2 秒，中间就只剩 4 秒——不管中间放
