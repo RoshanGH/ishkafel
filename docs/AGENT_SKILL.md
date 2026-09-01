@@ -311,9 +311,15 @@ export ISHKAFEL_APP=/path/to/ishkafel.app
 是怎么想的」。发现问题那一类不会被后面的流水账挤掉——人走开一会儿回来，
 要找的就是它。
 
-支持可视的命令：`import`、`analyze`、`candidates`、`apply plans`、
-`export`、`jianying`、`review drop/keep`、`voice generate`、
-`script shots`、`script apply`（全部子类）。
+**支持可视的命令：凡是会改数据的都支持**——`import`、`analyze`、
+`candidates`、`apply`（plans / segment / tags）、`export`、`jianying`、
+`review drop/keep`、`voice generate`、`subtitle`、`bgm`、
+`script extract`、`script voice`、`script voice-file`、`script shots`、
+`script tag-ref`、`script apply`（全部子类）、`script export`、
+`script jianying`。
+
+只读的命令（`show`、`tasks`、`status`、`frames`、`peek`、`todo`…）
+没有可视一说——它们什么都不改，界面也就没什么好跟的。
 **人说这些话，都是要可视**（他不会说 `--visual`，那是你的事）：
 
 > 「用可视化模式」「可视化」「我看着」「你做给我看」「我在旁边看着你做」

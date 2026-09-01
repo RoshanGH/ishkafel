@@ -17,6 +17,8 @@ import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
 import '../agent_lock_holder.dart';
+import '../../core/storage/agent_presence.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 
@@ -32,6 +34,9 @@ Future<int> runAnalyzeCommand({
   required Directory dataDir,
   String? external,
   String? holder,
+
+  /// 可视模式：分析要跑好几分钟，人得看着它一步步走到哪儿了
+  bool? visual,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -89,6 +94,17 @@ Future<int> runAnalyzeCommand({
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，分析不了');
     return exitLocked;
   }
+  // 分析要跑好几分钟，是这条线上最长的一段等待——**每一步都要说出来**，
+  // 不然人对着一块不动的板子不知道它是在跑还是卡死了
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
+  await stage.begin('正在分析原片',
+      focus: const AgentFocus(module: 'workbench'));
+
   // 分析要跑好几分钟，中途得续命，否则锁会在 60 秒后被判失效
   final heartbeat =
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
@@ -97,7 +113,11 @@ Future<int> runAnalyzeCommand({
     if (external0.isEmpty) {
       final analyzed = await pipeline.analyze(
         task,
-        onProgress: (progress) => sink.writeln('· ${progress.stage.name}'),
+        onProgress: (progress) {
+          sink.writeln('· ${progress.stage.name}');
+          stage.note('正在分析原片：${progress.stage.name}',
+              focus: const AgentFocus(module: 'workbench'));
+        },
       );
       if (analyzed.analysisError case final failure?) {
         sink.writeln('分析失败：$failure');
@@ -111,7 +131,11 @@ Future<int> runAnalyzeCommand({
     // ASR），落盘，然后把第一件待办交出去
     final prepared = await pipeline.prepare(
       task,
-      onProgress: (progress) => sink.writeln('· ${progress.stage.name}'),
+      onProgress: (progress) {
+        sink.writeln('· ${progress.stage.name}');
+        stage.note('正在分析原片：${progress.stage.name}',
+            focus: const AgentFocus(module: 'workbench'));
+      },
     );
     saveAnalysisState(dataDir, id,
         AnalysisState(prepared: prepared, pending: external0));
@@ -153,6 +177,7 @@ Future<int> runAnalyzeCommand({
     return 1;
   } finally {
     heartbeat.cancel();
+    stage.end();
     lock.release(holder ?? agentLockHolder);
   }
 }

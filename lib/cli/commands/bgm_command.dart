@@ -6,6 +6,8 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
+import '../../core/storage/agent_presence.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 
 /// `ishkafel bgm <任务> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]`
@@ -25,6 +27,9 @@ Future<int> runBgmCommand({
   String? volume,
   bool remove = false,
   String? holder,
+
+  /// 可视模式：配乐色带上当场看见铺了哪一段
+  bool? visual,
   required Future<BgmMaterial?> Function(int id) fetchMaterial,
   StringSink? out,
   StringSink? err,
@@ -83,6 +88,12 @@ Future<int> runBgmCommand({
     return exitBadUsage;
   }
 
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   final who = holder ?? agentLockHolder;
   if (!lock.acquire(who)) {
@@ -128,6 +139,8 @@ Future<int> runBgmCommand({
             BgmSegment.defaultVolume,
       );
     }
+    // 配乐是进成片的东西，不是装饰——铺到哪一段要让人看见
+    await stage.begin('正在铺配乐', focus: const AgentFocus(module: 'workbench'));
     await repository.save(task.copyWith(bgm: next, updatedAt: DateTime.now()));
     emitJson({
       'ok': true,
@@ -138,6 +151,7 @@ Future<int> runBgmCommand({
     }, out: out);
     return 0;
   } finally {
+    stage.end();
     lock.release(who);
   }
 }

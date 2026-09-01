@@ -21,9 +21,13 @@ import '../../core/replacement/replacement_plan.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/agent_presence.dart';
 import '../agent_lock_holder.dart';
+import '../agent_stage.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
+import '../../core/storage/ui_wake.dart';
+import '../../core/storage/ui_where.dart';
 import '../cli_output.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
@@ -43,6 +47,9 @@ Future<int> runApplyCommand({
   CandidateProbe? candidateProbe,
   String? file,
   String? holder,
+
+  /// 可视模式：切分、打标、方案落进界面时人看着它一条条进去
+  bool? visual,
   Future<String> Function()? readStdin,
   StringSink? out,
   StringSink? err,
@@ -103,6 +110,8 @@ Future<int> runApplyCommand({
       repository: repository,
       sink: sink,
       out: out,
+      visual: visual,
+      holder: holder,
     );
   } finally {
     // 命令跑完立刻还锁。不还的话要等心跳超时 60 秒，这期间人在 app 里
@@ -121,6 +130,8 @@ Future<int> _applyWithLock({
   required FileTaskRepository repository,
   required StringSink sink,
   required StringSink? out,
+  bool? visual,
+  String? holder,
   MiaoaContentService? contentService,
   CandidateProbe? candidateProbe,
   Future<FrameCheck> Function(int id)? frameCheckOf,
@@ -143,12 +154,33 @@ Future<int> _applyWithLock({
     return exitBadUsage;
   }
 
+  // 切分和打标都是**外包出去的判断回填进来**——落到哪几个单元上，
+  // 人得看着它一条条进去，而不是命令说了句「好了」
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
   if (what == 'segment') {
-    return _applySegment(
-        decoded, task, dataDir, repository, sink, out ?? stdout);
+    await stage.begin('正在应用切分',
+        focus: const AgentFocus(module: 'workbench'));
+    try {
+      return await _applySegment(
+          decoded, task, dataDir, repository, sink, out ?? stdout);
+    } finally {
+      stage.end();
+    }
   }
   if (what == 'tags') {
-    return _applyTags(decoded, task, dataDir, repository, sink, out ?? stdout);
+    await stage.begin('正在应用标签',
+        focus: const AgentFocus(module: 'workbench'));
+    try {
+      return await _applyTags(
+          decoded, task, dataDir, repository, sink, out ?? stdout);
+    } finally {
+      stage.end();
+    }
   }
 
   final validation = parsePlans(decoded, task);
@@ -481,6 +513,22 @@ Future<int> _applyPlansViaUi({
         '取段和画面自查这一轮会缺，方案本身照常提交');
   }
 
+  // **委派之前先确认界面真的停在这条任务上。**
+  //
+  // 界面的锁**不会自己放**：人打开过这个任务、后来退回了列表，锁还留着。
+  // 于是上面判定「界面占着锁」而走到这条委派路，但请求是发给**那条任务的
+  // 工作页**的——列表页不接，结果干等 90 秒超时，报「界面没有回应」。
+  // 先把界面叫回来，再递方案。
+  if (readUiWhere(dataDir)?.isOnTask(task.id) != true) {
+    sink.writeln('· 界面不在这条任务上，先把它叫回来');
+    writeUiWake(dataDir, task.id, review: false);
+    final deadline = DateTime.now().add(const Duration(seconds: 15));
+    while (DateTime.now().isBefore(deadline)) {
+      if (readUiWhere(dataDir)?.isOnTask(task.id) == true) break;
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
   sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
   final id = writeAgentRequest(
     dataDir: dataDir,
@@ -500,8 +548,8 @@ Future<int> _applyPlansViaUi({
   if (result == null) {
     // 超时是真失败：活儿没干。报成功的话人会以为方案提交上去了
     sink.writeln('界面没有回应（等了 90 秒）。'
-        '让用户看一眼那个页面，或者把界面挪开再跑一次：'
-        'ishkafel open <另一个任务 id>');
+        '让用户看一眼那个页面；或者用 ishkafel ui open ${task.id} '
+        '把界面带回这条任务再跑一次');
     return exitEnv;
   }
   if (!result.ok) {

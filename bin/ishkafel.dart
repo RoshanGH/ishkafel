@@ -155,6 +155,7 @@ Future<void> main(List<String> args) async {
     'subtitle' => await runSubtitleCommand(
         rest: rest,
         dataDir: dataDir,
+        visual: parsed['visual'] as bool,
         preset: parsed['preset'] as String?,
         bottomRatio: parsed['bottom'] as String?,
         fontRatio: parsed['font'] as String?,
@@ -175,6 +176,7 @@ Future<void> main(List<String> args) async {
     'bgm' => await runBgmCommand(
         rest: rest,
         dataDir: dataDir,
+        visual: parsed['visual'] as bool,
         fromUnit: parsed['from'] as String?,
         toUnit: parsed['to'] as String?,
         materialIds: parsed['materials'] as String?,
@@ -202,6 +204,7 @@ Future<void> main(List<String> args) async {
     'analyze' => await runAnalyzeCommand(
         rest: rest,
         dataDir: dataDir,
+        visual: parsed['visual'] as bool,
         external: parsed['external'] as String?,
       ),
     'skill' => await runSkillCommand(
@@ -258,7 +261,10 @@ Future<void> main(List<String> args) async {
         rest: rest, dataDir: dataDir, json: parsed['json'] as bool),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
-        rest: rest, dataDir: dataDir, file: parsed['file'] as String?),
+        rest: rest,
+        dataDir: dataDir,
+        file: parsed['file'] as String?,
+        visual: parsed['visual'] as bool),
     'export' => await runExportCommand(
         rest: rest,
         dataDir: dataDir,

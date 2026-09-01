@@ -139,6 +139,7 @@ Future<int> runScriptCommand({
         rest: rest.sublist(1),
         dataDir: dataDir,
         line: line,
+        visual: visual,
         out: out,
         err: err,
       );

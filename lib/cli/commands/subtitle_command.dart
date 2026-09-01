@@ -3,6 +3,9 @@ import 'dart:io';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/subtitle/subtitle_style.dart';
+import '../../core/storage/agent_presence.dart';
+import '../agent_lock_holder.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 
 /// `ishkafel subtitle <任务> [--preset blurBox] [--bottom 0.22] [--font 0.034]`
@@ -16,6 +19,10 @@ import '../cli_output.dart';
 Future<int> runSubtitleCommand({
   required List<String> rest,
   required Directory dataDir,
+
+  /// 可视模式：字幕样式改完，界面上当场能看见新样子
+  bool? visual,
+  String? holder,
   String? preset,
   String? bottomRatio,
   String? fontRatio,
@@ -76,8 +83,19 @@ Future<int> runSubtitleCommand({
   }
 
   if (changed) {
+    // 字幕样式是**进成片**的东西（主要拿来遮素材自带的烧字），
+    // 人得当场看见改成什么样了
+    final stage = AgentStage(
+      mode: AgentStageMode.from(visual: visual),
+      dataDir: dataDir,
+      taskId: task.id,
+      holder: holder ?? agentLockHolder,
+    );
+    await stage.begin('正在改字幕样式（${style.preset.name}）',
+        focus: const AgentFocus(module: 'director'));
     await repository
         .save(task.copyWith(subtitle: style, updatedAt: DateTime.now()));
+    stage.end();
   }
 
   emitJson({

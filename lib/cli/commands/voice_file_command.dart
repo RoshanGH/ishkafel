@@ -7,7 +7,9 @@ import '../../core/script/uploaded_voice.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
+import '../../core/storage/agent_presence.dart';
 import '../agent_lock_holder.dart';
+import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../lock_yield.dart';
 import 'analyze_command.dart' show loadCliCredentials;
@@ -29,6 +31,9 @@ Future<int> runScriptVoiceFileCommand({
   required Directory dataDir,
   int? line,
   String? holder,
+
+  /// 可视模式：界面跟到这一行，人看着自己的录音装上去
+  bool? visual,
 
   /// 测试注入：量时长 / 转写。真机走 ffmpeg + ASR
   Future<int> Function(File audio)? measureMs,
@@ -80,6 +85,15 @@ Future<int> runScriptVoiceFileCommand({
         '先不动它了。');
     return exitLocked;
   }
+  final stage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
+  final focus =
+      AgentFocus(module: 'director', lineIndex: index, panel: AgentPanel.voice);
+  await stage.begin('正在装第 $line 行的录音', focus: focus);
   try {
     // **把音频收进任务名下**：人给的那个文件随时可能被移走、改名、删掉，
     // 而它现在是这一行的时间根——留在外面等于把成片的地基放在别人家里
@@ -97,6 +111,7 @@ Future<int> runScriptVoiceFileCommand({
 
     // 逐字时间戳是断句和字幕打轴的依据，没有它这一行只能整句糊一屏
     sink.writeln('· 正在听这段录音说了什么');
+    await stage.show('正在听第 $line 行这段录音说了什么', focus: focus);
     List<VoiceWord> words = const [];
     var heard = '';
     try {
@@ -132,6 +147,9 @@ Future<int> runScriptVoiceFileCommand({
       heardText: heard,
     );
     await repository.save(task.copyWith(script: next, updatedAt: DateTime.now()));
+    // 这一行的时长换了根，镜头分配跟着变——让人当场看见落到哪一行
+    await stage.show('第 $line 行换成你自己的录音了（${durationMs}ms）',
+        focus: focus);
 
     final after = next.lines[index].text.trim();
     if (after != before) {
@@ -156,6 +174,8 @@ Future<int> runScriptVoiceFileCommand({
     }, out: out);
     return 0;
   } finally {
+    // 收工要撤在场状态，否则界面会一直显示「Agent 正在操作」，人动不了手
+    stage.end();
     lock.release(holder ?? agentLockHolder);
   }
 }
