@@ -89,6 +89,7 @@ class _StubVoiceService extends LineVoiceService {
     required String text,
     required String voiceId,
     int speechRate = 0,
+    String? instruction,
   }) async {
     if (fail) throw const TtsException('连接语音合成服务超时，请检查网络后重试');
     final t = text.trim();

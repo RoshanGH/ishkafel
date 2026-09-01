@@ -16,6 +16,7 @@ import '../../core/script/script_doc.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../core/script/script_export.dart';
 import '../../core/script/shot_allocation.dart';
+import '../../core/script/line_delivery_service.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
@@ -193,6 +194,11 @@ Future<int> runScriptExtractCommand({
 ///
 /// TTS **不外包**（音频无法验证），但生成时会自查：念重复、没念完、语速离谱
 /// 的自动重来一次，两次都岔就点名（见 voice_qc.dart）
+///
+/// 有参考片的行会**先听一遍原声**，把「这一句该怎么念」写成语音指令交给
+/// 合成（delivery_analyzer，与替换裂变的换音色同一套）。不接这一步的话，
+/// 预置音色只会用默认语气平铺直叙——用户第一句反馈就是「原片那个人在激动地
+/// 争吵，复刻出来情绪非常扁平」
 Future<int> runScriptVoiceCommand({
   required List<String> rest,
   required Directory dataDir,
@@ -201,6 +207,10 @@ Future<int> runScriptVoiceCommand({
   String? holder,
   StringSink? out,
   StringSink? err,
+
+  /// 测试注入：不给就按凭据装配真实服务
+  LineVoiceFactory? voiceFactory,
+  LineDeliveryFactory? deliveryFactory,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -219,12 +229,15 @@ Future<int> runScriptVoiceCommand({
     sink.writeln('「${task.name}」不是脚本成片任务');
     return exitBadUsage;
   }
-  final factory = defaultLineVoiceFactory(loadCliCredentials(dataDir), dataDir);
+  final credentials = loadCliCredentials(dataDir);
+  final factory = voiceFactory ?? defaultLineVoiceFactory(credentials, dataDir);
   if (factory == null) {
     sink.writeln('缺少语音凭据，配不了音。把 speech_app_id / '
         'speech_access_token 放到 <数据目录>/credentials 或 ./.secrets');
     return exitEnv;
   }
+  final deliveries =
+      deliveryFactory ?? defaultLineDeliveryFactory(credentials, dataDir);
   // 音色先定下来再说。**不定就不开工**——音色不对整片得重配，
   // 而每一句都是花钱的（界面早就这么卡了，CLI 这边一直在撞运气）
   final baseline = resolveVoiceBaseline(doc: doc, explicit: voiceId);
@@ -287,11 +300,49 @@ Future<int> runScriptVoiceCommand({
       ? '这一轮要配 ${targets.length} 句（另外 $already 句已经好了，不重做）'
       : '这一轮要配 ${targets.length} 句');
   final service = factory(task);
+  final delivery = deliveries?.call(task);
+  // **有参考片却听不了，要说在前面。**配音照样出得来，只是每句都是默认
+  // 语气——而「情绪扁平」的成片和正常成片肉眼分不出，闷着不说等于把问题
+  // 埋到用户看片子那一刻
+  final withRef = [
+    for (final i in targets)
+      if (deliveryRequestOf(doc, doc.lines[i]) != null) i,
+  ];
+  if (withRef.isNotEmpty && delivery == null) {
+    sink.writeln('注意：没有方舟凭据（ark_api_key），听不了参考片是怎么念的，'
+        '这 ${withRef.length} 句会用默认语气配——原片再激动也传不过来。');
+  }
   final failed = <String>[];
+  final degraded = <String>[];
+  var instructed = 0;
   try {
     for (var k = 0; k < targets.length; k++) {
       final i = targets[k];
       final lineId = doc!.lines[i].id;
+      final target = doc.lines[i];
+      // 先听一遍参考片这一句是怎么念的。听过的走缓存（按内容指纹），
+      // 重配同一句不再花钱；听不了就降级成默认语气，但要点名
+      final request = deliveryRequestOf(doc, target);
+      if (delivery != null && request != null) {
+        writeAgentPresence(
+          dataDir: dataDir,
+          taskId: task.id,
+          presence: AgentPresence(
+            holder: holder ?? agentLockHolder,
+            at: DateTime.now(),
+            action: '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
+            focus: AgentFocus(lineIndex: i, panel: AgentPanel.voice),
+          ),
+        );
+      }
+      final how = delivery == null
+          ? LineDelivery.none
+          : await delivery.resolve(request);
+      if (how.degradedReason != null) {
+        degraded.add('第 ${i + 1} 句：${how.degradedReason}');
+        sink.writeln('· 第 ${i + 1} 句的参考片没听成，这一句退回默认语气：'
+            '${how.degradedReason}');
+      }
       writeAgentPresence(
         dataDir: dataDir,
         taskId: task.id,
@@ -302,14 +353,15 @@ Future<int> runScriptVoiceCommand({
           focus: AgentFocus(lineIndex: i, panel: AgentPanel.voice),
         ),
       );
-      final target = doc.lines[i];
       try {
         final vo = await service.generate(
           lineId: lineId,
           text: target.text,
           voiceId: doc.voiceIdOf(target) ?? defaultVoice,
           speechRate: doc.speechRateOf(target),
+          instruction: how.instruction,
         );
+        if (how.hasInstruction) instructed++;
         doc = doc.setVoiceoverById(lineId, vo);
         // 配音时长是这一行的根：根变了，镜头分配跟着重算
         final updated = doc.lines.firstWhere((l) => l.id == lineId);
@@ -321,7 +373,8 @@ Future<int> runScriptVoiceCommand({
                   vo.durationMs));
         }
         await repository.save(task.copyWith(script: doc));
-        sink.writeln('· 第 ${i + 1} 句好了（${vo.durationMs}ms）');
+        sink.writeln('· 第 ${i + 1} 句好了（${vo.durationMs}ms'
+            '${how.hasInstruction ? '，念法：${how.instruction}' : ''}）');
       } catch (e) {
         failed.add('第 ${i + 1} 句：$e');
       }
@@ -329,6 +382,10 @@ Future<int> runScriptVoiceCommand({
     emitJson({
       'ok': failed.isEmpty,
       'generated': targets.length - failed.length,
+      // **带没带上「怎么念」直接决定成片有没有情绪**，所以要报出来：
+      // 只报「配了 20 句」的话，一片扁平的配音看起来跟正常的一模一样
+      'withDelivery': instructed,
+      if (degraded.isNotEmpty) 'deliveryDegraded': degraded,
       if (failed.isNotEmpty) 'failed': failed,
     }, out: out);
     return failed.isEmpty ? 0 : exitFailed;

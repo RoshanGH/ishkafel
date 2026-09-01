@@ -100,3 +100,9 @@ final shotFrameCheckFactoryProvider =
 /// 按任务造「生成配音」服务。null = 语音凭据不全，配音节禁用并说明原因。
 /// 装配逻辑在 core（`script_service_wiring.dart`），CLI 与界面共用同一份
 final lineVoiceFactoryProvider = Provider<LineVoiceFactory?>((ref) => null);
+
+/// 按任务造「听参考片这一句怎么念」的分析服务。null = 方舟凭据不全，
+/// 配音会退回默认语气（**这件事要说给用户听**，见 `_generateVoiceCore`）。
+/// 同样装配在 core，CLI 与界面共用一份
+final lineDeliveryFactoryProvider =
+    Provider<LineDeliveryFactory?>((ref) => null);

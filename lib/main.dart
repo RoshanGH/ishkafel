@@ -119,6 +119,10 @@ Future<void> main(List<String> args) async {
       // 编导台「生成配音」：同上，语音凭据齐了才有
       lineVoiceFactoryProvider
           .overrideWithValue(defaultLineVoiceFactory(credentials, dataDir)),
+      // 配音要带上「参考片这一句是怎么念的」：不接这一步，预置音色只会用
+      // 默认语气平铺直叙（用户反馈：原片在激动地争吵，复刻出来情绪扁平）
+      lineDeliveryFactoryProvider
+          .overrideWithValue(defaultLineDeliveryFactory(credentials, dataDir)),
       // 编导台「自动打标」：方舟凭据齐了才有
       lineTaggerProvider.overrideWithValue(buildLineTagger(credentials)),
       // 参考视觉镜头打标（多帧 vision：标签 + 画面描述）

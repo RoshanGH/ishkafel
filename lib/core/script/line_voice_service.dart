@@ -40,6 +40,14 @@ class LineVoiceService {
     required String text,
     required String voiceId,
     int speechRate = 0,
+
+    /// **这一句该怎么念**（火山的 `context_texts`）：一句自然语言，
+    /// 例如「用非常激动、带着争辩的语气说这句话」。
+    ///
+    /// 不传的话每句都是默认语气平铺直叙——原片那个人再激动也传不过来。
+    /// 复刻场景里它来自对参考片这一句的语气分析（delivery_analyzer），
+    /// 和替换裂变的「换音色」用的是同一套东西
+    String? instruction,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) {
@@ -55,6 +63,7 @@ class LineVoiceService {
         text: trimmed,
         voiceId: voiceId,
         speechRate: speechRate,
+        instruction: instruction,
       );
       final defect = voiceDefect(
         source: trimmed,
@@ -81,10 +90,14 @@ class LineVoiceService {
     required String text,
     required String voiceId,
     required int speechRate,
+    String? instruction,
   }) async {
     final result = await tts.synthesize(
       text: text,
       speaker: voiceId,
+      // 空白当没有：分析没出结果时给的是空串，别把空串发出去
+      instruction:
+          (instruction ?? '').trim().isEmpty ? null : instruction!.trim(),
       speechRate: speechRate == 0 ? null : speechRate,
     );
     await outputDir.create(recursive: true);

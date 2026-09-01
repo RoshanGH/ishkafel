@@ -10,6 +10,8 @@ import '../audio/tts_client.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import '../models/renew_task.dart';
+import '../audio/delivery_analyzer.dart';
+import 'line_delivery_service.dart';
 import 'line_voice_service.dart';
 import 'script_doc.dart';
 
@@ -45,6 +47,58 @@ LineVoiceFactory? defaultLineVoiceFactory(
         measureMs: measureAudioMs,
         transcribeWords: (audio) => transcribeVoiceWords(asr, audio),
       );
+}
+
+/// 「参考片这一句怎么念」的分析服务，按任务造（切片与缓存都落在任务目录下）
+typedef LineDeliveryFactory = LineDeliveryService Function(RenewTask task);
+
+/// 念法分析：切参考片 → 多模态模型听 → 一句语音指令，结论按内容指纹缓存。
+///
+/// 缺方舟 key 时返回 null——**调用方必须把这件事说出来**：没有它配音照样
+/// 出得来，只是每句都是默认语气，而「情绪扁平」的成片和正常成片肉眼分不出，
+/// 静默降级等于把问题埋到用户看片子的那一刻
+LineDeliveryFactory? defaultLineDeliveryFactory(
+    AiCredentials credentials, Directory dataDir) {
+  if (credentials.arkApiKey.isEmpty) return null;
+  final analyzer =
+      ArkDeliveryAnalyzer(chat: ArkChatClient(apiKey: credentials.arkApiKey));
+  return (task) {
+    // 切片与结论都放参考片切片目录：TaskArtifacts 已收编 script_refs，
+    // 删任务时随目录清走，不留孤儿
+    final workDir = Directory(p.join(dataDir.path, 'script_refs', task.id));
+    return LineDeliveryService(
+      analyzer: analyzer,
+      slice: (videoPath, startMs, endMs) =>
+          sliceReferenceWav(videoPath, workDir, startMs, endMs),
+      cacheDir: workDir,
+    );
+  };
+}
+
+/// 从参考片切出 `[startMs, endMs)` 的 16k 单声道 WAV——多模态模型吃的就是
+/// 这个规格。切片是**用完即弃**的中间产物，读完就删，不然一条 20 句的片子
+/// 会在盘上留下 20 个没人再读的 wav
+Future<List<int>> sliceReferenceWav(
+    String videoPath, Directory workDir, int startMs, int endMs) async {
+  workDir.createSync(recursive: true);
+  final out = File(p.join(workDir.path, 'delivery_slice_${startMs}_$endMs.wav'));
+  try {
+    final r = await systemProcessRunner('ffmpeg', [
+      '-y', '-v', 'quiet',
+      '-ss', '${startMs / 1000}', '-to', '${endMs / 1000}',
+      '-i', videoPath,
+      '-vn', '-ar', '16000', '-ac', '1', out.path,
+    ]);
+    if (r.exitCode != 0 || !out.existsSync()) {
+      throw StateError('从参考片切出这一句失败（$startMs~$endMs ms，'
+          'exit=${r.exitCode}）');
+    }
+    return out.readAsBytesSync();
+  } finally {
+    try {
+      out.deleteSync();
+    } catch (_) {}
+  }
 }
 
 /// mp3 → 16k 单声道 PCM（临时文件，用完即删）→ ASR → 词级时间戳

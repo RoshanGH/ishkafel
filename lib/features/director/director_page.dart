@@ -20,6 +20,7 @@ import '../../core/script/shot_frame_check.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/bgm_rail.dart';
+import '../../core/script/line_delivery_service.dart';
 import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_cover.dart';
 import '../../core/script/playhead.dart';
@@ -1395,12 +1396,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (!mounted) return;
     final stopped = _cancelBatchVoice;
     setState(() => _batchVoiceProgress = null);
+    final flat = lineIds.where(_deliveryDegraded.containsKey).length;
+    final flatNote =
+        flat > 0 ? '（其中 $flat 句没听成参考片的念法，用的是默认语气）' : '';
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(stopped
             ? '已停下。生成好的那几句保留着，其余仍是旧音色。'
             : failed == 0
-                ? '${lineIds.length} 句都换好了。'
-                : '$failed 句没生成成功，可以单独点那几句重试。')));
+                ? '${lineIds.length} 句都换好了。$flatNote'
+                : '$failed 句没生成成功，可以单独点那几句重试。$flatNote')));
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
@@ -1419,11 +1423,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (line.voiceId == null) return;
     }
     final ok = await _generateVoiceCore(line.id, line.voiceId!);
-    if (!ok && mounted) {
+    if (!mounted) return;
+    if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('配音生成失败，请稍后重试。')));
+      return;
+    }
+    // 配出来了，但没听成参考片的念法——这一句是默认语气，说清楚，
+    // 别让人以为「就该是这个味儿」
+    final degraded = _deliveryDegraded[line.id];
+    if (degraded != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('配好了，但没听成参考片这一句是怎么念的，'
+              '用的是默认语气（$degraded）。重新生成一次多半就好了。')));
     }
   }
+
+  /// 这几句没听成参考片的念法（lineId → 原因），用的是默认语气。
+  /// **必须说出去**：情绪扁平的配音和正常配音在界面上长得一模一样，
+  /// 不说的话人只会觉得「这软件配出来就是这个味儿」
+  final Map<String, String> _deliveryDegraded = {};
 
   /// 配音生成内核（静默版）：草片流水线与单行按钮共用。
   /// 成功返回 true；失败只留日志，由调用方决定怎么告知
@@ -1434,11 +1453,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     setState(() => _generatingLineIds.add(lineId));
     try {
       final service = factory(_task);
+      // 先听一遍参考片这一句是怎么念的，把念法交给合成。不带这句指令，
+      // 预置音色只会用默认语气平铺直叙——用户反馈里那条「原片在激动地
+      // 争吵，复刻出来情绪非常扁平」就是这么来的。
+      // 听过的按内容指纹走缓存，重配同一句不再花钱
+      final delivery = ref.read(lineDeliveryFactoryProvider)?.call(_task);
+      final how = delivery == null
+          ? LineDelivery.none
+          : await delivery.resolve(deliveryRequestOf(_doc, line));
+      if (how.degradedReason == null) {
+        _deliveryDegraded.remove(lineId);
+      } else {
+        _deliveryDegraded[lineId] = how.degradedReason!;
+      }
+      if (!mounted) return false;
       final vo = await service.generate(
         lineId: lineId,
         text: line.text,
         voiceId: voiceId,
         speechRate: _doc.speechRateOf(line),
+        instruction: how.instruction,
       );
       if (!mounted) return false;
       _mutate((d) => d.setVoiceoverById(lineId, vo));
@@ -2882,8 +2916,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       await _playback?.seekMs(0);
       await _playback?.play();
     }));
+    final flat = needVoice.where(_deliveryDegraded.containsKey).length;
     final problems = [
       if (voiceFailed > 0) '$voiceFailed 句配音没成',
+      // 配出来了但没听成参考片的念法：那几句是默认语气，听起来会平
+      if (flat > 0) '$flat 句用的是默认语气（没听成参考片怎么念）',
       if (shotFailed > 0) '$shotFailed 句没找到像的镜头',
     ];
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
