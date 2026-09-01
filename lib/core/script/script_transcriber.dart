@@ -5,6 +5,8 @@ import 'package:path/path.dart' as p;
 import '../analysis/audio_extractor.dart';
 import '../analysis/providers.dart';
 import '../analysis/scene_detector.dart';
+import '../analysis/segmentation_builder.dart';
+import '../models/video_info.dart';
 import '../ffmpeg/ffprobe_service.dart';
 import '../log/app_log.dart';
 import 'reference_shots.dart';
@@ -14,7 +16,8 @@ import 'script_doc.dart';
 enum ScriptTranscribeStage {
   extractingAudio('正在读取视频音频'),
   transcribing('正在识别台词'),
-  cuttingShots('正在切参考分镜');
+  cuttingShots('正在切参考分镜'),
+  grouping('正在按台词语义分行');
 
   final String label;
   const ScriptTranscribeStage(this.label);
@@ -60,6 +63,16 @@ class ScriptTranscriber {
   /// 出现「app 里提取出来是这样、命令行跑出来是那样」）。测试注入假的
   final FfprobeService probe;
 
+  /// **台词语义分组**（分子）。和替换裂变用的是同一个 provider——
+  /// 那边怎么切分子，这边就怎么切行。
+  ///
+  /// null = 没有方舟凭据或测试环境：退回「一句一单元」。那是**降级**，
+  /// 不是正路——降级出来的行会碎，一个完整镜头可能被摊到好几行上
+  final SemanticSplitter? splitter;
+
+  /// 两层构树：单元边界吸附 + 单元内部按镜头边界切原子（严格包含）
+  final SegmentationBuilder builder;
+
   /// PCM 中间产物的落脚处（用完即删，不留孤儿数据）
   final Directory workDir;
 
@@ -67,6 +80,8 @@ class ScriptTranscriber {
     required this.audio,
     required this.asr,
     this.scenes,
+    this.splitter,
+    this.builder = const SegmentationBuilder(),
     FfprobeService? probe,
     required this.workDir,
   }) : probe = probe ?? FfprobeService();
@@ -136,13 +151,25 @@ class ScriptTranscriber {
           AppLog.warn('参考分镜切分失败（不影响提取）：$e');
         }
       }
-      // 两层各自成立：镜头边界只由切点决定，台词只是「关联」到它覆盖的
-      // 那几镜（见 reference_shots.dart）。无台词的镜头单独成画面行
-      final lines = buildReferenceLines(
-        sentences: sentences,
-        cuts: cuts,
-        durationMs: cuts.isEmpty ? 0 : await _durationMs(videoPath, sentences),
+      // **和替换裂变同一套切分**：先按台词语义分成单元（分子），
+      // 再在单元内部按镜头边界切出参考分镜（原子）。
+      // 一句一行是降级路径，不是正路——见 reference_shots.dart
+      onStage?.call(ScriptTranscribeStage.grouping);
+      final info = await _info(videoPath);
+      final durationMs = info?.duration.inMilliseconds ?? 0;
+      final fps = (info?.fps ?? 0) > 0 ? info!.fps : 25.0;
+      final drafts = await _draftsOf(sentences);
+      final units = builder.build(
+        drafts: draftsWithVisualGaps(
+            drafts: drafts,
+            durationMs: durationMs > 0 ? durationMs : _lastSpokenMs(sentences)),
+        shotBoundaryMs: cuts,
+        silenceValleyMs: const [],
+        videoDurationMs:
+            durationMs > 0 ? durationMs : _lastSpokenMs(sentences),
+        fps: fps,
       );
+      final lines = linesFromUnits(units: units, sentences: sentences);
       if (!lines.any((l) => l.type == ScriptLineType.voiced)) {
         throw const ScriptTranscribeException(
             '这条视频里没有识别到任何台词——请确认它有人声口播。');
@@ -156,19 +183,37 @@ class ScriptTranscriber {
     }
   }
 
-  /// 参考片总时长。探不到时退回「最后一句台词的终点」——宁可少一个结尾
-  /// 画面行，也不能拿一个瞎猜的长度去造一段不存在的画面（会直接进成片）。
-  /// 这是可说出来的降级，所以留话在日志里
-  Future<int> _durationMs(String videoPath, List<AsrSentence> sentences) async {
-    final lastSpoken =
-        sentences.fold<int>(0, (m, s) => s.endMs > m ? s.endMs : m);
-    try {
-      final info = await probe.probe(videoPath);
-      final ms = info.duration.inMilliseconds;
-      if (ms > 0) return ms;
-    } catch (e) {
-      AppLog.warn('参考片时长探测失败，末镜按最后一句台词收尾（结尾无口播的画面会漏）：$e');
+  /// 语义分组。**分不了组就退回一句一单元**，并说出来——那会让行变碎，
+  /// 一个完整镜头被摊到好几行上，人一眼就看得出不对劲
+  Future<List<UnitDraft>> _draftsOf(List<AsrSentence> sentences) async {
+    if (splitter != null) {
+      try {
+        final drafts = await splitter!.split(sentences);
+        if (drafts.isNotEmpty) return drafts;
+        AppLog.warn('语义分组没给出单元，退回一句一行（行会偏碎）');
+      } catch (e) {
+        AppLog.warn('语义分组失败，退回一句一行（行会偏碎）：$e');
+      }
+    } else {
+      AppLog.warn('没有语义分组能力（缺方舟凭据），退回一句一行（行会偏碎）');
     }
-    return lastSpoken;
+    return [
+      for (final s in sentences)
+        if (s.text.trim().isNotEmpty && s.endMs > s.startMs)
+          UnitDraft(
+              startMs: s.startMs, endMs: s.endMs, transcript: s.text.trim()),
+    ];
   }
+
+  Future<VideoInfo?> _info(String videoPath) async {
+    try {
+      return await probe.probe(videoPath);
+    } catch (e) {
+      AppLog.warn('参考片时长/帧率探测失败，末镜按最后一句台词收尾：$e');
+      return null;
+    }
+  }
+
+  int _lastSpokenMs(List<AsrSentence> sentences) =>
+      sentences.fold<int>(0, (m, s) => s.endMs > m ? s.endMs : m);
 }

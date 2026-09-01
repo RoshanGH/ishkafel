@@ -1,162 +1,106 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/analysis/segmentation_builder.dart';
+import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/script/reference_shots.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 
-/// 参考片的两层各自成立：
-/// - 视觉镜头层的边界由**画面切点**决定，一个镜头就是一个完整镜头
-/// - 台词层决定成片时间
-/// 两者之间是**关联**（这一句对应哪几镜），不是**切割**。
+/// 参考片的切分**必须和替换裂变一模一样**：分子（台词语义单元）就是一行，
+/// 原子（视觉镜头）就是这一行点进去看到的那几个参考分镜。
 ///
-/// 真机任务 hluyggdhpb 踩过的坑：老实现拿「台词区间 ∩ 切点」当参考镜，
-/// 45 个参考镜里 19 个短于 1 秒、最短 3 毫秒——每句台词的开头都挂着
-/// 上一个画面的尾巴。拿 3 毫秒碎片抽帧去打标/搜相似，搜出来的当然不是同类。
+/// 产品负责人的原话：「你那边怎么切分子，这边就是怎么切行。原子就是我点参考
+/// 进去以后的那几个分镜。」此前这里另写了一套「一句一行 + 事后关联镜头跨度」，
+/// 结果一个完整镜头横跨三行——同一个画面被切成 0.6/0.4/1.6 三张卡。
 void main() {
-  AsrSentence say(String text, int startMs, int endMs) =>
-      AsrSentence(startMs: startMs, endMs: endMs, text: text);
+  SemanticUnit unit(int start, int end, String text, List<int> innerCuts) {
+    final edges = [start, ...innerCuts, end];
+    return SemanticUnit(
+      index: 0,
+      startMs: start,
+      endMs: end,
+      transcript: text,
+      shots: [
+        for (var i = 0; i < edges.length - 1; i++)
+          Shot(startMs: edges[i], endMs: edges[i + 1]),
+      ],
+    );
+  }
 
-  group('完整镜头序列（buildWholeShots）', () {
-    test('切点把整条片子切满：首尾都在，不留缝', () {
-      final shots =
-          buildWholeShots(cuts: const [3000, 8000, 12000], durationMs: 20000);
-      expect(shots, [(0, 3000), (3000, 8000), (8000, 12000), (12000, 20000)]);
+  group('分子 → 行，原子 → 行内的参考分镜', () {
+    test('一个单元一行，行内的分镜就是这个单元内部的那几镜', () {
+      final lines = linesFromUnits(
+        units: [unit(0, 7000, '看到没有？活的。天呐，这也太夸张了吧！', [2900])],
+        sentences: const [],
+      );
+      expect(lines, hasLength(1), reason: '三句短台词在同一个语义单元里，就是一行');
+      expect(lines.first.reference!.segments, [(0, 2900), (2900, 7000)],
+          reason: '行内两个原子——点参考进去应该看到两个分镜');
     });
 
-    test('碎镜并回相邻镜：闪一下的卡没有参考价值', () {
-      final shots =
-          buildWholeShots(cuts: const [200, 3000, 3100], durationMs: 9000);
-      expect(shots, [(0, 3100), (3100, 9000)],
-          reason: '3000~3100 的碎镜并回前一镜，开头 200ms 的碎镜再并入后一镜');
+    test('原子一定落在分子里，不会横跨两行', () {
+      final lines = linesFromUnits(
+        units: [
+          unit(0, 5000, '第一段', [2000]),
+          unit(5000, 9000, '第二段', []),
+        ],
+        sentences: const [],
+      );
+      for (final l in lines) {
+        final ref = l.reference!;
+        for (final (s, e) in ref.segments) {
+          expect(s, greaterThanOrEqualTo(ref.startMs));
+          expect(e, lessThanOrEqualTo(ref.endMs));
+        }
+      }
     });
 
-    test('一个切点都没有 → 不硬造「整片一镜」，交给老算法', () {
-      expect(buildWholeShots(cuts: const [], durationMs: 20000), isEmpty);
+    test('没有台词的单元成画面行，时长手填——它没有配音，不填在成片里就是 0', () {
+      final lines = linesFromUnits(
+        units: [unit(0, 2900, '', [])],
+        sentences: const [],
+      );
+      expect(lines.single.type, ScriptLineType.visual);
+      expect(lines.single.manualMs, 2900);
     });
 
-    test('时长未知 → 空序列（末镜的终点无从谈起）', () {
-      expect(buildWholeShots(cuts: const [3000], durationMs: 0), isEmpty);
-    });
-
-    test('越界切点被丢掉，不产生负长度镜头', () {
-      final shots =
-          buildWholeShots(cuts: const [-100, 0, 4000, 9000, 20000], durationMs: 9000);
-      expect(shots, [(0, 4000), (4000, 9000)]);
+    test('词级时间戳按中点归属，边界上的词不会同时算进两行', () {
+      final sentences = [
+        AsrSentence(startMs: 0, endMs: 2000, text: '你好世界', words: const [
+          AsrWord(text: '你好', startMs: 0, endMs: 900),
+          AsrWord(text: '世界', startMs: 1100, endMs: 2000),
+        ]),
+      ];
+      final lines = linesFromUnits(
+        units: [unit(0, 1000, '你好', []), unit(1000, 2000, '世界', [])],
+        sentences: sentences,
+      );
+      expect(lines[0].reference!.words.map((w) => w.text), ['你好']);
+      expect(lines[1].reference!.words.map((w) => w.text), ['世界']);
     });
   });
 
-  group('台词与完整镜头的关联（buildReferenceLines）', () {
-    // 全片四镜：(0,3000) (3000,8000) (8000,12000) (12000,20000)
-    const cuts = [3000, 8000, 12000];
-    const durationMs = 20000;
-
-    List<ScriptLine> build(List<AsrSentence> sentences) => buildReferenceLines(
-          sentences: sentences,
-          cuts: cuts,
-          durationMs: durationMs,
-        );
-
-    test('一句台词落在镜头中间 → 参考镜是完整镜头，不被台词边界切碎', () {
-      final lines = build([say('第一句', 500, 2500)]);
-      final ref = lines
-          .firstWhere((l) => l.type == ScriptLineType.voiced)
-          .reference!;
-      expect(ref.segments, [(0, 3000)],
-          reason: '台词只占 500~2500，但这一镜的真实边界是 0~3000');
-      expect(ref.startMs, 500, reason: '台词层的时间不变');
-      expect(ref.endMs, 2500);
+  group('没有台词的长段落要能成行——不然复刻出来的片子少一截', () {
+    test('开头的吸睛段补成一个空台词草稿', () {
+      final out = draftsWithVisualGaps(
+        drafts: [const UnitDraft(startMs: 2900, endMs: 7000, transcript: '有台词')],
+        durationMs: 9000,
+      );
+      expect(out.first.startMs, 0);
+      expect(out.first.endMs, 2900);
+      expect(out.first.transcript, isEmpty);
+      expect(out.last.startMs, 7000, reason: '结尾 2 秒无口播也要成段');
     });
 
-    test('一句跨两镜 → 两镜都完整，不出 3 毫秒碎片', () {
-      final lines = build([say('跨镜的一句', 3200, 9500)]);
-      final ref = lines
-          .firstWhere((l) => l.type == ScriptLineType.voiced)
-          .reference!;
-      expect(ref.segments, [(3000, 8000), (8000, 12000)]);
-      expect(ref.segments.every((s) => s.$2 - s.$1 >= 1000), isTrue,
-          reason: '没有短于 1 秒的碎镜');
-    });
-
-    test('台词开头压着上一镜 3 毫秒的尾巴 → 那一镜不算这一句的画面', () {
-      final lines = build([say('压着尾巴的一句', 2997, 7000)]);
-      final voiced = lines.firstWhere((l) => l.type == ScriptLineType.voiced);
-      expect(voiced.reference!.segments, [(3000, 8000)],
-          reason: '(0,3000) 那一镜只被压到 3 毫秒，是上一个画面的尾巴');
-      expect(lines.first.reference!.segments, [(0, 3000)],
-          reason: '甩掉的那一镜没人认领 → 成画面行，不会凭空消失');
-    });
-
-    test('一个镜头跨多句台词 → 几句都关联到它（镜头可共用）', () {
-      final lines = build([
-        say('前半句', 8200, 9500),
-        say('后半句', 9800, 11500),
-      ]);
-      final voiced =
-          lines.where((l) => l.type == ScriptLineType.voiced).toList();
-      expect(voiced, hasLength(2));
-      expect(voiced[0].reference!.segments, [(8000, 12000)]);
-      expect(voiced[1].reference!.segments, [(8000, 12000)]);
-    });
-
-    test('没被任何台词覆盖的镜头 → 画面行（用 manualMs 定时长）', () {
-      final lines = build([say('中间那句', 3200, 7500)]);
-      expect(lines.map((l) => l.type), [
-        ScriptLineType.visual,
-        ScriptLineType.voiced,
-        ScriptLineType.visual,
-        ScriptLineType.visual,
-      ], reason: '开头空镜、结尾定格都要成行，否则复刻出来的片子直接少掉这几段');
-      expect(lines.first.text, isEmpty);
-      expect(lines.first.manualMs, 3000);
-      expect(lines.first.reference!.segments, [(0, 3000)]);
-      expect(lines.last.manualMs, 8000);
-      expect(lines.last.reference!.segments, [(12000, 20000)]);
-    });
-
-    test('行按时间排序：画面行插在它该在的位置', () {
-      final lines = build([
-        say('第一句', 500, 2500),
-        say('第二句', 8200, 11500),
-      ]);
-      expect(lines.map((l) => l.text), ['第一句', '', '第二句', '']);
-      expect(lines[1].reference!.segments, [(3000, 8000)]);
-    });
-
-    test('词级时间戳跟着台词走（找镜头面板要裁「这一镜说了哪几个字」）', () {
-      final lines = buildReferenceLines(
-        sentences: [
-          AsrSentence(
-            startMs: 3200,
-            endMs: 5000,
-            text: '家人们',
-            words: const [
-              AsrWord(text: '家', startMs: 3200, endMs: 3500),
-              AsrWord(text: '人', startMs: 3500, endMs: 3800),
-              AsrWord(text: '们', startMs: 3800, endMs: 4100),
-            ],
-          ),
+    test('闪一下的空隙不单独成行，交给边界吸附并进去', () {
+      final out = draftsWithVisualGaps(
+        drafts: [
+          const UnitDraft(startMs: 100, endMs: 3000, transcript: 'a'),
+          const UnitDraft(startMs: 3200, endMs: 6000, transcript: 'b'),
         ],
-        cuts: cuts,
-        durationMs: durationMs,
+        durationMs: 6000,
       );
-      final voiced = lines.firstWhere((l) => l.type == ScriptLineType.voiced);
-      expect(voiced.reference!.words.map((w) => w.text).join(), '家人们');
-    });
-
-    test('空白台词不产配音行', () {
-      final lines = build([say('   ', 3200, 7500)]);
-      expect(lines.every((l) => l.type == ScriptLineType.visual), isTrue);
-    });
-
-    test('一个切点都没有（场景检测没出结果）→ 退回老算法：一句一镜、按台词边界', () {
-      final lines = buildReferenceLines(
-        sentences: [say('第一句', 500, 2500)],
-        cuts: const [],
-        durationMs: 20000,
-      );
-      expect(lines, hasLength(1), reason: '没有镜头层就不该凭空造画面行');
-      final ref = lines.first.reference!;
-      expect(ref.hasWholeShots, isFalse);
-      expect(ref.segments, [(500, 2500)]);
+      expect(out, hasLength(2), reason: '开头 100ms、中间 200ms 都不够成一个段落');
     });
   });
 }

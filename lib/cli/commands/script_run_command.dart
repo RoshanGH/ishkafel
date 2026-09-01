@@ -8,7 +8,9 @@ import '../../core/audio/bgm_cache_factory.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/analysis/scene_detector.dart';
+import '../../core/ai/ark_chat_client.dart';
 import '../../core/ai/volcano_asr_provider.dart';
+import '../../core/ai/volcano_semantic_splitter.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/models/export_record.dart';
 import '../../core/models/renew_task.dart';
@@ -148,6 +150,13 @@ Future<int> runScriptExtractCommand({
         accessToken: credentials.speechAccessToken,
       ),
       scenes: SceneDetector(run: const ResolvingProcessRunner().call),
+      // **和替换裂变同一个分组器**：那边怎么切分子，这边就怎么切行。
+      // 缺方舟凭据时提取会退回一句一行——那会让行碎成一句一个，
+      // 一个完整镜头被摊到好几行上
+      splitter: credentials.arkApiKey.isEmpty
+          ? null
+          : VolcanoSemanticSplitter(
+              chat: ArkChatClient(apiKey: credentials.arkApiKey)),
       workDir: Directory(p.join(dataDir.path, 'analysis_work', task.id)),
     );
     final lines = await transcriber.extract(video, onStage: (step) {

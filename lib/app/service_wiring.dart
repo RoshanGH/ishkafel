@@ -47,6 +47,12 @@ ScriptTranscriber? buildScriptTranscriber(
       accessToken: credentials.speechAccessToken,
     ),
     scenes: SceneDetector(),
+    // **和替换裂变同一个分组器**：那边怎么切分子，这边就怎么切行。
+    // 缺方舟凭据时给 null，提取会退回一句一行并在日志里说出来
+    splitter: credentials.arkApiKey.isEmpty
+        ? null
+        : VolcanoSemanticSplitter(
+            chat: ArkChatClient(apiKey: credentials.arkApiKey)),
     workDir: Directory(p.join(dataDir.path, 'analysis_work')),
   );
 }

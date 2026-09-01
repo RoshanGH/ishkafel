@@ -4,12 +4,33 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/analysis/scene_detector.dart';
+import 'package:ishkafel/core/analysis/segmentation_builder.dart';
 import 'package:ishkafel/core/ffmpeg/ffprobe_service.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
 import 'package:ishkafel/core/script/script_transcriber.dart';
 
-/// 「上传成片 → ASR → 脚本行（一句一行）」的编排。
-/// 假 ffmpeg / 假 ASR，只验编排逻辑与产物清理。
+/// 「上传成片 → ASR → 语义分行 → 脚本行」的编排。
+///
+/// **和替换裂变同一套切分**：一个台词语义单元（分子）就是一行，
+/// 单元内部的镜头（原子）就是这一行的参考分镜。假 ffmpeg / 假 ASR /
+/// 假分组器，只验编排逻辑与产物清理。
+/// 假的语义分组器：按给定的分组把句子聚成单元（真实现是 AI）
+class _FakeSplitter implements SemanticSplitter {
+  /// 每组包含哪几句（下标）
+  final List<List<int>> groups;
+  const _FakeSplitter(this.groups);
+
+  @override
+  Future<List<UnitDraft>> split(List<AsrSentence> sentences) async => [
+        for (final g in groups)
+          UnitDraft(
+            startMs: sentences[g.first].startMs,
+            endMs: sentences[g.last].endMs,
+            transcript: [for (final i in g) sentences[i].text].join(),
+          ),
+      ];
+}
+
 class _FakeAsr implements AsrProvider {
   final List<AsrSentence> sentences;
   final Object? throwing;
@@ -49,20 +70,55 @@ void main() {
         workDir: workDir,
       );
 
-  test('全链路：ASR 一句一行（脚本行的粒度是一句可配音的话），阶段依次回报', () async {
+  test('没有分组器时退回一句一行——那是降级，不是正路', () async {
     final stages = <ScriptTranscribeStage>[];
-    final lines =
-        await build().extract(video.path, onStage: stages.add);
+    final lines = await build().extract(video.path, onStage: stages.add);
 
     expect(lines.map((l) => l.text), ['第一句', '第二句']);
     expect(lines.every((l) => l.type == ScriptLineType.voiced), isTrue);
-    expect(
-        stages,
-        [
-          ScriptTranscribeStage.extractingAudio,
-          ScriptTranscribeStage.transcribing,
-        ],
-        reason: '等待要有交代：每个阶段依次回报（未接场景检测时没有切分镜阶段）');
+    expect(stages, contains(ScriptTranscribeStage.transcribing));
+    expect(stages, contains(ScriptTranscribeStage.grouping),
+        reason: '等待要有交代：分行也是一步，人得知道它在干什么');
+  });
+
+  test('分子就是行：同一个语义单元里的几句台词合成一行，行内是那几个原子',
+      () async {
+    final transcriber = ScriptTranscriber(
+      audio: AudioExtractor(run: (exe, args) async {
+        await File(args.last).writeAsBytes([0, 0]);
+        return ProcessResult(1, 0, '', '');
+      }),
+      // 三句短台词（真机上就是「看到没有？」「活的。」「天呐…」那三句）
+      asr: _FakeAsr([
+        sentence('看到没有？'),
+        sentence('活的。', at: 1200),
+        sentence('天呐！', at: 2400),
+      ]),
+      // AI 把这三句判成同一个语义单元
+      splitter: const _FakeSplitter([
+        [0, 1, 2]
+      ]),
+      // 画面切点 1.8s：这个单元里有两镜
+      scenes: SceneDetector(
+          run: (exe, args) async =>
+              ProcessResult(1, 0, '', 'n:0 pts_time:1.800\n')),
+      probe: FfprobeService(
+          run: (exe, args) async => ProcessResult(1, 0, _probeJson(3.4), '')),
+      workDir: workDir,
+    );
+
+    final lines = await transcriber.extract(video.path);
+
+    expect(lines.where((l) => l.type == ScriptLineType.voiced), hasLength(1),
+        reason: '三句在一个语义单元里就是一行——不是三行');
+    final ref =
+        lines.firstWhere((l) => l.type == ScriptLineType.voiced).reference!;
+    expect(ref.segments, hasLength(2),
+        reason: '点参考进去要看到这一行里的两个分镜（原子）');
+    for (final (s, e) in ref.segments) {
+      expect(s, greaterThanOrEqualTo(ref.startMs));
+      expect(e, lessThanOrEqualTo(ref.endMs));
+    }
   });
 
   test('接了场景检测：参考镜按画面切点走，无台词的尾段成画面行', () async {

@@ -23,10 +23,15 @@ void main() {
   test('提取台词时就把音色定下来，不留空等着谁想起来', () {
     final src =
         File('lib/cli/commands/script_run_command.dart').readAsStringSync();
-    final extract = src.substring(src.indexOf('runScriptExtractCommand'));
-    expect(extract.substring(0, 4000), contains('defaultVoiceId: baseline'),
+    // 取整个函数体，不要按字符数截窗口——往函数里加几行就会把要找的话
+    // 推出窗口，测试红了却和它想守的东西毫无关系（真机上就发生过）
+    final from = src.indexOf('runScriptExtractCommand');
+    final rest = src.substring(from);
+    final next = RegExp(r'\nFuture<int> ').firstMatch(rest);
+    final extract = next == null ? rest : rest.substring(0, next.start);
+    expect(extract, contains('defaultVoiceId: baseline'),
         reason: '音色是必选项——没有它，后面每一步的时长都是空的');
-    expect(extract.substring(0, 4000), contains('趁还没配音赶紧换'),
+    expect(extract, contains('趁还没配音赶紧换'),
         reason: '定了默认不等于不能改，但要说清「配完再换要重配一轮」');
   });
 
