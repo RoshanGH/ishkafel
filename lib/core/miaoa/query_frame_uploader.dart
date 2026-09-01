@@ -74,6 +74,11 @@ class QueryFrameUploader {
     final out = await gateway.text([
       'content',
       'upload',
+      // **必须要 --json**：不加的话 stdout 是给人看的一行
+      // 「✓ 已创建 IMAGE #575」，而 ossId 跑到 stderr 里去了——
+      // 于是上传明明成功，这里却拿不到 key，报「上传失败请重试」。
+      // 更糟的是拿不到 key 就不写缓存，人每点一次就真的重传一张图
+      '--json',
       '--type',
       'image',
       '--folder',

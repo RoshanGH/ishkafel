@@ -48,6 +48,10 @@ void main() {
     expect(key, 'prod/tenant-19/x/abc.jpg');
     expect(m.calls.single, containsAll(['content', 'upload', '--type', 'image']),
         reason: '要按图片类型传，落到专门放查询帧的文件夹');
+    expect(m.calls.single, contains('--json'),
+        reason: '不加 --json 的话 ossId 会跑到 stderr 里，'
+            '这里拿到的 stdout 只有一行给人看的「✓ 已创建 IMAGE #575」'
+            '——上传成功却报失败，而且每点一次都重传一张');
     expect(m.calls.single, contains('2689'));
   });
 
