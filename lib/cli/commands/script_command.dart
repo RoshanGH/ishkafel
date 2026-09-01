@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import '../../core/miaoa/miaoa_content_service.dart';
+import '../../core/miaoa/miaoa_gateway.dart';
+import '../../core/miaoa/query_frame_uploader.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
@@ -365,6 +367,7 @@ Future<int> runScriptCommand({
             SearchMode.voiceover => '正在按台词找：$searchKey',
             SearchMode.name => '正在按名字找：$searchKey',
             SearchMode.image => '正在拿这条素材的画面找相似的',
+            SearchMode.refImage => '正在拿参考片这一镜的画面找相似的',
           },
           focus: AgentFocus(
             module: 'director',
@@ -412,6 +415,19 @@ Future<int> runScriptCommand({
           SearchMode.image => await _searchLikeImage(
               services: services,
               materials: materials!,
+              tagIds: tagIds,
+              projectIds: projectIds,
+              sink: sink),
+          // **拿参考镜的首帧去搜**：要复刻的画面就在手上，直接拿它找同类。
+          // 妙啊的以图搜视频只吃 OSS key，而首帧只在本地（打标时抽的），
+          // 所以先传成查询帧（按内容指纹只传一次）
+          SearchMode.refImage => await _searchLikeRefFrame(
+              services: services,
+              dataDir: dataDir,
+              refShots: [
+                for (final r in refShots) (r as Map).cast<String, dynamic>(),
+              ],
+              which: materials,
               tagIds: tagIds,
               projectIds: projectIds,
               sink: sink),
@@ -1015,4 +1031,42 @@ int _taggedRefShotCount(ScriptDoc doc) {
     }
   }
   return n;
+}
+
+
+/// 拿参考片这一镜的首帧去找画面相似的素材。
+///
+/// [which] 是「第几个参考镜」（从 1 起，缺省第 1 个）——不是素材 id。
+/// 界面上人点的是那张卡上的「画面相似」，命令行这边只能靠序号指。
+Future<CandidatePage> _searchLikeRefFrame({
+  required MiaoaContentService services,
+  required Directory dataDir,
+  required List<Map<String, dynamic>> refShots,
+  required String? which,
+  required List<int> tagIds,
+  required List<int> projectIds,
+  required StringSink sink,
+}) async {
+  if (refShots.isEmpty) {
+    throw const MiaoaException('这一句没有参考镜，拿不到首帧——'
+        '先 ishkafel script tag-ref <任务> --line N 打标（打标时会抽首帧）');
+  }
+  final idx = int.tryParse((which ?? '1').trim()) ?? 1;
+  if (idx < 1 || idx > refShots.length) {
+    throw MiaoaException('这一句只有 ${refShots.length} 个参考镜，'
+        '--materials 要给 1~${refShots.length}（指第几个参考镜，不是素材 id）');
+  }
+  final frame = '${refShots[idx - 1]['framePath'] ?? ''}';
+  if (frame.isEmpty || !File(frame).existsSync()) {
+    throw MiaoaException('第 $idx 个参考镜还没有首帧图——'
+        '先 ishkafel script tag-ref <任务> --line N 打标');
+  }
+  sink.writeln('· 正在把这一帧交给素材库做查询帧（同一帧只传一次）');
+  final key = await QueryFrameUploader(
+    gateway: MiaoaGateway(),
+    folderId: queryFrameFolderId,
+    cacheDir: Directory(p.join(dataDir.path, 'query_frames')),
+  ).keyFor(File(frame));
+  return services.searchByImage(
+      fileKey: key, tagIds: tagIds, projectIds: projectIds, pageSize: 20);
 }

@@ -7,6 +7,12 @@ import 'package:path/path.dart' as p;
 import '../log/app_log.dart';
 import 'miaoa_gateway.dart';
 
+/// 查询帧落在哪个二级文件夹。
+///
+/// 这些图只是搜索用的中间物，单独放一处——混进正经素材里，
+/// 别人搜素材时会翻到一堆莫名其妙的截图
+const int queryFrameFolderId = 2689;
+
 /// 把一张**本地图**变成妙啊能用的查询帧（OSS key）。
 ///
 /// 为什么要有这一层：妙啊的以图搜视频只吃 OSS key

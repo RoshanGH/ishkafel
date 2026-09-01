@@ -85,12 +85,6 @@ final queryFrameUploaderProvider = Provider<QueryFrameUploader?>((ref) {
   );
 });
 
-/// 查询帧落在哪个二级文件夹。
-///
-/// 这些图只是搜索用的中间物，单独放一处——混进正经素材里，
-/// 别人搜素材时会翻到一堆莫名其妙的截图
-const queryFrameFolderId = 2689;
-
 /// 找镜头面板的三件套：内容检索、规格探测、标签体系。
 /// 默认真实实例（构造不起子进程，真正调用才 exec）；单测 override
 final shotSearchServicesProvider = Provider<ShotSearchServices>(

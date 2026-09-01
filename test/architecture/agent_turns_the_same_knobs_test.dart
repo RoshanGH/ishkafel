@@ -91,4 +91,30 @@ void main() {
           reason: '钩子留了却不在每行调用，等于没留');
     });
   });
+
+  test('拿参考镜首帧搜——界面有的，命令行也要有', () {
+    // 人在参考镜卡上点「画面相似」，Agent 也得能做同一件事。
+    // 此前那套上传查询帧的逻辑只接在界面上，命令行只能拿**候选素材**的
+    // fileKey 搜——手里攥着要复刻的那一帧却用不上，正是这条线最该用的路
+    final modes = File('lib/cli/search_modes.dart').readAsStringSync();
+    expect(modes, contains("'ref-image'"),
+        reason: '界面能拿参考镜首帧搜，命令行不能，就是少了一个旋钮');
+    final cmd = File('lib/cli/commands/script_command.dart').readAsStringSync();
+    expect(cmd, contains('_searchLikeRefFrame'));
+    expect(cmd, contains('QueryFrameUploader'),
+        reason: '以图搜视频只吃 OSS key，本地帧要先传成查询帧');
+  });
+
+  test('今天改的行为都写进手册了', () {
+    for (final k in [
+      '--by ref-image', // 拿参考镜首帧搜
+      '提取台词时就定下来了', // extract 自动定音色
+      '没配音的行，挑不了画面', // shots 的硬拦截
+      '从参考片提取时会自动产生这种行', // 无台词段成画面行
+      'voice-file', // 用自己录的配音
+    ]) {
+      expect(agentSkillMarkdown, contains(k),
+          reason: '「$k」这条行为变了却没写进手册——Agent 照旧的做法会撞墙');
+    }
+  });
 }
