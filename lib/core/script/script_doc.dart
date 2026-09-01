@@ -157,13 +157,35 @@ class RefShotMeta {
   }
 }
 
+/// 短于这个时长的参考镜没有参考价值（画面上就是闪一下的一格），
+/// 一律并回相邻镜——**否则用户会看到一堆点开只闪一下的卡**
+const int refShotMinMs = 400;
+
+/// 台词与某一镜重叠不足这么久，就不算「这一句的画面」。
+///
+/// 真机任务 hluyggdhpb：ASR 的句子起点常常比画面切点早几毫秒，于是每句
+/// 台词的开头都挂着上一个镜头 3ms 的尾巴。不设这个下限的话，这一句的
+/// 第一镜永远是上一句的画面——搜出来不是同类、描述也不是这一段。
+const int refShotMinOverlapMs = 200;
+
 /// 这一句在参考片里的区间（「参考视频」列的数据根）。
 ///
 /// 上传成片提取脚本时，ASR 给出的每句时间戳直接落在行上；视频路径
 /// 跟文档走（ScriptDoc.refVideoPath）——同一条参考片切出全部行。
+///
+/// **两层各自成立**：[startMs]/[endMs] 是台词层（决定成片时间），
+/// [shotStartMs]/[shotEndMs] 是视觉镜头层（边界只由画面切点决定）。
+/// 两者之间是「这一句对应哪几镜」的关联，不是互相切割。
 class LineRef {
   final int startMs;
   final int endMs;
+
+  /// 这一句关联到的那几个**完整镜头**的跨度（原片坐标）。
+  ///
+  /// null = 老档（当年是拿「台词区间 ∩ 切点」当参考镜的），[segments]
+  /// 自动退回按台词边界切——老任务读出来不崩、也不丢数据。
+  final int? shotStartMs;
+  final int? shotEndMs;
 
   /// 行级参考视频（手动给某一行上传的参考）；null = 用文档级
   /// ScriptDoc.refVideoPath（整片提取时的来源视频）
@@ -190,6 +212,8 @@ class LineRef {
     required this.endMs,
     this.videoPath,
     this.imagePath,
+    this.shotStartMs,
+    this.shotEndMs,
     List<int> cuts = const [],
     List<VoiceWord> words = const [],
     List<RefShotMeta> shotMeta = const [],
@@ -211,6 +235,8 @@ class LineRef {
         endMs: endMs,
         videoPath: videoPath,
         imagePath: imagePath,
+        shotStartMs: shotStartMs,
+        shotEndMs: shotEndMs,
         cuts: cuts,
         words: words,
         shotMeta: [
@@ -220,12 +246,28 @@ class LineRef {
         ]..sort((a, b) => a.startMs.compareTo(b.startMs)),
       );
 
+  /// 换词级时间戳（手动传的参考片补跑 ASR 后）——**其余字段一个都不能丢**：
+  /// 这里漏掉镜头跨度，参考镜就会悄悄退回按台词边界切
+  LineRef withWords(List<VoiceWord> next) => LineRef(
+        startMs: startMs,
+        endMs: endMs,
+        videoPath: videoPath,
+        imagePath: imagePath,
+        shotStartMs: shotStartMs,
+        shotEndMs: shotEndMs,
+        cuts: cuts,
+        words: next,
+        shotMeta: shotMeta,
+      );
+
   /// 换切点（就地重新做视觉切分后）——切点一变，旧的镜头打标全部作废
   LineRef withCuts(List<int> next) => LineRef(
         startMs: startMs,
         endMs: endMs,
         videoPath: videoPath,
         imagePath: imagePath,
+        shotStartMs: shotStartMs,
+        shotEndMs: shotEndMs,
         cuts: next,
         words: words,
       );
@@ -248,19 +290,35 @@ class LineRef {
     return text.isEmpty ? fallback : text;
   }
 
+  /// 这一句挂着的是不是**完整镜头**（新档）。
+  /// false = 老档，参考镜还是按台词边界切出来的
+  bool get hasWholeShots =>
+      shotStartMs != null && shotEndMs != null && shotEndMs! > shotStartMs!;
+
+  /// 视觉镜头层的起点：新档是第一个关联镜头的真实起点，老档退回台词起点
+  int get shotsStartMs => hasWholeShots ? shotStartMs! : startMs;
+
+  /// 视觉镜头层的终点（同上）
+  int get shotsEndMs => hasWholeShots ? shotEndMs! : endMs;
+
   /// 参考分镜的区间序列（按切点拆；没有切点就是整段一镜）。
-  /// 短于 400ms 的碎段并回前一段——闪一下的卡没有参考价值
+  ///
+  /// 新档拆的是**完整镜头跨度**——一个镜头就是一个完整镜头，允许它比这一句
+  /// 的台词更长（它可能同时是上一句/下一句的画面）；老档拆台词区间。
+  /// 短于 [refShotMinMs] 的碎段并回前一段——闪一下的卡没有参考价值
   List<(int, int)> get segments {
+    final from = shotsStartMs;
+    final to = shotsEndMs;
     final points = [
-      startMs,
-      ...cuts.where((c) => c > startMs && c < endMs),
-      endMs,
+      from,
+      ...cuts.where((c) => c > from && c < to),
+      to,
     ];
     final out = <(int, int)>[];
     for (var i = 0; i < points.length - 1; i++) {
       final s0 = points[i];
       final e0 = points[i + 1];
-      if (e0 - s0 < 400 && out.isNotEmpty) {
+      if (e0 - s0 < refShotMinMs && out.isNotEmpty) {
         final last = out.removeLast();
         out.add((last.$1, e0));
       } else {
@@ -275,6 +333,8 @@ class LineRef {
         'endMs': endMs,
         if (videoPath != null) 'videoPath': videoPath,
         if (imagePath != null) 'imagePath': imagePath,
+        if (shotStartMs != null) 'shotStartMs': shotStartMs,
+        if (shotEndMs != null) 'shotEndMs': shotEndMs,
         if (cuts.isNotEmpty) 'cuts': cuts,
         if (words.isNotEmpty) 'words': [for (final w in words) w.toJson()],
         if (shotMeta.isNotEmpty)
@@ -286,9 +346,17 @@ class LineRef {
     final start = raw['startMs'];
     final end = raw['endMs'];
     if (start is! int || end is! int || end <= start) return null;
+    // 跨度只认「两个都在、且是正区间」，任何一半缺失/不合法都退回老算法，
+    // 绝不半信半疑地拿一个越界跨度去切镜头
+    final shotStart = raw['shotStartMs'];
+    final shotEnd = raw['shotEndMs'];
+    final wholeShots =
+        shotStart is int && shotEnd is int && shotEnd > shotStart;
     return LineRef(
       startMs: start,
       endMs: end,
+      shotStartMs: wholeShots ? shotStart : null,
+      shotEndMs: wholeShots ? shotEnd : null,
       videoPath: raw['videoPath'] is String ? raw['videoPath'] as String : null,
       cuts: [
         if (raw['cuts'] is List)

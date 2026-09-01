@@ -271,9 +271,8 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   Future<void> _bootstrap() async {
     // 参考还没切过视觉镜头：面板里 loading 等它切完，切完直接显示
     // 正确的一排镜头（不让人看旧数据）
-    if ((_line.reference?.cuts.isEmpty ?? false) &&
-        _line.reference?.videoPath != null ||
-        (_line.reference != null && _line.reference!.cuts.isEmpty)) {
+    final ref0 = _line.reference;
+    if (ref0 != null && ref0.cuts.isEmpty && !ref0.hasWholeShots) {
       if (widget.prepareRef != null) {
         setState(() => _preparingRef = true);
         try {

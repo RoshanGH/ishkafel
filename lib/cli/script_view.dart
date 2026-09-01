@@ -248,8 +248,14 @@ String _wordsText(List<VoiceWord> words, int from, int to) => [
 Map<String, dynamic> _referenceJson(LineRef ref) {
   final segments = ref.segments;
   return {
+    // 台词层的区间（这一句什么时候说的）
     'startMs': ref.startMs,
     'endMs': ref.endMs,
+    // 视觉镜头层的跨度：这几镜是**完整镜头**，比台词长是正常的
+    // （一镜可能同时是上一句/下一句的画面）。缺这两个字段 = 老档，
+    // 参考镜还是按台词边界切出来的，别拿它当镜头边界用
+    if (ref.hasWholeShots) 'shotStartMs': ref.shotsStartMs,
+    if (ref.hasWholeShots) 'shotEndMs': ref.shotsEndMs,
     if (ref.videoPath != null) 'videoPath': ref.videoPath,
     'shots': [
       for (var k = 0; k < segments.length; k++)

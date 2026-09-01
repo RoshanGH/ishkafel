@@ -90,6 +90,60 @@ void main() {
       final ref = LineRef(startMs: 0, endMs: 3000, cuts: const [1500]);
       expect(ref.segmentText(0, '整句台词'), '整句台词');
     });
+
+    test('有镜头跨度：参考镜是完整镜头，超出台词边界也照给', () {
+      final ref = LineRef(
+        startMs: 3200,
+        endMs: 9500,
+        shotStartMs: 3000,
+        shotEndMs: 12000,
+        cuts: const [8000],
+      );
+      expect(ref.hasWholeShots, isTrue);
+      expect(ref.segments, [(3000, 8000), (8000, 12000)]);
+      expect(ref.durationMs, 6300, reason: '台词层的时长仍是台词自己的');
+    });
+
+    test('老档没有镜头跨度：退回台词边界切（不能读崩、不能丢数据）', () {
+      final back = LineRef.tryFromJson({
+        'startMs': 1000,
+        'endMs': 4000,
+        'cuts': [2000],
+      })!;
+      expect(back.hasWholeShots, isFalse);
+      expect(back.segments, [(1000, 2000), (2000, 4000)]);
+    });
+
+    test('镜头跨度随 json 往返；withCuts / withShotMeta 都留着它', () {
+      final ref = LineRef(
+        startMs: 3200,
+        endMs: 9500,
+        shotStartMs: 3000,
+        shotEndMs: 12000,
+        cuts: const [8000],
+      );
+      final back = LineRef.tryFromJson(ref.toJson())!;
+      expect(back.shotStartMs, 3000);
+      expect(back.shotEndMs, 12000);
+      expect(back.withCuts(const [7000]).shotStartMs, 3000);
+      expect(
+          back.withShotMeta(RefShotMeta(startMs: 3000, description: '一只手'))
+              .shotEndMs,
+          12000);
+    });
+
+    test('切点变了 → 旧的镜头打标自动作废，不拿旧结论去搜新画面', () {
+      final ref = LineRef(
+        startMs: 3200,
+        endMs: 9500,
+        shotStartMs: 3000,
+        shotEndMs: 12000,
+        cuts: const [8000],
+      ).withShotMeta(RefShotMeta(startMs: 3200, description: '老边界打的标'));
+      expect(ref.metaAt(3200)?.description, '老边界打的标');
+      expect(ref.metaAt(ref.segments.first.$1), isNull,
+          reason: '边界从 3200 变成 3000，认领不上就重打——不崩、也不错用');
+    });
   });
 
   group('字幕屏（切点跟语言走，与镜头无关）', () {

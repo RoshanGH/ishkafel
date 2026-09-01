@@ -1646,7 +1646,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final ref = line?.reference;
     final video = line == null ? null : _refVideoOf(line);
     if (line == null || ref == null || video == null) return;
-    if (ref.cuts.isNotEmpty || _refCutting.contains(lineId)) return;
+    // 新档提取时已经按全片切点分好完整镜头了——再就地切一遍，只会把
+    // 一个完整镜头按台词边界重新切碎，正是这次修的那个 bug
+    if (ref.hasWholeShots || ref.cuts.isNotEmpty ||
+        _refCutting.contains(lineId)) {
+      return;
+    }
     if (!File(video).existsSync()) return;
     _refCutting.add(lineId);
     try {
@@ -2355,17 +2360,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (words.isEmpty) return;
       final cur = _doc.lines.where((l) => l.id == lineId).firstOrNull?.reference;
       if (cur == null) return;
-      _mutate((d) => d.setReferenceById(
-          lineId,
-          LineRef(
-            startMs: cur.startMs,
-            endMs: cur.endMs,
-            videoPath: cur.videoPath,
-            imagePath: cur.imagePath,
-            cuts: cur.cuts,
-            words: words,
-            shotMeta: cur.shotMeta,
-          )));
+      _mutate((d) => d.setReferenceById(lineId, cur.withWords(words)));
     } catch (e) {
       AppLog.warn('参考视频 ASR 失败（只影响展示，$lineId）：$e');
     }
