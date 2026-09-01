@@ -20,7 +20,6 @@ import '../../core/script/line_delivery_service.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
-import '../../core/storage/agent_broadcast.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
@@ -81,6 +80,11 @@ Future<int> runScriptExtractCommand({
   required List<String> rest,
   required Directory dataDir,
   String? holder,
+
+  /// 可视模式：把软件拉起来、界面落到这个任务上，一步步跟着看。
+  /// **收不到这个标志的命令只能裸写播报**——横幅上念得挺热闹，界面却停在
+  /// 任务列表一动不动（真机上 extract / voice 两条正是如此）
+  bool? visual,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -125,11 +129,17 @@ Future<int> runScriptExtractCommand({
   }
   final heartbeat =
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
-  writeAgentPresence(
-      dataDir: dataDir,
-      taskId: task.id,
-      presence: AgentPresence(
-          holder: holder ?? agentLockHolder, at: DateTime.now(), action: '正在识别参考片的台词'));
+  final visualStage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
+  await visualStage.begin('正在识别参考片的台词',
+      focus: const AgentFocus(module: 'director'));
+  // 静默模式下 begin 什么都不做，在场状态还是要写：人可能正开着这一页
+  visualStage.note('正在识别参考片的台词',
+      focus: const AgentFocus(module: 'director'));
   try {
     final transcriber = ScriptTranscriber(
       audio: AudioExtractor(run: const ResolvingProcessRunner().call),
@@ -140,13 +150,11 @@ Future<int> runScriptExtractCommand({
       scenes: SceneDetector(run: const ResolvingProcessRunner().call),
       workDir: Directory(p.join(dataDir.path, 'analysis_work', task.id)),
     );
-    final lines = await transcriber.extract(video, onStage: (stage) {
-      writeAgentPresence(
-          dataDir: dataDir,
-          taskId: task.id,
-          presence: AgentPresence(
-              holder: holder ?? agentLockHolder, at: DateTime.now(), action: stage.label));
-      sink.writeln('· ${stage.label}');
+    final lines = await transcriber.extract(video, onStage: (step) {
+      // 转写是几分钟的活儿，回调是同步的：用心跳不等回执，
+      // 但每一跳都会确认界面还在编导台上——人中途切走了要能叫回来
+      visualStage.note(step.label, focus: const AgentFocus(module: 'director'));
+      sink.writeln('· ${step.label}');
     });
     // **一开始就得有音色。**
     //
@@ -205,6 +213,10 @@ Future<int> runScriptVoiceCommand({
   int? line,
   String? voiceId,
   String? holder,
+
+  /// 可视模式：一句句配音时界面跟着滚到那一行。见
+  /// [runScriptExtractCommand] 上的说明——这条命令此前同样收不到它
+  bool? visual,
   StringSink? out,
   StringSink? err,
 
@@ -312,6 +324,21 @@ Future<int> runScriptVoiceCommand({
     sink.writeln('注意：没有方舟凭据（ark_api_key），听不了参考片是怎么念的，'
         '这 ${withRef.length} 句会用默认语气配——原片再激动也传不过来。');
   }
+  // **配音是这条线上最慢最贵的一步**（20 句 TTS 好几分钟），也最该让人
+  // 看着：一句配好一句落格。此前这里裸写在场状态——横幅一句句念
+  // 「正在给第 10 句配音（10/20）」，界面却停在任务列表，二十句没有
+  // 一格出现在屏幕上（产品负责人当场问的就是这个）
+  final voiceStage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
+  await voiceStage.begin('正在配 ${targets.length} 句',
+      focus: AgentFocus(
+          module: 'director',
+          lineIndex: targets.isEmpty ? 0 : targets.first,
+          panel: AgentPanel.voice));
   final failed = <String>[];
   final degraded = <String>[];
   var instructed = 0;
@@ -324,16 +351,10 @@ Future<int> runScriptVoiceCommand({
       // 重配同一句不再花钱；听不了就降级成默认语气，但要点名
       final request = deliveryRequestOf(doc, target);
       if (delivery != null && request != null) {
-        writeAgentPresence(
-          dataDir: dataDir,
-          taskId: task.id,
-          presence: AgentPresence(
-            holder: holder ?? agentLockHolder,
-            at: DateTime.now(),
-            action: '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
-            focus: AgentFocus(lineIndex: i, panel: AgentPanel.voice),
-          ),
-        );
+        await voiceStage.show(
+            '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
+            focus: AgentFocus(
+                module: 'director', lineIndex: i, panel: AgentPanel.voice));
       }
       final how = delivery == null
           ? LineDelivery.none
@@ -343,16 +364,9 @@ Future<int> runScriptVoiceCommand({
         sink.writeln('· 第 ${i + 1} 句的参考片没听成，这一句退回默认语气：'
             '${how.degradedReason}');
       }
-      writeAgentPresence(
-        dataDir: dataDir,
-        taskId: task.id,
-        presence: AgentPresence(
-          holder: holder ?? agentLockHolder,
-          at: DateTime.now(),
-          action: '正在给第 ${i + 1} 句配音（${k + 1}/${targets.length}）',
-          focus: AgentFocus(lineIndex: i, panel: AgentPanel.voice),
-        ),
-      );
+      await voiceStage.show('正在给第 ${i + 1} 句配音（${k + 1}/${targets.length}）',
+          focus: AgentFocus(
+              module: 'director', lineIndex: i, panel: AgentPanel.voice));
       try {
         final vo = await service.generate(
           lineId: lineId,
@@ -450,7 +464,21 @@ Future<int> runScriptExportCommand({
   }
   final heartbeat =
       Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
+  // 此前只写了一句话到在场状态：没有模块、没有焦点，于是界面根本不进
+  // 那个任务，人盯着任务列表上一行滚动的字，画面纹丝不动
+  // （用户当场问的就是这个：「可视化模式吗？为什么只有播报没有界面动效」）
+  //
+  // 定义在 try **外面**：导出被拒时也要靠它在界面上留下一句话，
+  // 而那句话发生在 catch 里
+  final exportStage = AgentStage(
+    mode: AgentStageMode.from(visual: visual),
+    dataDir: dataDir,
+    taskId: task.id,
+    holder: holder ?? agentLockHolder,
+  );
   try {
+    await exportStage.begin('正在导出成片',
+        focus: const AgentFocus(module: 'director', lineIndex: 0));
     // **配乐得先下下来**。此前命令行这条路根本没接配乐：只要方案里铺了
     // 曲子，导出必然报「配乐在本地找不到……到配乐色带上重试下载」——
     // 而那正是手册说不该必要的手动操作，命令行也确实没有任何命令能拉它。
@@ -466,13 +494,9 @@ Future<int> runScriptExportCommand({
       var k = 0;
       for (final entry in wanted.entries) {
         k++;
-        writeAgentPresence(
-            dataDir: dataDir,
-            taskId: task.id,
-            presence: AgentPresence(
-                holder: holder ?? agentLockHolder,
-                at: DateTime.now(),
-                action: '正在下载配乐「${entry.value.name}」（$k/${wanted.length}）'));
+        exportStage.note(
+            '正在下载配乐「${entry.value.name}」（$k/${wanted.length}）',
+            focus: const AgentFocus(module: 'director'));
         sink.writeln('· 正在下载配乐「${entry.value.name}」（$k/${wanted.length}）');
         try {
           bgmPaths[entry.key] = await cache.fetch(entry.value);
@@ -492,17 +516,6 @@ Future<int> runScriptExportCommand({
       run: const ResolvingProcessRunner().call,
     );
     // 导出是**最长的一步**（几分钟），也最该让人看着——它直接出交付物。
-    // 此前只写了一句话到在场状态：没有模块、没有焦点，于是界面根本不进
-    // 那个任务，人盯着任务列表上一行滚动的字，画面纹丝不动
-    // （用户当场问的就是这个：「可视化模式吗？为什么只有播报没有界面动效」）
-    final exportStage = AgentStage(
-      mode: AgentStageMode.from(visual: visual),
-      dataDir: dataDir,
-      taskId: task.id,
-      holder: holder ?? agentLockHolder,
-    );
-    await exportStage.begin('正在导出成片',
-        focus: const AgentFocus(module: 'director', lineIndex: 0));
     final output = await runner.export(
       doc: doc,
       bgmPathOf: (id) => bgmPaths[id],
@@ -510,20 +523,14 @@ Future<int> runScriptExportCommand({
       onProgress: (progress) {
         // 渲染一镜就是一次 ffmpeg，几百毫秒到几秒——**不等界面回执**，
         // 等的话导出会被界面的节奏拖成两倍慢。只写状态，界面自己跟
-        writeAgentPresence(
-            dataDir: dataDir,
-            taskId: task.id,
-            presence: AgentPresence(
-                holder: holder ?? agentLockHolder,
-                at: DateTime.now(),
-                action: '正在导出：${progress.step}',
-                focus: progress.lineIndex == null
-                    ? null
-                    : AgentFocus(
-                        module: 'director',
-                        lineIndex: progress.lineIndex!,
-                        shotIndex: progress.shotIndex,
-                        panel: AgentPanel.shot)));
+        exportStage.note('正在导出：${progress.step}',
+            focus: progress.lineIndex == null
+                ? const AgentFocus(module: 'director')
+                : AgentFocus(
+                    module: 'director',
+                    lineIndex: progress.lineIndex!,
+                    shotIndex: progress.shotIndex,
+                    panel: AgentPanel.shot));
       },
     );
     exportStage.end();
@@ -540,15 +547,9 @@ Future<int> runScriptExportCommand({
     // 状态清掉——人盯着屏幕看到的是「转了一会儿，然后什么都没发生」，
     // 完全不知道导出被拒了、更不知道为什么（验收 Agent 报的原话：
     // 「导出被拒，窗口没有横幅、没有错误、什么都没有」）
-    if (AgentStageMode.from(visual: visual) == AgentStageMode.visual) {
-      writeAgentPresence(
-          dataDir: dataDir,
-          taskId: task.id,
-          presence: AgentPresence(
-              holder: holder ?? agentLockHolder,
-              at: DateTime.now(),
-              kind: BroadcastKind.warning,
-              action: '导出没成：${e.message}'));
+    if (exportStage.visual) {
+      await exportStage.warn('导出没成：${e.message}',
+          focus: const AgentFocus(module: 'director'));
       // 停一下再让 finally 清掉，否则这句话一闪而过等于没说
       await Future<void>.delayed(const Duration(seconds: 4));
     }

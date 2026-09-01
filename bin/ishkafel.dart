@@ -68,6 +68,8 @@ Future<void> main(List<String> args) async {
             '整体替换的候选镜头位写 `-`')
     ..addOption('out', help: 'export 用：输出目录')
     ..addOption('tag-groups', help: 'import 用：标签组 id，逗号分隔')
+    ..addOption('module',
+        help: 'ui open 用：去哪个模块（director / workbench / review）')
     ..addFlag('install',
         negatable: false, help: 'skill 用：把说明书装成技能（确定性落盘）')
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
@@ -218,6 +220,7 @@ Future<void> main(List<String> args) async {
         file: parsed['file'] as String?,
         tagGroups: parsed['tag-groups'] as String?,
         name: parsed['name'] as String?,
+        module: parsed['module'] as String?,
       ),
     'review' => await runReviewCommand(
         rest: rest,
@@ -333,9 +336,13 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   ui new-task --mode <replace|blank|script> --tag-groups <id,id> [--file <原片>]
                    **当着人的面**新建任务：软件弹出来、向导打开、字段填上、
                    点创建。人在旁边看着时用它；人不在场用 script new 更快
-  ui tasks         让界面退回任务列表，**松开它占着的任务锁**。
-                   建完任务界面就停在那条任务上，而下一步多半要写它——
-                   撞上「人（编导台）正在操作这个任务」时敲这条
+  ui open <id> [--module director|workbench|review]
+                   **把界面叫到这条任务上**。可视模式下每一步开工前都该
+                   在现场——命令自己也会确认，这条是给你的显式入口。
+                   已经在那一页就直接返回，不会把页面弹来弹去
+  ui tasks         把界面支开、退回任务列表。**可视模式下一般用不着**：
+                   撞上界面的锁时命令会自动请它让位（人留在那一页看着）。
+                   支开就等于关掉了可视化现场，得用 ui open 才叫得回来
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
   review drop <id> --items 0:-:100,1:2:202
                    替人剔掉这几条——人在审片台看着说「删掉哪几条」时用它

@@ -253,19 +253,9 @@ Future<int> _changeCandidates({
       } else {
         await stage.show(action, focus: focus);
       }
-      if (!stage.visual) {
-        // 静默模式也要写在场状态：万一人正开着界面，至少知道有东西在动它
-        writeAgentPresence(
-          dataDir: dataDir,
-          taskId: task.id,
-          presence: AgentPresence(
-            holder: holder,
-            at: DateTime.now(),
-            action: action,
-            focus: focus,
-          ),
-        );
-      }
+      // 静默模式下 begin/show 什么都不做，在场状态还是要写：
+      // 人可能正开着这一页，至少该知道有东西在动他的任务
+      if (!stage.visual) stage.note(action, focus: focus);
     }
 
     // 拿锁期间人可能自己点过：重读一遍再校验，别拿旧前提写新数据

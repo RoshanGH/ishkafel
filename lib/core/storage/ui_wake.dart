@@ -52,6 +52,13 @@ void writeUiWake(
     }));
 }
 
+/// 还有一条唤醒没被界面取走吗。
+///
+/// **「已经叫过、它还在路上」和「它不肯来」是两回事。** 界面读到唤醒就
+/// 删文件，所以文件还在 = 它还没看到这一条：这时再写一条毫无意义，
+/// 只会把同样的内容覆盖一遍。判断「要不要再叫一次」时先问这一句。
+bool hasPendingUiWake(Directory dataDir) => _wakeFile(dataDir).existsSync();
+
 /// 取一条唤醒请求并**删掉文件**——同一条请求只处理一次，
 /// 不然 GUI 每次轮询都会再开一个页面
 UiWakeRequest? consumeUiWake(Directory dataDir) {

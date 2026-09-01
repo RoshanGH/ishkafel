@@ -3,7 +3,10 @@ import 'dart:io';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/task_seq.dart';
 import '../../core/storage/ui_action.dart';
+import '../../core/storage/ui_wake.dart';
+import '../../core/storage/ui_where.dart';
 import '../cli_output.dart';
 import '../app_locator.dart';
 
@@ -26,6 +29,10 @@ Future<int> runUiCommand({
 
   /// 任务名。不给就用软件的默认命名（「脚本 08-27 20:57」这种）
   String? name,
+
+  /// `ui open` 要去哪个模块：`director` / `workbench` / `review`。
+  /// 不给就按任务类型选（脚本成片进编导台，其余进工作台）
+  String? module,
   String? holder,
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
@@ -40,13 +47,31 @@ Future<int> runUiCommand({
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
-  if (rest.isEmpty ||
-      (rest.first != 'new-task' && rest.first != 'tasks')) {
+  const subs = ['new-task', 'tasks', 'open'];
+  if (rest.isEmpty || !subs.contains(rest.first)) {
     sink.writeln('用法：\n'
         '  ishkafel ui new-task --mode <replace|blank|script> '
         '--tag-groups <id,id> [--file <原片>]\n'
-        '  ishkafel ui tasks     让界面退回任务列表，松开它占着的任务锁');
+        '  ishkafel ui open <任务> [--module director|workbench|review]\n'
+        '      把界面叫到这条任务上。**可视模式下每一步开工前都该在现场**\n'
+        '  ishkafel ui tasks\n'
+        '      把界面支开、退回任务列表。可视模式下一般用不着：撞上界面的锁\n'
+        '      时命令会自动请它让位（人留在那一页看着），不需要你先支开它。\n'
+        '      支开了就等于关掉了可视化现场，要再用 ui open 才叫得回来');
     return exitBadUsage;
+  }
+  if (rest.first == 'open') {
+    return _openTaskPage(
+      rest: rest.sublist(1),
+      dataDir: dataDir,
+      module: module,
+      run: run,
+      env: env,
+      appExists: appExists,
+      waitForUi: waitForUi,
+      out: out,
+      err: err,
+    );
   }
   if (rest.first == 'tasks') {
     return _backToTaskList(
@@ -218,5 +243,75 @@ Future<int> _backToTaskList({
     return exitFailed;
   }
   emitJson({'ok': true, 'via': 'ui', 'message': result.message}, out: out);
+  return 0;
+}
+
+
+/// `ishkafel ui open <任务> [--module …]` —— **把界面叫到现场**。
+///
+/// 可视模式此前只有出口没有入口：[UiAction.tasksOpen] 能把界面支开，
+/// 却没有任何办法把它叫回来。真机上 Agent 为了拿写锁调了 `ui tasks`，
+/// 界面退到任务列表，此后二十句配音全程在列表页上以文字滚过——播报没
+/// 说谎，可视化却结束了，而且回不去。产品负责人的话：「它并不判断当前
+/// 是否是它执行的那个页面，这样的话可视化的意义就没有了。」
+///
+/// 各条命令自己也会在每一步开工前确认现场（见 `AgentStage`），这条命令
+/// 是给 Agent 的显式入口：接着干之前先把人带回该看的那一页。
+Future<int> _openTaskPage({
+  required List<String> rest,
+  required Directory dataDir,
+  String? module,
+  Future<ProcessResult> Function(String, List<String>)? run,
+  Map<String, String>? env,
+  bool Function(String path)? appExists,
+  Duration waitForUi = const Duration(seconds: 90),
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('要指定任务：ishkafel ui open <任务 id>');
+    return exitBadUsage;
+  }
+  const modules = ['director', 'workbench', 'review'];
+  if (module != null && !modules.contains(module)) {
+    // 写错了就点名。默默去个别的地方，人对着不相干的页面等半天
+    sink.writeln('--module 要是 ${modules.join(' / ')} 之一');
+    return exitBadUsage;
+  }
+  final task = await resolveTaskRef(FileTaskRepository(dataDir), rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  final target = module ?? (task.isScript ? 'director' : 'workbench');
+  // 已经在这一页就别再唤醒：唤醒会把页面关掉重开，滚动位置、展开的镜头
+  // 全丢，人看到的是画面弹回第一行
+  if (readUiWhere(dataDir)?.isOn(module: target, taskId: task.id) == true) {
+    emitJson({'ok': true, 'already': true, 'module': target, 'task': task.id},
+        out: out);
+    return 0;
+  }
+  final failure =
+      await launchApp(run: run ?? Process.run, env: env, exists: appExists);
+  if (failure != null) {
+    sink.writeln(failure);
+    return exitEnv;
+  }
+  writeUiWake(dataDir, task.id, review: target == 'review', module: target);
+  // 等它真的到位再返回：命令一返回就接着干活的话，头几步又落在空场上
+  final deadline = DateTime.now().add(waitForUi);
+  while (DateTime.now().isBefore(deadline)) {
+    if (readUiWhere(dataDir)?.isOn(module: target, taskId: task.id) == true) {
+      emitJson({'ok': true, 'module': target, 'task': task.id}, out: out);
+      return 0;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+  }
+  // 没等到不算失败：软件可能正在冷启动，唤醒文件躺在那儿，它起来就会落位
+  sink.writeln('界面还没落到「$target」（等了 ${waitForUi.inSeconds} 秒）。'
+      '唤醒已经写下了，软件起来就会过去。');
+  emitJson({'ok': true, 'module': target, 'task': task.id, 'landed': false},
+      out: out);
   return 0;
 }

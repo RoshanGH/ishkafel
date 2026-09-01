@@ -118,13 +118,18 @@ Future<int> runScriptCommand({
           rest: rest.sublist(1), dataDir: dataDir, out: out, err: err);
     case 'extract':
       return runScriptExtractCommand(
-          rest: rest.sublist(1), dataDir: dataDir, out: out, err: err);
+          rest: rest.sublist(1),
+          dataDir: dataDir,
+          visual: visual,
+          out: out,
+          err: err);
     case 'voice':
       return runScriptVoiceCommand(
         rest: rest.sublist(1),
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        visual: visual,
         out: out,
         err: err,
       );

@@ -77,7 +77,7 @@ void main() {
       'apply': {'plans', 'segment', 'tags'},
       'review': {'list', 'drop', 'keep'},
       'voice': {'generate'},
-      'ui': {'new-task', 'tasks'},
+      'ui': {'new-task', 'tasks', 'open'},
     };
     // 这份名单是**手写**的，所以它漏过东西：`script` 压根没进来，
     // 于是手册里那条根本不存在的 `script from-video` 一直没人查。

@@ -4,6 +4,7 @@ import '../core/log/app_log.dart';
 import '../core/storage/agent_broadcast.dart';
 import '../core/storage/agent_presence.dart';
 import '../core/storage/ui_wake.dart';
+import '../core/storage/ui_where.dart';
 import 'app_locator.dart';
 
 /// Agent 干活的两种模式。
@@ -58,7 +59,15 @@ class AgentStage {
 
   int _step = 0;
   bool _appLaunched = false;
-  String? _lastModule;
+
+  /// 上一次问「界面在哪」是什么时候（见 [_ensureOnStage] 的节流）
+  DateTime _lastCheckedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// 上一次叫界面过来是什么时候。叫完给它 [_settleTime] 落位，
+  /// 这期间不再叫——正在跳转的页面经不起第二次唤醒
+  DateTime _lastWakeAt = DateTime.fromMillisecondsSinceEpoch(0);
+  String? _lastWakeModule;
+  static const Duration _settleTime = Duration(seconds: 3);
 
   AgentStage({
     required this.mode,
@@ -100,20 +109,59 @@ class AgentStage {
   Future<void> warn(String action, {AgentFocus? focus}) =>
       show(action, focus: focus, kind: BroadcastKind.warning);
 
+  /// **开工前先确认现场**：界面此刻在哪一页、这一步该在哪一页看。
+  ///
+  /// 不在就把它带过去；已经在就什么都不做。
+  ///
+  /// 这一问必须**每一步都问**，不能只在开头问一次。真机上栽过：脚本成片
+  /// 的配音全程在横幅上念「正在给第 10 句配音（10/20）」，界面却停在任务
+  /// 列表，二十句没有一格出现在屏幕上——播报没说谎，可视化却没发生。
+  /// 产品负责人的话：「它并不判断当前是否是它执行的那个页面，这样的话
+  /// 可视化的意义就没有了。」被打断之后接着干的那一次尤其要问，因为人在
+  /// 打断的间隙多半已经把界面切走了。
+  ///
+  /// 为什么要先读一眼界面在哪、而不是无脑每步都发唤醒：唤醒会把目标页面
+  /// 关掉重开（滚动位置、展开的镜头全丢）。已经在现场还发，人看到的是
+  /// 画面不停地弹回第一行——那个毛病挨过骂，不能再犯。
+  /// [throttle] 给心跳用：导出的进度回调一镜一跳（几百毫秒一次），
+  /// 没必要每跳都去读盘。**步骤（[show]）一律不节流**——一步就是一个
+  /// 交代，每一步都得当场确认人看得见。
+  void _ensureOnStage(String? module, {bool throttle = false}) {
+    if (!visual) return;
+    // 全局槽上的活儿（导入）还没有任务可跳，状态显示在任务列表页上
+    if (taskId == globalPresenceSlot) return;
+    if (throttle) {
+      final now = DateTime.now();
+      if (now.difference(_lastCheckedAt) < const Duration(seconds: 1)) return;
+      _lastCheckedAt = now;
+    }
+    // 没指定模块的步骤（导出、剪映草稿这类整片的活儿）只问到「在这条任务上」
+    // 就够——去编导台还是工作台由界面按任务类型自己选
+    final where = readUiWhere(dataDir);
+    final onScene = module == null
+        ? where?.isOnTask(taskId) == true
+        : where?.isOn(module: module, taskId: taskId) == true;
+    if (onScene) return;
+    // 已经叫过、它还没取走：**它在路上，不是不肯来**。重复写只是把同一条
+    // 覆盖一遍；界面没开时更是每一步都白写一次
+    if (hasPendingUiWake(dataDir)) return;
+    // 取走了但还没报到：多半正在跳转（关掉旧页、开新页要几百毫秒）。
+    // 这几百毫秒里再叫一次，界面就会把刚开到一半的页面再销毁重建一次——
+    // 人看到的正是那个挨过骂的「画面弹回第一行」
+    // 只对**同一个去处**留宽限：换模块是新的目的地，要立刻带过去
+    if (module == _lastWakeModule &&
+        DateTime.now().difference(_lastWakeAt) < _settleTime) {
+      return;
+    }
+    _lastWakeModule = module;
+    _lastWakeAt = DateTime.now();
+    writeUiWake(dataDir, taskId, review: module == 'review', module: module);
+  }
+
   Future<void> show(String action,
       {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) async {
     if (!visual) return;
-    // 换模块了就唤醒界面把人带过去——它可能停在任务列表、也可能停在
-    // 另一个模块。跨模块跳转走唤醒文件，模块内部的定位走在场状态
-    final module = focus?.module;
-    // 全局槽上的活儿（导入）还没有任务可跳——只把软件拉起来，
-    // 状态显示在任务列表页上
-    if (taskId != globalPresenceSlot &&
-        module != null &&
-        module != _lastModule) {
-      _lastModule = module;
-      writeUiWake(dataDir, taskId, review: module == 'review', module: module);
-    }
+    _ensureOnStage(focus?.module);
     _step++;
     writeAgentPresence(
       dataDir: dataDir,
@@ -152,6 +200,33 @@ class AgentStage {
   void heartbeat(String action,
       {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) {
     if (!visual) return;
+    // 配音、导出这类活儿一跑几分钟，中途人可能自己退出去了——
+    // 心跳也要确认现场，不然「回来看看」就再也回不来
+    _ensureOnStage(focus?.module, throttle: true);
+    writeAgentPresence(
+      dataDir: dataDir,
+      taskId: taskId,
+      presence: AgentPresence(
+        holder: holder,
+        at: DateTime.now(),
+        action: action,
+        step: _step,
+        kind: kind,
+        focus: focus,
+      ),
+    );
+  }
+
+  /// 报一句「我在干什么」——**两种模式都写**。
+  ///
+  /// 静默模式下人也可能正开着这一页：他至少该知道有东西在动他的任务，
+  /// 而不是眼看着数据自己变。可视模式下等同 [heartbeat]（顺带确认现场）。
+  ///
+  /// 有了它，调用方不必再各写一遍「可视走 stage、静默裸写 presence」——
+  /// 那个重复此前散在四处，每多一处就多一个漏掉焦点的机会。
+  void note(String action,
+      {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) {
+    if (visual) return heartbeat(action, focus: focus, kind: kind);
     writeAgentPresence(
       dataDir: dataDir,
       taskId: taskId,
@@ -176,15 +251,11 @@ class AgentStage {
   Future<void> _launchApp({String? module}) async {
     if (_appLaunched) return;
     _appLaunched = true;
-    _lastModule = module;
     try {
       // 「去哪个任务」走唤醒文件而不是 --args：启动参数只在冷启动时生效，
       // app 已经在跑时会被静默丢弃（`open` 命令那边真机撞到过——再点一次
       // 只是把窗口调到前台，什么都不发生）。文件冷热启动一条路
-      if (taskId != globalPresenceSlot) {
-        writeUiWake(dataDir, taskId,
-            review: module == 'review', module: module);
-      }
+      _ensureOnStage(module);
       final failure = await launchApp(run: _run, exists: appExists);
       if (failure != null) {
         AppLog.warn('拉起 app 失败（可视模式退化成静默）：$failure');

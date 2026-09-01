@@ -14,6 +14,7 @@ import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/tasks_watch.dart';
 import '../../core/storage/ui_wake.dart';
+import '../../core/storage/ui_where.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
 import '../../app/theme/app_spacing.dart';
@@ -97,13 +98,59 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// `ishkafel review`，app 只是亮了一下，什么都没发生。文件冷热启动一条路
   Timer? _wakeTimer;
   bool _handlingWake = false;
-  String? _reviewOpenFor;
 
   /// 现在停在哪个模块的哪条任务上（'director' / 'workbench'）。
   /// **用来判断「已经在这一页了」**——Agent 每条命令都会唤醒一次，
   /// 不判断就每次都把页面销毁重建，视图弹回第一行
+  /// **界面此刻停在哪个模块、哪条任务。**
+  ///
+  /// 所有进入工作页的路径都要经过 [_enterModule] 记在这里，一条都不能漏：
+  /// 漏掉的那条路进去之后，Agent 读到的还是「人在任务列表」，于是每一步
+  /// 都发唤醒把页面销毁重建——人看到的是画面不停地弹回第一行。
   String? _openedModule;
   String? _openedTaskFor;
+
+  /// 进一个模块，**并把「界面在哪」记准**。
+  ///
+  /// 记账和跳转必须绑在一起：分开写就一定会有人只写跳转（原来那四条
+  /// 人工路径正是如此）。
+  Future<Object?> _enterModule(
+      String module, String taskId, Widget page) async {
+    _openedModule = module;
+    _openedTaskFor = taskId;
+    try {
+      return await Navigator.of(context)
+          .push<Object?>(MaterialPageRoute(builder: (_) => page));
+    } finally {
+      _openedModule = null;
+      _openedTaskFor = null;
+    }
+  }
+
+  /// 把「界面停在哪一页」写给 CLI 看。
+  ///
+  /// Agent 每走一步都读它来判断「人此刻看得见吗」——看不见就先把界面
+  /// 带过去，再动手。没有这一份，可视模式就退化成「换了个地方显示的日志」：
+  /// 横幅一句句念「正在给第 10 句配音」，而界面停在任务列表，
+  /// 二十句没有一格出现在屏幕上（真机上就是这么发生的）。
+  String? _wroteWhere;
+  DateTime _wroteWhereAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _reportWhere() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final module = _openedModule ?? 'tasks';
+    final key = '$module/$_openedTaskFor';
+    // 换页了就**立刻**写——Agent 正等着知道人去哪了；没换就按心跳节奏，
+    // 别为了一份没变的内容每 700 毫秒写一次盘
+    if (key == _wroteWhere &&
+        DateTime.now().difference(_wroteWhereAt) < UiWhere.beatEvery) {
+      return;
+    }
+    _wroteWhere = key;
+    _wroteWhereAt = DateTime.now();
+    writeUiWhere(dataDir, module: module, taskId: _openedTaskFor);
+  }
 
   /// Agent 在干不属于任何一个任务的活儿（导入、批处理）。
   ///
@@ -118,6 +165,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
   void _startWakeWatcher() {
     _wakeTimer ??= Timer.periodic(const Duration(milliseconds: 700), (_) {
+      _reportWhere();
       _pollWake();
       _pollGlobalAgent();
       _pollTasksChanged();
@@ -404,39 +452,20 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         // （验收时人在旁边看着，第一句话就是「怎么老往第一行跳」）。
         // 审核页早就这么防了，这两个模块漏了
         if (_openedModule == 'director' && _openedTaskFor == task.id) return;
-        _openedModule = 'director';
-        _openedTaskFor = task.id;
         Navigator.of(context).popUntil((r) => r.isFirst);
-        unawaited(Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => DirectorPage(task: task)))
-            .whenComplete(() {
-          _openedModule = null;
-          _openedTaskFor = null;
-        }));
+        unawaited(_enterModule('director', task.id, DirectorPage(task: task)));
       } else if (wake.module == 'workbench') {
         if (_openedModule == 'workbench' && _openedTaskFor == task.id) return;
-        _openedModule = 'workbench';
-        _openedTaskFor = task.id;
         Navigator.of(context).popUntil((r) => r.isFirst);
-        unawaited(Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)))
-            .whenComplete(() {
-          _openedModule = null;
-          _openedTaskFor = null;
-        }));
+        unawaited(_enterModule('workbench', task.id, WorkbenchPage(task: task)));
       } else if (wantsReview) {
         // 同一条任务的审核页已经开着时不再叠一层——Agent 重复跑 review
         // 只该把窗口带到前台
-        if (_reviewOpenFor == task.id) return;
-        _reviewOpenFor = task.id;
+        if (_openedModule == 'review' && _openedTaskFor == task.id) return;
         Navigator.of(context).popUntil((r) => r.isFirst);
         // 审核是把关，不进能改一切的工作台
-        unawaited(Navigator.of(context)
-            .push(
-              MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
-            )
-            .then((outcome) => _showReviewOutcome(outcome))
-            .whenComplete(() => _reviewOpenFor = null));
+        unawaited(_enterModule('review', task.id, ReviewPage(task: task))
+            .then(_showReviewOutcome));
       } else {
         Navigator.of(context).popUntil((r) => r.isFirst);
         unawaited(_openTask(context, ref, task));
@@ -513,9 +542,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     // 覆盖到。而 `ishkafel open` 那条路一直不崩——它先 popUntil 回
     // 列表页，同一时刻只有一个编导台。差别就在这儿
     Navigator.of(context).popUntil((r) => r.isFirst);
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
-    );
+    await _enterModule('director', task.id, DirectorPage(task: task));
     await ref.read(taskListProvider.notifier).reload();
   }
 
@@ -618,9 +645,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       BuildContext context, WidgetRef ref, RenewTask task) async {
     // 脚本任务没有原片、不走分析——直接进编导台，下面的检查全不适用
     if (task.isScript) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => DirectorPage(task: task)),
-      );
+      await _enterModule('director', task.id, DirectorPage(task: task));
       await ref.read(taskListProvider.notifier).reload();
       return;
     }
@@ -653,9 +678,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       _showSnackBar(context, '这条素材缺少可用的帧率信息，无法按帧切分，请重新导入转码后的文件。');
       return;
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => WorkbenchPage(task: task)),
-    );
+    unawaited(_enterModule('workbench', task.id, WorkbenchPage(task: task)));
   }
 
   /// 任务卡菜单：重命名 / 重新分析 / 删除（删除为破坏性操作，需二次确认）
@@ -670,10 +693,8 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       case TaskCardAction.review:
         // 人不靠 CLI 也能进审核页——Agent 挑完但人当时没看，之后随时补审
         if (context.mounted) {
-          final outcome = await Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => ReviewPage(task: task)),
-          );
-          _showReviewOutcome(outcome);
+          _showReviewOutcome(
+              await _enterModule('review', task.id, ReviewPage(task: task)));
         }
       case TaskCardAction.rename:
         final name = await promptRenameTask(context, task);

@@ -34,9 +34,16 @@ void main() {
         reason: 'ui tasks 是 Agent 敲的那一下');
   });
 
-  test('手册要写明撞锁是常态、出路在哪', () {
-    expect(agentSkillMarkdown, contains('ishkafel ui tasks'),
+  test('手册要写明撞锁是常态、不用自己去腾锁', () {
+    expect(agentSkillMarkdown, contains('自动请界面让位'),
         reason: '手册不说的话，Agent 撞上「正在操作这个任务」只能自己瞎试——'
-            '真机上它试的是「打开另一条任务」，那条路在只有一条任务时是死的');
+            '真机上它试过「打开另一条任务」（只有一条任务时是死的），'
+            '也试过 ui tasks 把界面支开（可视化现场就此关掉）');
+  });
+
+  test('手册要给出把界面叫回现场的入口', () {
+    expect(agentSkillMarkdown, contains('ishkafel ui open'),
+        reason: '只有把界面支开的命令、没有叫回来的命令，Agent 一旦支开'
+            '就再也回不到现场——后面几十步人一格都看不见');
   });
 }

@@ -119,18 +119,10 @@ Future<int> runScriptApplyCommand({
   );
   // 可视模式下这一句会把软件拉起来、落到这个任务、等界面真的展示完
   await stage.begin(_actionOf(what, payload), focus: _focusOf(what, payload));
+  // 静默模式下 begin 什么都不做，在场状态还是要写：
+  // 人可能正开着这一页，至少该知道有东西在动他的任务
   if (!stage.visual) {
-    // 静默模式也要写在场状态：万一人正开着界面，至少知道有东西在动它
-    writeAgentPresence(
-      dataDir: dataDir,
-      taskId: task.id,
-      presence: AgentPresence(
-        holder: holder ?? agentLockHolder,
-        at: DateTime.now(),
-        action: _actionOf(what, payload),
-        focus: _focusOf(what, payload),
-      ),
-    );
+    stage.note(_actionOf(what, payload), focus: _focusOf(what, payload));
   }
 
   try {
