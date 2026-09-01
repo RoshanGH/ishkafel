@@ -101,6 +101,13 @@ class LineBoardHandlers {
   final void Function(int index) onPickVoice;
   final void Function(int index, int rate) onSpeechRate;
   final void Function(int index) onGenerateVoice;
+
+  /// **用我自己录的配音**：选一个音频文件装到这一行上。
+  ///
+  /// 合成语音的情绪天花板就摆在那儿（预置音色、句与句之间没有上下文），
+  /// 原片那个人激动地在争吵，合成出来还是平的。人自己念，念成什么样
+  /// 就是什么样
+  final void Function(int index) onUploadVoice;
   final void Function(int index) onTogglePlayVoice;
   final void Function(int index, int segIndex) onPlayReference;
   final void Function(int index, int segIndex) onUseReference;
@@ -157,6 +164,7 @@ class LineBoardHandlers {
     required this.onPickVoice,
     required this.onSpeechRate,
     required this.onGenerateVoice,
+    required this.onUploadVoice,
     required this.onTogglePlayVoice,
     required this.onPlayReference,
     required this.onUseReference,
@@ -1866,6 +1874,26 @@ class _LineBand extends StatelessWidget {
         ),
       const Spacer(),
       const SizedBox(width: AppSpacing.sm),
+      // 「我自己录」和「生成配音」并排：合成不满意时，人直接把自己念的
+      // 那一段扔进来——这一行的时长、逐字时间、甚至台词都以那段录音为准
+      SizedBox(
+        height: 24,
+        child: Tooltip(
+          message: '用我自己录的这一句（时长与台词都以录音为准）',
+          child: TextButton.icon(
+            key: ValueKey('band-upload-voice-$index'),
+            onPressed: generating ? null : () => handlers.onUploadVoice(index),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+              foregroundColor: AppColors.textSecondary,
+              textStyle: const TextStyle(
+                  fontSize: AppFontSize.micro, fontWeight: FontWeight.w600),
+            ),
+            icon: const Icon(Icons.upload_file, size: 11),
+            label: const Text('我自己录'),
+          ),
+        ),
+      ),
       SizedBox(
         height: 24,
         child: TextButton.icon(

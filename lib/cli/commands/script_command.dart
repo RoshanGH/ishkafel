@@ -29,6 +29,7 @@ import '../search_modes.dart';
 import '../script_shot_context.dart';
 import 'script_apply_command.dart';
 import 'script_run_command.dart';
+import 'voice_file_command.dart';
 import '../script_view.dart';
 
 /// `ishkafel script <子命令> <任务>` —— 脚本成片这条线的只读入口。
@@ -87,6 +88,7 @@ Future<int> runScriptCommand({
         '  new <名字>                      建一个脚本任务\n'
         '  extract <任务> <参考视频>        识别台词，生成脚本行\n'
         '  voice <任务> [--line N]         生成配音\n'
+        '  voice-file <任务> --line N <音频>  用我自己录的配音（时长与台词都以它为准）\n'
         '  show <任务> [--line N]          任务全貌 / 单行详情\n'
         '  shots <任务> --line N           候选镜头与判断依据\n'
         '  subtitles <任务> --line N       断句材料\n'
@@ -121,6 +123,15 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         voiceId: voiceId,
+        out: out,
+        err: err,
+      );
+    case 'voice-file':
+      // 用我自己录的配音：时长、逐字时间、甚至台词都以这段录音为准
+      return runScriptVoiceFileCommand(
+        rest: rest.sublist(1),
+        dataDir: dataDir,
+        line: line,
         out: out,
         err: err,
       );

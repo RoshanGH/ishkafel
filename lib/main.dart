@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'app/app.dart';
 import 'core/ai/ai_credentials.dart';
+import 'core/ai/volcano_asr_provider.dart';
 import 'core/audio/bgm_cache_factory.dart';
 import 'core/storage/media_migration.dart';
 import 'core/storage/task_media.dart';
@@ -149,6 +150,18 @@ Future<void> main(List<String> args) async {
       dataDirProvider.overrideWithValue(dataDir),
       // 「生成配音」：凭据齐了才给工厂，否则工作台把按钮禁用并说明原因，
       // 而不是让用户点了之后撞一个网络错误
+      // 听一段上传的配音说了什么：和命令行那条路同一份实现
+      voiceWordsProvider.overrideWithValue(
+        credentials.speechAppId.isEmpty
+            ? null
+            : (audio) => transcribeVoiceWords(
+                  VolcanoAsrProvider(
+                    appId: credentials.speechAppId,
+                    accessToken: credentials.speechAccessToken,
+                  ),
+                  audio,
+                ),
+      ),
       voiceSwapFactoryProvider.overrideWithValue(defaultVoiceSwapFactory(
           credentials: credentials, dataDir: dataDir)),
       // 矩阵导出：真实 ffmpeg + 真实下载。素材缓存按任务分目录，

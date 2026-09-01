@@ -1,3 +1,7 @@
+import 'dart:io';
+
+import 'package:path/path.dart' as p;
+
 import 'script_doc.dart';
 
 /// 人自己录的配音，在音色这一栏里叫什么。
@@ -55,4 +59,21 @@ ScriptDoc applyUploadedVoice({
       words: words,
     ),
   );
+}
+
+
+/// 把人给的音频**收进任务名下**。
+///
+/// 他给的那个文件随时可能被移走、改名、删掉，而它现在是这一行的时间根
+/// ——留在外面等于把成片的地基放在别人家里。删任务时随 voices 目录一起清走。
+Future<File> keepUploadedVoice({
+  required File source,
+  required Directory dataDir,
+  required String taskId,
+  required String lineId,
+}) async {
+  final dir = Directory(p.join(dataDir.path, 'voices', taskId));
+  dir.createSync(recursive: true);
+  final ext = p.extension(source.path).toLowerCase();
+  return source.copy(p.join(dir.path, '${lineId}_mine$ext'));
 }

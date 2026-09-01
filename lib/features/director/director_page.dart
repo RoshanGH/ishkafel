@@ -25,6 +25,8 @@ import '../../core/script/preview_voice_normalizer.dart';
 import '../../core/script/script_cover.dart';
 import '../../core/script/playhead.dart';
 import '../../core/script/script_doc.dart';
+import '../../core/script/uploaded_voice.dart';
+import '../../core/script/script_service_wiring.dart';
 import '../../core/script/voice_sweep.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
@@ -1408,6 +1410,63 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   }
 
   /// 显式生成配音：设计稿定死——改字只标黄，点这里才调 API
+  /// **用我自己录的配音**：选一个音频装到这一行上。
+  ///
+  /// 这一行的时长、逐字时间、甚至台词都以这段录音为准——人已经念出来了，
+  /// 那就是事实。合成语音的情绪天花板摆在那儿，这是最后那条路。
+  Future<void> _uploadVoice(int index) async {
+    final picked = await ref.read(voiceFilePickerProvider)();
+    if (picked == null || !mounted) return;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final line = _doc.lines[index];
+    setState(() => _generatingLineIds.add(line.id));
+    try {
+      final kept = await keepUploadedVoice(
+          source: File(picked), dataDir: dataDir, taskId: _task.id, lineId: line.id);
+      final durationMs = await measureAudioMs(kept);
+      if (durationMs <= 0) {
+        _toast('这个音频读不出时长，可能不是能用的音频文件。');
+        return;
+      }
+      // 逐字时间是断句和字幕打轴的依据。听不出来只影响这两样，
+      // **不该挡住「用我自己的配音」这件事**——但要说出来
+      var words = const <VoiceWord>[];
+      var heard = '';
+      final asr = ref.read(voiceWordsProvider);
+      if (asr == null) {
+        _toast('没配语音服务，听不出这段说了什么——时长照用，但断不了句。');
+      } else {
+        try {
+          words = await asr(kept);
+          heard = words.map((w) => w.text).join();
+        } catch (e) {
+          AppLog.warn('上传配音转写失败（line=${line.id}）：$e');
+          _toast('这段录音没听清——时长照用，但断不了句。');
+        }
+      }
+      if (!mounted) return;
+      final before = line.text.trim();
+      _mutate((d) => applyUploadedVoice(
+            doc: d,
+            lineIndex: index,
+            audioPath: kept.path,
+            durationMs: durationMs,
+            words: words,
+            heardText: heard,
+          ));
+      final after = _doc.lines[index].text.trim();
+      if (after != before) {
+        // 悄悄把台词换掉，人回头看脚本会以为自己记错了
+        _toast('台词按你录的改了：「$after」');
+      }
+    } catch (e) {
+      if (mounted) _toast('这段配音没装上：$e');
+    } finally {
+      if (mounted) setState(() => _generatingLineIds.remove(line.id));
+    }
+  }
+
   Future<void> _generateVoice(int index) async {
     final factory = ref.read(lineVoiceFactoryProvider);
     if (factory == null) {
@@ -3265,6 +3324,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                             '点这一行的「重新生成」才会按新语速配音。');
                       },
                       onGenerateVoice: _generateVoice,
+                      onUploadVoice: _uploadVoice,
                       onTogglePlayVoice: _togglePlayVoice,
                       onPlayReference: _playReference,
                       onUseReference: _useReference,

@@ -1,3 +1,4 @@
+import '../../core/script/script_doc.dart';
 import '../settings/settings_providers.dart';
 import '../../core/miaoa/query_frame_uploader.dart';
 import '../../core/miaoa/miaoa_gateway.dart';
@@ -42,6 +43,26 @@ Future<String?> pickRefFile() async {
   final file = await openFile(acceptedTypeGroups: const [video, image]);
   return file?.path;
 }
+
+/// 挑一个自己录的配音文件。
+///
+/// 合成语音的情绪天花板就摆在那儿，人自己念是最后那条路——所以这个入口
+/// 要能收常见的录音格式，而不是只认一种
+typedef VoiceFilePicker = Future<String?> Function();
+final voiceFilePickerProvider =
+    Provider<VoiceFilePicker>((ref) => pickVoiceFile);
+
+Future<String?> pickVoiceFile() async {
+  const audio = XTypeGroup(
+      label: '配音', extensions: ['mp3', 'm4a', 'wav', 'aac', 'caf', 'mp4']);
+  final file = await openFile(acceptedTypeGroups: const [audio]);
+  return file?.path;
+}
+
+/// 听一段音频说了什么（词级时间戳）。**null = 这台机器没配语音服务**——
+/// 那样上传的配音只有时长可用，断不了句
+typedef VoiceWordsReader = Future<List<VoiceWord>> Function(File audio);
+final voiceWordsProvider = Provider<VoiceWordsReader?>((ref) => null);
 
 /// 参考视觉镜头打标（多帧 vision，一次给标签 + 画面描述——与 U 层
 /// 视觉镜头打标同一个 ShotTagger）。null = 方舟凭据缺失
