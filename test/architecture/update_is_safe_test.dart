@@ -9,6 +9,9 @@ void main() {
     final src = File('lib/core/update/update_config.dart').readAsStringSync();
     expect(src, contains('UPDATE_TOS_AK'),
         reason: '包私有存放，靠只读凭据现换预签名链接');
+    expect(src.contains('UPDATE_MANIFEST_URL'), isFalse,
+        reason: '清单也走预签名读：app 本来就带着钥匙，'
+            '再维护一个公开地址等于多一处要操心 ACL 的地方');
     final signer = File('lib/core/update/tos_signer.dart').readAsStringSync();
     expect(signer, contains('presignGet'),
         reason: '没有预签名就只能公开读，等于把方舟 key 发出去');
@@ -34,6 +37,26 @@ void main() {
     final card = File('lib/features/settings/update_card.dart').readAsStringSync();
     expect(card, contains('showDialog'),
         reason: '破坏性操作要确认，这是写进 CLAUDE.md 的');
+  });
+
+  test('发布不依赖外部命令行工具——本机装没装都能发', () {
+    expect(File('tool/publish_release.dart').existsSync(), isTrue);
+    final src = File('tool/publish_release.dart').readAsStringSync();
+    expect(src, contains('presignPut'));
+    expect(src.contains('Process.run'), isFalse,
+        reason: '要求先装一个命令行工具才能发版，早晚有一次发不出去');
+    expect(src.contains('Process.start'), isFalse);
+    expect(src.indexOf("_put(signer, key"),
+        lessThan(src.indexOf('_manifestKey()')),
+        reason: '先传包后传清单——反了的话清单已经指向新版本而包还没上去，'
+            '这中间点更新的人会下到 404');
+  });
+
+  test('发布用的可写凭据不进产物', () {
+    final build = File('scripts/build_macos.sh').readAsStringSync();
+    expect(build.contains('update_tos_ak_write'), isFalse,
+        reason: 'app 里只该有读权限——写凭据进了产物，'
+            '拿到包的人就能往发布目录里塞东西');
   });
 
   test('升级后 CLI 与说明书要跟上同一版', () {

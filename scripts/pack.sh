@@ -24,6 +24,16 @@ fi
 ./scripts/build_macos.sh --release
 ./scripts/package_macos.sh
 
+# 配了自动更新的落点就顺手发布：别人下次打开设置就能看到更新提示。
+# **没配就跳过**，不打断打包流程——这一步是可选的
+if [ -f .secrets/update_tos_ak_write ]; then
+  echo
+  echo "正在发布到对象存储…"
+  if ! dart run tool/publish_release.dart; then
+    echo "发布失败——包已经打好了，修完再单独跑：dart run tool/publish_release.dart" >&2
+  fi
+fi
+
 # 打完包顺手把跑着的换成新版本。
 #
 # **不能只 open**：macOS 对已经在跑的 app 只是激活窗口、不加载新二进制，

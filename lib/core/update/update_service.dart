@@ -95,7 +95,11 @@ class UpdateService {
   }) async {
     if (!UpdateConfig.enabled) return null;
     try {
-      final raw = await (fetch ?? _fetch)(UpdateConfig.manifestUrl);
+      // 清单也私有：用同一对只读凭据换一条短效链接。有效期给得很短——
+      // 它只是拿来读一次的
+      final url = _signer.presignGet(UpdateConfig.manifestKey,
+          ttl: const Duration(minutes: 5));
+      final raw = await (fetch ?? _fetch)(url);
       if (raw == null) return null;
       final m = ReleaseManifest.tryParse(raw);
       if (m == null) {

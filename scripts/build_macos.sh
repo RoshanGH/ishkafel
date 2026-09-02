@@ -42,7 +42,6 @@ read_optional() {
   local file="$SECRETS/$1"
   [[ -f "$file" ]] && tr -d '[:space:]' < "$file" || echo ""
 }
-UP_URL="$(read_optional update_manifest_url)"
 UP_REGION="$(read_optional update_tos_region)"
 UP_BUCKET="$(read_optional update_tos_bucket)"
 UP_ENDPOINT="$(read_optional update_tos_endpoint)"
@@ -55,7 +54,6 @@ flutter build macos "$MODE" \
   --dart-define=ARK_API_KEY="$ARK" \
   --dart-define=SPEECH_APP_ID="$APP_ID" \
   --dart-define=SPEECH_ACCESS_TOKEN="$TOKEN" \
-  --dart-define=UPDATE_MANIFEST_URL="$UP_URL" \
   --dart-define=UPDATE_TOS_REGION="$UP_REGION" \
   --dart-define=UPDATE_TOS_BUCKET="$UP_BUCKET" \
   --dart-define=UPDATE_TOS_ENDPOINT="$UP_ENDPOINT" \

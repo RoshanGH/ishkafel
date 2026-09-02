@@ -36,6 +36,23 @@ class TosSigner {
     String objectKey, {
     Duration ttl = const Duration(minutes: 30),
     DateTime? now,
+  }) =>
+      presign('GET', objectKey, ttl: ttl, now: now);
+
+  /// 上传链接。**只有发布脚本用**——app 里带的那对凭据只该有读权限，
+  /// 拿它签出来的 PUT 会被服务端拒掉，这正是我们要的
+  String presignPut(
+    String objectKey, {
+    Duration ttl = const Duration(minutes: 30),
+    DateTime? now,
+  }) =>
+      presign('PUT', objectKey, ttl: ttl, now: now);
+
+  String presign(
+    String method,
+    String objectKey, {
+    Duration ttl = const Duration(minutes: 30),
+    DateTime? now,
   }) {
     final at = (now ?? DateTime.now().toUtc()).toUtc();
     final stamp = _iso8601(at);
@@ -57,7 +74,7 @@ class TosSigner {
         .join('&');
 
     final canonicalRequest = [
-      'GET',
+      method,
       canonicalUri,
       canonicalQuery,
       'host:$host\n',

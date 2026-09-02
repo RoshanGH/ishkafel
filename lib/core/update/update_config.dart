@@ -4,10 +4,10 @@
 /// 没配就整个功能关掉：`enabled` 为 false 时界面上不出现任何更新入口——
 /// 不能让人看到一个「检查更新」按钮，点下去永远说「网络不通」。
 class UpdateConfig {
-  /// 清单地址：一个**公开可读**的小 JSON，只有版本号、指纹、更新说明，
-  /// 没有下载地址。包本身是私有的，地址由 app 现换预签名链接
-  static const manifestUrl =
-      String.fromEnvironment('UPDATE_MANIFEST_URL');
+  /// 清单在 bucket 里的对象键。**它也是私有的**——app 本来就带着只读凭据，
+  /// 用同一把钥匙去读清单，就不用再维护一个公开地址、也不用操心 ACL
+  static const manifestKey = String.fromEnvironment('UPDATE_TOS_MANIFEST_KEY',
+      defaultValue: 'latest.json');
 
   static const region = String.fromEnvironment('UPDATE_TOS_REGION');
   static const bucket = String.fromEnvironment('UPDATE_TOS_BUCKET');
@@ -22,7 +22,6 @@ class UpdateConfig {
   static const secretKey = String.fromEnvironment('UPDATE_TOS_SK');
 
   static bool get enabled =>
-      manifestUrl.isNotEmpty &&
       region.isNotEmpty &&
       bucket.isNotEmpty &&
       endpoint.isNotEmpty &&
@@ -32,7 +31,6 @@ class UpdateConfig {
   /// 没配全时说清缺哪一项——排查时不用去翻构建脚本
   static String get missingHint {
     final missing = [
-      if (manifestUrl.isEmpty) 'UPDATE_MANIFEST_URL',
       if (region.isEmpty) 'UPDATE_TOS_REGION',
       if (bucket.isEmpty) 'UPDATE_TOS_BUCKET',
       if (endpoint.isEmpty) 'UPDATE_TOS_ENDPOINT',
