@@ -1,0 +1,49 @@
+/// **这个任务还欠打标吗。**
+///
+/// 打标是切分落库之后转入后台跑的（让人 26 秒就能进去看切分，不用等占七成
+/// 时长的打标）。这个优化本身是对的，错在它只做了乐观路径：**app 一关，
+/// 打标就永久丢了**——任务状态已经是 ready，看起来一切正常，没有任何地方
+/// 记得它还欠着，界面也不提示。人看到的是「上传完视频，进去发现没标签」，
+/// 而且找不到原因（真机上就这么丢过一次：35 个镜头一个标签都没有）。
+///
+/// 判据用**画面描述**而不是标签：AI 打过标一定会写一句描述，而标签可能
+/// 本来就一个都不合适（那是打过的合法结果）。描述空 = 这一镜没被看过。
+library;
+
+import '../models/renew_task.dart';
+import '../models/semantic_unit.dart';
+import '../models/shot.dart';
+
+/// 这一镜被看过了吗
+bool shotTagged(Shot shot) => (shot.description ?? '').trim().isNotEmpty;
+
+/// 这个单元里还有几镜没被看过
+List<int> untaggedShotIndexes(SemanticUnit unit) => [
+      for (var i = 0; i < unit.shots.length; i++)
+        if (!shotTagged(unit.shots[i])) i,
+    ];
+
+/// 哪些单元还欠打标（下标，升序）。
+///
+/// 只要单元里有一镜没被看过，整个单元就要重打——打标是按单元发起的，
+/// 单元标签和镜头标签一起出
+Set<int> unitsPendingTagging(RenewTask task) {
+  final units = task.units;
+  if (units == null || units.isEmpty) return const {};
+  // 空白任务没有原片，镜头是从素材拼出来的，标签本来就是手填的
+  if (task.isBlank) return const {};
+  return {
+    for (var i = 0; i < units.length; i++)
+      if (units[i].shots.isEmpty
+          ? units[i].tags.isEmpty
+          : untaggedShotIndexes(units[i]).isNotEmpty)
+        i,
+  };
+}
+
+/// 这个任务欠不欠打标。**只看已经切分完的任务**——还在分析中的不算，
+/// 那是正常进行中
+bool needsTagging(RenewTask task) =>
+    task.status == RenewTaskStatus.ready &&
+    task.analysisError == null &&
+    unitsPendingTagging(task).isNotEmpty;

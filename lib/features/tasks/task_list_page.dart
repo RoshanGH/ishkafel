@@ -18,6 +18,7 @@ import '../../core/storage/ui_where.dart';
 import '../../core/update/release_manifest.dart';
 import '../../core/update/update_service.dart';
 import '../update/update_dialog.dart';
+import 'tagging_resumer.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
 import '../../app/theme/app_spacing.dart';
@@ -80,6 +81,35 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 弹回去，等于出不来。
   bool _jumpedToInitialTask = false;
 
+  /// 正在补哪条任务的标签。**软件自己干的活要在界面上说**——
+  /// 不许占 Agent 那条播报通道，占了人就分不清是谁在动手
+  TaggingProgress? _tagging;
+  bool _leaving = false;
+
+  /// **把上次没打完的标补上。**
+  ///
+  /// 打标是切分落库之后转后台跑的，app 一关就永久丢了（真机上丢过一次：
+  /// 35 个镜头一个标签都没有，而界面什么都不说）。这不是替人做决定——
+  /// 打标本来就是他上传视频时同意的那趟分析的一部分，只是没跑完
+  Future<void> _resumePendingTagging() async {
+    final tagging = ref.read(taggingServiceProvider);
+    if (tagging == null) return;
+    final fixed = await TaggingResumer(
+      repository: ref.read(taskRepositoryProvider),
+      tagging: tagging,
+    ).resumeAll(
+      onProgress: (p) {
+        if (mounted) setState(() => _tagging = p);
+      },
+      shouldStop: () => _leaving || !mounted,
+    );
+    if (!mounted || fixed == 0) return;
+    await ref.read(taskListProvider.notifier).reload();
+    if (mounted) {
+      _showSnackBar(context, '补上了 $fixed 条片子没打完的标签。');
+    }
+  }
+
   /// 查到的新版本。**提示要摆在人看得见的地方**——只放在设置页里的话，
   /// 人不会天天进去看，等于这个提示不存在
   ReleaseManifest? _newRelease;
@@ -111,6 +141,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     _startWakeWatcher();
     unawaited(_catchUpAfterUpgrade());
     unawaited(_checkUpdate());
+    unawaited(_resumePendingTagging());
     final id = ref.read(initialTaskIdProvider);
     if (id == null || _jumpedToInitialTask) return;
     _jumpedToInitialTask = true;
@@ -515,6 +546,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
   @override
   void dispose() {
+    _leaving = true;
     _wakeTimer?.cancel();
     _lifecycle.dispose();
     super.dispose();
@@ -856,6 +888,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       body: Column(
         children: [
           const EnvironmentBanners(),
+          // 软件自己在补活儿：说清在补哪一条、到第几个
+          if (_tagging case final t?)
+            NoticeBanner(
+              icon: Icons.sell_outlined,
+              color: AppColors.accentBlue,
+              message: '正在补「${t.taskName}」的标签'
+                  '${t.total > 0 ? '（${t.done}/${t.total} 个单元）' : ''}'
+                  '——上次没打完，接着打。',
+            ),
           // Agent 在干没有任务归属的活儿（导入）：这几秒里界面必须说话
           if (_globalAgent != null)
             NoticeBanner(
