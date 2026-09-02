@@ -13,6 +13,7 @@ import 'package:ishkafel/features/director/scroll_into_view.dart';
 /// 人看到的是：播报条一直说着「正在给第 11 行找镜头」，画面停在第 1 行
 /// 纹丝不动。可视模式于是退化成一条日志，而它本该是这个软件最值钱的部分。
 void main() {
+  mainStable();
   group('粗滚：把没构建的那一行带进视口', () {
     test('等分估落点', () {
       expect(
@@ -118,6 +119,67 @@ void main() {
           reason: '滚过来的同时要有发光把人眼带过去');
       expect(src, contains('agentFocused: focusLineIndex == i'),
           reason: '光有样式没接上焦点，等于没有');
+    });
+  });
+}
+
+/// **同一行上不许反复滚。**
+///
+/// Agent 在一行上会连着播好几条（找镜头 → 看参考片画面 → 搜到候选 →
+/// 提交），焦点一直是这一行、只有动作在变。此前每一条都触发一次「粗滚」，
+/// 而粗滚按平均行高估位置——行高其实差得远（一行可能挂着 9 个镜头卡片），
+/// 估出来的落点比真实位置偏上一大截。于是精调刚把这一行对准，下一条播报
+/// 又把画面拽回估算点，来回弹。
+///
+/// 产品负责人看到的：「它会不停地从这一行跳到第一行，不能稳定地像人的操作
+/// 一样稳定在它操作的这一行上。」判据是：**Agent 从第 1 行做到第 27 行，
+/// 界面应该往下走 27 次，不是上下弹一百次。**
+void mainStable() {
+  group('稳定停在它操作的那一行', () {
+    testWidgets('那一行已经构建出来了：粗滚不出手，交给精调', (tester) async {
+      final controller = ScrollController();
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            height: 300,
+            child: ListView.builder(
+              controller: controller,
+              itemCount: 25,
+              itemBuilder: (context, i) =>
+                  SizedBox(height: 100, child: Text('第 $i 行')),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      // 精调已经把第 8 行摆到了眼前（真实位置，比等分估算靠下）
+      controller.jumpTo(760);
+      await tester.pumpAndSettle();
+
+      ensureIndexVisible(
+          controller: controller, index: 8, count: 25, alreadyBuilt: true);
+      await tester.pumpAndSettle(const Duration(seconds: 1));
+
+      expect(controller.offset, 760,
+          reason: '这一行已经在树上，粗滚的活儿早干完了——'
+              '再按估算滚一次只会把对准的画面拽回去');
+    });
+
+
+    test('编导台真的只在换行时滚——不是光有能力没接上', () {
+      final src =
+          File('lib/features/director/director_page.dart').readAsStringSync();
+      expect(src, contains('_scrolledTo != focus.lineIndex'),
+          reason: '同一行上的后续播报再滚一次，就会把精调对准的画面拽回估算点');
+      expect(src, contains('alreadyBuilt: _builtRows.has'),
+          reason: '已经在树上的行由它自己精确对齐，粗滚不该插手');
+      expect(src, contains('_scrolledTo = null'),
+          reason: 'Agent 走了要清掉，下次回来重新对齐一次');
+    });
+
+    test('没构建出来的行，粗滚照旧出手', () {
+      // alreadyBuilt 为 false 时行为不变：把它带进构建范围是粗滚的唯一职责
+      expect(estimateOffsetFor(index: 12, count: 25, maxExtent: 2400), 1200);
     });
   });
 }

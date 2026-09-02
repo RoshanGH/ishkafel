@@ -202,6 +202,10 @@ class LineBoard extends StatelessWidget {
   /// 给了就压过 [previewLineIndex]——人得看见 Agent 正在动哪一行
   final int? focusLineIndex;
 
+  /// 登记哪些行已经在树上——粗滚据此决定要不要为某一行出手
+  /// （已经构建出来的行，位置由它自己精确对齐，粗滚再插手就会把画面拽回去）
+  final BuiltRows? builtRows;
+
   /// 正在原位播放的卡（'ref_行id' / 'shot_行id_镜下标'）与共享播放器
   /// 画面——谁在播，画面就挂到谁的卡上
   final String? inlineKey;
@@ -224,6 +228,7 @@ class LineBoard extends StatelessWidget {
     required this.playingLineId,
     this.previewLineIndex,
     this.focusLineIndex,
+    this.builtRows,
     this.searchingLineIndex,
     this.inlineKey,
     this.inlineVideo,
@@ -242,6 +247,8 @@ class LineBoard extends StatelessWidget {
       itemBuilder: (context, i) => ScrollIntoView(
         key: ValueKey('band-${doc.lines[i].id}'),
         active: i == (focusLineIndex ?? previewLineIndex),
+        index: i,
+        registry: builtRows,
         child: _LineBand(
           index: i,
           line: doc.lines[i],

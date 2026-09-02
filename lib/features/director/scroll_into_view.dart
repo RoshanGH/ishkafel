@@ -12,9 +12,30 @@ import 'package:flutter/material.dart';
 /// 只做前一半的后果，真机上是这样的：右栏一屏放得下三四行卡片，Agent 从
 /// 第 1 行做到第 25 行，界面在第 4 行之后就再也不动了。播报条一直在说
 /// 「正在给第 11 行找镜头」，画面停在第 1 行——**可视模式退化成一条日志**。
+/// 此刻**真的在树上**的那些行。
+///
+/// 粗滚（[ensureIndexVisible]）的唯一职责是「把还没构建的行带进构建范围」。
+/// 已经构建出来的行，位置由行自己精确对齐——这时粗滚再按平均行高估一个
+/// 落点滚过去，只会把已经对准的画面拽回去（真机上就是那个「不停从这一行
+/// 跳回第一行」）。
+class BuiltRows {
+  final Set<int> _rows = <int>{};
+
+  void mark(int index) => _rows.add(index);
+  void unmark(int index) => _rows.remove(index);
+  bool has(int index) => _rows.contains(index);
+  void clear() => _rows.clear();
+}
+
 class ScrollIntoView extends StatefulWidget {
   final bool active;
   final Widget child;
+
+  /// 这是第几行。给了 [registry] 才有意义
+  final int? index;
+
+  /// 登记「我已经在树上了」，让粗滚知道不用为这一行出手
+  final BuiltRows? registry;
 
   /// 停在视口的哪个位置（0 = 顶，1 = 底）
   final double alignment;
@@ -23,6 +44,8 @@ class ScrollIntoView extends StatefulWidget {
     super.key,
     required this.active,
     required this.child,
+    this.index,
+    this.registry,
     this.alignment = 0.25,
   });
 
@@ -34,14 +57,25 @@ class _ScrollIntoViewState extends State<ScrollIntoView> {
   @override
   void initState() {
     super.initState();
+    if (widget.index != null) widget.registry?.mark(widget.index!);
     // 刚被建出来就已经是焦点：多半是外面粗滚把它带进了构建范围，
     // 这一下负责精确对齐
     if (widget.active) _reveal();
   }
 
   @override
+  void dispose() {
+    if (widget.index != null) widget.registry?.unmark(widget.index!);
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(ScrollIntoView old) {
     super.didUpdateWidget(old);
+    if (old.index != widget.index) {
+      if (old.index != null) old.registry?.unmark(old.index!);
+      if (widget.index != null) widget.registry?.mark(widget.index!);
+    }
     if (widget.active && !old.active) _reveal();
   }
 
@@ -80,7 +114,12 @@ void ensureIndexVisible({
   required ScrollController controller,
   required int index,
   required int count,
+
+  /// 这一行**已经在树上**了吗。是的话粗滚不出手：它的位置由行自己
+  /// 精确对齐，按平均行高估一个落点滚过去只会把对准的画面拽回去
+  bool alreadyBuilt = false,
 }) {
+  if (alreadyBuilt) return;
   if (!controller.hasClients) return;
   final position = controller.position;
   final target = estimateOffsetFor(

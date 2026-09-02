@@ -1044,6 +1044,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     }));
   }
 
+  /// 上一次为哪一行滚过。**同一行上的后续播报不再滚**——它在这一行做十件
+  /// 事，界面就稳稳停在这一行，跟人自己操作时一样
+  int? _scrolledTo;
+
+  /// 哪些行此刻真的在树上：粗滚只为没构建的行出手
+  final BuiltRows _builtRows = BuiltRows();
+
   /// 订阅 Agent 的在场状态。
   ///
   /// 用轮询而不是文件监听：这份文件是**另一个进程**写的，macOS 上的文件
@@ -1082,14 +1089,25 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                       focus.shotIndex != null
                   ? (focus.lineIndex, focus.shotIndex!)
                   : null;
-          // **先粗滚过去，那一行才建得出来**。右栏一屏只放得下三四行卡片，
-          // ListView 又是懒构建的：焦点落在第 11 行时它压根不在树上，
-          // 行内那个「滚到眼前」等不到任何回调——Agent 一过第 4 行，
-          // 界面就再也不动了，可视模式退化成一条播报（真机上就是这样）
-          ensureIndexVisible(
-              controller: _boardScroll,
-              index: focus.lineIndex,
-              count: _doc.lines.length);
+          // **只在换行时滚，而且只为「还没构建出来的行」出手。**
+          //
+          // 先粗滚才建得出那一行：右栏一屏放得下三四行，ListView 是懒构建
+          // 的，焦点落在第 11 行时它压根不在树上，行内那个「滚到眼前」等不
+          // 到任何回调——Agent 一过第 4 行界面就再也不动了。
+          //
+          // 但粗滚按**平均行高**估落点，而行高差得远（一行可能挂着 9 个镜头
+          // 卡片）。Agent 在同一行上会连着播好几条（找镜头 → 看参考片画面 →
+          // 搜到候选 → 提交），每条都滚一次的话，精调刚把这一行对准，下一条
+          // 就把画面拽回估算点——人看到的是「不停地从这一行跳回第一行」，
+          // 盯不住它在哪儿干活，可视化最要紧的那件事就没了。
+          if (_scrolledTo != focus.lineIndex) {
+            _scrolledTo = focus.lineIndex;
+            ensureIndexVisible(
+                controller: _boardScroll,
+                index: focus.lineIndex,
+                count: _doc.lines.length,
+                alreadyBuilt: _builtRows.has(focus.lineIndex));
+          }
         }
       });
       // **等这一帧真的画出来再回执**：Agent 靠它决定什么时候走下一步。
@@ -1097,6 +1115,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (now != null && now.step > 0) _ackAfterPainted(now.step);
       // 它干完走了：把它改的东西载进来——不载的话人随手一改就把它的活覆盖了
       if (leaving) {
+        // 它走了：下次再来时重新对齐一次（人这期间可能自己滚到别处了）
+        _scrolledTo = null;
         // 让出去的锁要收回来，不然人接着改，改到保存那一下才发现写不进去
         if (_yieldedToAgent) {
           _yieldedToAgent = false;
@@ -3292,6 +3312,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     playingLineId: _playingLineId,
                     previewLineIndex: _previewLineIndex,
                     focusLineIndex: _agent?.focus?.lineIndex,
+                    builtRows: _builtRows,
                     // 「正在给这一行找镜头」：那一步是纯检索，要过一会儿
                     // 才有东西填进来。不给个动静的话，人看到的是播报在
                     // 热火朝天地报「找到 946 条」，而界面一动不动
