@@ -1,0 +1,44 @@
+/// 自动更新的落点配置。**编译期注入**，和 AI 凭据同一条路
+/// （`scripts/build_macos.sh` 从 `.secrets/` 读）。
+///
+/// 没配就整个功能关掉：`enabled` 为 false 时界面上不出现任何更新入口——
+/// 不能让人看到一个「检查更新」按钮，点下去永远说「网络不通」。
+class UpdateConfig {
+  /// 清单地址：一个**公开可读**的小 JSON，只有版本号、指纹、更新说明，
+  /// 没有下载地址。包本身是私有的，地址由 app 现换预签名链接
+  static const manifestUrl =
+      String.fromEnvironment('UPDATE_MANIFEST_URL');
+
+  static const region = String.fromEnvironment('UPDATE_TOS_REGION');
+  static const bucket = String.fromEnvironment('UPDATE_TOS_BUCKET');
+  static const endpoint = String.fromEnvironment('UPDATE_TOS_ENDPOINT');
+
+  /// **只读**凭据：只该有这一个 bucket 的 GetObject 权限。
+  ///
+  /// 它和别的凭据一样明文躺在二进制里（`strings` 一抠就有）——这正是包不能
+  /// 公开读的原因。给它最小权限，泄露的后果就只是「别人能下载安装包」，
+  /// 而不是「别人能花你的钱」
+  static const accessKey = String.fromEnvironment('UPDATE_TOS_AK');
+  static const secretKey = String.fromEnvironment('UPDATE_TOS_SK');
+
+  static bool get enabled =>
+      manifestUrl.isNotEmpty &&
+      region.isNotEmpty &&
+      bucket.isNotEmpty &&
+      endpoint.isNotEmpty &&
+      accessKey.isNotEmpty &&
+      secretKey.isNotEmpty;
+
+  /// 没配全时说清缺哪一项——排查时不用去翻构建脚本
+  static String get missingHint {
+    final missing = [
+      if (manifestUrl.isEmpty) 'UPDATE_MANIFEST_URL',
+      if (region.isEmpty) 'UPDATE_TOS_REGION',
+      if (bucket.isEmpty) 'UPDATE_TOS_BUCKET',
+      if (endpoint.isEmpty) 'UPDATE_TOS_ENDPOINT',
+      if (accessKey.isEmpty) 'UPDATE_TOS_AK',
+      if (secretKey.isEmpty) 'UPDATE_TOS_SK',
+    ];
+    return missing.isEmpty ? '' : '缺少：${missing.join('、')}';
+  }
+}

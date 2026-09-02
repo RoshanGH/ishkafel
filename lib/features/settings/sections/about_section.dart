@@ -7,6 +7,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/log/app_log.dart';
 import '../settings_providers.dart';
+import '../update_card.dart';
 import '../settings_widgets.dart';
 
 /// 在访达中打开目录（注入点：测试不真的调起访达）
@@ -32,6 +33,8 @@ class AboutSection extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.xl),
       children: [
+        // 更新入口就放在版本号旁边——人找版本号的时候正是他想升级的时候
+        const UpdateCard(),
         SettingsCard(
           title: 'ishkafel',
           children: [

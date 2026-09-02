@@ -15,6 +15,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/tasks_watch.dart';
 import '../../core/storage/ui_wake.dart';
 import '../../core/storage/ui_where.dart';
+import '../../core/update/update_service.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
 import '../../app/theme/app_spacing.dart';
@@ -77,8 +78,27 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 弹回去，等于出不来。
   bool _jumpedToInitialTask = false;
 
+  /// 启动时让**随包走的两样东西跟上这一版**：命令行工具（shim 指向 app 内的
+  /// CLI，app 换了位置就失效）和给 Agent 的说明书（复制出去的文件，不重装
+  /// 永远是旧的）。
+  ///
+  /// 不只为自动更新准备——手动换包的人同样会遇到「app 是新的、命令是旧的」。
+  /// 只在**装过且过期**时才动手，没装过的人不打扰
+  Future<void> _catchUpAfterUpgrade() async {
+    try {
+      final skillChanged = await UpdateService().finishAfterRestart();
+      if (!mounted || !skillChanged) return;
+      _showSnackBar(context,
+          '说明书已更新到这一版——让 Codex / Claude Code 重新加载一次技能，'
+          '免得它照着旧手册调新命令。');
+    } catch (_) {
+      // 收尾失败不该拦住人用软件：设置页里两张卡片都能手动重装
+    }
+  }
+
   void _openInitialTask() {
     _startWakeWatcher();
+    unawaited(_catchUpAfterUpgrade());
     final id = ref.read(initialTaskIdProvider);
     if (id == null || _jumpedToInitialTask) return;
     _jumpedToInitialTask = true;

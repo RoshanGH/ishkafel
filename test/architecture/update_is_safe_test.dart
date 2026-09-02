@@ -1,0 +1,48 @@
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+
+/// 自动更新动的是**人正在用的软件**，而且包里带着明文 AI 凭据。
+/// 这几条错一条，后果分别是「软件没了」和「别人花你的钱」。
+void main() {
+  test('安装包不能公开读——产物里的 AI 凭据是明文的', () {
+    final src = File('lib/core/update/update_config.dart').readAsStringSync();
+    expect(src, contains('UPDATE_TOS_AK'),
+        reason: '包私有存放，靠只读凭据现换预签名链接');
+    final signer = File('lib/core/update/tos_signer.dart').readAsStringSync();
+    expect(signer, contains('presignGet'),
+        reason: '没有预签名就只能公开读，等于把方舟 key 发出去');
+  });
+
+  test('下载完必须核对指纹再动现有的 app', () {
+    final src = File('lib/core/update/update_service.dart').readAsStringSync();
+    final install = src.substring(src.indexOf('Future<void> install('));
+    expect(install.indexOf('verifySha256'), lessThan(install.indexOf('handOff')),
+        reason: '先换后验等于没验——人手上会剩一个坏 app');
+    expect(install.indexOf('verifySignature'),
+        lessThan(install.indexOf('handOff')),
+        reason: '签名也要在替换之前验');
+  });
+
+  test('没配更新地址时不显示任何更新入口', () {
+    final card = File('lib/features/settings/update_card.dart').readAsStringSync();
+    expect(card, contains('UpdateConfig.enabled'),
+        reason: '摆一个点下去永远报错的按钮，比没有这个按钮更糟');
+  });
+
+  test('更新前要人确认——重启会打断正在跑的活儿', () {
+    final card = File('lib/features/settings/update_card.dart').readAsStringSync();
+    expect(card, contains('showDialog'),
+        reason: '破坏性操作要确认，这是写进 CLAUDE.md 的');
+  });
+
+  test('升级后 CLI 与说明书要跟上同一版', () {
+    final svc = File('lib/core/update/update_service.dart').readAsStringSync();
+    expect(svc, contains('CliInstaller'));
+    expect(svc, contains('SkillInstaller'));
+    final page =
+        File('lib/features/tasks/task_list_page.dart').readAsStringSync();
+    expect(page, contains('finishAfterRestart'),
+        reason: '写了不调用等于没做——版本对不上是最难查的一类问题');
+  });
+}

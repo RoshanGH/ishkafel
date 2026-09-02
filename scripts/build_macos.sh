@@ -31,12 +31,36 @@ ARK="$(read_key ark_api_key)"
 APP_ID="$(read_key speech_app_id)"
 TOKEN="$(read_key speech_access_token)"
 
+# 自动更新的落点。**可选**：这几个文件不在就不注入，产物里的更新入口
+# 整个不显示（不能摆一个点下去永远报错的按钮）。
+#
+# update_tos_ak / update_tos_sk 应当是一对**只读**凭据，只有这一个 bucket 的
+# GetObject 权限——它和别的 key 一样明文躺在产物里（strings 一抠就有），
+# 这正是安装包必须私有存放的原因：泄露的后果只该是「别人能下载安装包」，
+# 而不是「别人能花你的钱」。
+read_optional() {
+  local file="$SECRETS/$1"
+  [[ -f "$file" ]] && tr -d '[:space:]' < "$file" || echo ""
+}
+UP_URL="$(read_optional update_manifest_url)"
+UP_REGION="$(read_optional update_tos_region)"
+UP_BUCKET="$(read_optional update_tos_bucket)"
+UP_ENDPOINT="$(read_optional update_tos_endpoint)"
+UP_AK="$(read_optional update_tos_ak)"
+UP_SK="$(read_optional update_tos_sk)"
+
 MODE="${1:---debug}"
 
 flutter build macos "$MODE" \
   --dart-define=ARK_API_KEY="$ARK" \
   --dart-define=SPEECH_APP_ID="$APP_ID" \
-  --dart-define=SPEECH_ACCESS_TOKEN="$TOKEN"
+  --dart-define=SPEECH_ACCESS_TOKEN="$TOKEN" \
+  --dart-define=UPDATE_MANIFEST_URL="$UP_URL" \
+  --dart-define=UPDATE_TOS_REGION="$UP_REGION" \
+  --dart-define=UPDATE_TOS_BUCKET="$UP_BUCKET" \
+  --dart-define=UPDATE_TOS_ENDPOINT="$UP_ENDPOINT" \
+  --dart-define=UPDATE_TOS_AK="$UP_AK" \
+  --dart-define=UPDATE_TOS_SK="$UP_SK"
 
 # 只报路径，绝不回显 key
 case "$MODE" in
