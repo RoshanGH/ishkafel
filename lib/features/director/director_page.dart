@@ -32,6 +32,7 @@ import '../../core/script/sound_mix.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/doc_watch.dart';
+import '../../core/ui/text_editing_keys.dart';
 import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
@@ -3205,29 +3206,51 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final showGuide =
         _scriptIsPristine && !_guideDismissed && _extract == null;
     // 全页快捷键：空格播放/暂停、←→ 秒跳、⌘Z 撤销、⇧⌘Z 重做。
-    // 文本框有焦点时这些键先被输入框消费，不会打架
+    //
+    // **人在输入框里打字时一律让路**（[isEditableTextFocused]）。
+    // `CallbackShortcuts` 没有 `isEnabled` 那道闸，匹配上就无条件执行——
+    // 于是写脚本时空格被当成「播放/暂停」，而中文输入法在拼音阶段按空格
+    // 是选词上屏，拼音永远上不了屏：**中文根本打不出来，粘贴却可以**。
+    // 输入框那头也包了 [TextEditingKeys] 把这些键留在本层，两道一起。
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.space): () {
+          if (isEditableTextFocused()) return;
           if (!_planResult.isEmpty && _videoWidget != null) {
             unawaited(_togglePreviewPlay());
           }
         },
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
-            unawaited(_seekPreview((_positionMs.value - 1000).clamp(
-                0, _planResult.plan.totalMs))),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-            unawaited(_seekPreview((_positionMs.value + 1000).clamp(
-                0, _planResult.plan.totalMs))),
-        const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () =>
-            setState(() => _multiSelected
-              ..clear()
-              ..addAll([for (var i = 0; i < _doc.lines.length; i++) i])),
-        const SingleActivator(LogicalKeyboardKey.escape): () =>
-            setState(_multiSelected.clear),
-        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): _undo,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          if (isEditableTextFocused()) return;
+          unawaited(_seekPreview(
+              (_positionMs.value - 1000).clamp(0, _planResult.plan.totalMs)));
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          if (isEditableTextFocused()) return;
+          unawaited(_seekPreview(
+              (_positionMs.value + 1000).clamp(0, _planResult.plan.totalMs)));
+        },
+        const SingleActivator(LogicalKeyboardKey.keyA, meta: true): () {
+          // 输入框里 ⌘A 是全选这段文字，不是全选整篇脚本的行
+          if (isEditableTextFocused()) return;
+          setState(() => _multiSelected
+            ..clear()
+            ..addAll([for (var i = 0; i < _doc.lines.length; i++) i]));
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          // 输入法组合时 Esc 是取消组合
+          if (isEditableTextFocused()) return;
+          setState(_multiSelected.clear);
+        },
+        const SingleActivator(LogicalKeyboardKey.keyZ, meta: true): () {
+          if (isEditableTextFocused()) return;
+          _undo();
+        },
         const SingleActivator(LogicalKeyboardKey.keyZ,
-            meta: true, shift: true): _redo,
+            meta: true, shift: true): () {
+          if (isEditableTextFocused()) return;
+          _redo();
+        },
       },
       child: FocusScope(
         autofocus: true,

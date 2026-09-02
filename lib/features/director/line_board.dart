@@ -1,4 +1,5 @@
 import 'dart:io';
+import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -521,17 +522,20 @@ class _ScreenTextFieldState extends State<_ScreenTextField> {
   }
 
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: _c,
-        focusNode: _focus,
-        style: const TextStyle(fontSize: AppFontSize.caption, height: 1.3),
-        decoration: const InputDecoration(
-          isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          hintText: '这屏显示的字',
+  Widget build(BuildContext context) => TextEditingKeys(
+    // 打中文字幕的地方，空格必须归输入法
+    child: TextField(
+          controller: _c,
+          focusNode: _focus,
+          style: const TextStyle(fontSize: AppFontSize.caption, height: 1.3),
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            hintText: '这屏显示的字',
+          ),
+          onSubmitted: (_) => _commit(),
         ),
-        onSubmitted: (_) => _commit(),
-      );
+  );
 }
 
 /// 悬停时露出遮罩动作（胶片格的播放/用它）：平时画面干净，

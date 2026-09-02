@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/ui/text_editing_keys.dart';
+
+// 「人正在输入框里打字吗」只有一份，放在 core/ui——编导台那边也要用它
+export '../../core/ui/text_editing_keys.dart' show isEditableTextFocused;
 
 /// 审片台页面级全局播放快捷键（空格播放/暂停、←/→ 逐帧步进）。
 ///
@@ -49,17 +53,7 @@ class PageSeekEdgeIntent extends Intent {
   const PageSeekEdgeIntent({required this.toStart});
 }
 
-/// 判断当前键盘焦点是否落在可编辑文本控件（如台词输入框）内。
-///
-/// 页面级快捷键必须在这种情况下"放行"——不拦截空格/方向键，让它们正常
-/// 走文本编辑流程，而不是被误当成播放/暂停或逐帧指令。做法：从当前
-/// `primaryFocus` 对应的 Element 向上找是否存在 [EditableText] 祖先
-/// （`TextField`/`TextFormField` 内部都由 `EditableText` 承载实际编辑）。
-bool isEditableTextFocused() {
-  final element = FocusManager.instance.primaryFocus?.context;
-  if (element == null) return false;
-  return element.findAncestorWidgetOfExactType<EditableText>() != null;
-}
+
 
 /// 页面级「切换播放/暂停」Action：焦点在文本框时禁用（`isEnabled` 返回
 /// false），此时 `Actions`/`ShortcutManager` 会把按键视为"本层未处理"，

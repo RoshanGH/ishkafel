@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../core/ui/text_editing_keys.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -312,32 +313,35 @@ class _LineRowState extends State<_LineRow> {
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
-              child: TextField(
-                controller: _controller,
-                focusNode: _focus,
-                maxLines: null,
-                autofocus: widget.autofocus,
-                textInputAction: TextInputAction.done,
-                onTap: widget.onSelect,
-                onChanged: _onTyped,
-                onSubmitted: (_) {
-                  _commitNow();
-                  widget.onSubmit();
-                },
-                cursorColor: AppColors.accentBlue,
-                style: const TextStyle(
-                    fontSize: AppFontSize.emphasis,
-                    height: 1.55,
-                    color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  isDense: true,
-                  border: InputBorder.none,
-                  hintText: visual ? '画面行（无台词，只有画面）' : null,
-                  hintStyle: const TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: AppFontSize.emphasis),
-                  contentPadding:
-                      const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: TextEditingKeys(
+                // 空格归输入法：被全页快捷键截成「播放」的话，拼音永远上不了屏
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _focus,
+                  maxLines: null,
+                  autofocus: widget.autofocus,
+                  textInputAction: TextInputAction.done,
+                  onTap: widget.onSelect,
+                  onChanged: _onTyped,
+                  onSubmitted: (_) {
+                    _commitNow();
+                    widget.onSubmit();
+                  },
+                  cursorColor: AppColors.accentBlue,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.emphasis,
+                      height: 1.55,
+                      color: AppColors.textPrimary),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    hintText: visual ? '画面行（无台词，只有画面）' : null,
+                    hintStyle: const TextStyle(
+                        color: AppColors.textTertiary,
+                        fontSize: AppFontSize.emphasis),
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                  ),
                 ),
               ),
             ),

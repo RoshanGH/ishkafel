@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/material.dart';
 
@@ -989,15 +990,18 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           {Key? key}) =>
       Row(children: [
         Expanded(
-          child: TextField(
-            key: key,
-            controller: controller,
-            style: const TextStyle(fontSize: AppFontSize.body),
-            decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 15),
-                hintText: hint),
-            onSubmitted: (_) => _runSearch(),
+          child: TextEditingKeys(
+            // 搜关键词要打中文，空格归输入法
+            child: TextField(
+              key: key,
+              controller: controller,
+              style: const TextStyle(fontSize: AppFontSize.body),
+              decoration: InputDecoration(
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.search, size: 15),
+                  hintText: hint),
+              onSubmitted: (_) => _runSearch(),
+            ),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
