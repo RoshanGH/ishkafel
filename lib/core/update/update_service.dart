@@ -172,9 +172,13 @@ class UpdateService {
   /// - 给 Agent 的说明书：那是**复制出去的文件**，不重装永远是旧的。
   ///   Agent 照着旧手册调新命令，报错还查不出为什么
   ///
-  /// 返回要不要提醒人「说明书换了，让 Agent 重新加载一遍」
-  Future<bool> finishAfterRestart() async {
+  /// 返回一句要给人看的话；null = 没什么好说的。
+  ///
+  /// **失败也要说**：说明书没装上却不吭声，人以为已经是新的，
+  /// 于是 Agent 照着旧手册调新命令——报错还查不到根因上
+  Future<String?> finishAfterRestart() async {
     var skillUpdated = false;
+    final problems = <String>[];
     try {
       final cli = CliInstaller.forRunningApp();
       final status = cli.inspect();
@@ -186,6 +190,7 @@ class UpdateService {
       }
     } catch (e) {
       AppLog.warn('升级收尾：重装命令行工具失败：$e');
+      problems.add('命令行工具没更新成（设置 → 运行环境里可以手动重装）');
     }
     try {
       final skill = SkillInstaller.forCurrentUser(
@@ -200,7 +205,13 @@ class UpdateService {
       }
     } catch (e) {
       AppLog.warn('升级收尾：重装说明书失败：$e');
+      problems.add('Agent 说明书没更新成（设置 → 运行环境里可以手动重装）');
     }
-    return skillUpdated;
+    if (problems.isNotEmpty) return problems.join('；');
+    if (skillUpdated) {
+      return '说明书已更新到这一版——让 Codex / Claude Code 重新加载一次技能，'
+          '免得它照着旧手册调新命令。';
+    }
+    return null;
   }
 }

@@ -15,7 +15,9 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/tasks_watch.dart';
 import '../../core/storage/ui_wake.dart';
 import '../../core/storage/ui_where.dart';
+import '../../core/update/release_manifest.dart';
 import '../../core/update/update_service.dart';
+import '../update/update_dialog.dart';
 import '../review/review_page.dart';
 import '../settings/settings_providers.dart';
 import '../../app/theme/app_spacing.dart';
@@ -78,6 +80,17 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 弹回去，等于出不来。
   bool _jumpedToInitialTask = false;
 
+  /// 查到的新版本。**提示要摆在人看得见的地方**——只放在设置页里的话，
+  /// 人不会天天进去看，等于这个提示不存在
+  ReleaseManifest? _newRelease;
+
+  /// 启动就查一次。查不到就静静地什么都不显示（网络不通不该弹框吓人）
+  Future<void> _checkUpdate() async {
+    final found = await UpdateService().check();
+    if (!mounted || found == null) return;
+    setState(() => _newRelease = found);
+  }
+
   /// 启动时让**随包走的两样东西跟上这一版**：命令行工具（shim 指向 app 内的
   /// CLI，app 换了位置就失效）和给 Agent 的说明书（复制出去的文件，不重装
   /// 永远是旧的）。
@@ -86,11 +99,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 只在**装过且过期**时才动手，没装过的人不打扰
   Future<void> _catchUpAfterUpgrade() async {
     try {
-      final skillChanged = await UpdateService().finishAfterRestart();
-      if (!mounted || !skillChanged) return;
-      _showSnackBar(context,
-          '说明书已更新到这一版——让 Codex / Claude Code 重新加载一次技能，'
-          '免得它照着旧手册调新命令。');
+      final say = await UpdateService().finishAfterRestart();
+      if (!mounted || say == null) return;
+      _showSnackBar(context, say);
     } catch (_) {
       // 收尾失败不该拦住人用软件：设置页里两张卡片都能手动重装
     }
@@ -99,6 +110,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   void _openInitialTask() {
     _startWakeWatcher();
     unawaited(_catchUpAfterUpgrade());
+    unawaited(_checkUpdate());
     final id = ref.read(initialTaskIdProvider);
     if (id == null || _jumpedToInitialTask) return;
     _jumpedToInitialTask = true;
@@ -803,6 +815,20 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
             ),
         ]),
         actions: [
+          // 有新版本就摆在这儿：人一眼看得见，点一下就能升
+          if (_newRelease case final release?)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                key: const Key('task-list-update'),
+                onPressed: () async {
+                  await showUpdateDialog(context, release: release);
+                  if (mounted) unawaited(_checkUpdate());
+                },
+                icon: const Icon(Icons.system_update_alt, size: 16),
+                label: Text('有新版本 ${release.version}'),
+              ),
+            ),
           // 常驻入口：忘掉流程的时刻，恰恰是列表里已经堆了一屏任务的时候，
           // 只在空状态露一次脸的说明等于没有
           IconButton(

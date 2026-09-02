@@ -35,9 +35,35 @@ void main() {
   });
 
   test('更新前要人确认——重启会打断正在跑的活儿', () {
-    final card = File('lib/features/settings/update_card.dart').readAsStringSync();
-    expect(card, contains('showDialog'),
-        reason: '破坏性操作要确认，这是写进 CLAUDE.md 的');
+    final dialog =
+        File('lib/features/update/update_dialog.dart').readAsStringSync();
+    expect(dialog, contains('会被打断'),
+        reason: '破坏性操作要说清代价，这是写进 CLAUDE.md 的');
+    expect(dialog, contains('以后再说'), reason: '要留得下拒绝的余地');
+  });
+
+  test('提示摆在人看得见的地方，不是只藏在设置里', () {
+    final page =
+        File('lib/features/tasks/task_list_page.dart').readAsStringSync();
+    expect(page, contains('有新版本'),
+        reason: '只放设置页等于没有提示——人不会天天进去看');
+    expect(page, contains('_checkUpdate'),
+        reason: '启动就要查一次，不然提示永远不出现');
+  });
+
+  test('更新流程只有一套 UI——两处各写一套迟早改漏一处', () {
+    final card =
+        File('lib/features/settings/update_card.dart').readAsStringSync();
+    expect(card, contains('showUpdateDialog'));
+    expect(card.contains('LinearProgressIndicator'), isFalse,
+        reason: '进度画在对话框里就够了，卡片里再画一份就是第二套');
+  });
+
+  test('收尾失败要说出来，不能只写日志', () {
+    final svc = File('lib/core/update/update_service.dart').readAsStringSync();
+    expect(svc, contains('problems.add'),
+        reason: '说明书没装上却不吭声，人以为是新的，'
+            'Agent 照着旧手册调新命令，报错查不到根因');
   });
 
   test('发布不依赖外部命令行工具——本机装没装都能发', () {

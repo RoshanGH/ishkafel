@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +9,7 @@ import '../../core/app_version.dart';
 import '../../core/update/release_manifest.dart';
 import '../../core/update/update_config.dart';
 import '../../core/update/update_service.dart';
+import '../update/update_dialog.dart';
 import 'settings_widgets.dart';
 
 /// 「有新版本 → 点一下 → 装好重启」。
@@ -56,46 +56,13 @@ class _UpdateCardState extends State<UpdateCard> {
     });
   }
 
+  /// 走**统一的那个对话框**——主界面顶栏点进来的也是它。
+  /// 同一件事两处各写一套，迟早一处改了另一处没改
   Future<void> _install() async {
     final release = _found;
     if (release == null) return;
-    // **重启是破坏性的**：别的页面可能正开着任务、正在跑分析。先说清再动手
-    final go = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('更新到 ${release.version}？'),
-        content: const Text('下载完会自动重启软件。\n\n'
-            '正在跑的分析、配音、导出会被打断；正在编辑的内容请先收尾。\n'
-            '重启后命令行工具和 Agent 说明书会一起更新到同一版。'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('等一下')),
-          FilledButton(
-              key: const ValueKey('update-confirm'),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('现在更新')),
-        ],
-      ),
-    );
-    if (go != true || !mounted) return;
-    await _service.install(
-      release,
-      onState: (s) {
-        if (mounted) setState(() => _state = s);
-      },
-      // 替换脚本已经接手：这个进程必须退出，它才能动这个 app
-      onExit: () async => _quit(),
-    );
-  }
-
-  /// 替换脚本已经在等这个进程消失——它得等旧进程退出才能动这个 app。
-  ///
-  /// 留一点时间让脚本起来（`detached` 启动不是瞬时的），然后退出。
-  /// 任务锁是文件锁：进程没了，心跳停了，下一个拿锁的会认出它已经失效
-  Future<void> _quit() async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    exit(0);
+    await showUpdateDialog(context, release: release, service: _service);
+    if (mounted) await _check();
   }
 
   @override
@@ -115,18 +82,6 @@ class _UpdateCardState extends State<UpdateCard> {
         if (_state case UpdateAvailable(:final release)) ...[
           const Divider(height: 1, color: AppColors.border),
           _notes(release),
-        ],
-        if (_state case UpdateDownloading(:final ratio, :final release)) ...[
-          const Divider(height: 1, color: AppColors.border),
-          _progress(ratio, '正在下载 ${release.version}'),
-        ],
-        if (_state case UpdateInstalling(:final release)) ...[
-          const Divider(height: 1, color: AppColors.border),
-          _progress(null, '正在校验并安装 ${release.version}，马上重启'),
-        ],
-        if (_state case UpdateFailed(:final message)) ...[
-          const Divider(height: 1, color: AppColors.border),
-          SettingsNote('更新没成：$message'),
         ],
         if (_checkedAndUpToDate)
           const SettingsNote('已经是最新版本。'),
@@ -175,26 +130,6 @@ class _UpdateCardState extends State<UpdateCard> {
                 style: const TextStyle(
                     fontSize: AppFontSize.micro,
                     color: AppColors.textTertiary)),
-          ],
-        ),
-      );
-
-  Widget _progress(double? ratio, String label) => Padding(
-        padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 每一次等待都要有交代：带分母的进度，而不是一个转圈
-            Text(
-                ratio == null
-                    ? label
-                    : '$label（${(ratio * 100).toStringAsFixed(0)}%）',
-                style: const TextStyle(
-                    fontSize: AppFontSize.caption,
-                    color: AppColors.textSecondary)),
-            const SizedBox(height: AppSpacing.xs),
-            LinearProgressIndicator(value: ratio, minHeight: 3),
           ],
         ),
       );
