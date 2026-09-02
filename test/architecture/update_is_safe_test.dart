@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// 自动更新动的是**人正在用的软件**，而且包里带着明文 AI 凭据。
 /// 这几条错一条，后果分别是「软件没了」和「别人花你的钱」。
 void main() {
+  mainExternalArgs();
   test('安装包不能公开读——产物里的 AI 凭据是明文的', () {
     final src = File('lib/core/update/update_config.dart').readAsStringSync();
     expect(src, contains('UPDATE_TOS_AK'),
@@ -67,5 +68,22 @@ void main() {
         File('lib/features/tasks/task_list_page.dart').readAsStringSync();
     expect(page, contains('finishAfterRestart'),
         reason: '写了不调用等于没做——版本对不上是最难查的一类问题');
+  });
+}
+
+/// 外部命令的参数**必须手跑过**才敢写进代码。
+///
+/// 真机验证抓到过：`codesign --verify --deep -q` —— 它没有 `-q`，
+/// usage 报错退出 2，于是任何包都被判成「签名不过」，人永远升不上去。
+/// 测试里用假的 runner 是发现不了这种问题的。
+void mainExternalArgs() {
+  test('codesign 的参数是真实存在的', () {
+    final src = File('lib/core/update/app_updater.dart').readAsStringSync();
+    final line = src
+        .split('\n')
+        .firstWhere((l) => l.contains("run('codesign'"), orElse: () => '');
+    expect(line, isNotEmpty);
+    expect(line.contains("'-q'"), isFalse,
+        reason: 'codesign 没有 -q：给了它 usage 报错退出 2，任何包都验不过');
   });
 }

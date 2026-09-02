@@ -102,7 +102,9 @@ class AppUpdater {
   /// 验签。**换上去之前验**——换完再发现签名坏了，人手上就只剩一个
   /// 打不开的 app 了
   Future<void> verifySignature(Directory app) async {
-    final r = await run('codesign', ['--verify', '--deep', '-q', app.path]);
+    // 参数**手跑过**才敢写：codesign 没有 `-q`，给了它会 usage 报错退出 2,
+    // 于是任何包都被判成「签名不过」，人永远升不上去（这一条是真机验证抓到的）
+    final r = await run('codesign', ['--verify', '--deep', app.path]);
     if (r.exitCode != 0) {
       throw UpdateException('新版本的签名验证没通过，没有替换。'
           '这可能是下载被中间人改过——请找发包的人确认。');
@@ -152,7 +154,10 @@ if ! mv "$newApp" "$targetApp"; then
   exit 1
 fi
 rm -rf "\$BACKUP"
-open "$targetApp"
+# 换好了就算成功。**打开失败不算失败**——人自己点一下图标就行，
+# 而把退出码搅浑会让「没换上去」和「换好了没打开」分不开
+open "$targetApp" || true
+exit 0
 ''';
 
   /// 交棒给替换脚本，然后**这个进程就该退出了**（调用方负责退出）
