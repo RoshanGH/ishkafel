@@ -68,18 +68,35 @@ String _appVersion() {
 String _manifestKey() =>
     _readOptional('update_tos_manifest_key') ?? 'latest.json';
 
-/// 更新说明取 CHANGELOG 里这一版那一节——人点「更新」之前要看得到改了什么
-String _notesOf(String version) {
+/// 更新说明：**从 CHANGELOG 取最近若干版，不是只取这一版**。
+///
+/// 拿到包的人手上可能是十几版之前的——只给他看最新那一节，他看到的就是
+/// 「加了诊断日志」这种末梢改动，而中间那些真正重要的（中文输入打不出来、
+/// 打标丢了、自动铺一版按分镜铺）一条都看不到。人点「更新」之前要看得到
+/// 的是**他跨过的全部**。
+String _notesOf(String version, {int keep = 8}) {
   final lines = File('CHANGELOG.md').readAsLinesSync();
-  final out = <String>[];
-  var on = false;
+  final sections = <String, List<String>>{};
+  final order = <String>[];
+  String? current;
   for (final line in lines) {
-    if (line.trim() == '## $version') {
-      on = true;
+    final head = RegExp(r'^## (\d+\.\d+\.\d+)\s*$').firstMatch(line.trim());
+    if (head != null) {
+      current = head.group(1);
+      order.add(current!);
+      sections[current] = [];
       continue;
     }
-    if (on && line.startsWith('## ')) break;
-    if (on) out.add(line);
+    if (current != null) sections[current]!.add(line);
+  }
+  // 从当前版本往回数 keep 版
+  final from = order.indexOf(version);
+  final take = from < 0 ? order.take(keep) : order.skip(from).take(keep);
+  final out = <String>[];
+  for (final v in take) {
+    out.add('## $v');
+    out.add(sections[v]!.join('\n').trim());
+    out.add('');
   }
   return out.join('\n').trim();
 }
