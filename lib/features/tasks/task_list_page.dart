@@ -93,7 +93,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   /// 打标本来就是他上传视频时同意的那趟分析的一部分，只是没跑完
   Future<void> _resumePendingTagging() async {
     final tagging = ref.read(taggingServiceProvider);
-    if (tagging == null) return;
+    if (tagging == null) {
+      AppLog.info('补标签：没有打标服务（AI 凭据未配置），跳过');
+      return;
+    }
     final fixed = await TaggingResumer(
       repository: ref.read(taskRepositoryProvider),
       tagging: tagging,

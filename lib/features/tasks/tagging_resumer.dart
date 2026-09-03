@@ -52,8 +52,11 @@ class TaggingResumer {
     try {
       final tasks = await repository.findAll();
       final pending = tasks.where(needsTagging).toList();
+      // 扫描结果要说出来：查不出问题时，「有没有扫到」是第一个要排除的
+      AppLog.info('补标签：扫了 ${tasks.length} 条任务，'
+          '${pending.length} 条欠着'
+          '${pending.isEmpty ? '' : '（${pending.map((t) => t.name).join('、')}）'}');
       if (pending.isEmpty) return 0;
-      AppLog.info('有 ${pending.length} 条任务的标签没打完，接着打');
       for (final task in pending) {
         if (shouldStop?.call() ?? false) break;
         if (await _resumeOne(task, onProgress, shouldStop)) fixed++;
