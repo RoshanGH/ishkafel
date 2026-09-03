@@ -24,14 +24,15 @@ fi
 ./scripts/build_macos.sh --release
 ./scripts/package_macos.sh
 
-# 配了自动更新的落点就顺手发布：别人下次打开设置就能看到更新提示。
-# **没配就跳过**，不打断打包流程——这一步是可选的
+# **打包不等于上线。**
+#
+# 打包是出一个产物，随时可以做、做多少次都行；上线是把这一版推到线上，
+# 所有人下次打开就会看到更新提示——那是对外的动作，要人点头才做。
+# 每改一行就自动往所有人机器上推一版，是不对的。
 if [ -f .secrets/update_tos_ak_write ]; then
   echo
-  echo "正在发布到对象存储…"
-  if ! dart run tool/publish_release.dart; then
-    echo "发布失败——包已经打好了，修完再单独跑：dart run tool/publish_release.dart" >&2
-  fi
+  echo "包已打好，**还没上线**。要让大家更新到这一版，跑："
+  echo "  ./scripts/publish.sh"
 fi
 
 # 打完包顺手把跑着的换成新版本。
