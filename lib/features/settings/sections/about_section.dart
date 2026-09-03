@@ -7,6 +7,7 @@ import '../../../app/theme/app_colors.dart';
 import '../../../app/theme/app_spacing.dart';
 import '../../../core/log/app_log.dart';
 import '../settings_providers.dart';
+import '../product_owner_card.dart';
 import '../update_card.dart';
 import '../settings_widgets.dart';
 
@@ -35,6 +36,8 @@ class AboutSection extends ConsumerWidget {
       children: [
         // 更新入口就放在版本号旁边——人找版本号的时候正是他想升级的时候
         const UpdateCard(),
+        // 有问题找谁：来这一页的人多半正是遇上事了，把去处摆在最前面
+        const ProductOwnerCard(),
         SettingsCard(
           title: 'ishkafel',
           children: [

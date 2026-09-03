@@ -1,7 +1,7 @@
 name: ishkafel
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.1.179+179
+version: 0.1.180+180
 
 environment:
   sdk: ^3.12.2
@@ -30,6 +30,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
 
 # CLI 入口：`dart compile exe bin/ishkafel.dart`
 executables:
