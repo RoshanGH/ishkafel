@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +15,8 @@ String? valueAfter(List<String> args, String flag) {
   int exitCode = 0,
   String stderr = '',
   bool produceFiles = true,
+  /// 非空则把子进程卡在这儿，用来造出「上一次还没跑完」的时间窗
+  Completer<void>? hold,
 }) {
   final calls = <List<String>>[];
   final work = Directory.systemTemp.createTempSync('ishkafel_sep_');
@@ -25,6 +28,7 @@ String? valueAfter(List<String> args, String flag) {
       modelDir: Directory('${work.path}/models'),
       run: (bin, args) async {
         calls.add(args);
+        if (hold != null) await hold.future;
         if (exitCode == 0 && produceFiles) {
           out.createSync(recursive: true);
           final stem = 'a-${VocalSeparator.modelTag}';
@@ -138,6 +142,50 @@ void main() {
       () => b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out),
       throwsA(isA<VocalSeparationException>()),
     );
+  });
+
+  /// 真机事故（2026-09-04）：一条素材被并发起了 **14 个**分离进程，还都往
+  /// 同一组文件里写。`separate` 只认**已经跑完**的产物，上一次还在跑的那段
+  /// 时间里，每个调用方都会再起一个。
+  ///
+  /// 以前这事没人发现，因为它们全都因为找不到 ffmpeg 秒退；把 PATH 修好之后
+  /// 它们真跑起来了，机器直接被拖垮。
+  test('上一次还没跑完时再要一次，就等它——不许再起一个往同一份文件里写', () async {
+    final hold = Completer<void>();
+    final b = _build(hold: hold);
+
+    final first = b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+    final second =
+        b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+    hold.complete();
+    final results = await Future.wait([first, second]);
+
+    expect(b.calls, hasLength(1), reason: '两个调用方共用同一次分离');
+    expect(results[0].vocalsPath, results[1].vocalsPath);
+  });
+
+  test('跑完之后再要，照旧复用产物、也不受在途登记的影响', () async {
+    final b = _build();
+
+    await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+    await b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+
+    expect(b.calls, hasLength(1));
+  });
+
+  test('上一次失败了，下一次还能重试——失败不许把登记留在那儿', () async {
+    final hold = Completer<void>();
+    final b = _build(hold: hold, exitCode: 1, stderr: '模型下载失败');
+
+    final failing =
+        b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out);
+    hold.complete();
+    await expectLater(failing, throwsA(isA<VocalSeparationException>()));
+
+    await expectLater(
+        b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out),
+        throwsA(isA<VocalSeparationException>()));
+    expect(b.calls, hasLength(2), reason: '第二次要真的重试，不是复读上一次的失败');
   });
 
   test('产物文件名带模型标记：换了模型要重新分离，不能接着用旧产物', () async {

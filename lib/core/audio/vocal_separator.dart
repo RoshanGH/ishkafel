@@ -78,13 +78,26 @@ class VocalSeparator {
   static const int batchSize = 8;
   static const int segmentSize = 512;
 
+  /// 在途的分离，**按产物路径**登记。
+  ///
+  /// 静态是有意的：调用方每次都现造一个分离器（见 main.dart 里的
+  /// `materialVocals`），登记在实例上根本拦不住；而要守的东西本来就是全局
+  /// 的——同一组产物文件。
+  ///
+  /// 真机事故（2026-09-04）：一条素材被并发起了 **14 个**分离进程，还都往
+  /// 同一组文件里写。下面那句「已经分离过就直接复用」只认**跑完**的产物，
+  /// 上一次还在跑的那段时间里，每个调用方都会再起一个。以前没人发现，是
+  /// 因为它们全都因为找不到 ffmpeg 秒退；PATH 一修好就把机器拖垮了。
+  static final Map<String, Future<SeparatedAudio>> _inFlight = {};
+
   /// 分离 [audioPath]，两条轨落到 [outputDir]。
   ///
-  /// 已经分离过就直接复用（重进任务不该再等一遍）。
+  /// 已经分离过就直接复用（重进任务不该再等一遍）；**上一次还在跑就等它**，
+  /// 不再起第二个（见 [_inFlight]）。
   Future<SeparatedAudio> separate({
     required String audioPath,
     required Directory outputDir,
-  }) async {
+  }) {
     outputDir.createSync(recursive: true);
     modelDir.createSync(recursive: true);
 
@@ -97,10 +110,22 @@ class VocalSeparator {
         background.existsSync() &&
         vocals.lengthSync() > 0 &&
         background.lengthSync() > 0) {
-      return SeparatedAudio(
-          vocalsPath: vocals.path, backgroundPath: background.path);
+      return Future.value(SeparatedAudio(
+          vocalsPath: vocals.path, backgroundPath: background.path));
     }
 
+    final running = _inFlight[vocals.path];
+    if (running != null) return running;
+
+    final job = _separate(audioPath, outputDir, stem, vocals, background);
+    _inFlight[vocals.path] = job;
+    // 失败也要摘登记，否则这条素材在本次启动里就永远重试不了
+    job.whenComplete(() => _inFlight.remove(vocals.path)).ignore();
+    return job;
+  }
+
+  Future<SeparatedAudio> _separate(String audioPath, Directory outputDir,
+      String stem, File vocals, File background) async {
     final result = await run(binary, [
       audioPath,
       '--model_filename', model,

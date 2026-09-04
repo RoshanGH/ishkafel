@@ -1,7 +1,7 @@
 name: ishkafel
 description: "A new Flutter project."
 publish_to: 'none'
-version: 0.1.182+182
+version: 0.1.183+183
 
 environment:
   sdk: ^3.12.2
