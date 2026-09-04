@@ -39,7 +39,7 @@ void main() {
       rest: rest,
       dataDir: dir,
       module: module,
-      run: (_, __) async => ProcessResult(0, 0, '', ''),
+      run: (_, _) async => ProcessResult(0, 0, '', ''),
       appExists: (_) => true,
       waitForUi: const Duration(milliseconds: 50),
       out: out,

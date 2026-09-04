@@ -25,7 +25,7 @@ void main() {
         dataDir: dir,
         taskId: taskId,
         stepTimeout: const Duration(milliseconds: 1),
-        run: (_, __) async => ProcessResult(0, 0, '', ''),
+        run: (_, _) async => ProcessResult(0, 0, '', ''),
         appExists: (_) => true,
       );
 

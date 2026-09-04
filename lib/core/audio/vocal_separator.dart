@@ -127,10 +127,20 @@ class VocalSeparator {
         vocalsPath: vocals.path, backgroundPath: background.path);
   }
 
-  /// 把命令行的失败翻译成用户能照做的中文
+  /// 把命令行的失败翻译成用户能照做的中文。
+  ///
+  /// **分清是谁没找到**：这个工具自己还要调 ffmpeg 来解码，缺 ffmpeg 时它抛的
+  /// 同样是「No such file」。真机上（2026-09-04）就因此把人支使去装一个早就
+  /// 装好的工具——说错原因比不说更糟，他会照做，然后发现还是不行。
   static String _friendlyError(int exitCode, String stderr) {
     final lower = stderr.toLowerCase();
-    if (lower.contains('no such file') || lower.contains('not found')) {
+    final missing =
+        lower.contains('no such file') || lower.contains('not found');
+    if (missing && lower.contains('ffmpeg')) {
+      return '人声分离工具找不到 ffmpeg（它要靠 ffmpeg 解码）。'
+          '请确认已安装 ffmpeg 后重新启动本应用';
+    }
+    if (missing) {
       return '未检测到人声分离工具，请先安装后重试';
     }
     if (lower.contains('connection') || lower.contains('timed out')) {

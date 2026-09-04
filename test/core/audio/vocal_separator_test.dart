@@ -111,6 +111,26 @@ void main() {
     );
   });
 
+  /// 真机事故（2026-09-04）：这句话把用户支使去装一个**已经装好**的工具。
+  /// 缺的是分离工具自己要调的 ffmpeg——它抛的也是「No such file」，于是被
+  /// 归到了同一句上。说错原因比不说更糟：他会照着做，然后发现还是不行。
+  test('缺的是 ffmpeg 时就说 ffmpeg，别赖到人声分离工具头上', () async {
+    final b = _build(
+      exitCode: 1,
+      stderr: "FileNotFoundError: [Errno 2] "
+          "No such file or directory: 'ffmpeg'",
+    );
+
+    expect(
+      () => b.separator.separate(audioPath: '/tmp/a.wav', outputDir: b.out),
+      throwsA(isA<VocalSeparationException>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('ffmpeg'),
+              isNot(contains('未检测到人声分离工具'))))),
+    );
+  });
+
   test('跑成功了却没产出文件，同样要报错而不是给一个不存在的路径', () async {
     final b = _build(produceFiles: false);
 

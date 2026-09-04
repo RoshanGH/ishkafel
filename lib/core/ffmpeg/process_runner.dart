@@ -12,9 +12,13 @@ typedef ProcessRunner = Future<ProcessResult> Function(
 typedef ProcessInvoker = Future<ProcessResult> Function(
     String executable, List<String> args);
 
-/// 子进程启动器（注入点：测试用假 Process，无需真实二进制）
+/// 子进程启动器（注入点：测试用假 Process，无需真实二进制）。
+///
+/// 带上 [environment] 是因为我们拉起的**第三方程序**（audio-separator）
+/// 自己还要去 PATH 上找 ffmpeg，见 [childProcessPath]
 typedef ProcessStarter = Future<Process> Function(
-    String executable, List<String> args);
+    String executable, List<String> args,
+    {Map<String, String>? environment});
 
 /// 全局共享的工具定位器：解析结果缓存在实例上，各服务复用同一份避免重复探测
 final MediaToolsLocator sharedMediaToolsLocator = MediaToolsLocator();
@@ -56,7 +60,11 @@ class TimeoutProcessInvoker {
   });
 
   Future<ProcessResult> call(String executable, List<String> args) async {
-    final process = await starter(executable, args);
+    // 把装着工具的目录交到子进程手上。本 app 自己调 ffmpeg 早就用绝对路径
+    // 绕开了这个坑，但第三方程序绕不开——它自己要去 PATH 上找（见
+    // [childProcessPath] 里记的那次真机事故）
+    final process = await starter(executable, args,
+        environment: {'PATH': childProcessPath()});
     final stdoutFuture = _collect(process.stdout);
     final stderrFuture = _collect(process.stderr);
     try {

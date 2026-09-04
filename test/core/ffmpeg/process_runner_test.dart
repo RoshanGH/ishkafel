@@ -45,7 +45,7 @@ void main() {
       final process = _FakeProcess(stdoutText: '正常输出', stderrText: '警告');
       final invoker = TimeoutProcessInvoker(
         timeout: const Duration(seconds: 5),
-        starter: (_, _) async {
+        starter: (_, _, {environment}) async {
           Future.microtask(() => process.finish(0));
           return process;
         },
@@ -59,11 +59,33 @@ void main() {
       expect(process.killCount, 0);
     });
 
+    /// 真机事故（2026-09-04）：点「重新分离」报「未检测到人声分离工具」，
+    /// 可工具装得好好的。缺的是它自己要调的 **ffmpeg**——GUI 进程继承的
+    /// launchd PATH 里没有 Homebrew，第三方程序绕不开这一条。
+    test('起子进程时把装工具的目录交给它——第三方程序自己要去 PATH 上找 ffmpeg',
+        () async {
+      final process = _FakeProcess();
+      Map<String, String>? handed;
+      final invoker = TimeoutProcessInvoker(
+        timeout: const Duration(seconds: 5),
+        starter: (_, _, {environment}) async {
+          handed = environment;
+          Future.microtask(() => process.finish(0));
+          return process;
+        },
+      );
+
+      await invoker('audio-separator', const []);
+
+      expect(handed?['PATH'], isNotNull, reason: '不交 PATH 等于让它自己碰运气');
+      expect(handed!['PATH'], contains('/opt/homebrew/bin'));
+    });
+
     test('超时后杀掉子进程并抛出带中文说明的异常', () async {
       final process = _FakeProcess();
       final invoker = TimeoutProcessInvoker(
         timeout: const Duration(milliseconds: 30),
-        starter: (_, _) async => process, // 永不结束
+        starter: (_, _, {environment}) async => process, // 永不结束
       );
 
       await expectLater(

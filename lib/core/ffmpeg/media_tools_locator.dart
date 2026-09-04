@@ -24,6 +24,42 @@ class MediaToolsStatus {
       ]);
 }
 
+/// 交给**子进程**用的 PATH。
+///
+/// 本 app 自己调 ffmpeg 用的是绝对路径（见下面的 [MediaToolsLocator]），
+/// 已经绕开了「GUI 进程 PATH 里没有 Homebrew」这个坑。但我们还会拉起
+/// **第三方程序**——`audio-separator` 就是一个，它自己要去 PATH 上找 ffmpeg
+/// 来解码，绕不开。
+///
+/// 真机事故（2026-09-04）：点「重新分离」报「未检测到人声分离工具，请先安装
+/// 后重试」，可工具装得好好的，终端里手跑 11 秒就分完了。真正缺的是它要用的
+/// ffmpeg——子进程抛 `FileNotFoundError: 'ffmpeg'`，被翻译成了「工具没装」，
+/// 于是用户照着提示反复装、反复重试，永远好不了。
+///
+/// 所以起子进程时把这些目录交到它手上。**继承来的 PATH 一个都不丢**：
+/// 丢了会连累它要用的别的工具。
+String childProcessPath({
+  String? currentPath,
+  List<String> extraDirs = const [],
+  String? home,
+}) {
+  final resolvedHome = home ?? Platform.environment['HOME'];
+  final dirs = <String>[
+    ...MediaToolsLocator.defaultSearchDirs,
+    // uv tool install / pipx 都装在这儿（audio-separator 本身就在这里）
+    if (resolvedHome != null && resolvedHome.isNotEmpty)
+      '$resolvedHome/.local/bin',
+    ...extraDirs,
+    ...(currentPath ?? Platform.environment['PATH'] ?? '').split(':'),
+  ];
+  // 去重并丢掉空段：PATH 里出现空段等于把当前目录也算进去，是个安全问题
+  final seen = <String>{};
+  return [
+    for (final d in dirs)
+      if (d.isNotEmpty && seen.add(d)) d,
+  ].join(':');
+}
+
 /// ffmpeg/ffprobe 可执行文件定位。
 ///
 /// 为什么需要：macOS 上由 Finder / `open` 启动的 GUI 进程继承的是 launchd 的
