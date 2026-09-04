@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/tagging_service.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/vocal_separator.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/project_ref.dart';
@@ -560,6 +561,21 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 保存配乐方案。与切分、替换方案同一条「随手落库」通路。
   Future<void> saveBgm(RenewTask task, BgmPlan bgm) async {
     final updated = task.copyWith(bgm: bgm, updatedAt: DateTime.now());
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 记下这条任务自己的人声轨。
+  ///
+  /// 人声轨**归任务所有**，两条任务之间不共用（见 [PreparedCache]）：它被
+  /// 别人删任务时一起清掉、或当初那次分离失败过，用户都能在工作台点
+  /// 「重新分离」补一份，补完就落在这里
+  Future<void> saveVocals(RenewTask task, SeparatedAudio stems) async {
+    final updated = task.copyWith(
+      vocalsPath: stems.vocalsPath,
+      backgroundPath: stems.backgroundPath,
+      updatedAt: DateTime.now(),
+    );
     await ref.read(taskRepositoryProvider).save(updated);
     await _refreshAfterSave(updated);
   }

@@ -61,6 +61,22 @@ class PreparedAnalysis {
     this.backgroundPath,
   });
 
+  /// 换上**这条任务自己的**人声轨。
+  ///
+  /// 人声轨归任务所有（落在 `stems/<taskId>/`），任务一删就跟着走；而这份
+  /// 产物按源文件内容缓存、能活得比任何一条任务都久。两者生命周期不同，
+  /// 所以复用缓存里的切分时必须重新配一份自己的，绝不能沿用别人那条路径
+  PreparedAnalysis withStems(SeparatedAudio? stems) => PreparedAnalysis(
+        sentences: sentences,
+        valleys: valleys,
+        shotBounds: shotBounds,
+        vocalsPath: stems?.vocalsPath,
+        backgroundPath: stems?.backgroundPath,
+      );
+
+  /// 抹掉人声轨路径的副本——进缓存前必须过这一道，理由见 [PreparedCache.save]
+  PreparedAnalysis withoutStems() => withStems(null);
+
   Map<String, dynamic> toJson() => {
         'sentences': [for (final s in sentences) s.toJson()],
         'valleys': valleys,
@@ -293,7 +309,12 @@ class AnalysisPipeline {
       // **说清是复用不是重跑**：报成 building 的话，后面真的 building
       // 时会再报一次，人看着像倒退了
       _report(onProgress, AnalysisStage.reusingPrepared);
-      return hit;
+      // 切分能复用，人声轨不能——它归任务所有，别人删任务时会被一起清掉。
+      // 所以这里仍要为当前这条任务分离一份自己的（同一条任务重进不会重跑，
+      // [VocalSeparator.separate] 认自己名下已有的产物）。这一步十几秒，
+      // 必须报出来，不能让进度条挂着不动
+      _report(onProgress, AnalysisStage.separatingVocals);
+      return hit.withStems(await _separate(task, sourcePath));
     }
 
     await workDir.create(recursive: true);
@@ -432,14 +453,31 @@ class AnalysisPipeline {
   /// 分离口播与背景音。**失败不中断整条分析**：切分与打标本身仍然有价值，
   /// 为了一条音轨把几分钟的分析结果整个废掉不划算。缺了它只影响「替换配乐」，
   /// 那一步会自己说明原因。
-  Future<SeparatedAudio?> _separate(RenewTask task, String sourcePath) async {
+  /// 只重新分离这条任务的人声轨，**不碰切分与打标**。
+  ///
+  /// 给界面上的「重新分离」用。人声轨归任务所有，丢了（别人删任务时被一起
+  /// 清掉）或那次分离失败过，缺的都只是这一份——为它重跑一整轮分析是拿几
+  /// 分钟换十几秒。空白任务没有原片、机器上没装工具，都返回 null，
+  /// 不许拿空路径去跑 ffmpeg。
+  ///
+  /// **失败照原样抛出**：这是用户主动点的，他在等一个结果，出了错就得让他
+  /// 看见原因。分析途中那次不一样，见 [_separate]
+  Future<SeparatedAudio?> separateVocals(RenewTask task) async {
+    final sourcePath = task.sourcePath;
     final tool = separator;
-    if (tool == null) return null;
+    if (sourcePath == null || tool == null) return null;
+    return tool.separate(
+      audioPath: sourcePath,
+      // 各任务各存各的：这份产物归任务所有，别人删任务时不该碰到它
+      outputDir: Directory(p.join(workDir.path, 'stems', task.id)),
+    );
+  }
+
+  /// 分析途中的那次分离。**失败只记一笔就过**——为了一条音轨把几分钟的
+  /// 切分与打标废掉不划算，人声轨事后单独补得回来（[separateVocals]）
+  Future<SeparatedAudio?> _separate(RenewTask task, String sourcePath) async {
     try {
-      return await tool.separate(
-        audioPath: sourcePath,
-        outputDir: Directory(p.join(workDir.path, 'stems', task.id)),
-      );
+      return await separateVocals(task);
     } catch (e) {
       AppLog.warn('任务 ${task.id} 的口播/背景音分离失败（不影响其余分析）：$e');
       return null;

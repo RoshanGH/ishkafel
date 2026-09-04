@@ -91,10 +91,10 @@ void main() {
         clock: () => DateTime.utc(2026, 7, 29, 12),
       );
 
-  RenewTask makeTask() => RenewTask(
-        id: 't1',
+  RenewTask makeTask({String id = 't1', String? sourcePath}) => RenewTask(
+        id: id,
         name: '测试片',
-        sourcePath: '/v/a.mp4',
+        sourcePath: sourcePath ?? '/v/a.mp4',
         videoInfo: const VideoInfo(
             width: 1080,
             height: 1920,
@@ -451,6 +451,134 @@ void main() {
 
       expect(done.units, isNotNull);
       expect(done.vocalsPath, isNull);
+    });
+  });
+
+
+  /// 人声轨**归任务所有**，两条任务之间不共用。
+  ///
+  /// 真机事故（2026-09-04）：项目 A 与项目 B 用的是同一条源片。A 先分析，
+  /// 人声轨落在 A 名下；分析结果按**源文件内容**缓存，缓存里存着那条
+  /// 绝对路径。后来 A 被删，软件按规矩清光 A 名下的文件——人声轨跟着走了。
+  /// B 再打开时命中缓存，拿回一条指向空地址的路径，界面就一直喊
+  /// 「没有分离出纯人声轨」，而且**怎么重新分析都好不了**：缓存命中就
+  /// 直接返回，压根走不到分离那一步。
+  ///
+  /// 定下的规矩：项目 A 就是项目 A，项目 B 就是项目 B，谁删都不许影响对方。
+  group('人声轨不跨任务共用', () {
+    /// 造一条真实存在的源文件——[sourcePrintOf] 读不到文件就返回 null，
+    /// 缓存那条路整个不会走，这个 bug 也就复现不出来（现有测试全用
+    /// `/v/a.mp4` 这个不存在的路径，正是它让这条线一直没被测到）
+    File makeSource() {
+      final f = File('${tempDir.path}/同一条片子.mp4');
+      f.writeAsBytesSync(List<int>.filled(4096, 7));
+      return f;
+    }
+
+    test('删掉先分析那条任务的产物后，另一条任务仍有自己能用的人声轨', () async {
+      final repo = FileTaskRepository(tempDir);
+      final source = makeSource();
+
+      final a = makeTask(id: '任务A', sourcePath: source.path);
+      await repo.save(a);
+      final doneA =
+          await makePipeline(repo, separator: fakeSeparator()).analyze(a);
+      expect(File(doneA.vocalsPath!).existsSync(), isTrue,
+          reason: '前提：A 自己得先分离成功');
+
+      // 删掉任务 A——软件按规矩清光它名下的产物
+      Directory('${tempDir.path}/work/stems/任务A').deleteSync(recursive: true);
+
+      final b = makeTask(id: '任务B', sourcePath: source.path);
+      await repo.save(b);
+      final doneB =
+          await makePipeline(repo, separator: fakeSeparator()).analyze(b);
+
+      expect(doneB.vocalsPath, isNotNull,
+          reason: 'B 有自己的人声轨，不该因为 A 被删就没了');
+      expect(File(doneB.vocalsPath!).existsSync(), isTrue,
+          reason: '存的路径必须真的有文件——指向空地址等于没有');
+      expect(doneB.vocalsPath, contains('任务B'),
+          reason: '产物要落在 B 自己名下，不能借用别人的');
+    });
+
+    test('两条任务各分离各的，谁也不借用谁的产物', () async {
+      final repo = FileTaskRepository(tempDir);
+      final source = makeSource();
+      final calls = <int>[];
+
+      final a = makeTask(id: '任务A', sourcePath: source.path);
+      await repo.save(a);
+      final doneA =
+          await makePipeline(repo, separator: fakeSeparator(calls: calls))
+              .analyze(a);
+
+      final b = makeTask(id: '任务B', sourcePath: source.path);
+      await repo.save(b);
+      final doneB =
+          await makePipeline(repo, separator: fakeSeparator(calls: calls))
+              .analyze(b);
+
+      expect(calls, hasLength(2), reason: '各跑各的分离，不共用一份产物');
+      expect(doneA.vocalsPath, isNot(doneB.vocalsPath),
+          reason: '两条任务的人声轨必须是两个文件');
+      expect(File(doneA.vocalsPath!).existsSync(), isTrue);
+      expect(File(doneB.vocalsPath!).existsSync(), isTrue);
+    });
+
+    test('单独重新分离：只补这条任务自己的人声轨，不重跑分析', () async {
+      final repo = FileTaskRepository(tempDir);
+      final source = makeSource();
+      final calls = <int>[];
+      final pipeline = makePipeline(repo, separator: fakeSeparator(calls: calls));
+
+      final a = makeTask(id: '任务A', sourcePath: source.path);
+      await repo.save(a);
+      final done = await pipeline.analyze(a);
+      // 产物被清掉（别人删任务、或磁盘清理）
+      Directory('${tempDir.path}/work/stems/任务A').deleteSync(recursive: true);
+      expect(File(done.vocalsPath!).existsSync(), isFalse, reason: '前提：确实丢了');
+
+      final stems = await pipeline.separateVocals(done);
+
+      expect(stems, isNotNull);
+      expect(File(stems!.vocalsPath).existsSync(), isTrue);
+      expect(calls, hasLength(2), reason: '只多跑了一次分离');
+    });
+
+    test('空白任务没有原片，重新分离直接说没有——不许拿空路径去跑 ffmpeg', () async {
+      final repo = FileTaskRepository(tempDir);
+      final blank = RenewTask(
+        id: '空白',
+        name: '空白任务',
+        status: RenewTaskStatus.ready,
+        createdAt: DateTime.utc(2026, 7, 29),
+        updatedAt: DateTime.utc(2026, 7, 29),
+      );
+
+      expect(
+          await makePipeline(repo, separator: fakeSeparator())
+              .separateVocals(blank),
+          isNull);
+    });
+
+    test('句子与切分照旧复用——省下的 ASR 与 LLM 不能一起赔掉', () async {
+      final repo = FileTaskRepository(tempDir);
+      final source = makeSource();
+
+      final a = makeTask(id: '任务A', sourcePath: source.path);
+      await repo.save(a);
+      final doneA =
+          await makePipeline(repo, separator: fakeSeparator()).analyze(a);
+
+      final b = makeTask(id: '任务B', sourcePath: source.path);
+      await repo.save(b);
+      final doneB =
+          await makePipeline(repo, separator: fakeSeparator()).analyze(b);
+
+      // 同一条片子切出来的单元数必须一样——这正是按内容缓存要保住的东西
+      expect(doneB.units!.length, doneA.units!.length);
+      expect(doneB.units![0].endMs, doneA.units![0].endMs);
     });
   });
 

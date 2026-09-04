@@ -127,11 +127,16 @@ class PreviewAudioBanner extends StatelessWidget {
   /// 用户的问题，不该逼他去重选一首曲子。为空表示这条提示没有重试出口
   final VoidCallback? onRetry;
 
+  /// 按钮上写什么。默认「重试」，但提示里说的是什么就该写什么——
+  /// 上面告诉他「重新分离一次就好」，按钮却写「重试」，他得自己去猜是不是同一件事
+  final String retryLabel;
+
   const PreviewAudioBanner(
       {super.key,
       required this.text,
       required this.building,
-      this.onRetry});
+      this.onRetry,
+      this.retryLabel = '重试'});
 
   @override
   Widget build(BuildContext context) => Container(
@@ -167,7 +172,7 @@ class PreviewAudioBanner extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap),
-                child: const Text('重试'),
+                child: Text(retryLabel),
               ),
           ],
         ),

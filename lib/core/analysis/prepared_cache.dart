@@ -20,6 +20,16 @@ import 'segmentation_builder.dart';
 ///
 /// **只缓存与源文件有关的东西**：标签依赖标签组，换了标签组就该重打，
 /// 所以不在这里。
+///
+/// **更要紧的是不缓存「指向别处文件的路径」**。真机事故（2026-09-04）：
+/// 两条任务用同一条源片，先分析的那条把人声轨落在自己名下，路径写进了
+/// 这份缓存；那条任务被删后，软件按规矩清光它名下的产物，人声轨跟着走了。
+/// 另一条任务再打开时命中缓存，拿回一条指向空地址的路径，界面一直喊
+/// 「没有分离出纯人声轨」，而且**怎么重新分析都好不了**——命中缓存直接
+/// 返回，压根走不到分离那一步。
+///
+/// 规矩定死：**任何归属于某条任务的路径都不许进这里**。缓存只装
+/// 「按片子稳定、且不依赖任何一条任务活着」的数据（句子、切点）。
 class PreparedCache {
   final Directory dataDir;
 
@@ -36,7 +46,9 @@ class PreparedCache {
     try {
       final f = _fileFor(sourcePrint);
       if (!f.existsSync()) return null;
-      return PreparedAnalysis.tryFromJson(jsonDecode(f.readAsStringSync()));
+      // 老缓存里可能还留着人声轨路径，一律不认——理由见 [save]
+      return PreparedAnalysis.tryFromJson(jsonDecode(f.readAsStringSync()))
+          ?.withoutStems();
     } catch (e) {
       AppLog.warn('分析产物缓存读不动（$sourcePrint）：$e');
       return null;
@@ -85,7 +97,10 @@ class PreparedCache {
     try {
       final f = _fileFor(sourcePrint);
       f.parent.createSync(recursive: true);
-      f.writeAsStringSync(jsonEncode(prepared.toJson()));
+      // **人声轨路径不进缓存**：它归任务所有（落在 `stems/<taskId>/`），
+      // 任务一删就被清掉；而这份缓存按源文件内容存，能活得比任何一条任务
+      // 都久。存进来就会在下一条任务里变成一个指向空地址的路径
+      f.writeAsStringSync(jsonEncode(prepared.withoutStems().toJson()));
     } catch (e) {
       // 存不下只是下次要重算，不该让这次导入失败
       AppLog.warn('分析产物缓存写不进（$sourcePrint）：$e');

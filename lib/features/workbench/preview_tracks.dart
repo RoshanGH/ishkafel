@@ -227,24 +227,51 @@ final materialSeparatorProvider = Provider<
   (ref) => null,
 );
 
+/// 一条提示要说清两件事：**为什么**声音不对，以及**做什么**才能好。
+/// [retryable] 为真时界面给一个「重新分离」的按钮
+typedef VocalsNotice = ({String text, bool retryable});
+
 /// 有配乐或配音、但没有分离出来的人声轨时的提醒。
 ///
 /// 这种情况下新配乐只能叠在原声上，原片自带的背景音还在——两首曲子一起响。
 /// 用户听到的东西不对，必须说清是为什么。
 ///
+/// **这条提示以前是撒谎的**（真机事故 2026-09-04）：它只看人声轨文件在不在，
+/// 却一律归因到「工具没装」、一律劝人「重新分析」。用户早把工具装齐了，
+/// 「设置 → 关于」也如实显示已安装，而重新分析命中缓存后直接返回、走不到
+/// 分离那一步——他照做一百遍也好不了。所以这里按**真实原因**分叉，
+/// 并且只给真能解决问题的出口。
+///
 /// [isBlank] 是空白任务：它没有原片、也就没有原片人声轨，但**它的声音全部
 /// 来自替换素材**，而素材是逐条分离的（见 [MaterialVocalCache]）。所以这条
 /// 提示对它不成立——除非机器上压根没装分离工具，[canSeparate] 就是为此。
-String? missingVocalsNotice(BgmPlan bgm, VoicePlan voices, String? vocalsPath,
+VocalsNotice? missingVocalsNotice(
+    BgmPlan bgm, VoicePlan voices, String? vocalsPath,
     {bool isBlank = false, bool canSeparate = true}) {
   if (bgm.segments.isEmpty) return null;
   if (isBlank) {
     // 空白任务的每一段都是整体替换，声音来自素材，逐条分离即可
     if (canSeparate) return null;
-    return '这台机器上没有装人声分离工具，配乐会和素材自带的声音叠在一起。'
-        '去「设置 → 运行环境」装一下就好';
+    return (
+      text: '这台机器上没有装人声分离工具，配乐会和素材自带的声音叠在一起。'
+          '去「设置 → 运行环境」装一下就好',
+      retryable: false,
+    );
   }
   if (vocalsPath != null && File(vocalsPath).existsSync()) return null;
-  return '没有分离出纯人声轨，新配乐会与原片自带的背景音叠在一起。'
-      '装好人声分离工具后重新分析可解决';
+  // 工具真没装：指路去装。重试没有意义，装完才有得谈
+  if (!canSeparate) {
+    return (
+      text: '这台机器上没有装人声分离工具，新配乐会与原片自带的背景音叠在一起。'
+          '去「设置 → 运行环境」装一下就好',
+      retryable: false,
+    );
+  }
+  // 工具是好的，缺的只是这条片子自己的那份人声轨——分一次就有了。
+  // 不许再提「装工具」：人家已经装好了，再劝一遍只会让他以为是自己没装对
+  return (
+    text: '这条片子的纯人声轨还没有，新配乐会与原片自带的背景音叠在一起。'
+        '重新分离一次就好',
+    retryable: true,
+  );
 }

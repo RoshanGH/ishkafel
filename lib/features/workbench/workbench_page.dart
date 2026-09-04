@@ -50,6 +50,7 @@ import '../settings/settings_providers.dart';
 import '../tasks/task_list_controller.dart';
 import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/vocal_separator.dart';
 import 'bgm_picker_sheet.dart';
 import 'candidate_badge.dart';
 import 'voice_picker_sheet.dart';
@@ -1099,6 +1100,64 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _syncPreviewAudio();
   }
 
+  /// 正在单独补这条任务的人声轨。分离要十几秒，界面得说清在做什么
+  bool _separatingVocals = false;
+
+  /// 只补这条任务自己的人声轨，不重跑整轮分析。
+  ///
+  /// 人声轨**归任务所有**（落在 `stems/<taskId>/`）：别人删任务时会被一起
+  /// 清掉，当初那次分离也可能失败过。缺的既然只是这一份，就没有理由为它
+  /// 重跑几分钟的 ASR 与切分——何况那条路命中分析缓存后直接返回，
+  /// 压根走不到分离那一步（真机事故 2026-09-04 就卡在这儿）。
+  ///
+  /// **失败要说原因**：这是用户主动点的，他在等一个结果。工具没装、模型下
+  /// 不下来，[VocalSeparationException] 都已经翻成人话，原样告诉他
+  Future<void> _separateVocals() async {
+    // 重入闸：分离是十几秒的重活，连点两下不该跑两遍
+    if (_separatingVocals) return;
+    final pipeline = ref.read(analysisPipelineProvider);
+    if (pipeline == null) {
+      _showVocalsFailure(pipelineUnavailableMessage);
+      return;
+    }
+    setState(() => _separatingVocals = true);
+    try {
+      final stems = await pipeline.separateVocals(_task);
+      if (!mounted) return;
+      if (stems == null) {
+        // 走到这儿说明这条任务压根没有可分离的原片。提示条本不该给出口，
+        // 真给到了也不能一声不吭
+        _showVocalsFailure('这条任务没有原片，分不出人声轨');
+        return;
+      }
+      setState(() => _task = _task.copyWith(
+          vocalsPath: stems.vocalsPath, backgroundPath: stems.backgroundPath));
+      // 有了纯人声，预览要重新混一遍——否则听到的还是原声叠着新配乐
+      _syncPreviewAudio();
+      await _tasks!.saveVocals(_task, stems);
+    } on VocalSeparationException catch (e) {
+      AppLog.warn('单独分离人声轨失败（taskId=${widget.task.id}）：${e.message}');
+      if (mounted) _showVocalsFailure(e.message);
+    } catch (e) {
+      AppLog.warn('单独分离人声轨失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showVocalsFailure('人声分离失败，请稍后重试');
+    } finally {
+      if (mounted) setState(() => _separatingVocals = false);
+    }
+  }
+
+  /// 分离失败的说法。失败原因已经是人话了，原样给出去，并留一个再试一次的入口
+  void _showVocalsFailure(String reason) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(reason),
+      backgroundColor: AppColors.red,
+      action: SnackBarAction(
+          label: '再试一次',
+          textColor: Colors.white,
+          onPressed: () => unawaited(_separateVocals())),
+    ));
+  }
+
   /// 拖段落边界改长度。只改长度——曲子、备选、音量、预览版都不动
   Future<void> _resizeBgm(int startUnit, int newStart, int newEnd) =>
       _saveBgm(_task.bgm
@@ -1963,6 +2022,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       );
     }
 
+    // 声音不对时那条提示。**分离能力按谁来分离判定**：空白任务的声音全部来自
+    // 替换素材，是逐条分离的；有原片的任务分的是原片自己那条音轨，用的是分析
+    // 管线里那个分离器。拿素材那条去判断原片这条，判出来的话是不作数的
+    final vocalsNotice = missingVocalsNotice(
+      _task.bgm,
+      _task.voices,
+      _task.vocalsPath,
+      isBlank: _task.isBlank,
+      canSeparate: _task.isBlank
+          ? ref.read(materialSeparatorProvider) != null
+          : ref.read(analysisPipelineProvider)?.separator != null,
+    );
+
     return PopScope(
       canPop: true,
       onPopInvokedWithResult: (didPop, result) {
@@ -1989,11 +2061,23 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 building: (_tracks?.speedFitter?.pending ?? 0) > 0,
                 onRetry: _retryPreviewAudio,
               ),
-            if (missingVocalsNotice(_task.bgm, _task.voices, _task.vocalsPath,
-                    isBlank: _task.isBlank,
-                    canSeparate: ref.read(materialSeparatorProvider) != null)
-                case final notice?)
-              PreviewAudioBanner(text: notice, building: false),
+            // 分离要十几秒，正在跑就先说在跑——转圈不说话是不合格的
+            if (_separatingVocals)
+              const PreviewAudioBanner(
+                  key: Key('vocals-notice-banner'),
+                  text: '正在分离这条片子的纯人声轨，约十几秒…',
+                  building: true)
+            else if (vocalsNotice case final notice?)
+              PreviewAudioBanner(
+                key: const Key('vocals-notice-banner'),
+                text: notice.text,
+                building: false,
+                retryLabel: '重新分离',
+                // 只读时不给出口：这条任务正被别人占着，补出来也写不进去
+                onRetry: notice.retryable && _isEditable && _lock == null
+                    ? _separateVocals
+                    : null,
+              ),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
             // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
