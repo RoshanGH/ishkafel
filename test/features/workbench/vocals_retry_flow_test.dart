@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -98,8 +99,8 @@ void main() {
         },
       );
 
-  AnalysisPipeline pipeline({String? stderr}) => AnalysisPipeline(
-        separator: separator(stderr: stderr),
+  AnalysisPipeline pipelineWith(VocalSeparator tool) => AnalysisPipeline(
+        separator: tool,
         audio: AudioExtractor(run: (_, args) async {
           await File(args.last).writeAsBytes(Uint8List(16000));
           return ProcessResult(1, 0, '', '');
@@ -112,6 +113,9 @@ void main() {
         repository: _Repo(),
         workDir: Directory('${tempDir.path}/work'),
       );
+
+  AnalysisPipeline pipeline({String? stderr}) =>
+      pipelineWith(separator(stderr: stderr));
 
   /// 一条铺了配乐、但人声轨指向空地址的任务——正是真机上那条
   RenewTask makeTask() {
@@ -197,6 +201,26 @@ void main() {
         reason: '产物落在自己名下，不许借用别人的');
     expect(saved.backgroundPath, isNotNull, reason: '背景轨要一起记下来');
     expect(_retry, findsNothing, reason: '补上了就不该还挂着那条提示');
+  });
+
+  testWidgets('分离要十几秒，这段时间里界面必须说在分离', (tester) async {
+    // 卡住分离：模拟真实工具跑十几秒的那段时间
+    final gate = Completer<ProcessResult>();
+    final held = VocalSeparator(
+      modelDir: Directory('${tempDir.path}/models'),
+      run: (bin, args) => gate.future,
+    );
+    await open(tester, withPipeline: pipelineWith(held));
+
+    await tester.tap(_retry);
+    await tester.pump();
+
+    expect(find.textContaining('正在分离'), findsOneWidget,
+        reason: '转圈不说话是不合格的——十几秒里人得知道软件在干什么');
+    expect(_retry, findsNothing, reason: '正在跑就别再给一个按钮让人重复点');
+
+    gate.complete(ProcessResult(1, 1, '', '模型下载失败'));
+    await tester.pumpAndSettle();
   });
 
   testWidgets('机器上没装分离工具：把真实原因说出来，不许只当无事发生',
