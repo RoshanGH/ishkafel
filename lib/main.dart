@@ -51,6 +51,7 @@ import 'core/miaoa/miaoa_content_service.dart';
 MaterialVocalCache materialVocals(Directory dataDir, String taskId) =>
     MaterialVocalCache(
       separator: VocalSeparator(
+        extractAudio: extractAudioForSeparation,
         binary: resolveVocalSeparatorBinary(),
         modelDir: Directory(p.join(dataDir.path, 'separator_models')),
       ),
@@ -86,7 +87,10 @@ Future<void> main(List<String> args) async {
 
   // 启动期预检 ffmpeg/ffprobe：GUI 进程 PATH 不含 Homebrew 目录，
   // 缺失时列表页常驻横幅引导安装，而不是等用户导入时撞见子进程异常
-  final mediaTools = sharedMediaToolsLocator.preflight();
+  // 结果不接住：真正读它的是 mediaToolsStatusProvider（每次重算，见下面的
+  // override）。这里跑一遍是为了**开机就在日志里留下缺哪个工具**，
+  // 排查问题时不用等用户点进设置页
+  sharedMediaToolsLocator.preflight();
 
   // 开机扫一遍孤儿产物。删任务时清干净只解决一半问题——崩溃、手动删存档、
   // 开发期换机器总会留下没主的东西，它们只会一直躺在盘上占地方
@@ -137,13 +141,18 @@ Future<void> main(List<String> args) async {
       shotFrameCheckFactoryProvider.overrideWithValue(
           (dir, taskId) => buildShotFrameCheck(
               arkApiKey: credentials.arkApiKey, dataDir: dir, taskId: taskId)),
-      mediaToolsStatusProvider.overrideWithValue(mediaTools),
+      // **用 overrideWith 而不是 overrideWithValue**：横幅和「能否开工」都读它，
+      // 存成一个启动时算好的值的话，用户装好 ffmpeg 后横幅不消失、功能也不
+      // 恢复，只能重启 app。这样写才能在清掉未命中缓存后 invalidate 重算
+      mediaToolsStatusProvider
+          .overrideWith((ref) => sharedMediaToolsLocator.preflight()),
       taskArtifactCleanerProvider.overrideWithValue(artifactCleaner),
       // 设置页：扫描/体检都用真实目录与真实进程，注入点集中在这里
       cacheScannerProvider.overrideWithValue(
           CacheScanner(dataDir: dataDir)),
       environmentProbeProvider.overrideWithValue(defaultEnvironmentProbe(
-          mediaTools: mediaTools, credentials: credentials)),
+          resolveMediaTools: sharedMediaToolsLocator.preflight,
+          credentials: credentials)),
       miaoaAccountServiceProvider.overrideWithValue(MiaoaAccountService()),
       miaoaAuthServiceProvider.overrideWithValue(MiaoaAuthService()),
       toolInstallerProvider.overrideWithValue(ToolInstaller()),

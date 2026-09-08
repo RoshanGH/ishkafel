@@ -32,13 +32,13 @@ class EnvironmentSection extends ConsumerWidget {
           error: (_, _) => SettingsCard(children: [
             SettingsErrorBlock(
                 message: '运行环境体检失败，请点「重试」。',
-                onRetry: () => ref.invalidate(environmentReportProvider)),
+                onRetry: () => refreshToolProbes(ref)),
           ]),
           data: (data) => data == null
               ? const SettingsCard(children: [
                   SettingsNote('本次运行未开启环境体检（通常只发生在测试环境）。')
                 ])
-              : _Report(report: data, onRefresh: () => ref.invalidate(environmentReportProvider)),
+              : _Report(report: data, onRefresh: () => refreshToolProbes(ref)),
         ),
         // 摆在体检结果**外面**：命令行工具跟体检没有依赖关系，体检失败或
         // 没开启时，这张卡片不该跟着一起消失
@@ -156,7 +156,7 @@ class _ToolRow extends ConsumerWidget {
       recipe: recipe,
       installer: installer,
       // 装好了立刻重新体检——不让用户自己去猜「现在算装上了吗」
-      onInstalled: () => ref.invalidate(environmentReportProvider),
+      onInstalled: () => refreshToolProbes(ref),
     );
   }
 }

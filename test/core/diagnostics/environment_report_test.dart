@@ -26,7 +26,7 @@ EnvironmentProbe _probe({
   ProcessRunnerLike run = _version,
 }) =>
     EnvironmentProbe(
-      mediaTools: tools,
+      resolveMediaTools: () => tools,
       resolveMiaoa: () => miaoaPath,
       resolveSeparator: () => separatorPath,
       credentials: credentials,
@@ -34,6 +34,35 @@ EnvironmentProbe _probe({
     );
 
 void main() {
+  group('装好之后不必重启 app', () {
+    test('重新体检时重新解析路径，能发现新装好的工具', () async {
+      var installed = false;
+      final probe = EnvironmentProbe(
+        resolveMediaTools: () => installed
+            ? const MediaToolsStatus(
+                ffmpegPath: '/opt/homebrew/bin/ffmpeg',
+                ffprobePath: '/opt/homebrew/bin/ffprobe')
+            : const MediaToolsStatus(),
+        resolveMiaoa: () => null,
+        resolveSeparator: () => null,
+        credentials: _complete,
+        run: _version,
+      );
+
+      final before = await probe.collect();
+      expect(before.tools.firstWhere((t) => t.name == 'ffmpeg').installed,
+          isFalse);
+
+      // 用户照着提示把工具装上了——app 一直开着
+      installed = true;
+
+      final after = await probe.collect();
+      expect(after.tools.firstWhere((t) => t.name == 'ffmpeg').installed, isTrue,
+          reason: '体检拿的是启动那一刻的旧结论的话，用户装完点「重新检测」'
+              '还是显示未安装，只能重启 app——而界面上并没有说要重启');
+    });
+  });
+
   group('外部工具体检', () {
     test('列出 ffmpeg / ffprobe / miaoa 三项及其实际路径', () async {
       final report = await _probe().collect();

@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/diagnostics/environment_report.dart';
 import '../../core/diagnostics/tool_installer.dart';
+import '../../core/diagnostics/tool_probe_cache.dart';
 import '../../core/miaoa/miaoa_account_service.dart';
 import '../../core/miaoa/miaoa_auth_service.dart';
 import '../../core/storage/cache_usage.dart';
 import '../../core/storage/task_repository.dart';
+import '../tasks/environment_banner.dart';
 import '../tasks/task_list_controller.dart';
 
 // 版本号搬到了 core/app_version.dart（CLI 也要用，不能拖进 Flutter），
@@ -36,6 +38,19 @@ final toolInstallerProvider = Provider<ToolInstaller?>((ref) => null);
 final cacheScannerProvider = Provider<CacheScanner?>((ref) => null);
 
 final environmentProbeProvider = Provider<EnvironmentProbe?>((ref) => null);
+
+/// 重新体检：**先忘掉「没找到」，再让读探测结果的 provider 重算**。
+///
+/// 顺序不能反：先 invalidate 的话，重算时读到的还是旧缓存，等于没刷新。
+///
+/// 只 invalidate 采集器是不够的（2026-09-06 真机 bug）——工具路径缓存在下面
+/// 三个定位器里，不清掉的话「重新检测」点多少次都还是「未安装」。
+/// 装完工具、点重新检测都走这里，别各自去 invalidate。
+void refreshToolProbes(WidgetRef ref) {
+  forgetToolProbeMisses();
+  ref.invalidate(mediaToolsStatusProvider);
+  ref.invalidate(environmentReportProvider);
+}
 
 final dataDirProvider = Provider<Directory?>((ref) => null);
 

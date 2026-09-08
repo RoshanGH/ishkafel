@@ -26,3 +26,9 @@ final _miaoaLocator = MediaToolsLocator(searchDirs: miaoaSearchDirs);
 /// 判空分支。
 String resolveMiaoaBinary({MediaToolsLocator? locator}) =>
     (locator ?? _miaoaLocator).resolve('miaoa') ?? 'miaoa';
+
+/// 忘掉「没找到 miaoa」这个结论，让下一次解析重新看一眼磁盘。
+///
+/// 见 [MediaToolsLocator.forgetMisses]：用户是在 app 开着的时候装工具的，
+/// 不清掉未命中缓存，装完就得重启 app 才认——而界面上并没有说要重启。
+void forgetMiaoaProbeMisses() => _miaoaLocator.forgetMisses();

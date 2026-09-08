@@ -57,7 +57,10 @@ class EnvironmentReport {
 /// Homebrew 目录，ffmpeg「明明装了」却调不起来。把解析到的真实路径摆在
 /// 界面上，用户（和排查问题的人）一眼就能确认到底找没找到。
 class EnvironmentProbe {
-  final MediaToolsStatus mediaTools;
+  /// ffmpeg / ffprobe 的解析结果。**每次体检都重新要一遍**，不能存成一个
+  /// 启动时算好的值——用户在 app 开着的时候装好工具，体检要当场认出来
+  final MediaToolsStatus Function() resolveMediaTools;
+
   final String? Function() resolveMiaoa;
 
   /// 人声分离工具的路径解析（可选项，找不到返回 null）
@@ -70,7 +73,7 @@ class EnvironmentProbe {
   final bool debugBuild;
 
   const EnvironmentProbe({
-    required this.mediaTools,
+    required this.resolveMediaTools,
     required this.resolveMiaoa,
     required this.resolveSeparator,
     required this.credentials,
@@ -79,6 +82,7 @@ class EnvironmentProbe {
   });
 
   Future<EnvironmentReport> collect() async {
+    final mediaTools = resolveMediaTools();
     final miaoaPath = resolveMiaoa();
     final specs = <(String, String?, List<String>)>[
       (MediaToolsLocator.ffmpeg, mediaTools.ffmpegPath, const ['-version']),
@@ -126,12 +130,12 @@ class EnvironmentProbe {
 
 /// 生产环境的默认采集器（miaoa 路径解析未命中时回退裸名，这里要还原成 null）
 EnvironmentProbe defaultEnvironmentProbe({
-  required MediaToolsStatus mediaTools,
+  required MediaToolsStatus Function() resolveMediaTools,
   required AiCredentials credentials,
   ProcessRunnerLike? run,
 }) =>
     EnvironmentProbe(
-      mediaTools: mediaTools,
+      resolveMediaTools: resolveMediaTools,
       resolveMiaoa: MiaoaGateway.installedPath,
       resolveSeparator: () {
         final resolved = resolveVocalSeparatorBinary();

@@ -86,6 +86,7 @@ AnalysisPipeline? buildAnalysisPipeline(
     // 口播/背景音分离：模型落到数据目录（工具默认放 /tmp，系统一清就要重下
     // 几百兆）。没装分离工具时这一步会失败，分析照常完成，只影响换配乐
     separator: VocalSeparator(
+        extractAudio: extractAudioForSeparation,
       binary: resolveVocalSeparatorBinary(),
       modelDir: Directory(p.join(dataDir.path, 'separator_models')),
     ),
