@@ -209,11 +209,46 @@ class TimelinePainter extends CustomPainter {
     }
   }
 
+
+  /// 这一格在**成片**时间轴上的左右像素。
+  ///
+  /// **按列表下标问成片轴，绝不拿原片时间去换算。**
+  /// `unit.endMs` 是开区间，而「原片毫秒 → 成片毫秒」是按「谁的原片区间盖住
+  /// 它」找的——`endMs` 落进的是**相邻那一段**。列表顺序和原片顺序一致时两者
+  /// 正好相等，看不出问题；手加的单元被拖到最前之后（它在原片上的占位排在
+  /// 末尾），原片里最后那个单元的右边界会被算成手加单元的成片起点 0，
+  /// 矩形左右翻转、整格什么都画不出来——镜头轨上还有块，单元轨那儿是空的
+  /// （2026-09-08 真机）。
+  (double, double) _unitPx(int listIndex) {
+    final axis = geometry.axis;
+    final unit = units[listIndex];
+    if (axis == null) {
+      return (geometry.msToPx(unit.startMs), geometry.msToPx(unit.endMs));
+    }
+    final start = axis.startOf(listIndex);
+    return (
+      geometry.composedMsToPx(start),
+      geometry.composedMsToPx(start + axis.durationOf(listIndex))
+    );
+  }
+
+  /// 这一镜在**成片**上的左右像素。理由同 [_unitPx]——最后一镜的 `endMs`
+  /// 等于所属单元的 `endMs`，一样会翻转
+  (double, double) _shotPx(int unitIndex, int shotIndex) {
+    final axis = geometry.axis;
+    final a = axis?.composedShotStart(unitIndex, shotIndex);
+    final b = axis?.composedShotEnd(unitIndex, shotIndex);
+    if (a == null || b == null) {
+      final shot = units[unitIndex].shots[shotIndex];
+      return (geometry.msToPx(shot.startMs), geometry.msToPx(shot.endMs));
+    }
+    return (geometry.composedMsToPx(a), geometry.composedMsToPx(b));
+  }
+
   /// 整体替换的单元在镜头轨上画成一整块，写明「整段已替换」
-  void _paintReplacedShotSpan(
-      Canvas canvas, Size size, SemanticUnit unit, Color unitColor) {
-    final left = geometry.msToPx(unit.startMs);
-    final right = geometry.msToPx(unit.endMs);
+  void _paintReplacedShotSpan(Canvas canvas, Size size, int listIndex,
+      SemanticUnit unit, Color unitColor) {
+    final (left, right) = _unitPx(listIndex);
     if (right < 0 || left > size.width) return;
     final rect = Rect.fromLTRB(left + _shotGap / 2, TimelineTracks.shotsTop,
         right - _shotGap / 2, TimelineTracks.shotsBottom);
@@ -248,9 +283,9 @@ class TimelinePainter extends CustomPainter {
   }
 
   void _paintUnitsTrack(Canvas canvas, Size size) {
-    for (final unit in units) {
-      final left = geometry.msToPx(unit.startMs);
-      final right = geometry.msToPx(unit.endMs);
+    for (var u = 0; u < units.length; u++) {
+      final unit = units[u];
+      final (left, right) = _unitPx(u);
       if (right < 0 || left > size.width) continue;
 
       final rect = Rect.fromLTRB(
@@ -367,18 +402,17 @@ class TimelinePainter extends CustomPainter {
   /// 嵌套在语义单元内"这条核心约束在视觉上一眼可见；选中态改用紫色实心
   /// 高亮，与单元轨的选中态（单元自身色描边加粗）区分开。
   void _paintShotsTrack(Canvas canvas, Size size) {
-    for (final unit in units) {
+    for (var u = 0; u < units.length; u++) {
+      final unit = units[u];
       final unitColor = _unitColors[unit.index % _unitColors.length];
       // 被整体替换的单元：原来那些视觉镜头在成片里已经不存在了（整段换成了
       // 另一条素材）。还按原样画一排小格子，等于让用户去点一批点不动的东西
       if (geometry.axis?.isReplaced(unit.index) ?? false) {
-        _paintReplacedShotSpan(canvas, size, unit, unitColor);
+        _paintReplacedShotSpan(canvas, size, u, unit, unitColor);
         continue;
       }
       for (var s = 0; s < unit.shots.length; s++) {
-        final shot = unit.shots[s];
-        final left = geometry.msToPx(shot.startMs);
-        final right = geometry.msToPx(shot.endMs);
+        final (left, right) = _shotPx(u, s);
         if (right < 0 || left > size.width) continue;
 
         // 内缩出相邻块体之间的间隙；块体本身比间隙还窄时不再内缩，
@@ -456,8 +490,9 @@ class TimelinePainter extends CustomPainter {
         final last = units.length - 1;
         final lo = math.min(sel.from, sel.to).clamp(0, last);
         final hi = math.max(sel.from, sel.to).clamp(0, last);
-        final rect = Rect.fromLTRB(geometry.msToPx(units[lo].startMs), top,
-            geometry.msToPx(units[hi].endMs), bottom);
+        final (loLeft, _) = _unitPx(lo);
+        final (_, hiRight) = _unitPx(hi);
+        final rect = Rect.fromLTRB(loLeft, top, hiRight, bottom);
         canvas.drawRect(
             rect, Paint()..color = AppColors.accentBlue.withValues(alpha: 0.3));
         canvas.drawRect(
@@ -558,9 +593,7 @@ class TimelinePainter extends CustomPainter {
         // 换没换素材直接看替换方案——外面再传一份只会多一处可能对不上
         if (u >= replacements.length) continue;
         if ((replacements[u].shotCandidateIds[i]?.isEmpty ?? true)) continue;
-        final shot = unit.shots[i];
-        final left = geometry.msToPx(shot.startMs);
-        final right = geometry.msToPx(shot.endMs);
+        final (left, right) = _shotPx(u, i);
         if (right < 0 || left > size.width) continue;
         final edited = subtitleEdited?.call(u, i) ?? false;
         final box = Rect.fromLTRB(left + 1, TimelineTracks.subsTop + 2,
