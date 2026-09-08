@@ -31,6 +31,8 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     'analyzed': units != null,
     // 分析出错时把原因带出来：调用方要能分辨「还在跑」和「跑挂了」
     'analysisError': task.analysisError,
+    // 替换分镜放哪一路声音的**全片打底**（镜头可以各自覆盖，见 shots）
+    'materialAudio': task.materialAudio.toJson(),
     'units': units == null ? null : [for (final u in units) _unitToJson(u)],
     // 替换现状（主流程唯一真相）：apply plans 投影进来、审核剔除也落这里。
     // Agent 提交后靠它验证生效、审核后靠它看剔了什么——没有这块就只能盲跑
@@ -103,7 +105,14 @@ Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
       'endMs': unit.endMs,
       'durationMs': unit.endMs - unit.startMs,
       'transcript': unit.transcript,
+      // 原片上有没有这一段。**false = 用户手动加的**：它没有台词（模型无从
+      // 打标，标签只能手填），也没有原片画面可放（不挑素材就导不出来）。
+      // 不报的话你会以为它和别的单元一样，照着一个错的前提往下干
+      'hasSource': unit.hasSource,
       'tags': unit.tags,
+      // 人手改过的标签：重新打标会跳过它。不报的话你会以为打标漏了这个单元，
+      // 跑一遍发现它纹丝不动，也不知道为什么
+      if (unit.tagsHandpicked) 'tagsHandpicked': true,
       'shots': [
         for (var i = 0; i < unit.shots.length; i++)
           {
@@ -117,6 +126,13 @@ Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
             if (unit.shots[i].productBrand != null)
               'productBrand': unit.shots[i].productBrand,
             'tags': unit.shots[i].tags,
+            if (unit.shots[i].tagsHandpicked) 'tagsHandpicked': true,
+            // 这一镜单独设过「放素材的哪一路声音」。**不设就不报这两个字段**
+            // ——「跟随全片」和「明确设成某一档」要分得开
+            if (unit.shots[i].materialAudioMode != null)
+              'materialAudioMode': unit.shots[i].materialAudioMode!.name,
+            if (unit.shots[i].materialAudioVolume != null)
+              'materialAudioVolume': unit.shots[i].materialAudioVolume,
           },
       ],
     };

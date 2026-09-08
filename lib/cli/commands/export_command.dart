@@ -198,6 +198,7 @@ Future<int> runExportCommand({
     // 整体替换的段落铺了配乐时用素材的纯人声——与 GUI 同一条规则
     separateMaterial: MaterialVocalCache(
       separator: VocalSeparator(
+        extractAudio: extractAudioForSeparation,
         binary: resolveVocalSeparatorBinary(),
         modelDir: Directory(p.join(dataDir.path, 'separator_models')),
       ),

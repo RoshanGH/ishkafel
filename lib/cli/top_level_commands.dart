@@ -30,6 +30,7 @@ const List<String> topLevelCommands = [
   'task-rename',
   'tasks',
   'todo',
+  'unit',
   'ui',
   'voice',
   'voices',

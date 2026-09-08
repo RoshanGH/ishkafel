@@ -25,6 +25,27 @@ void main() {
     }
   });
 
+  test('这一轮新加的旋钮，Agent 侧一个都不能少', () {
+    // 「人在界面上能拧的每个旋钮，Agent 都要能拧」。少一个，它就只能被动
+    // 接受软件给的默认值——那又退回成规则了。
+    //
+    // 这一轮加的：手动增删台词语义单元、调单元顺序、手填标签、
+    // 视觉镜头保留素材原声（含音量）
+    const knobs = {
+      'unit add': '有原片的任务也能手动加单元',
+      'unit remove': '删掉手动加的单元',
+      'unit move': '调单元顺序（列表顺序就是成片顺序）',
+      'unit tags': '给手加的单元手填标签',
+      'unit audio': '这一镜保留素材原声、调音量',
+      'unit subtitle': '改这一镜要烧的字幕',
+    };
+    for (final e in knobs.entries) {
+      expect(agentSkillMarkdown, contains(e.key),
+          reason: '${e.value}——人在界面上能做，手册里却没有 `${e.key}`。'
+              'Agent 看不到的能力等于不存在');
+    }
+  });
+
   test('划词建镜这条线在手册里说得完整', () {
     for (final key in const [
       'startWord',

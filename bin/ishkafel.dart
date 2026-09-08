@@ -28,6 +28,7 @@ import 'package:ishkafel/cli/commands/skill_command.dart';
 import 'package:ishkafel/cli/commands/task_command.dart';
 import 'package:ishkafel/cli/commands/tasks_command.dart';
 import 'package:ishkafel/cli/commands/todo_command.dart';
+import 'package:ishkafel/cli/commands/unit_command.dart';
 import 'package:ishkafel/cli/data_dir.dart';
 
 /// ishkafel 的命令行入口。
@@ -47,6 +48,14 @@ Future<void> main(List<String> args) async {
     ..addOption('data-dir', help: '数据目录（默认与 app 一致）')
     ..addOption('unit', help: '单元下标（从 0 开始）')
     ..addOption('shot', help: '镜头下标（从 0 开始）')
+    ..addOption('text',
+        help: 'unit subtitle 用：这一镜的字幕，多段用 | 分开；'
+            '给空串表示不要字幕')
+    ..addFlag('auto',
+        negatable: false, help: 'unit subtitle 用：清掉手改，回到自动算')
+    ..addOption('audio',
+        help: 'unit audio 用：none 不播 / vocals 人声 / background 背景声 / '
+            'original 原声 / follow 跟随全片')
     ..addOption('line', help: 'script 用：行号（从 1 开始，与界面上一致）')
     ..addOption('voice', help: 'script voice 用：音色 id')
     ..addFlag('visual',
@@ -75,8 +84,10 @@ Future<void> main(List<String> args) async {
     ..addOption('keyword', help: 'candidates 用：按画面描述语义检索（替代标签）')
     ..addOption('units', help: 'voice 用：给哪几个单元换音色（0,2）')
     ..addOption('from', help: 'bgm 用：从第几个单元开始铺')
-    ..addOption('to', help: 'bgm 用：铺到第几个单元')
-    ..addOption('volume', help: 'bgm 用：音量（0~1）')
+    ..addOption('to',
+        help: 'bgm 用：铺到第几个单元；unit move 用：挪到第几个位置（都从 0 开始）')
+    ..addOption('volume',
+        help: 'bgm 用：配乐音量；unit audio 用：素材原声压到几成（都是 0~1）')
     ..addFlag('remove', help: 'bgm 用：删掉从 --from 开始的那一段')
     ..addOption('preset',
         help: 'subtitle 用：字幕样式预设。'
@@ -239,6 +250,19 @@ Future<void> main(List<String> args) async {
         tagGroups: parsed['tag-groups'] as String?,
         unit: int.tryParse(parsed['unit'] as String? ?? ''),
         tags: parsed['tags'] as String?,
+      ),
+    'unit' => await runUnitCommand(
+        rest: rest,
+        dataDir: dataDir,
+        unit: int.tryParse(parsed['unit'] as String? ?? ''),
+        shot: int.tryParse(parsed['shot'] as String? ?? ''),
+        to: int.tryParse(parsed['to'] as String? ?? ''),
+        tags: parsed['tags'] as String?,
+        audio: parsed['audio'] as String?,
+        text: parsed['text'] as String?,
+        auto: parsed['auto'] as bool,
+        volume: double.tryParse(parsed['volume'] as String? ?? ''),
+        visual: parsed['visual'] == true,
       ),
     'todo' => await runTodoCommand(rest: rest, dataDir: dataDir),
     'script' => await runScriptCommand(
