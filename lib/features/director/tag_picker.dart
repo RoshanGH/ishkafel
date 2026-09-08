@@ -18,12 +18,19 @@ class PickedTag {
 ///
 /// [selected] 是当前已选的标签名（预先带勾）；[preferredGroupIds] 的组
 /// 排最前（通常是任务的分子标签组——最可能用的放手边）。
+///
+/// [onlyPreferred] 为真时**只给 [preferredGroupIds] 这几个组**，别的一个不露。
+/// 审核页改标签走这一档：那里的标签就是下一步的检索键，给出任务标签组以外
+/// 的词，等于让人挑一个这个项目根本没素材的标签——搜完才发现是空的，
+/// 而那时他也不知道是标签选错了。
+///
 /// 返回确认后的完整选择（含解析到的 id）；取消返回 null。
 Future<List<PickedTag>?> showTagPicker(
   BuildContext context, {
   required MiaoaTagService tags,
   List<String> selected = const [],
   Set<int> preferredGroupIds = const {},
+  bool onlyPreferred = false,
 }) =>
     showDialog<List<PickedTag>>(
       context: context,
@@ -31,6 +38,7 @@ Future<List<PickedTag>?> showTagPicker(
         tags: tags,
         selected: selected,
         preferredGroupIds: preferredGroupIds,
+        onlyPreferred: onlyPreferred,
       ),
     );
 
@@ -38,11 +46,13 @@ class _TagPickerDialog extends StatefulWidget {
   final MiaoaTagService tags;
   final List<String> selected;
   final Set<int> preferredGroupIds;
+  final bool onlyPreferred;
 
   const _TagPickerDialog({
     required this.tags,
     required this.selected,
     required this.preferredGroupIds,
+    required this.onlyPreferred,
   });
 
   @override
@@ -73,10 +83,14 @@ class _TagPickerDialogState extends State<_TagPickerDialog> {
         for (final g in groups)
           if (widget.preferredGroupIds.contains(g.id)) g,
       ];
-      final rest = [
-        for (final g in groups)
-          if (!widget.preferredGroupIds.contains(g.id) && g.tags.isNotEmpty) g,
-      ];
+      final rest = widget.onlyPreferred
+          ? const <TagGroup>[]
+          : [
+              for (final g in groups)
+                if (!widget.preferredGroupIds.contains(g.id) &&
+                    g.tags.isNotEmpty)
+                  g,
+            ];
       setState(() => _groups = [...preferred, ...rest]);
     } catch (e) {
       AppLog.warn('标签选择器拉词表失败：$e');

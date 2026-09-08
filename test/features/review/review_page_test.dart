@@ -48,13 +48,20 @@ void main() {
         createdAt: DateTime.utc(2026, 8, 17),
         updatedAt: DateTime.utc(2026, 8, 17),
         units: const [
-          SemanticUnit(index: 0, startMs: 0, endMs: 5000, transcript: '第一句'),
+          SemanticUnit(
+              index: 0,
+              startMs: 0,
+              endMs: 5000,
+              transcript: '第一句',
+              tags: ['促单', '痛点']),
           SemanticUnit(
               index: 1,
               startMs: 5000,
               endMs: 9000,
               transcript: '第二句',
-              shots: [Shot(startMs: 5000, endMs: 9000)]),
+              shots: [
+                Shot(startMs: 5000, endMs: 9000, tags: ['厨房情景', '实拍'])
+              ]),
         ],
         replacements: replacements,
         pickedMaterials: const [
@@ -97,6 +104,13 @@ void main() {
   Object? popped;
 
   Future<void> pump(WidgetTester tester, RenewTask task) async {
+    // 测试默认视口只有 800×600，段落头里摆着完整的标签与不截断的台词，
+    // 两组就挤不下了——而真机窗口远比这大。按实际尺寸给，别为了迁就
+    // 一个假窗口把界面改回去截断
+    tester.view.physicalSize = const Size(1600, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
     repo.tasks[task.id] = task;
     popped = null;
     await tester.pumpWidget(ProviderScope(
@@ -133,6 +147,66 @@ void main() {
     // 把路由动画走完：动画中页面整体右偏，右下角的确认按钮会在视口外
     await tester.pumpAndSettle();
   }
+
+  testWidgets('段落上把这一层的标签摆出来：整段替换给单元标签，逐镜头给镜头标签',
+      (tester) async {
+    // 标签就是这一段的检索键。人在审核候选「像不像」的时候，得能看见
+    // 它当初是按什么搜出来的——看不见就只能猜，猜不对就只会反复剔除
+    await pump(
+        tester,
+        taskWith([
+          UnitReplacement.whole(const [101]),
+          UnitReplacement.perShot(const {
+            0: [102]
+          }),
+        ]));
+
+    // U1 是整段替换 → 单元标签
+    expect(find.text('促单'), findsOneWidget);
+    expect(find.text('痛点'), findsOneWidget);
+    // U2·S1 是镜头替换 → 那个镜头的标签
+    expect(find.text('厨房情景'), findsOneWidget);
+    expect(find.text('实拍'), findsOneWidget);
+  });
+
+  testWidgets('内嵌模式改标签交回工作台，自己不写盘（两边都整份落库，谁后写谁赢）',
+      (tester) async {
+    List<SemanticUnit>? handedBack;
+    final task = taskWith([UnitReplacement.whole(const [101])]);
+    repo.tasks[task.id] = task;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        dataDirProvider.overrideWithValue(dataDir),
+        taskRepositoryProvider.overrideWithValue(repo),
+      ],
+      child: MaterialApp(
+        home: ReviewPage(
+          task: task,
+          onApply: (_) {},
+          onTagsChanged: (units) => handedBack = units,
+          hoverPlayer: _FakeHoverPlayer(),
+          resolveMedia: (_) async => '/tmp/fake.mp4',
+          extractOriginalThumb: extractThumb,
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // 「改标签」入口在每个段落上
+    expect(find.byKey(const ValueKey('review-edit-tags-0/null')),
+        findsOneWidget);
+    expect(handedBack, isNull, reason: '没改之前不该往外抛');
+  });
+
+  testWidgets('台词整段显示，不截断也不加省略号', (tester) async {
+    // 人正是靠这段台词判断候选贴不贴题。截成两行加「…」等于把要判断的
+    // 东西藏起来——省下的那点高度换不来这个
+    await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
+
+    final text = tester.widget<Text>(find.text('第一句'));
+    expect(text.maxLines, isNull, reason: '不许限行数');
+    expect(text.overflow, isNot(TextOverflow.ellipsis), reason: '不许省略号');
+  });
 
   testWidgets('候选按位置分组列出，默认全部保留', (tester) async {
     await pump(

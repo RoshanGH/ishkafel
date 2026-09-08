@@ -55,6 +55,7 @@ void main() {
     WidgetTester tester, {
     List<String> selected = const [],
     Set<int> preferredGroupIds = const {},
+    bool onlyPreferred = false,
     List<List<String>>? calls,
   }) async {
     late Future<List<PickedTag>?> result;
@@ -68,7 +69,8 @@ void main() {
               result = showTagPicker(context,
                   tags: tags,
                   selected: selected,
-                  preferredGroupIds: preferredGroupIds);
+                  preferredGroupIds: preferredGroupIds,
+                  onlyPreferred: onlyPreferred);
             },
             child: const Text('open'),
           ),
@@ -79,6 +81,16 @@ void main() {
     await tester.pumpAndSettle();
     return result;
   }
+
+  testWidgets('onlyPreferred：只给任务自己的标签组，别的组一个不露', (tester) async {
+    // 审核页改标签用这一档：标签是检索键，给出任务标签组以外的词
+    // 等于让人挑一个这个项目根本没素材的标签，搜完才发现是空的
+    await pump(tester, preferredGroupIds: {10}, onlyPreferred: true);
+
+    expect(find.text('话术结构'), findsOneWidget);
+    expect(find.text('画面场景'), findsNothing);
+    expect(find.text('厨房'), findsNothing);
+  });
 
   testWidgets('词表按组铺开，点选后确定返回带 id 的标签', (tester) async {
     final resultFuture = await pump(tester);

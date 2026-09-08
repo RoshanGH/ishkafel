@@ -13,13 +13,16 @@ import '../../core/export/speed_fit.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/task_lock.dart';
+import '../director/tag_picker.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
+import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_id_badge.dart';
 import '../tasks/task_list_controller.dart';
 import 'review_hover_player.dart';
@@ -41,6 +44,13 @@ class ReviewPage extends ConsumerStatefulWidget {
   /// （CLI 唤醒 / 任务列表进入）：进门持锁、确认自己写盘
   final void Function(List<ReviewDecision> decisions)? onApply;
 
+  /// 标签在这一页被改过时回调（**内嵌模式必须接**）。
+  ///
+  /// 为什么不让审核页自己写盘：内嵌时工作台开着同一条任务，两边都是整份
+  /// 任务对象落库，谁后写谁赢——不交回去的话，人在这里改的标签会被工作台
+  /// 的下一次保存抹掉。为 null 时是独立模式，自己持锁自己写。
+  final void Function(List<SemanticUnit> units)? onTagsChanged;
+
   /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
   final ReviewHoverPlayer? hoverPlayer;
   final Future<String> Function(int materialId)? resolveMedia;
@@ -50,6 +60,7 @@ class ReviewPage extends ConsumerStatefulWidget {
     super.key,
     required this.task,
     this.onApply,
+    this.onTagsChanged,
     this.hoverPlayer,
     this.resolveMedia,
     this.extractOriginalThumb,
@@ -60,6 +71,10 @@ class ReviewPage extends ConsumerStatefulWidget {
 }
 
 class _ReviewPageState extends ConsumerState<ReviewPage> {
+  /// 单元列表的**可变副本**：审核页能就地改标签，改完这里先变，
+  /// 再按模式落库（内嵌模式交回工作台，独立模式自己写盘）
+  late List<SemanticUnit> _units = [...(widget.task.units ?? const [])];
+
   late final List<ReviewItem> _items =
       collectReviewItems(widget.task.replacements ?? const []);
 
@@ -374,6 +389,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         final originEnd = item.shot == null ? unit?.endMs : shot?.endMs;
         return _Section(
           id: id,
+          unitIndex: item.unit,
+          shotIndex: item.shot,
           title: item.shot == null
               ? 'U${item.unit + 1} · 整段替换'
               : 'U${item.unit + 1} · S${item.shot! + 1}',
@@ -618,7 +635,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   Widget _sectionHeader(_Section section) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [
+          Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
             Text(section.title,
                 style: const TextStyle(
                     fontSize: AppFontSize.emphasis,
@@ -632,13 +649,16 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                       color: AppColors.textTertiary)),
             ],
           ]),
+          // 标签**独占一行、全部铺开**：挤在标题旁边的话，镜头层十来个标签
+          // 会被压成很窄的一条。它们是这一段的检索键，看的就是「全都有哪些」
+          _tagRow(section),
           if (section.transcript.isNotEmpty)
             Container(
-              constraints: const BoxConstraints(maxWidth: 720),
+              constraints: const BoxConstraints(maxWidth: 1100),
               padding: const EdgeInsets.only(top: 2),
+              // **台词不截断**：截成两行加省略号，等于把人要判断的东西藏起来
+              // ——他正是靠这段话决定候选贴不贴题的
               child: Text(section.transcript,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontSize: AppFontSize.caption,
                       height: 1.5,
@@ -646,6 +666,96 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             ),
         ],
       );
+
+  /// 这一段的标签。**摆出来，而且能就地改。**
+  ///
+  /// 为什么要摆在这里：标签就是这一段候选的检索键。人在这一屏判断候选
+  /// 「像不像」的时候，得能看见它当初是按什么搜出来的——看不见就只能猜，
+  /// 猜错了也只会反复剔除，问题根子（标签打偏了）一直没人动。
+  ///
+  /// 取哪一层跟着替换粒度走：整段替换检索用的是单元标签，逐镜头替换用的是
+  /// 那个镜头的标签——摆另一层等于给人看一份跟这次检索无关的东西。
+  Widget _tagRow(_Section section) {
+    final tags = _tagsOf(section);
+    final editable = _agent == null && _blockedBy == null;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          if (tags.isEmpty)
+            const Text('未打标',
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: AppColors.textTertiary))
+          else
+            for (final tag in tags) _chip(tag),
+          if (editable)
+            TextButton(
+              key: ValueKey('review-edit-tags-${section.id}'),
+              onPressed: () => unawaited(_editTags(section)),
+              style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm, vertical: 0),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              child: const Text('改标签',
+                  style: TextStyle(fontSize: AppFontSize.caption)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 改这一段的标签：打开选择器（当前的预先带勾），勾选/取消都在里面完成
+  /// ——删一个和加一个是同一个动作，跟编导台那边一致。
+  ///
+  /// **只给这条任务自己的标签组**（onlyPreferred）：标签是下一步的检索键，
+  /// 给出任务标签组以外的词等于让人挑一个这个项目根本没素材的标签，
+  /// 搜完才发现是空的，那时也不知道是标签选错了。
+  Future<void> _editTags(_Section section) async {
+    final groups = section.shotIndex == null
+        ? widget.task.unitTagGroups
+        : widget.task.shotTagGroups;
+    final picked = await showTagPicker(
+      context,
+      tags: ref.read(miaoaTagServiceProvider),
+      selected: _tagsOf(section),
+      preferredGroupIds: {for (final g in groups) g.id},
+      onlyPreferred: true,
+    );
+    if (picked == null || !mounted) return;
+    _applyTags(section, [for (final t in picked) t.name]);
+  }
+
+  /// 标签改动落地。
+  ///
+  /// **内嵌模式不自己写盘**：那时工作台开着同一条任务，它保存的是整份任务
+  /// 对象，这边再写一次，谁后写谁赢——人在审核页改的标签会被工作台的下一次
+  /// 保存抹掉。所以交回它，由它跟切分改动走同一条保存通路。
+  void _applyTags(_Section section, List<String> tags) {
+    setState(() => _units = _withTags(_units, section, tags));
+    final onTagsChanged = widget.onTagsChanged;
+    if (onTagsChanged != null) {
+      onTagsChanged(_units);
+      return;
+    }
+    // 独立模式：进门就持着锁，这份任务此刻归自己写
+    unawaited(ref
+        .read(taskRepositoryProvider)
+        .save(widget.task.copyWith(units: _units, updatedAt: DateTime.now())));
+  }
+
+  /// 这一段检索用的那一层标签
+  List<String> _tagsOf(_Section section) {
+    if (section.unitIndex >= _units.length) return const [];
+    final unit = _units[section.unitIndex];
+    final shotIndex = section.shotIndex;
+    if (shotIndex == null) return unit.tags;
+    return shotIndex < unit.shots.length ? unit.shots[shotIndex].tags : const [];
+  }
 
   /// 原片卡：这一段本来的样子。不可剔除（它不是候选，是参照物），
   /// 悬停播的是原片的这个区间
@@ -1001,10 +1111,38 @@ class ReviewOutcome {
   const ReviewOutcome({required this.kept, required this.dropped});
 }
 
+/// 换掉某个单元（或它某个镜头）的标签，其余原样返回新列表。
+/// 抽成纯函数：改标签是不可变更新，就地改会让 setState 前后指向同一个对象
+List<SemanticUnit> _withTags(
+    List<SemanticUnit> units, _Section section, List<String> tags) {
+  if (section.unitIndex >= units.length) return units;
+  return [
+    for (var i = 0; i < units.length; i++)
+      if (i != section.unitIndex)
+        units[i]
+      else if (section.shotIndex == null)
+        units[i].copyWith(tags: tags)
+      else
+        units[i].copyWith(shots: [
+          for (var j = 0; j < units[i].shots.length; j++)
+            if (j == section.shotIndex)
+              units[i].shots[j].copyWith(tags: tags)
+            else
+              units[i].shots[j],
+        ]),
+  ];
+}
+
 class _Section {
   final String id;
   final String title;
   final String transcript;
+
+  /// 这一段落在哪个单元；[shotIndex] 为 null 表示整段替换。
+  /// 标签要按这两个下标去任务里取——**取哪一层由替换粒度决定**：
+  /// 整段替换检索用的是单元标签，逐镜头替换用的是那个镜头的标签
+  final int unitIndex;
+  final int? shotIndex;
 
   /// 镜头替换的固定坑位时长；整段替换为 null（时长跟素材走）
   final int? slotMs;
@@ -1018,6 +1156,8 @@ class _Section {
     required this.id,
     required this.title,
     required this.transcript,
+    required this.unitIndex,
+    this.shotIndex,
     required this.slotMs,
     this.originStartMs,
     this.originEndMs,
