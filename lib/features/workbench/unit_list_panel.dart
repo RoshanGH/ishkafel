@@ -5,6 +5,7 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/export/composed_timeline.dart';
 import 'inspector_panel.dart' show formatTimecode;
 
 /// 台词语义单元列表：左栏，跟随 controller 渲染可滚动列表；点击行选中该单元
@@ -30,7 +31,15 @@ class UnitListPanel extends StatelessWidget {
   /// 把第 from 个单元拖到第 to 个位置。**列表顺序就是成片顺序**
   final void Function(int from, int to)? onReorderUnit;
 
+  /// **成片**时间轴。左栏那两个数是这个单元在成片里从哪到哪，不是原片位置。
+  ///
+  /// 手加的单元原片里根本没有它（它的 startMs/endMs 只是塞在原片末尾的占位），
+  /// 照原片显示就是一个纯假数字——真机上它写着 01:36.07–01:46.07，
+  /// 而原片只有 96.2s。为 null 时退回原片时间（测试/老调用点）
+  final ComposedTimeline? composed;
+
   const UnitListPanel({
+    this.composed,
     super.key,
     required this.controller,
     this.onUnitTap,
@@ -87,12 +96,17 @@ class UnitListPanel extends StatelessWidget {
 
   Widget _row(List<SemanticUnit> units, int i) {
     final unit = units[i];
+    // **拿不到外面那条轴就地现算一条**：直接退回原片时间是静默降级——
+    // 数字看着对，其实是另一条轴，人拿它去对时会对错
+    final axis = composed ??
+        ComposedTimeline.of(units: units, wholeDurations: const {});
     final selected = controller.selection?.unitIndex == i &&
         controller.selection?.shotIndex == null;
     return _UnitRow(
       unit: unit,
       index: i,
       fps: controller.fps,
+      composed: axis,
       selected: selected,
       onDelete: (onDeleteUnit == null ||
               !(canDeleteUnit?.call(unit) ?? true))
@@ -171,6 +185,7 @@ class _UnitRow extends StatelessWidget {
   final SemanticUnit unit;
   final int index;
   final double fps;
+  final ComposedTimeline composed;
   final bool selected;
   final VoidCallback onTap;
 
@@ -179,12 +194,20 @@ class _UnitRow extends StatelessWidget {
 
   const _UnitRow({
     this.onDelete,
+    required this.composed,
     required this.unit,
     required this.index,
     required this.fps,
     required this.selected,
     required this.onTap,
   });
+
+  /// 这个单元在**成片**里从哪到哪
+  String _range() {
+    final start = composed.startOf(index);
+    return '${formatTimecode(start, fps)}–'
+        '${formatTimecode(start + composed.durationOf(index), fps)}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +244,7 @@ class _UnitRow extends StatelessWidget {
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   Text(
-                    '${formatTimecode(unit.startMs, fps)}–${formatTimecode(unit.endMs, fps)}',
+                    _range(),
                     style: const TextStyle(
                         color: AppColors.textTertiary,
                         fontSize: AppFontSize.micro),

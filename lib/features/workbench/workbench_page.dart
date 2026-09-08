@@ -1150,7 +1150,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (editor == null || !_isEditable || _lock != null) return;
     final next = _task.isBlank
         ? BlankUnitOps.append(editor.units)
-        : SegmentationEditOps.appendUnit(editor.units);
+        : SegmentationEditOps.appendUnit(editor.units, fps: editor.fps);
     editor.replaceUnitsForBlankTask(next, next.last.endMs);
     editor.select(EditorSelection.unit(next.length - 1));
     _scheduleAutosave();

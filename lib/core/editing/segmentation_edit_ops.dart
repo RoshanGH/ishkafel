@@ -2,6 +2,7 @@ import '../analysis/boundary_snapper.dart';
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
+import '../time/timecode.dart';
 import 'transcript_splitter.dart';
 
 /// 切分编辑纯函数集：审片台上所有对语义单元/镜头结构的编辑操作都经此模块。
@@ -423,15 +424,20 @@ abstract final class SegmentationEditOps {
   /// 而「取自原片的哪一段」还得靠 [SemanticUnit.startMs]/[endMs] 表达。
   /// 想让它排到前面去，加完再拖——顺序由列表决定（见 `unit_reorder.dart`）。
   ///
-  /// 时长先给一个占位（挑到素材后由上层按素材真实时长重排）。
-  static List<SemanticUnit> appendUnit(List<SemanticUnit> units) {
+  /// 时长先给一个占位（挑到素材后由上层按素材真实时长重排），
+  /// 并按 [fps] 吸到整帧——**成片位置是各段时长一路累加出来的**，这里带个
+  /// 零头，后面每一段都跟着偏，拼到片尾越差越多。而界面显示的是帧，
+  /// 人看到的就是「每一段都对，加起来差了一帧」。fps 给 0 表示读不出帧率，
+  /// 那就不动它（读不出帧率不该让时长凭空变一下）。
+  static List<SemanticUnit> appendUnit(List<SemanticUnit> units,
+      {double fps = 0}) {
     final start = units.isEmpty ? 0 : units.last.endMs;
     return [
       ...units,
       SemanticUnit(
         index: units.length,
         startMs: start,
-        endMs: start + appendedUnitPlaceholderMs,
+        endMs: start + alignToFrame(appendedUnitPlaceholderMs, fps),
         // 原片上没有这一段，台词和镜头本来就不存在
         transcript: '',
         shots: const [],

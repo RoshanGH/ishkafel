@@ -53,4 +53,32 @@ void main() {
           reason: '存量任务反序列化回来不能突然变成「没有原片」');
     });
   });
+
+  group('手加单元的长度按整帧对齐', () {
+    // 不对齐的话，这个零头会跟着往后每一段的成片位置一路传下去，拼到片尾
+    // 越差越多——而界面显示的是帧，人看到的就是「每段都对，加起来差一帧」。
+    test('29.97fps：占位长度吸到帧边界上', () {
+      final units = SegmentationEditOps.appendUnit(const [], fps: 29.97);
+      final added = units.single;
+
+      final frames = added.durationMs * 29.97 / 1000;
+
+      expect((frames - frames.round()).abs(), lessThan(0.001),
+          reason: '${added.durationMs}ms 在 29.97fps 下是 $frames 帧，不是整数');
+    });
+
+    test('30fps：10 秒正好 300 帧，长度不变', () {
+      final units = SegmentationEditOps.appendUnit(const [], fps: 30);
+
+      expect(units.single.durationMs,
+          SegmentationEditOps.appendedUnitPlaceholderMs);
+    });
+
+    test('不给 fps 时保持原样——老调用点不该因此变一下', () {
+      final units = SegmentationEditOps.appendUnit(const []);
+
+      expect(units.single.durationMs,
+          SegmentationEditOps.appendedUnitPlaceholderMs);
+    });
+  });
 }

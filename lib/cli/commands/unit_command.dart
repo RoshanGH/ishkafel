@@ -131,7 +131,9 @@ Future<int> _add(
   final next = task.copyWith(
     units: task.isBlank
         ? BlankUnitOps.append(units)
-        : SegmentationEditOps.appendUnit(units),
+        // 帧率读不出来就给 0（appendUnit 那边会原样不动，不去瞎对齐）
+        : SegmentationEditOps.appendUnit(units,
+            fps: task.videoInfo?.fps ?? 0),
     updatedAt: DateTime.now(),
   );
   await repository.save(next);

@@ -1,4 +1,5 @@
 import '../core/export/subtitle_coverage.dart';
+import '../core/export/composed_timeline.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
 import '../core/replacement/replacement_plan.dart';
@@ -13,6 +14,40 @@ import '../core/replacement/replacement_plan.dart';
 /// 冒充**「分析完了但没有单元」——调用方据此决定是等着还是往下走。
 Map<String, dynamic> taskToJson(RenewTask task) {
   final units = task.units;
+  // 整体替换的单元在成片里有多长——跟挑中的那条素材走。素材时长不知道的
+  // 那些记下来，下面整块不报
+  final unknown = <int>[];
+  final wholeDurations = <int, int>{};
+  final plans = task.replacements;
+  if (plans != null && units != null) {
+    final durationOf = {
+      for (final m in task.pickedMaterials)
+        if (m.durationMs != null) m.id: m.durationMs!,
+    };
+    for (var i = 0; i < units.length && i < plans.length; i++) {
+      if (plans[i].mode != ReplacementMode.whole) continue;
+      final pick = plans[i].wholePreviewId ??
+          (plans[i].wholeCandidateIds.isEmpty
+              ? null
+              : plans[i].wholeCandidateIds.first);
+      final ms = pick == null ? null : durationOf[pick];
+      if (ms == null) {
+        unknown.add(i);
+      } else {
+        wholeDurations[i] = ms;
+      }
+    }
+  }
+  final composed = (units == null || unknown.isNotEmpty)
+      ? null
+      : ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
+  final composedBlockedBy = unknown.isEmpty
+      ? null
+      : '这几个单元是整体替换，但还不知道选中素材有多长，'
+          '所以整条片子的成片位置都算不准：'
+          '${unknown.map((i) => 'U${i + 1}').join('、')}。'
+          '先把素材下下来（candidates fetch），再来看 composedStartMs';
+
   return {
     'id': task.id,
     // 人对 Agent 说的是「#12」这种短编号；回传出去，Agent 复述时才对得上
@@ -33,7 +68,19 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     'analysisError': task.analysisError,
     // 替换分镜放哪一路声音的**全片打底**（镜头可以各自覆盖，见 shots）
     'materialAudio': task.materialAudio.toJson(),
-    'units': units == null ? null : [for (final u in units) _unitToJson(u)],
+    // **成片位置**：界面上显示的是这一套，Agent 也得拿同一套——它据此判断
+    // 「这一镜够不够铺满这句话」「前后连不连得上」，基准错了判断就跟着错。
+    //
+    // 算不准就**整块不报**并点名（见 composedUnavailable）：整体替换那一段
+    // 长度跟素材走，素材时长不知道时报一个差不多的数，Agent 会当真数用。
+    if (composed == null) 'composedUnavailable': composedBlockedBy,
+    if (composed != null) 'composedDurationMs': composed.totalMs,
+    'units': units == null
+        ? null
+        : [
+            for (var i = 0; i < units.length; i++)
+              _unitToJson(units[i], composed, i)
+          ],
     // 替换现状（主流程唯一真相）：apply plans 投影进来、审核剔除也落这里。
     // Agent 提交后靠它验证生效、审核后靠它看剔了什么——没有这块就只能盲跑
     'replacements': task.replacements == null
@@ -99,11 +146,21 @@ Map<String, dynamic> taskToJson(RenewTask task) {
   };
 }
 
-Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
+Map<String, dynamic> _unitToJson(
+        SemanticUnit unit, ComposedTimeline? composed, int at) =>
+    {
       'index': unit.index,
+      // **原片位置**。老名字留着（已有调用方还在用），同时给一份把基准写在
+      // 名字里的——两个基准混着用正是 2026-09-08 那个「属性栏写 00:45.03、
+      // 时间线画在 01:03」的来源
       'startMs': unit.startMs,
       'endMs': unit.endMs,
       'durationMs': unit.endMs - unit.startMs,
+      'sourceStartMs': unit.startMs,
+      'sourceEndMs': unit.endMs,
+      // **成片位置**：列表顺序就是成片顺序，前面的长度一变这里全跟着挪
+      if (composed != null) 'composedStartMs': composed.startOf(at),
+      if (composed != null) 'composedDurationMs': composed.durationOf(at),
       'transcript': unit.transcript,
       // 原片上有没有这一段。**false = 用户手动加的**：它没有台词（模型无从
       // 打标，标签只能手填），也没有原片画面可放（不挑素材就导不出来）。
@@ -120,6 +177,12 @@ Map<String, dynamic> _unitToJson(SemanticUnit unit) => {
             'startMs': unit.shots[i].startMs,
             'endMs': unit.shots[i].endMs,
             'durationMs': unit.shots[i].endMs - unit.shots[i].startMs,
+            'sourceStartMs': unit.shots[i].startMs,
+            'sourceEndMs': unit.shots[i].endMs,
+            // 整体替换的单元这里是 null：那一段整个换成了另一条素材，
+            // 原片的镜头切分在成片里已经不存在，编一个数出来是假精度
+            'composedStartMs': ?composed?.composedShotStart(at, i),
+            'composedEndMs': ?composed?.composedShotEnd(at, i),
             'description': unit.shots[i].description,
             // 这一镜露的是谁家产品——**「本片是什么品牌」的唯一可靠来源**。
             // 判断候选对不对得上本片，参照只能从这里来

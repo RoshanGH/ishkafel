@@ -56,6 +56,31 @@ class ComposedTimeline {
   int durationOf(int unitIndex) =>
       _durations[unitIndex.clamp(0, _durations.length - 1)];
 
+  /// 这一镜在**成片**里从第几毫秒开始。
+  ///
+  /// 界面上所有时间数字都该是成片时间——存的是原片毫秒（那是切分点），
+  /// 显示的是它在成片里落到哪儿，每次现算。
+  ///
+  /// **整体替换的单元返回 null**：那一段整个换成了另一条素材，原片的镜头
+  /// 切分在成片里已经不存在了。按比例缩一个数出来是假精度，而人会拿它去对时。
+  /// 下标越界也返回 null——界面在编辑过程中会短暂拿到对不上的下标。
+  int? composedShotStart(int unitIndex, int shotIndex) =>
+      _composedShot(unitIndex, shotIndex, end: false);
+
+  /// 这一镜在**成片**里到第几毫秒结束。约定同 [composedShotStart]
+  int? composedShotEnd(int unitIndex, int shotIndex) =>
+      _composedShot(unitIndex, shotIndex, end: true);
+
+  int? _composedShot(int unitIndex, int shotIndex, {required bool end}) {
+    if (unitIndex < 0 || unitIndex >= units.length) return null;
+    if (isReplaced(unitIndex)) return null;
+    final unit = units[unitIndex];
+    if (shotIndex < 0 || shotIndex >= unit.shots.length) return null;
+    final shot = unit.shots[shotIndex];
+    final offset = (end ? shot.endMs : shot.startMs) - unit.startMs;
+    return _starts[unitIndex] + offset;
+  }
+
   /// 两条轴画出来是不是一模一样。
   ///
   /// **界面靠它判断要不要换轴**。原来只比 [totalMs]——而调整单元顺序恰恰

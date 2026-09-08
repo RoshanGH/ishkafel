@@ -37,6 +37,24 @@ Widget inspectorCard(List<Widget> children) => Container(
       ]),
     );
 
+/// 次要信息行：值比标签更长时用它。
+///
+/// 「取自原片 00:45.03–00:48.14」这种一行放不下——[inspectorInfoRow] 是
+/// 左右对齐的两段文字，值一长就把属性栏撑爆（真机上溢出 9.3px）。这里把值
+/// 换行摆在下面，字号也压小：它是给人回原片对素材用的参考，不是主数字。
+Widget inspectorSubRow(String label, String value) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        inspectorLabel(label),
+        const SizedBox(height: 2),
+        Text(value,
+            style: const TextStyle(
+                color: AppColors.textTertiary,
+                fontSize: AppFontSize.caption,
+                fontFeatures: [FontFeature.tabularFigures()])),
+      ],
+    );
+
 Widget inspectorInfoRow(String label, String value) => Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [

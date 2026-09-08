@@ -405,11 +405,21 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   stageHeight: box.maxHeight,
                   candidatesActive: picking,
                 );
+                // **一条成片轴，两个面板共用**：左栏和属性栏上的时间数字全是
+                // 「这一段在成片里落到哪儿」，每次现算。存的永远是原片毫秒
+                // （那是切分点，是数据本身）——把成片时间存进库的话，加一个
+                // 单元就要重写每一个单元再落盘，写一半崩了就烂在盘上。
+                // 实测全量重算 0.4µs（60 单元 2700 镜也只要 3.5µs），
+                // 而时间线光画省略号每帧就要 2.1ms
+                final composedAxis = ComposedTimeline.of(
+                    units: editor.units,
+                    wholeDurations: widget.composedDurations);
                 return Row(
                 children: [
                   SizedBox(
                     width: widths.left,
                     child: UnitListPanel(
+                      composed: composedAxis,
                       controller: editor,
                       onAddUnit: widget.onAddUnit,
                       onReorderUnit: widget.onReorderUnit,
@@ -448,6 +458,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                             SidePanelTab.inspector => InspectorPanel(
                                 controller: editor,
                                 fps: editor.fps,
+                                composed: composedAxis,
                                 onSplitAtPlayhead: () =>
                                     _splitAtPlayhead(context, editor, playback),
                                 // 逐帧调边界时预览跟到那一帧（先停播——

@@ -6,6 +6,8 @@ import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/audio/material_audio.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
+import '../../core/export/composed_timeline.dart';
+import '../../core/time/timecode.dart';
 import 'inspector_widgets.dart';
 import 'inserted_unit_label.dart';
 import 'material_audio_card.dart';
@@ -15,28 +17,9 @@ import 'tag_trace_section.dart';
 import 'voice_card.dart';
 import '../../core/editing/edit_locks.dart';
 
-/// 把毫秒时间戳格式化为 `mm:ss.ff`（ff 为两位帧号，前补 0）。
-///
-/// 帧号先把 ms 换算为总帧数再四舍五入取整，而不是直接对 `ms % 1000` 做浮点
-/// 运算截断：例如 70033ms/30fps 精确对应第 2101 帧（70.033*30=2100.99，
-/// 四舍五入为 2101），落在第 70 秒的第 1 帧上，若直接对毫秒余数取整会因浮
-/// 点误差把这一帧算漏、显示成 00 帧。
-///
-/// `fps.round()` 用作 mm:ss 的秒数除数是显示层的可接受近似：非整数帧率
-/// （如 29.97）下会有亚帧级漂移，但不会导致 ff 达到/超过 fpsRound（帧号
-/// 始终落在 [0, fpsRound) 内），因此只影响显示，不影响编辑运算的帧精度
-/// （编辑运算走 SegmentationEditOps.frameMs，独立于这里的显示格式化）。
-String formatTimecode(int ms, double fps) {
-  final fpsRound = fps.round();
-  final totalFrames = (ms * fps / 1000).round();
-  final totalSeconds = totalFrames ~/ fpsRound;
-  final ff = totalFrames % fpsRound;
-  final mm = totalSeconds ~/ 60;
-  final ss = totalSeconds % 60;
-  return '${_pad2(mm)}:${_pad2(ss)}.${_pad2(ff)}';
-}
-
-String _pad2(int n) => n.toString().padLeft(2, '0');
+/// 时间码格式化搬到了 `core/time/timecode.dart`——命令行、导出、报告都要用，
+/// 不该去 import 一个界面文件。这里转出去，老调用点不用改。
+export '../../core/time/timecode.dart' show formatTimecode;
 
 /// 属性检查器：右栏，跟随 [SegmentationEditorController.selection] 三态渲染
 /// ——选中单元 / 选中镜头 / 无选中占位。
@@ -46,6 +29,11 @@ String _pad2(int n) => n.toString().padLeft(2, '0');
 class InspectorPanel extends StatefulWidget {
   final SegmentationEditorController controller;
   final double fps;
+
+  /// **成片**时间轴。属性栏上所有时间数字都是「在成片里落到哪儿」，
+  /// 每次现算、不落库——存的永远是原片毫秒（那是切分点，是数据本身）。
+  /// 为 null 时退回原片时间（测试/老调用点）
+  final ComposedTimeline? composed;
 
   /// 「在游标处拆分」的实际拆分时机（当前播放头位置）由外部（审片台页面）
   /// 决定，本面板只负责转发点击事件。
@@ -122,6 +110,7 @@ class InspectorPanel extends StatefulWidget {
     super.key,
     required this.controller,
     required this.fps,
+    this.composed,
     this.onSplitAtPlayhead,
     this.onSeekTo,
     this.voiceOf,
@@ -148,6 +137,30 @@ class InspectorPanel extends StatefulWidget {
 }
 
 class _InspectorPanelState extends State<InspectorPanel> {
+  /// 成片时间轴。**外面没给就地现算一条**——直接退回原片时间是静默降级：
+  /// 数字看着对，其实是另一条轴，人拿它去对时会对错
+  ComposedTimeline get _axis =>
+      widget.composed ??
+      ComposedTimeline.of(
+          units: widget.controller.units, wholeDurations: const {});
+
+  /// 这个单元在**成片**里的起点
+  int _unitStart(int unitIndex, SemanticUnit unit) => _axis.startOf(unitIndex);
+
+  int _unitEnd(int unitIndex, SemanticUnit unit) {
+    final t = _axis;
+    return t.startOf(unitIndex) + t.durationOf(unitIndex);
+  }
+
+  /// 这一镜在**成片**里的起止。整体替换的单元返回 null——那一段整个换成了
+  /// 另一条素材，原片的镜头切分在成片里已经不存在，编一个数出来是假精度
+  (int, int)? _shotRange(int unitIndex, int shotIndex) {
+    final t = _axis;
+    final a = t.composedShotStart(unitIndex, shotIndex);
+    final b = t.composedShotEnd(unitIndex, shotIndex);
+    return (a == null || b == null) ? null : (a, b);
+  }
+
   final _transcriptController = TextEditingController();
 
   /// 台词 TextField 专用 FocusNode：聚焦时开启编辑会话、失焦时结束（评审
@@ -347,7 +360,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
           inspectorCard([
             inspectorTimeRow(
               label: '开始',
-              valueText: formatTimecode(unit.startMs, widget.fps),
+              valueText: formatTimecode(_unitStart(unitIndex, unit), widget.fps),
               minusKey: const Key('inspector-start-minus'),
               plusKey: const Key('inspector-start-plus'),
               minusEnabled: canNudgeStart,
@@ -357,7 +370,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             ),
             inspectorTimeRow(
               label: '结束',
-              valueText: formatTimecode(unit.endMs, widget.fps),
+              valueText: formatTimecode(_unitEnd(unitIndex, unit), widget.fps),
               minusKey: const Key('inspector-end-minus'),
               plusKey: const Key('inspector-end-plus'),
               minusEnabled: canNudgeEnd,
@@ -373,6 +386,15 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   hasSource: unit.hasSource,
                 )),
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
+            // 手加的单元原片里根本没有它——它的 startMs/endMs 只是塞在原片
+            // 末尾的占位。给出来就是个纯假数字（真机上它写着
+            // 01:36.07–01:46.07，而原片只有 96.2s），所以这一行只对
+            // 真的取自原片的单元出现
+            if (unit.hasSource)
+              inspectorSubRow(
+                  '取自原片',
+                  '${formatTimecode(unit.startMs, widget.fps)}'
+                      ' – ${formatTimecode(unit.endMs, widget.fps)}'),
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
@@ -459,7 +481,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 'U${unit.index + 1} · ${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
             inspectorTimeRow(
               label: '镜头开始',
-              valueText: formatTimecode(shot.startMs, widget.fps),
+              valueText: formatTimecode(
+                  _shotRange(unitIndex, shotIndex)?.$1 ?? shot.startMs,
+                  widget.fps),
               minusKey: const Key('inspector-start-minus'),
               plusKey: const Key('inspector-start-plus'),
               minusEnabled: canNudgeStart,
@@ -469,7 +493,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
             ),
             inspectorTimeRow(
               label: '镜头结束',
-              valueText: formatTimecode(shot.endMs, widget.fps),
+              valueText: formatTimecode(
+                  _shotRange(unitIndex, shotIndex)?.$2 ?? shot.endMs,
+                  widget.fps),
               minusKey: const Key('inspector-end-minus'),
               plusKey: const Key('inspector-end-plus'),
               minusEnabled: canNudgeEnd,
@@ -479,6 +505,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
             ),
             inspectorInfoRow(
                 '时长', '${(shot.durationMs / 1000).toStringAsFixed(2)}s'),
+            // **原片出处单独一行、写清楚**：上面那两个数是成片位置，
+            // 而人有时要知道这一镜取自原片哪一段（回原片去看、去对素材）。
+            // 两者混在同一个字段里就是 2026-09-08 那个「属性栏写 00:45.03、
+            // 时间线画在 01:03」的来源
+            inspectorSubRow(
+                '取自原片',
+                '${formatTimecode(shot.startMs, widget.fps)}'
+                    ' – ${formatTimecode(shot.endMs, widget.fps)}'),
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
