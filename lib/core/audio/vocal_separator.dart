@@ -27,6 +27,29 @@ class SeparatedAudio {
 /// 一律用原混音，一个字节都不动。这条策略在混音那一层实现，本类只管分离。
 ///
 /// 走 `audio-separator` 命令行（BS-Roformer 模型，见 [model]）。
+/// 给分离工具抽一道它读得懂的音频（立体声 wav）。
+///
+/// 与 [AudioExtractor] 那条不是一回事：那边出的是给 ASR 用的单声道 16k PCM，
+/// 分离要的是原采样率的立体声——降过声道再分，出来的两轨都是废的。
+Future<String> extractAudioForSeparation(
+  String input,
+  String out, {
+  ProcessRunner run = systemProcessRunner,
+}) async {
+  final result = await run('ffmpeg', [
+    '-y', '-v', 'error',
+    '-i', input,
+    // 只要声音；保持立体声与原采样率
+    '-vn', '-ac', '2', '-ar', '44100',
+    out,
+  ]);
+  if (result.exitCode != 0) {
+    throw VocalSeparationException(
+        '抽音频失败（exit=${result.exitCode}）：${result.stderr}');
+  }
+  return out;
+}
+
 class VocalSeparator {
   final ProcessRunner run;
 
@@ -37,11 +60,25 @@ class VocalSeparator {
   /// 系统清理临时目录后每次都要重新下载几百兆。
   final Directory modelDir;
 
+  /// 把视频/任意媒体抽成分离工具读得懂的音频。返回落地的路径。
+  ///
+  /// **必须先抽这一道**：`audio-separator` 走 `soundfile` 读输入，它认
+  /// wav/flac 这类，**不认 mp4**——直接把视频喂过去就是
+  /// `Format not recognised`，而界面上只会显示「分离失败」。
+  /// 真机 2026-09-07：这台机器上分离从来没成功过，就是栽在这儿。
+  final Future<String> Function(String input, String out)? extractAudio;
+
   const VocalSeparator({
     required this.modelDir,
     this.run = systemProcessRunner,
     this.binary = 'audio-separator',
+    this.extractAudio,
   });
+
+  /// 这些后缀 `soundfile` 直接读得了，不用白抽一道
+  static const Set<String> readableExtensions = {
+    '.wav', '.flac', '.aiff', '.aif', '.ogg',
+  };
 
   /// 用的模型：UVR-MDX-NET-Inst_HQ_3。
   ///
@@ -124,10 +161,25 @@ class VocalSeparator {
     return job;
   }
 
+  /// 交给分离工具的那个文件：本来就读得了就原样用，否则抽一道音频。
+  ///
+  /// 抽出来的中间文件跟产物落在同一个目录——按任务归属，删任务时一并清掉，
+  /// 不会变成孤儿
+  Future<String> _readableInput(
+      String audioPath, Directory outputDir, String stem) async {
+    final ext = p.extension(audioPath).toLowerCase();
+    if (readableExtensions.contains(ext)) return audioPath;
+    final extract = extractAudio;
+    if (extract == null) return audioPath;
+    return extract(audioPath, p.join(outputDir.path, '$stem-输入.wav'));
+  }
+
   Future<SeparatedAudio> _separate(String audioPath, Directory outputDir,
       String stem, File vocals, File background) async {
+    // 视频（或任何 soundfile 读不了的东西）先抽成 wav 再喂
+    final input = await _readableInput(audioPath, outputDir, stem);
     final result = await run(binary, [
-      audioPath,
+      input,
       '--model_filename', model,
       '--model_file_dir', modelDir.path,
       '--output_dir', outputDir.path,
@@ -199,3 +251,7 @@ final _locator = MediaToolsLocator(searchDirs: vocalSeparatorSearchDirs);
 /// 解析可执行文件路径；找不到时回退裸名，让子进程照常抛出「未安装」
 String resolveVocalSeparatorBinary({MediaToolsLocator? locator}) =>
     (locator ?? _locator).resolve('audio-separator') ?? 'audio-separator';
+
+/// 忘掉「没找到 audio-separator」这个结论，让下一次解析重新探测。
+/// 理由同 [forgetMiaoaProbeMisses]：装工具时 app 是开着的。
+void forgetVocalSeparatorProbeMisses() => _locator.forgetMisses();
