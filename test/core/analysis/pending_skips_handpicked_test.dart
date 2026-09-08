@@ -59,4 +59,44 @@ void main() {
 
     expect(unitsPendingTagging(t), {0});
   });
+
+  group('手加的台词语义单元：不排进自动打标', () {
+    // 2026-09-08 真机：每次打开任务，手加的 U1 都会被再打一次标——它没有
+    // 台词、没有镜头、原片里也没有它，模型没有任何东西可以据以打标，
+    // 于是每次都白烧一次 AI 调用，返回的还永远是空。
+    //
+    // 它的标签本来就是人手填的（withHandpickedTags），不该走自动这条路。
+    RenewTask taskWith(List<SemanticUnit> units) => RenewTask(
+          id: 't',
+          name: 'n',
+          sourcePath: '/v/src.mp4',
+          status: RenewTaskStatus.ready,
+          units: units,
+          createdAt: DateTime(2026),
+          updatedAt: DateTime(2026),
+        );
+
+    test('没有原片来源的单元不算欠打标', () {
+      final task = taskWith(const [
+        SemanticUnit(
+            index: 0,
+            startMs: 96233,
+            endMs: 106233,
+            transcript: '',
+            hasSource: false),
+      ]);
+
+      expect(unitsPendingTagging(task), isEmpty,
+          reason: '它没有台词也没有画面，打标只会返回空——'
+              '每打开一次任务就白烧一次 AI 调用');
+    });
+
+    test('原片里的单元照旧欠着', () {
+      final task = taskWith(const [
+        SemanticUnit(index: 0, startMs: 0, endMs: 1000, transcript: '有台词'),
+      ]);
+
+      expect(unitsPendingTagging(task), contains(0));
+    });
+  });
 }

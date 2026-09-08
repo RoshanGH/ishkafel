@@ -307,6 +307,23 @@ class _TimelineViewState extends State<TimelineView> {
       return;
     }
 
+    // 字幕轨：点哪一段就选中那一镜，人直接去右边改。
+    //
+    // 那几段字是**按镜头坑位**画的，横向范围和视觉镜头轨上那一格完全一样，
+    // 所以直接借镜头轨的命中判定——把 y 挪到镜头轨上再问一次，不另写一套
+    // 几何（两套迟早对不上）。用户原话：「能不能直接选中字幕直接改啊？」
+    if (TimelineTracks.isOnSubsTrack(position.dy)) {
+      final onShots = Offset(position.dx,
+          (TimelineTracks.shotsTop + TimelineTracks.shotsBottom) / 2);
+      final shotHit = TimelineHitTester.hitTest(
+          onShots, widget.controller.units, widget.geometry,
+          locks: widget.controller.locks);
+      if (shotHit case ShotBlockHit(:final unitIndex, :final shotIndex)) {
+        widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
+      }
+      return;
+    }
+
     final hit = TimelineHitTester.hitTest(
         position, widget.controller.units, widget.geometry,
         locks: widget.controller.locks);

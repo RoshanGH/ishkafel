@@ -38,7 +38,14 @@ Set<int> unitsPendingTagging(RenewTask task) {
       // **人手改过的一律跳过**：他把标签改成空，意思是「我就是不要标签」，
       // 而不是「还没打」。分不清的话后台会默默补一份回去，把他刚做的判断
       // 盖掉——他看不见这一步，只会觉得改了没生效
-      if (!units[i].tagsHandpicked &&
+      //
+      // **手加的单元也一律跳过**：原片里没有它，它没有台词、没有镜头、
+      // 也没有画面，模型没有任何东西可以据以打标——排进去只会每打开一次
+      // 任务就白烧一次 AI 调用，返回的还永远是空（2026-09-08 真机上，
+      // 一条任务的 U1 就这么被反复打了好几轮）。它的标签本来就是人手填的，
+      // 见 withHandpickedTags
+      if (units[i].hasSource &&
+          !units[i].tagsHandpicked &&
           (units[i].shots.isEmpty
               ? units[i].tags.isEmpty
               : untaggedShotIndexes(units[i]).isNotEmpty))

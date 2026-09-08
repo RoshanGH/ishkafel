@@ -78,4 +78,17 @@ void main() {
     expect(checked, greaterThanOrEqualTo(2),
         reason: '至少 exportAll 和 exportCombinations 两条路要被查到');
   });
+
+  test('预览的字幕样式跟着任务走，不能停在默认那套', () {
+    // 2026-09-08 真机：「这个参数调整的还是用不了，调整参数也没有变化」。
+    // 导出一直用 _task.subtitle，而预览的变速切片构造时压根没接样式，
+    // 永远是 SubtitleStyle.standard——两边对不上，人怎么调都看不到变化。
+    final src =
+        File('lib/features/workbench/workbench_page.dart').readAsStringSync();
+
+    expect(src, contains('subtitleStyleOf:'),
+        reason: '预览的变速切片没接字幕样式，调了参数只有导出能看到');
+    expect(src, contains('subtitleTrackOf:'),
+        reason: '同理，手改过的字幕也要进预览');
+  });
 }

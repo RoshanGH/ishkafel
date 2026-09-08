@@ -143,6 +143,12 @@ abstract final class TimelineTracks {
   /// 字幕轨底部
   static double get subsBottom => subsTop + subsH;
 
+  /// 点在字幕轨上了没有。
+  ///
+  /// 轨上画着那几段字，点下去就该选中那一镜——人才能直接去右边改。
+  /// 用户原话：「能不能直接选中字幕直接改啊？」
+  static bool isOnSubsTrack(double dy) => dy >= subsTop && dy < subsBottom;
+
   /// 配乐轨标题条顶部
   static double get bgmLabelTop => subsBottom + gap;
 

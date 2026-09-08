@@ -57,6 +57,17 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      // **靠右摆，别压在播放器上**：调字号、位置、颜色全靠看预览判断，
+      // 而居中的对话框正好把画面盖住——人调完只能关掉弹窗才看得见，
+      // 关掉又没法再微调（2026-09-08 真机：「弹窗刚好挡住预览窗口了」）。
+      // 右侧是属性栏，盖住它不影响这件事。
+      //
+      // 用 AlertDialog 自己的 alignment，**不能在外面套 Align**：
+      // Dialog 内部自带一层 Center，会把外层给的空间撑满，套了没有任何效果
+      // （第一版就是这么写的，真机上一看还是居中）。
+      alignment: Alignment.centerRight,
+      insetPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.xl, vertical: AppSpacing.lg),
       backgroundColor: AppColors.surfaceRaised,
       title: const Text('字幕样式', style: TextStyle(fontSize: AppFontSize.title)),
       content: SizedBox(

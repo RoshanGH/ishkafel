@@ -48,7 +48,16 @@ class SpeedFitter extends ChangeNotifier {
   /// 拷一份进来的话这个 fitter 是页面初始化时建的，永远停在打开那一刻。
   final SubtitleTrack Function()? subtitleTrackOf;
 
+  /// 字幕样式。**活取**，理由同 [subtitleTrackOf]：顶栏「字幕」里调字号、
+  /// 位置、描边，人调完立刻要在预览里看到。构造时拷一份的话，这个 fitter 是
+  /// 进页面那一刻建的，永远停在默认那套——2026-09-08 真机「调整参数也没有
+  /// 变化」就是这么来的（导出那条路一直用的是任务里的样式，两边对不上）。
+  final SubtitleStyle Function()? subtitleStyleOf;
+
+  /// 没给 [subtitleStyleOf] 时的兜底
   final SubtitleStyle subtitleStyle;
+
+  SubtitleStyle get _style => subtitleStyleOf?.call() ?? subtitleStyle;
 
   /// 把字幕行渲成透明 PNG 的渲染器（系统渲字，见 SubtitleRasterizer）。
   /// 只有 [sentences] 非空才会用到
@@ -73,6 +82,7 @@ class SpeedFitter extends ChangeNotifier {
     this.targetSpec,
     this.sentences = const [],
     this.subtitleTrackOf,
+    this.subtitleStyleOf,
     this.subtitleStyle = SubtitleStyle.standard,
     SubtitleRasterizer? rasterizer,
   }) : rasterizer = rasterizer ?? SubtitleRasterizer();
@@ -213,7 +223,8 @@ class SpeedFitter extends ChangeNotifier {
     required int slotEndMs,
   }) =>
       '$candidatePath|$slotStartMs-$slotEndMs|'
-      '${subtitleFingerprint(_linesFor(unitIndex: unitIndex, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}';
+      '${subtitleFingerprint(_linesFor(unitIndex: unitIndex, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}|'
+      '${_style.fingerprint}';
 
   /// 这一镜要烧的字。手改过就用手改的——和导出、属性面板同一个出口
   List<SubtitleLine> _linesFor({
@@ -254,7 +265,7 @@ class SpeedFitter extends ChangeNotifier {
     final subFingerprint = subtitleFingerprint(lines);
     final subKey = subFingerprint.isEmpty
         ? ''
-        : '|sub$subFingerprint|${subtitleStyle.fingerprint}';
+        : '|sub$subFingerprint|${_style.fingerprint}';
     // **和导出、剪映走同一个函数**：那两条路都改成「从素材里截一段」了，
     // 预览要是还整条压缩，人在软件里看到的是快进、导出来却不是——
     // 比两边都快进更糟，因为人会照着预览下判断
@@ -288,7 +299,7 @@ class SpeedFitter extends ChangeNotifier {
               lines: lines,
               width: width,
               height: height,
-              style: subtitleStyle,
+              style: _style,
               outDir: cache.dir,
             );
       final out = await cache.render(

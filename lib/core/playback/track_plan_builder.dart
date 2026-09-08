@@ -97,14 +97,23 @@ class TrackPlanBuilder {
         continue;
       }
 
-      // 空白任务里没挑素材的分子：没有原片垫底，只能跳过并如实记下来
-      if (sourcePath == null) {
+      // 没挑素材、又没有原片可垫的单元：跳过并如实记下来。
+      //
+      // 两种情况都在这儿：空白任务里的分子（整条任务没有原片），以及
+      // **手加的台词语义单元**（这条任务有原片，但原片里没有它）。
+      //
+      // 判据必须是「**这个单元**有没有原片来源」，不是「这条任务有没有原片」
+      // ——同一条任务里两种单元现在是并存的。按后者判的话，手加单元会掉进
+      // 下面「按镜头逐段取原片」的分支，而它的 startMs/endMs 只是时间线上的
+      // 占位、落在原片时长之外：取的是一段根本不存在的时间，播出来是黑的
+      // 或者干脆卡住（2026-09-08 真机：「添加的台词语义单元不能正常播放」）。
+      if (sourcePath == null || !unit.hasSource) {
         skipped.add(unit.index);
         unitRanges[unit.index] = (start, at);
         continue;
       }
 
-      // 走到这儿 sourcePath 一定非空——空白任务在上一个分支已经跳过了
+      // 走到这儿 sourcePath 一定非空——上一个分支已经把没有原片的都拦下了
       final audioSource = audioSourcePath ?? sourcePath;
 
       // 没有整体替换：画面按镜头逐段取，声音按「这一段该用哪条音源」取

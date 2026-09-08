@@ -645,6 +645,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 人手改过的那几镜以他改的为准。**活取**：这个 fitter 是进页面时建的，
       // 拷一份进去的话预览永远停在打开那一刻
       subtitleTrackOf: () => _task.subtitleTrack,
+      // 顶栏「字幕」里调的字号/位置/描边。**活取**，理由同上：调完立刻要看到
+      subtitleStyleOf: () => _task.subtitle,
     );
   }
 
@@ -1861,6 +1863,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (picked == null || !mounted) return;
     final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
     setState(() => _task = next);
+    // 预览里被替换的那几段是**提前烧好字**的切片，样式变了要按新指纹重渲一遍。
+    // 不推的话人调完参数看不到任何变化（2026-09-08 真机）
+    _syncPreviewAudio();
     await ref.read(taskRepositoryProvider).save(next);
   }
 
