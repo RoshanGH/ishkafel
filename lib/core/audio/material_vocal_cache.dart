@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 import '../log/app_log.dart';
 import 'vocal_separator.dart';
 
-/// 把**替换素材**分离成纯人声，按素材文件缓存，同一条只分离一次。
+/// 把**替换素材**分成人声与背景两路，按素材文件缓存，同一条只分离一次。
 ///
 /// 为什么需要它：整体替换的段落，声音来自那条素材，里面同样有背景音。
 /// 在它上面铺配乐，素材自带的背景音和新配乐就是两首曲子一起响——跟原片那一路
@@ -26,35 +26,35 @@ class MaterialVocalCache {
   ///
   /// 分不了不是错误：调用方退回素材原声照常出片，只是配乐会和它叠在一起，
   /// 那件事由界面如实告知。这里绝不抛——一条素材分不了不该让整次导出失败。
-  Future<String?> vocalsOf(String materialPath) async {
+  Future<String?> vocalsOf(String materialPath) async =>
+      (await separate(materialPath))?.vocalsPath;
+
+  /// 返回这条素材的背景轨（水声、喷雾声、环境音；说话声已被分掉）。
+  ///
+  /// **背景轨原来是生成完就删掉的**——那时这条链路只要纯人声，一条 30MB 的
+  /// 未压缩 WAV 躺着纯属占盘。现在「替换分镜放背景声」这一档要读它，
+  /// 它就有了读者，于是留着（磁盘上的每一份数据都要有人读、有人删——
+  /// 这两条现在都满足了：任务删掉时按缓存目录整片清）。
+  Future<String?> backgroundOf(String materialPath) async =>
+      (await separate(materialPath))?.backgroundPath;
+
+  /// 分离一次，两路都拿到。**同一条素材只跑一次**：
+  /// [VocalSeparator] 认已有产物，人声和背景是同一次分离的两个输出，
+  /// 分别调两个方法不会跑第二遍
+  Future<SeparatedAudio?> separate(String materialPath) async {
     final tool = separator;
     if (tool == null) return null;
     if (!File(materialPath).existsSync()) return null;
     try {
-      final stems = await tool.separate(
+      return await tool.separate(
         audioPath: materialPath,
         // 同一条素材的产物固定落一处，[VocalSeparator] 自己会认已有结果
         outputDir: Directory(
             p.join(cacheDir.path, p.basenameWithoutExtension(materialPath))),
       );
-      // 背景轨从生成那一刻起就没有任何读者（这条链路只要纯人声），
-      // 一条 30MB 的未压缩 WAV 躺着纯属占盘——磁盘上的每一份数据都要
-      // 有人读、有人删
-      _discardQuietly(stems.backgroundPath);
-      return stems.vocalsPath;
     } catch (e) {
-      AppLog.warn('素材人声分离失败（$materialPath）：$e');
+      AppLog.warn('素材分离失败（$materialPath）：$e');
       return null;
-    }
-  }
-
-  /// 删失败只记日志：清理是顺手的事，不该让分离本身报错
-  static void _discardQuietly(String path) {
-    try {
-      final f = File(path);
-      if (f.existsSync()) f.deleteSync();
-    } catch (e) {
-      AppLog.warn('清理背景轨失败（$path）：$e');
     }
   }
 }

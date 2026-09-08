@@ -1,6 +1,7 @@
 import '../ffmpeg/media_spec.dart';
 import '../subtitle/subtitle_overlay.dart';
 import 'export_spec.dart';
+import '../audio/material_audio.dart';
 import 'speed_fit.dart';
 
 /// 导出用的 ffmpeg 命令行拼装（纯函数，不起进程）。
@@ -131,14 +132,16 @@ class ExportCommands {
     /// 与 [target] 互斥：预览传 target、导出传 spec；都传时以 target 为准
     ExportSpec? spec,
   }) {
-    // 截了一段等长的就不再变速——截完还变速等于白截
+    // 截了一段等长的就不再变速——截完还变速等于白截。
+    // **判定走 [SpeedFit.effectiveFactor]**：保留素材原声时声音要用同一个
+    // 倍率，两边各算一份迟早分叉，而分叉的结果是声音和画面越走越偏、不报错
     final trimmed = trimStartMs != null &&
         candidateDurationMs != null &&
         candidateDurationMs - trimStartMs >= durationMs;
-    final factor = candidateDurationMs == null || trimmed
-        ? 1.0
-        : SpeedFit.factorFor(
-            candidateMs: candidateDurationMs, slotMs: durationMs);
+    final factor = SpeedFit.effectiveFactor(
+        candidateMs: candidateDurationMs,
+        slotMs: durationMs,
+        trimStartMs: trimStartMs);
     // 一样长时不插滤镜：白走一道只会掉画质
     final speed = (factor - 1).abs() < 1e-6
         ? ''
@@ -222,11 +225,15 @@ class ExportCommands {
   static List<String> wholeReplacementAudio({
     required String input,
     required String out,
+    /// 压到原始音量的几成。1.0 = 原样（默认，也是这个参数出现之前的行为）
+    double volume = 1.0,
   }) =>
       [
         '-y', '-v', 'error',
         '-i', input,
         '-vn',
+        // 1.0 时不插滤镜：白走一道只会掉音质
+        if ((volume - 1).abs() > 1e-6) ...['-af', 'volume=$volume'],
         ..._audioNormalize(),
         out,
       ];
@@ -309,6 +316,50 @@ class ExportCommands {
         ..._audioNormalize(),
         out,
       ];
+
+  /// 把**候选素材自己的声音**叠回成片的某一段（视觉镜头替换用）。
+  ///
+  /// 镜头替换换的是画面，那一段的口播照旧来自原片，所以素材的声音本来是被
+  /// 丢掉的（[replaceShot] 里那个 `-an`）。这条命令把它作为**额外一层**加
+  /// 回来——口播、素材原声、配乐三者同时响。
+  ///
+  /// 两处跟配乐不一样：
+  /// - **要跟着变速**。画面用 `setpts=PTS/factor` 填满原坑位，声音不走同样的
+  ///   倍率就会越走越偏（见 [atempoChain]）
+  /// - **不循环**。配乐短了循环补齐，素材声音短了就该是短的——补出来的那截
+  ///   是凭空多的现场音
+  static List<String> mixMaterialAudio({
+    required String voice,
+    required String material,
+    required String out,
+    required int startMs,
+    required int durationMs,
+    required double speedFactor,
+    int? trimStartMs,
+    double volume = MaterialAudioSetting.defaultVolume,
+  }) {
+    final tempo = atempoChain(speedFactor);
+    final chain = [
+      'volume=$volume',
+      ...tempo,
+      'adelay=$startMs|$startMs',
+      'atrim=0:${_seconds(startMs + durationMs)}',
+    ].join(',');
+    return [
+      '-y', '-v', 'error',
+      '-i', voice,
+      // -ss 贴在素材那个 -i 前面：放后面是解码完再丢，从 20 秒素材里取 2 秒
+      // 要白解 18 秒
+      if (trimStartMs != null) ...['-ss', _seconds(trimStartMs)],
+      '-i', material,
+      '-filter_complex',
+      '[1:a]$chain[mat];'
+          '[0:a][mat]amix=inputs=2:duration=first:dropout_transition=0[a]',
+      '-map', '[a]',
+      ..._audioNormalize(),
+      out,
+    ];
+  }
 
   /// 统一画面规格：缩放到目标画幅，比例不同的补黑边（不拉伸变形）。
   /// 给了 [target] 就按原片的分辨率，否则按成片标准的 1080×1920

@@ -8,6 +8,8 @@ import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
 import 'bgm_cache.dart';
 import 'bgm_plan.dart';
+import 'material_audio.dart';
+import 'vocal_separator.dart';
 
 /// 成片声音的合成器：口播 + 配音 + 配乐，合成一条完整音轨。
 ///
@@ -58,12 +60,18 @@ class AudioTrackBuilder {
   /// 没铺配乐的地方没必要先损一道。
   final Future<String?> Function(String materialPath)? separateMaterial;
 
+  /// 把素材分成人声/背景两路。整体替换选了这两档时用它；
+  /// 分不出来就让调用方失败，**不许悄悄换一路声音进成片**
+  final Future<SeparatedAudio?> Function(String materialPath)?
+      separateMaterialStems;
+
   /// 导出用的帧率。**声音要和画面按同一个帧率取整**，否则每段差出小半帧、
   /// 一路累积到片尾就是可听见的错位。为 null 表示按默认 30
   final double? exportFps;
 
   AudioTrackBuilder({
     this.separateMaterial,
+    this.separateMaterialStems,
     this.exportFps,
     required this.run,
     required this.workDir,
@@ -99,6 +107,11 @@ class AudioTrackBuilder {
     /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）。配乐的位置要按
     /// 这个换算，否则从被替换的那个单元之后全部错位
     Map<int, int> wholeDurations = const {},
+
+    /// 视觉镜头替换里**要保留原声**的那几镜。上层已经算好了落地路径、
+    /// 变速倍率、截取起点和它在成片里的位置——那些参数必须和画面那一段
+    /// 用的完全一致，否则声音和画面对不上
+    List<ShotMaterialAudio> shotAudio = const [],
   }) async {
     workDir.createSync(recursive: true);
     // 整体替换会改变单元时长，后面所有单元跟着挪——配乐的位置必须按
@@ -135,6 +148,37 @@ class AudioTrackBuilder {
       args: (dest) => ExportCommands.concat(listFile: listFile, out: dest),
       what: '拼接声音',
     );
+
+    // 素材原声逐镜叠上去（视觉镜头替换里开了「保留素材原声」的那些）。
+    //
+    // 摆在配乐**之前**：配乐是最外面那一层垫底的，先把画面这一段自己的
+    // 现场音贴回去，再往整体上铺乐，跟人听到的层次一致。
+    //
+    // **一镜失败就整条失败**，不像配乐那样只丢一段：用户是特意为这一镜
+    // 打开保留原声的（要的就是那个水声、喷雾声），静默少一层他不会发现，
+    // 而这是影响成片的东西
+    for (final shot in shotAudio) {
+      final mixedKey = 'mataudio|$key|${shot.path}|${shot.composedStartMs}'
+          '|${shot.durationMs}|${shot.speedFactor}|${shot.trimStartMs}'
+          '|${shot.volume}';
+      out = await _cache.render(
+        key: mixedKey,
+        prefix: 'mix_material',
+        extension: 'wav',
+        args: (dest) => ExportCommands.mixMaterialAudio(
+          voice: out,
+          material: shot.path,
+          out: dest,
+          startMs: shot.composedStartMs,
+          durationMs: shot.durationMs,
+          speedFactor: shot.speedFactor,
+          trimStartMs: shot.trimStartMs,
+          volume: shot.volume,
+        ),
+        what: '这一镜的素材原声',
+      );
+      key = mixedKey;
+    }
 
     // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓。
     //
@@ -233,20 +277,35 @@ class AudioTrackBuilder {
   }) async {
     // 整体替换优先于换音色——同一个单元两者都设时导出前置检查已经拦下了
     if (wholeAudio != null && File(wholeAudio).existsSync()) {
-      // 这一段被配乐盖住时，用素材的**纯人声**：素材自带的背景音留着的话，
-      // 它和新配乐就是两首曲子一起响
+      final setting = resolveWholeAudio(unit);
+      // 明确要求这一段别出声（片头插的空镜常这么用：只要画面，声音交给配乐）
+      if (!setting.mode.audible) return const [];
+
       var source = wholeAudio;
-      if (_overlaps(covered, unit.startMs, unit.endMs)) {
+      // 选了人声/背景声：按档位取那一路。**分不出来就失败，不悄悄换一路**
+      if (setting.mode.needsSeparation) {
+        final stems = await separateMaterialStems?.call(wholeAudio);
+        if (stems == null) {
+          throw StateError('U${unit.index + 1} 选了「${setting.mode.label}」，'
+              '但这条素材分离失败。重试一次，或把它改成「原声」/「不播放」');
+        }
+        source = setting.mode == MaterialAudioMode.vocals
+            ? stems.vocalsPath
+            : stems.backgroundPath;
+      } else if (_overlaps(covered, unit.startMs, unit.endMs)) {
+        // 这一段被配乐盖住时，用素材的**纯人声**：素材自带的背景音留着的话，
+        // 它和新配乐就是两首曲子一起响
         final vocals = await separateMaterial?.call(wholeAudio);
         if (vocals != null && File(vocals).existsSync()) source = vocals;
       }
       return [
         await _cache.render(
-          key: 'whole|$source',
+          // 音量进指纹：改了音量要重渲，不能命中上一次那份
+          key: 'whole|$source|${setting.volume}',
           prefix: 'mix_u${unit.index}_whole',
           extension: 'wav',
-          args: (dest) =>
-              ExportCommands.wholeReplacementAudio(input: source, out: dest),
+          args: (dest) => ExportCommands.wholeReplacementAudio(
+              input: source, out: dest, volume: setting.volume),
           what: 'U${unit.index + 1} 的替换声音',
         )
       ];
@@ -278,12 +337,16 @@ class AudioTrackBuilder {
       final (start, end) = ranges[i];
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
       final needsClean = _overlaps(covered, start, end) && vocalsPath != null;
-      final source = needsClean ? vocalsPath : sourcePath;
+      // **手动加的单元不许去原片上剪**：它的 startMs~endMs 只是时间线上的
+      // 占位，原片里没有这一段。不挡住的话会剪出一段别的声音接进成片，
+      // 而且哪儿都不报错——人只有听出来才知道
+      final source =
+          !unit.hasSource ? null : (needsClean ? vocalsPath : sourcePath);
       if (source == null) {
         // 空白任务里每个单元都是整体替换，走不到这儿。走到了就是有一段
         // 既没有素材也没有原片——不许拿静音顶上，那会让成片少一段声音
         throw StateError('U${unit.index + 1} 这一段既没有素材也没有原片，'
-            '合不出声音。请给它挑一条素材，或者删掉这个分子');
+            '合不出声音。请给它挑一条素材，或者删掉它');
       }
       pieces.add(await _cache.render(
         key: 'trim|$source|$start|$end|$exportFps',
