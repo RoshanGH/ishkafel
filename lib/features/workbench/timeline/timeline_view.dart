@@ -80,6 +80,12 @@ class TimelineView extends StatefulWidget {
   /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）
   final Map<int, int> composedDurations;
 
+  /// 这一镜的字幕手改过没有（字幕轨上标一下）
+  final bool Function(int unitIndex, int shotIndex)? subtitleEdited;
+
+  /// 字幕轨上画的预览文字
+  final String Function(int unitIndex, int shotIndex)? subtitleTextOf;
+
   /// 点了那个数字徽标：跳到右栏对应的那一段（shotIndex 为 null 表示整体替换）
   final void Function(int unitIndex, int? shotIndex)? onReplacementBadgeTap;
 
@@ -109,6 +115,8 @@ class TimelineView extends StatefulWidget {
     super.key,
     required this.controller,
     required this.geometry,
+    this.subtitleEdited,
+    this.subtitleTextOf,
     this.media,
     required this.playhead,
     this.mediaStatus = TimelineMediaStatus.ready,
@@ -439,8 +447,20 @@ class _TimelineViewState extends State<TimelineView> {
 
   /// 配乐轨按台词语义单元对齐——框选时吸附到单元边界，而不是 51 个镜头
   /// 一格一格对
-  int? _unitIndexAtX(double dx) => unitIndexAtMs(
-      widget.controller.units, widget.geometry.pxToMs(dx));
+  ///
+  /// **按成片位置查**：老写法是「像素 → 成片 ms → 原片 ms → 拿原片时间去
+  /// 列表里顺序扫」，那一步假设单元按原片时间升序排列。单元可以被拖乱顺序
+  /// 之后这个假设就不成立了——点在 U1 上会选中别人。
+  int? _unitIndexAtX(double dx) {
+    final axis = widget.geometry.axis;
+    if (axis == null) {
+      return unitIndexAtMs(
+          widget.controller.units, widget.geometry.pxToMs(dx));
+    }
+    return widget.controller.units.isEmpty
+        ? null
+        : axis.unitIndexAtComposedMs(widget.geometry.pxToComposedMs(dx));
+  }
 
   /// 光标是不是抓在某一段的边界手柄上
   ({int startUnit, BgmEdge edge, int from, int to})? _grabBgmEdge(double dx) {
@@ -550,9 +570,11 @@ class _TimelineViewState extends State<TimelineView> {
           onHorizontalDragCancel: _handleDragCancel,
           // RepaintBoundary 是必需的：没有它时 RenderCustomPaint.markNeedsPaint
           // 会一路上溯到 RenderView，播放头每次移动都要把整页的绘制指令重录一遍。
-          // 轨道总高是固定的（四条轨 + 各自标题条 = 248px）。窗口太矮时
-          // 纵向滚动兜底，而不是让最后一条轨（音频波形）整条落在可视区外——
-          // 用户既看不到波形，也看不到为它准备的「生成中/生成失败」占位。
+          // 轨道总高固定（六条轨 + 各自标题条，见 TimelineTracks.totalHeight）。
+          // 窗口太矮时纵向滚动兜底，而不是让最后一条轨（音频波形）整条落在
+          // 可视区外——用户既看不到波形，也看不到为它准备的「生成中/生成
+          // 失败」占位。**兜底成立的前提是画布高确实取到了总高**：总高比
+          // 视口还矮的话子高度就等于视口高度，滚都滚不动（2026-09-08）。
           // 手势坐标取自 CustomPaint 内部，滚动不影响命中判定的 y 基准。
           child: SingleChildScrollView(
             child: RepaintBoundary(
@@ -578,6 +600,8 @@ class _TimelineViewState extends State<TimelineView> {
                     voices: widget.voices,
                     replacements: widget.replacements,
                     composedDurations: widget.composedDurations,
+                    subtitleEdited: widget.subtitleEdited,
+                    subtitleTextOf: widget.subtitleTextOf,
                     textCache: _textCache,
                   ),
                 ),

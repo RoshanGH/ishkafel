@@ -6,6 +6,7 @@ import 'package:ishkafel/app/theme/app_colors.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
+import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
@@ -13,7 +14,9 @@ import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 const _viewportWidth = 1600.0;
 
 /// 画布高度取到波形轨以下，留出一段只有播放头会经过的空白区域用于像素取样
-const _canvasHeight = 300.0;
+/// 画布要够高，把所有轨都画进来——写死数字的话，每加一条轨这些测试都会
+/// 莫名其妙地挂（2026-09-08 加字幕轨时就撞了一次）
+final _canvasHeight = TimelineTracks.totalHeight + 10;
 
 /// 真机复现数据的等价缩影：末单元只有 53ms，在 1600px 视口下宽约 0.92px，
 /// 「块宽 - 左右内边距」为负数 —— 这正是让整帧绘制中断的输入。
@@ -56,7 +59,7 @@ TimelinePainter _painter({required int playheadMs}) {
 Future<ui.Image> _paintToImage(TimelinePainter painter) async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
-  painter.paint(canvas, const Size(_viewportWidth, _canvasHeight));
+  painter.paint(canvas, Size(_viewportWidth, _canvasHeight));
   final picture = recorder.endRecording();
   return picture.toImage(_viewportWidth.toInt(), _canvasHeight.toInt());
 }
@@ -72,7 +75,7 @@ void main() {
       // 中途，会让本帧后续所有绘制（镜头/抽帧/波形轨、顶栏、底栏）全部丢失。
       expect(
         () => _painter(playheadMs: 46000)
-            .paint(canvas, const Size(_viewportWidth, _canvasHeight)),
+            .paint(canvas, Size(_viewportWidth, _canvasHeight)),
         returnsNormally,
       );
     });

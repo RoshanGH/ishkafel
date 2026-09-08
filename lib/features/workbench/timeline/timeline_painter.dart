@@ -14,6 +14,7 @@ import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'bgm_edge_hit.dart';
+import 'thumbs_span.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
@@ -66,6 +67,12 @@ class TimelinePainter extends CustomPainter {
   final TimelineGeometry geometry;
   /// 已解码的抽帧，**下标即时间格**；某格缺失时为 null（画占位而不是错位平铺）
   final List<ui.Image?>? thumbImages;
+
+  /// 这一镜的字幕手改过没有（手改的标一下，人要看得出哪些自己动过）
+  final bool Function(int unitIndex, int shotIndex)? subtitleEdited;
+
+  /// 这一镜字幕的头一句，画在轨上当预览
+  final String Function(int unitIndex, int shotIndex)? subtitleTextOf;
   final List<double>? waveEnvelope;
   /// 播放头位置——**成片**毫秒（播放器直接给的那个值）
   final int playheadMs;
@@ -109,6 +116,8 @@ class TimelinePainter extends CustomPainter {
     this.composedDurations = const {},
     this.voices = VoicePlan.empty,
     this.thumbImages,
+    this.subtitleEdited,
+    this.subtitleTextOf,
     this.waveEnvelope,
     required this.playheadMs,
     this.replacements = const [],
@@ -122,18 +131,24 @@ class TimelinePainter extends CustomPainter {
     _paintTrackLabels(canvas, size);
     _paintUnitsTrack(canvas, size);
     _paintShotsTrack(canvas, size);
+    _paintSubsTrack(canvas, size);
     _paintBgmTrack(canvas, size);
     _paintThumbsTrack(canvas, size);
     _paintWaveTrack(canvas, size);
     _paintPlayhead(canvas, size);
   }
 
-  /// 五条轨的标题条。标题同时是操作说明——「视觉镜头严格嵌套在台词语义
+  /// 六条轨的标题条。标题同时是操作说明——「视觉镜头严格嵌套在台词语义
   /// 单元内」是本产品的核心约束，写在轨道上比藏进帮助文档有效得多。
   void _paintTrackLabels(Canvas canvas, Size size) {
     final entries = <(double, String, String)>[
       (TimelineTracks.unitsLabelTop, '台词语义单元', '播放头处拆分；边界在右侧属性面板逐帧调'),
       (TimelineTracks.shotsLabelTop, '视觉镜头', '选中后在播放头处拆分，限制在所属单元内'),
+      (
+        TimelineTracks.subsLabelTop,
+        '字幕',
+        '只有换过素材的镜头才烧字幕；选中那一镜可以在右侧改'
+      ),
       (
         TimelineTracks.bgmLabelTop,
         '配乐',
@@ -526,6 +541,50 @@ class TimelinePainter extends CustomPainter {
     }
   }
 
+  /// 字幕轨：**只有换过素材的镜头才有**。
+  ///
+  /// 没换的镜头字幕烧在原片像素里，我们既读不出也不重渲——那一段留空是
+  /// 如实的，画点什么反而让人以为我们管得着。
+  ///
+  /// 手改过的那几段单独标一下：人得能一眼看出哪些是自己动过的
+  void _paintSubsTrack(Canvas canvas, Size size) {
+    final rect = Rect.fromLTRB(
+        0, TimelineTracks.subsTop, size.width, TimelineTracks.subsBottom);
+    canvas.save();
+    canvas.clipRect(rect);
+    for (var u = 0; u < units.length; u++) {
+      final unit = units[u];
+      for (var i = 0; i < unit.shots.length; i++) {
+        // 换没换素材直接看替换方案——外面再传一份只会多一处可能对不上
+        if (u >= replacements.length) continue;
+        if ((replacements[u].shotCandidateIds[i]?.isEmpty ?? true)) continue;
+        final shot = unit.shots[i];
+        final left = geometry.msToPx(shot.startMs);
+        final right = geometry.msToPx(shot.endMs);
+        if (right < 0 || left > size.width) continue;
+        final edited = subtitleEdited?.call(u, i) ?? false;
+        final box = Rect.fromLTRB(left + 1, TimelineTracks.subsTop + 2,
+            right - 1, TimelineTracks.subsBottom - 2);
+        if (box.width <= 0) continue;
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(box, const Radius.circular(3)),
+          Paint()
+            ..color = (edited ? AppColors.accentBlue : AppColors.textTertiary)
+                .withValues(alpha: edited ? 0.5 : 0.22),
+        );
+        final label = subtitleTextOf?.call(u, i) ?? '';
+        if (label.isEmpty || box.width < 24) continue;
+        canvas.save();
+        canvas.clipRect(box);
+        _drawText(canvas, label, Offset(box.left + 4, box.top + 3),
+            AppColors.textPrimary,
+            fontSize: AppFontSize.micro, maxWidth: box.width - 8);
+        canvas.restore();
+      }
+    }
+    canvas.restore();
+  }
+
   void _paintThumbsTrack(Canvas canvas, Size size) {
     final images = thumbImages;
     if (images == null || images.isEmpty) {
@@ -538,11 +597,20 @@ class TimelinePainter extends CustomPainter {
         0, TimelineTracks.thumbsTop, size.width, TimelineTracks.thumbsBottom);
     canvas.save();
     canvas.clipRect(trackRect);
+    // **按原片跨度等分，不是按成片总长**：缩略图是从原片抽的，代表原片
+    // 0~原片时长。手动加的单元在原片上不存在，拿成片总长去等分会让整条
+    // 胶片条压扁、和上面的单元块全部错位（2026-09-07 真机 bug）。
+    // 那一段本来就没有原片画面可放，留空是对的
+    final spanMs = sourceSpanMs(units);
+    if (spanMs <= 0) {
+      canvas.restore();
+      return;
+    }
     final count = images.length;
     final imagePaint = Paint()..filterQuality = FilterQuality.low;
     for (var i = 0; i < count; i++) {
-      final segStartMs = geometry.durationMs * i / count;
-      final segEndMs = geometry.durationMs * (i + 1) / count;
+      final segStartMs = spanMs * i / count;
+      final segEndMs = spanMs * (i + 1) / count;
       final left = geometry.msToPx(segStartMs.round());
       final right = geometry.msToPx(segEndMs.round());
       if (right < 0 || left > size.width) continue;
@@ -634,12 +702,15 @@ class TimelinePainter extends CustomPainter {
     final barPaint =
         Paint()..color = AppColors.accentBlue.withValues(alpha: 0.55);
     final count = envelope.length;
-    final durationMs = geometry.durationMs;
+    // **按原片跨度索引包络，不是按成片总长**：波形和胶片条一样是从原片抽的，
+    // 手加的单元在原片上不存在，拿成片总长去换算会让整条波形错位
+    final durationMs = sourceSpanMs(units);
     if (durationMs <= 0) return;
 
     for (var x = 0.0; x < size.width; x += _waveColumnWidth) {
       final startMs = geometry.pxToMs(x);
       final endMs = geometry.pxToMs(x + _waveColumnWidth);
+      // 落在原片范围之外（手加单元占的那段）：那里本来就没有原片声音
       if (endMs < 0 || startMs > durationMs) continue;
 
       // 该像素列覆盖的包络下标范围（至少取一个样本，避免高倍放大下取空）

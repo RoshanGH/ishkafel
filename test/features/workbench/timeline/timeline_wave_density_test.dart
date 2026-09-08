@@ -12,7 +12,9 @@ import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 const _viewportWidth = 1200.0;
-const _canvasHeight = 300.0;
+/// 画布要够高，把所有轨都画进来——写死数字的话，每加一条轨这些测试都会
+/// 莫名其妙地挂（2026-09-08 加字幕轨时就撞了一次）
+final _canvasHeight = TimelineTracks.totalHeight + 10;
 
 /// 5 分钟素材：这正是固定桶数会失效的量级
 const _durationMs = 300000;
@@ -41,7 +43,7 @@ Future<ByteData> _render(TimelineGeometry geometry, List<double> envelope) async
   
     textCache: TextLayoutCache(),);
   final recorder = ui.PictureRecorder();
-  painter.paint(Canvas(recorder), const Size(_viewportWidth, _canvasHeight));
+  painter.paint(Canvas(recorder), Size(_viewportWidth, _canvasHeight));
   final image = await recorder
       .endRecording()
       .toImage(_viewportWidth.toInt(), _canvasHeight.toInt());

@@ -96,6 +96,10 @@ abstract final class TimelineTracks {
   static const unitsH = 44.0;
   static const shotsH = 26.0;
 
+  /// 字幕轨。**紧挨着镜头轨**——它修饰的就是那一层，隔开了看不出对应关系。
+  /// 只在被替换的镜头下面有东西，其余位置留空
+  static const subsH = 22.0;
+
   /// 配乐轨。比镜头轨略窄——它上面只有「哪段用了哪首」，没有边界拖拽
   static const bgmH = 24.0;
   static const thumbsH = 52.0;
@@ -130,8 +134,17 @@ abstract final class TimelineTracks {
   /// 镜头轨底部
   static double get shotsBottom => shotsTop + shotsH;
 
+  /// 字幕轨标题条顶部
+  static double get subsLabelTop => shotsBottom + gap;
+
+  /// 字幕轨顶部
+  static double get subsTop => subsLabelTop + labelH;
+
+  /// 字幕轨底部
+  static double get subsBottom => subsTop + subsH;
+
   /// 配乐轨标题条顶部
-  static double get bgmLabelTop => shotsBottom + gap;
+  static double get bgmLabelTop => subsBottom + gap;
 
   /// 配乐轨顶部
   static double get bgmTop => bgmLabelTop + labelH;
@@ -157,11 +170,15 @@ abstract final class TimelineTracks {
   /// 波形轨底部
   static double get waveBottom => waveTop + waveH;
 
-  /// 五条轨（含各自标题条）的总高。
+  /// 六条轨（含各自标题条）的总高。
   ///
-  /// 窗口太矮时最后一条会整条落在可视区外——用户既看不到波形，也看不到
-  /// 为它准备的「生成中/生成失败」占位。窗口最小尺寸与三栏区/时间线区的
-  /// 分配比例由它反推，见 `macos/Runner/MainFlutterWindow.swift` 与
+  /// **就是最后一条轨的底边**，不许再有第二个出处：2026-09-08 加字幕轨时
+  /// 这里还按五条轨算（290），而 painter 无条件画到 330，音频波形轨整条
+  /// 落在画布外；外层 SingleChildScrollView 的子高度取 max(视口高, 这个值)，
+  /// 它比视口还矮时子高度就等于视口高度，**连滚都滚不下去**。
+  ///
+  /// 窗口最小尺寸与三栏区/时间线区的分配比例由它反推，见
+  /// `macos/Runner/MainFlutterWindow.swift` 与
   /// `test/features/workbench/timeline/timeline_tracks_layout_test.dart`。
   static double get totalHeight => waveBottom;
 }

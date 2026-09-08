@@ -11,7 +11,9 @@ import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 
 const _viewportWidth = 1600.0;
-const _canvasHeight = 300.0;
+/// 画布要够高，把所有轨都画进来——写死数字的话，每加一条轨这些测试都会
+/// 莫名其妙地挂（2026-09-08 加字幕轨时就撞了一次）
+final _canvasHeight = TimelineTracks.totalHeight + 10;
 const _durationMs = 40000;
 
 List<SemanticUnit> _units() => const [
@@ -35,7 +37,7 @@ Future<ByteData> _render(TimelineMediaStatus status) async {
   
     textCache: TextLayoutCache(),);
   final recorder = ui.PictureRecorder();
-  painter.paint(Canvas(recorder), const Size(_viewportWidth, _canvasHeight));
+  painter.paint(Canvas(recorder), Size(_viewportWidth, _canvasHeight));
   final image = await recorder
       .endRecording()
       .toImage(_viewportWidth.toInt(), _canvasHeight.toInt());
