@@ -21,11 +21,21 @@ abstract final class SegmentationEditOps {
 
   /// 一帧的**标称**毫秒时长（四舍五入）。
   ///
-  /// 只用于把"±N 帧"换算成一个目标 ms（换算结果随后必被 [_snap] 吸附回帧
-  /// 点，所以 ±0.5ms 的标称误差不会外泄）。**不要**用它当作"最小时长"或
-  /// clamp 的退让幅度——帧点在毫秒轴上非等距，真实最小间距见
-  /// [minFrameSpanMs]。
-  static int frameMs(double fps) => (1000 / fps).round();
+  /// 从 [ms] 起走 [frames] 帧之后落在哪个毫秒。
+  ///
+  /// **按帧号加减，不是按毫秒加常数。** 帧点在毫秒轴上非等距（30fps 下
+  /// 0,33,67,100…，间距在 33/34 交替），拿 `round(1000/fps)` 当步长走，
+  /// 走多了就会少走一帧：30 步 × 33ms = 990ms，而 30 帧是 1000ms。
+  /// 而且 `round(1000/29.97)` 和 `round(1000/30)` 都是 33，两种帧率分不开
+  /// （见 `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.5）。
+  ///
+  /// 起点不在帧点上时先吸到最近的帧再走。结果不会小于 0。
+  static int msAfterFrames(int ms, double fps, int frames) {
+    if (fps <= 0) return ms < 0 ? 0 : ms;
+    final target = _frameIndex(ms, fps) + frames;
+    final out = _msOfFrame(target < 0 ? 0 : target, fps);
+    return out < 0 ? 0 : out;
+  }
 
   /// 一帧在毫秒轴上的**真实最小跨度**：相邻帧点毫秒值之差的最小值。
   ///

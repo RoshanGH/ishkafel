@@ -97,7 +97,8 @@ void main() {
 
     test('clamp：不能把单元压到小于一帧', () {
       final out = SegmentationEditOps.moveUnitBoundary(fixture(), 0, 0, fps: fps)!;
-      expect(out[0].endMs, greaterThanOrEqualTo(SegmentationEditOps.frameMs(fps)));
+      expect(out[0].endMs,
+          greaterThanOrEqualTo(SegmentationEditOps.minFrameSpanMs(fps)));
     });
 
     test('末尾边界索引非法返回 null', () {
@@ -116,7 +117,7 @@ void main() {
     test('clamp 在相邻镜头内部（不吞并镜头）', () {
       final out = SegmentationEditOps.moveShotBoundary(fixture(), 0, 0, 5990, fps: fps)!;
       expect(out[0].shots[1].endMs - out[0].shots[1].startMs,
-          greaterThanOrEqualTo(SegmentationEditOps.frameMs(fps)));
+          greaterThanOrEqualTo(SegmentationEditOps.minFrameSpanMs(fps)));
     });
   });
 
@@ -445,7 +446,7 @@ void main() {
   group('clamp 上界收缩幅度不小于一帧（Critical 1 修法自检：帧点 endMs 上新旧算法一致）', () {
     // 当 endMs 本身就是合法帧点时，新的 clamp 上界算法必须与旧的
     // `_frameBefore(endMs, fps)`（单纯回退一帧）给出相同结果——因为任意
-    // 两个相邻帧点间距在 30fps 下恒为 33 或 34ms，都 >= frameMs(30)=33，
+    // 两个相邻帧点间距在 30fps 下恒为 33 或 34ms，都 >= minFrameSpanMs(30)=33，
     // 回退一帧天然满足"留白 >= 一帧"的约束。下列数值（67/100/4000/96233）
     // 用 python 独立复算验证过与旧 `_frameBefore` 结果一致（见提交信息），
     // 通过 moveShotBoundary 这一个调用点验证，因为四处 clamp 上界共享同一
@@ -511,7 +512,7 @@ void main() {
   });
 
   group('一帧的真实最小跨度（Critical 3：帧率非 30 时误判合法片段为非法）', () {
-    // frameMs(fps)=round(1000/fps) 只是"标称帧时长"，与帧点在毫秒轴上的真实
+    // round(1000/fps) 只是"标称帧时长"，与帧点在毫秒轴上的真实
     // 相邻间距未必相等：
     // - 30fps：round=33，帧点 0,33,67,100…，最小间距也是 33 → 恰好安全
     // - 24fps：round=42，帧点 0,42,83,125…，最小间距 41 → 差 1ms
@@ -535,9 +536,11 @@ void main() {
       }
     });
 
-    test('30fps 行为完全不变：真实最小间距恰等于标称帧时长 33ms', () {
+    test('30fps：真实最小间距 33ms', () {
+      // 曾经这里还断言它等于「标称帧时长」round(1000/fps)。那个函数已经删了：
+      // 它对 29.97 和 30 都返回 33，两种帧率分不开，而且按它一路累加
+      // 30 步只有 990ms（见 core/time/rational.dart）
       expect(SegmentationEditOps.minFrameSpanMs(30), 33);
-      expect(SegmentationEditOps.minFrameSpanMs(30), SegmentationEditOps.frameMs(30));
     });
 
     test('60fps：跨一帧的片段（967→983，16ms）是合法结构', () {
@@ -639,7 +642,8 @@ void main() {
 /// 点。仅用于在测试里独立算出各片长下拆分操作可达的最远合法拆分点（构造
 /// 输入），不依赖被测实现本身的私有函数。
 int _expectedMaxBoundary(int endMs, double fps) {
-  final gap = SegmentationEditOps.frameMs(fps);
+  // 参考实现里的「留一帧」用真实最小间距，不用已删掉的标称帧时长
+  final gap = SegmentationEditOps.minFrameSpanMs(fps);
   final threshold = endMs - gap;
   var idx = (threshold * fps / 1000).round();
   if (idx < 0) idx = 0;

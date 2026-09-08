@@ -67,6 +67,9 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     'sourcePath': task.sourcePath,
     'durationMs': task.videoInfo?.duration.inMilliseconds,
     'fps': task.videoInfo?.fps,
+    // 精确帧率：29.97 是 30000/1001，转成 double 之后它和 30 在很多运算里
+    // 就分不开了（round(1000/fps) 对两者都是 33ms）。判等、拼指纹用这个
+    'fpsExact': task.videoInfo?.fpsExact.toString(),
     'analyzed': units != null,
     // 分析出错时把原因带出来：调用方要能分辨「还在跑」和「跑挂了」
     'analysisError': task.analysisError,

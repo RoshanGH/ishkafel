@@ -412,11 +412,11 @@ class SegmentationEditorController extends ChangeNotifier {
   ///   首单元返回 false）；startEdge=false 调整与后一单元的边界
   ///   （moveUnitBoundary(unitIndex, ...)，末单元返回 false）
   /// - 选中镜头：同理在单元内换算为 moveShotBoundary
-  /// 目标 ms = 当前边界 + frames*frameMs（frames 可为负，表示反方向）
+  /// 目标 ms = 当前边界往后走 frames 帧（可为负，表示反方向）。
+  /// **按帧号走**，不是按毫秒加常数——见 [SegmentationEditOps.msAfterFrames]
   bool nudgeSelectedEdge({required bool startEdge, required int frames}) {
     final sel = _clampSelection(_selection);
     if (sel == null) return false;
-    final delta = frames * SegmentationEditOps.frameMs(fps);
 
     if (sel.shotIndex == null) {
       final u = sel.unitIndex;
@@ -424,11 +424,13 @@ class SegmentationEditorController extends ChangeNotifier {
       if (u < 0 || u >= _units.length) return false;
       if (startEdge) {
         if (u <= 0) return false;
-        final target = _units[u].startMs + delta;
+        final target =
+            SegmentationEditOps.msAfterFrames(_units[u].startMs, fps, frames);
         return moveUnitBoundary(u - 1, target);
       } else {
         if (u >= _units.length - 1) return false;
-        final target = _units[u].endMs + delta;
+        final target =
+            SegmentationEditOps.msAfterFrames(_units[u].endMs, fps, frames);
         return moveUnitBoundary(u, target);
       }
     }
@@ -440,11 +442,13 @@ class SegmentationEditorController extends ChangeNotifier {
     if (s < 0 || s >= shots.length) return false;
     if (startEdge) {
       if (s <= 0) return false;
-      final target = shots[s].startMs + delta;
+      final target =
+          SegmentationEditOps.msAfterFrames(shots[s].startMs, fps, frames);
       return moveShotBoundary(u, s - 1, target);
     } else {
       if (s >= shots.length - 1) return false;
-      final target = shots[s].endMs + delta;
+      final target =
+          SegmentationEditOps.msAfterFrames(shots[s].endMs, fps, frames);
       return moveShotBoundary(u, s, target);
     }
   }

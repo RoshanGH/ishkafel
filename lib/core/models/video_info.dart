@@ -1,18 +1,35 @@
+import '../time/rational.dart';
 /// 视频元信息（不可变）
 class VideoInfo {
   final int width;
   final int height;
   final Duration duration;
   final double fps;
+
+  /// 帧率的**精确**形式。ffprobe 给的是 `30000/1001` 这种分数，转成 double
+  /// 之后 29.97 和 30 在很多地方就分不开了（`round(1000/fps)` 对两者都是
+  /// 33ms）。存原始分数，需要精确判等、进缓存指纹时用它。
+  /// 老存档里只有 double，那时按「离哪个标准帧率最近」认回来。
+  final Rational? _fpsExact;
+
+  /// 帧率的精确形式。没有原始分数时从 [fps] 认回来——29.97 会认回
+  /// 30000/1001，而不是 29970/1000
+  Rational get fpsExact => _fpsExact ?? Rational.fromDouble(fps);
   final int fileSizeBytes;
 
   const VideoInfo({
+    Rational? fpsExact,
+
     required this.width,
     required this.height,
     required this.duration,
     required this.fps,
     required this.fileSizeBytes,
-  });
+  })  :
+        // 对外叫 fpsExact，对内是私有字段——外面拿到的永远是 getter，
+        // 没存原始分数时从 double 认回来
+        // ignore: prefer_initializing_formals
+        _fpsExact = fpsExact;
 
   bool get isPortrait => height > width;
 
@@ -35,6 +52,9 @@ class VideoInfo {
           'ffprobe 输出中缺少可用帧率（r_frame_rate / avg_frame_rate 均非法）');
     }
     return VideoInfo(
+      fpsExact: Rational.tryParse('${video['r_frame_rate'] ?? ''}') ??
+          Rational.tryParse('${video['avg_frame_rate'] ?? ''}') ??
+          Rational.fromDouble(fps),
       width: video['width'] as int,
       height: video['height'] as int,
       duration: Duration(milliseconds: (durationSec * 1000).round()),
@@ -72,6 +92,9 @@ class VideoInfo {
         'height': height,
         'durationMs': duration.inMilliseconds,
         'fps': fps,
+        // 精确帧率也存下来：老存档只有 double，读回来只能按「离哪个标准帧率
+        // 最近」猜；新存档存原始分数，29.97 和 30 永远分得开
+        'fpsExact': fpsExact.toString(),
         'fileSizeBytes': fileSizeBytes,
       };
 
@@ -80,6 +103,8 @@ class VideoInfo {
         height: json['height'] as int,
         duration: Duration(milliseconds: json['durationMs'] as int),
         fps: (json['fps'] as num).toDouble(),
+        fpsExact: Rational.tryParse('${json['fpsExact'] ?? ''}') ??
+            Rational.fromDouble((json['fps'] as num).toDouble()),
         fileSizeBytes: json['fileSizeBytes'] as int,
       );
 
