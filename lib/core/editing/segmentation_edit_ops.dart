@@ -412,4 +412,35 @@ abstract final class SegmentationEditOps {
     }
     return true;
   }
+
+  /// 在末尾**加一个原片上没有的单元**。
+  ///
+  /// 有原片的任务原本有条硬约束：单元必须无缝覆盖整条原片。加单元打破的正是
+  /// 这一条——新单元在原片里不存在，它的画面只能来自挑到的素材，成片因此
+  /// 比原片长。这是产品决定：「成片变长，不动原片」。
+  ///
+  /// 为什么只能加在末尾：插到中间的话，它左右两边的原片时间就不连续了，
+  /// 而「取自原片的哪一段」还得靠 [SemanticUnit.startMs]/[endMs] 表达。
+  /// 想让它排到前面去，加完再拖——顺序由列表决定（见 `unit_reorder.dart`）。
+  ///
+  /// 时长先给一个占位（挑到素材后由上层按素材真实时长重排）。
+  static List<SemanticUnit> appendUnit(List<SemanticUnit> units) {
+    final start = units.isEmpty ? 0 : units.last.endMs;
+    return [
+      ...units,
+      SemanticUnit(
+        index: units.length,
+        startMs: start,
+        endMs: start + appendedUnitPlaceholderMs,
+        // 原片上没有这一段，台词和镜头本来就不存在
+        transcript: '',
+        shots: const [],
+        hasSource: false,
+      ),
+    ];
+  }
+
+  /// 新加的单元在时间线上先占多长。跟空白任务的占位同一个值——
+  /// 格子上明确写着「待填」，挑到素材后按真实时长重排
+  static const int appendedUnitPlaceholderMs = 10000;
 }

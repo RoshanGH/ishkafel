@@ -56,6 +56,26 @@ class ComposedTimeline {
   int durationOf(int unitIndex) =>
       _durations[unitIndex.clamp(0, _durations.length - 1)];
 
+  /// 两条轴画出来是不是一模一样。
+  ///
+  /// **界面靠它判断要不要换轴**。原来只比 [totalMs]——而调整单元顺序恰恰
+  /// 不改变总时长，于是时间线一直用着拖动之前那份轴：左栏顺序改了、时间线
+  /// 纹丝不动（2026-09-07 真机 bug）。
+  ///
+  /// 比的是「每一格从哪儿开始、多长、取自原片的哪一段」——顺序一变，
+  /// 后两样至少有一个跟着变。
+  bool sameLayoutAs(ComposedTimeline other) {
+    if (units.length != other.units.length) return false;
+    for (var i = 0; i < units.length; i++) {
+      if (_starts[i] != other._starts[i]) return false;
+      if (_durations[i] != other._durations[i]) return false;
+      // 长度和起点都一样、但换的是另一段原片：画面内容变了，也得重画
+      if (units[i].startMs != other.units[i].startMs) return false;
+      if (units[i].endMs != other.units[i].endMs) return false;
+    }
+    return true;
+  }
+
   /// 一段配乐覆盖的单元在**成片**里的时间区间；没有单元时 null
   (int, int)? rangeOfUnits(int fromUnit, int toUnit) {
     if (units.isEmpty) return null;
@@ -78,10 +98,11 @@ class ComposedTimeline {
   /// 它在成片里真实的长度，不必在脑子里再换算一次。
   int toComposedMs(int sourceMs) {
     if (units.isEmpty) return 0;
-    if (sourceMs <= units.first.startMs) return 0;
-    if (sourceMs >= units.last.endMs) return totalMs;
+    // **按「谁的原片区间盖住它」找，不能顺序扫着比大小**：单元可以被拖乱
+    // 顺序（列表顺序 = 成片顺序，startMs 只说明取自原片哪一段），顺序扫会
+    // 先撞上排在前面、但原片时间更靠后的那个单元
     for (var i = 0; i < units.length; i++) {
-      if (sourceMs >= units[i].endMs) continue;
+      if (sourceMs < units[i].startMs || sourceMs >= units[i].endMs) continue;
       final into = sourceMs - units[i].startMs;
       final sourceLen = units[i].endMs - units[i].startMs;
       if (sourceLen <= 0 || _durations[i] == sourceLen) {
@@ -89,7 +110,37 @@ class ComposedTimeline {
       }
       return _starts[i] + (into * _durations[i] / sourceLen).round();
     }
-    return totalMs;
+    // 落在所有单元的原片区间之外（比如手动加的单元占的那段时间）：
+    // 夹到最近的一端，别返回一个凭空的数字
+    var earliest = units.first;
+    var latest = units.first;
+    var latestIndex = 0;
+    for (var i = 0; i < units.length; i++) {
+      if (units[i].startMs < earliest.startMs) earliest = units[i];
+      if (units[i].endMs > latest.endMs) {
+        latest = units[i];
+        latestIndex = i;
+      }
+    }
+    if (sourceMs <= earliest.startMs) return 0;
+    return _starts[latestIndex] + _durations[latestIndex];
+  }
+
+  /// 成片上的某一刻落在**第几个单元**上。
+  ///
+  /// 走 [_starts]/[_durations]——它们本来就是按列表顺序连续排出来的，
+  /// 所以单元怎么拖都对。**命中测试一律走这条**：拿原片时间去列表里顺序扫
+  /// （老写法）在单元被排过序之后必错。
+  ///
+  /// 落在片头之前夹到 0、片尾之后夹到最后一个：用户框选时手会滑出片子，
+  /// 这时该夹住而不是让选区突然消失。
+  int unitIndexAtComposedMs(int composedMs) {
+    if (units.isEmpty) return 0;
+    if (composedMs < 0) return 0;
+    for (var i = 0; i < units.length; i++) {
+      if (composedMs < _starts[i] + _durations[i]) return i;
+    }
+    return units.length - 1;
   }
 
   /// 成片上的某一刻对应原片的哪一刻。**命中测试要用**：用户点在成片轴上，
