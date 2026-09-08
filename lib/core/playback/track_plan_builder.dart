@@ -76,7 +76,10 @@ class TrackPlanBuilder {
     // 单元下标 → 它在成片上占的 [起, 止)，配乐要按它定位
     final unitRanges = <int, (int, int)>{};
 
-    for (final unit in units) {
+    // 被配乐盖住的是**哪几格**（列表下标）。见 track_plan_builder 里那段说明
+    final coveredUnits = AudioTrackBuilder.bgmCoveredUnits(units, bgm);
+    for (var u = 0; u < units.length; u++) {
+      final unit = units[u];
       final start = at;
       final replacement = _replacementOf(replacements, unit.index);
       final whole = _wholePick(replacement, materials);
@@ -96,8 +99,7 @@ class TrackPlanBuilder {
           sourceSpanMs: unit.durationMs,
         ));
         // 这一段被配乐盖住时用素材的纯人声（与导出同一条规则）
-        final wholeCovered =
-            _coveredByBgm(units, bgm, unit.startMs, unit.endMs);
+        final wholeCovered = coveredUnits.contains(u);
         final wholeVoice =
             (wholeCovered ? materialVocals[whole.path] : null) ?? whole.path;
         voice.add(TrackSegment(
@@ -192,7 +194,7 @@ class TrackPlanBuilder {
           final slotMs = shotEnd - shotStart;
           // 被配乐盖住的段落必须用纯人声，否则新配乐与原背景两首曲子一起响
           final clean = vocalsPath != null &&
-              _coveredByBgm(units, bgm, shotStart, shotEnd);
+              coveredUnits.contains(u);
           voice.add(TrackSegment(
             atMs: cursor,
             durationMs: slotMs,
@@ -240,13 +242,10 @@ class TrackPlanBuilder {
     return id == null ? null : materials[id];
   }
 
-  static bool _coveredByBgm(
-      List<SemanticUnit> units, BgmPlan bgm, int startMs, int endMs) {
-    for (final (a, b) in AudioTrackBuilder.bgmCoveredRanges(units, bgm)) {
-      if (startMs < b && endMs > a) return true;
-    }
-    return false;
-  }
+  /// 这一格被配乐盖住了没有。**按列表下标问**——原来是拿原片时间区间比重叠，
+  /// 而那个区间是用列表下标去取 startMs/endMs 拼的：调过序就指到别的段上，
+  /// 甚至首尾颠倒。判错的后果是这一段该用纯人声还是原声反了，
+  /// 人一听就知道不对（2026-09-08 真机：调完顺序背景音乐变了）
 
   /// 配乐落在成片时间轴的哪一段。
   ///

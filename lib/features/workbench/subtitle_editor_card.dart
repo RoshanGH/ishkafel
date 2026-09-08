@@ -55,6 +55,14 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
   /// 一次性整段塞进来、不经过候选区，所以只有粘贴是好的——用户就是这么描述的。
   final List<TextEditingController> _controllers = [];
 
+  /// 每一行一个焦点节点：**离开这一格才提交**。
+  ///
+  /// 敲字的过程中提交，等于每敲一个字重烧一次字幕——一句十来个字就是十来次
+  /// ffmpeg，横幅一直在闪，而中间那些半截状态（「李」「李斯」「李斯特」…）
+  /// 没有任何意义。用户原话：「我每键入一下，它都会提示那个正在烧录。
+  /// 这个东西我觉得可以在我修改完光标离开的时候，你再去进行烧录会好一点。」
+  final List<FocusNode> _focus = [];
+
   @override
   void initState() {
     super.initState();
@@ -75,10 +83,13 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
   void _sync() {
     final lines = widget.lines;
     while (_controllers.length < lines.length) {
+      final i = _controllers.length;
       _controllers.add(TextEditingController());
+      _focus.add(FocusNode()..addListener(() => _commitIfLeft(i)));
     }
     while (_controllers.length > lines.length) {
       _controllers.removeLast().dispose();
+      _focus.removeLast().dispose();
     }
     for (var i = 0; i < lines.length; i++) {
       if (_controllers[i].text == lines[i].text) continue;
@@ -89,10 +100,32 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     }
   }
 
+  /// 焦点离开第 [i] 格：把框里的文字交出去。没改过就不交——白交一次等于
+  /// 白烧一次
+  void _commitIfLeft(int i) {
+    if (i >= _focus.length || _focus[i].hasFocus) return;
+    if (i >= widget.lines.length || i >= _controllers.length) return;
+    final text = _controllers[i].text;
+    if (text == widget.lines[i].text) return;
+    widget.onChanged([
+      for (var j = 0; j < widget.lines.length; j++)
+        if (j == i)
+          SubtitleLine(
+              startMs: widget.lines[j].startMs,
+              endMs: widget.lines[j].endMs,
+              text: text)
+        else
+          widget.lines[j],
+    ]);
+  }
+
   @override
   void dispose() {
     for (final c in _controllers) {
       c.dispose();
+    }
+    for (final f in _focus) {
+      f.dispose();
     }
     super.dispose();
   }
@@ -166,6 +199,7 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
               key: ValueKey('subtitle-text-$i'),
               // 长期持有的那一个，见 [_sync]。绝不在 build 里现造
               controller: _controllers[i],
+              focusNode: _focus[i],
               style: const TextStyle(fontSize: AppFontSize.caption),
               decoration: const InputDecoration(
                 isDense: true,
@@ -173,16 +207,9 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
                     EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 border: OutlineInputBorder(),
               ),
-              onChanged: (v) => onChanged([
-                for (var j = 0; j < lines.length; j++)
-                  if (j == i)
-                    SubtitleLine(
-                        startMs: lines[j].startMs,
-                        endMs: lines[j].endMs,
-                        text: v)
-                  else
-                    lines[j],
-              ]),
+              // **不在这里提交**：敲字的过程中每次提交都要重烧一遍字幕。
+              // 光标离开这一格时才交（见 [_commitIfLeft]）；回车也算改完
+              onSubmitted: (_) => _commitIfLeft(i),
             ),
           ),
           IconButton(

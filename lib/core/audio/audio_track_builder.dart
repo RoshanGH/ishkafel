@@ -118,14 +118,17 @@ class AudioTrackBuilder {
     // **成片**时间轴算（见 [ComposedTimeline]）
     final timeline =
         ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
-    final covered = bgmCoveredRanges(units, bgm);
+    // **按列表下标**，不是原片时间区间——调过序之后后者会指到别的段上
+    final covered = bgmCoveredUnits(units, bgm);
     final degraded = <String>[];
 
     _cache.resetTouched();
     final parts = <String>[];
-    for (final unit in units) {
+    for (var i = 0; i < units.length; i++) {
+      final unit = units[i];
       parts.addAll(await _unitParts(
         unit: unit,
+        listIndex: i,
         sourcePath: sourcePath,
         vocalsPath: vocalsPath,
         covered: covered,
@@ -263,13 +266,16 @@ class AudioTrackBuilder {
 
   /// 一个单元切出来的若干段声音。
   ///
-  /// 换过音色的单元整段用配音；否则按**镜头**切——同一个单元里可能只有前半
-  /// 段被配乐覆盖，按单元一刀切会让没覆盖的那半段也白白损一道音质。
+  /// 换过音色的单元整段用配音；否则按**镜头**切。
+  ///
+  /// [covered] 是被配乐盖住的**列表下标**集合。配乐按整格单元铺
+  /// （`startUnit..endUnit`），所以一个单元要么整格被盖、要么整格没被盖。
   Future<List<String>> _unitParts({
     required SemanticUnit unit,
+    required int listIndex,
     required String? sourcePath,
     required String? vocalsPath,
-    required List<(int, int)> covered,
+    required Set<int> covered,
     required Map<int, String> voiceAudio,
 
     /// 这个单元被整体替换了：口播来自这条候选素材，整段取用不裁不补
@@ -292,7 +298,7 @@ class AudioTrackBuilder {
         source = setting.mode == MaterialAudioMode.vocals
             ? stems.vocalsPath
             : stems.backgroundPath;
-      } else if (_overlaps(covered, unit.startMs, unit.endMs)) {
+      } else if (covered.contains(listIndex)) {
         // 这一段被配乐盖住时，用素材的**纯人声**：素材自带的背景音留着的话，
         // 它和新配乐就是两首曲子一起响
         final vocals = await separateMaterial?.call(wholeAudio);
@@ -336,7 +342,8 @@ class AudioTrackBuilder {
     for (var i = 0; i < ranges.length; i++) {
       final (start, end) = ranges[i];
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
-      final needsClean = _overlaps(covered, start, end) && vocalsPath != null;
+      // 配乐按整格单元铺，所以这一格里每一镜的答案都一样
+      final needsClean = covered.contains(listIndex) && vocalsPath != null;
       // **手动加的单元不许去原片上剪**：它的 startMs~endMs 只是时间线上的
       // 占位，原片里没有这一段。不挡住的话会剪出一段别的声音接进成片，
       // 而且哪儿都不报错——人只有听出来才知道
@@ -365,18 +372,28 @@ class AudioTrackBuilder {
     return pieces;
   }
 
-  static bool _overlaps(List<(int, int)> ranges, int start, int end) {
-    for (final (a, b) in ranges) {
-      if (start < b && end > a) return true;
+  /// 哪几格被配乐盖住了——**给的是列表下标，不是原片时间区间**。
+  ///
+  /// 配乐本来就按单元下标记（`startUnit..endUnit`）。原来是拿这两个下标去取
+  /// `units[i].startMs/endMs` 拼一个原片时间区间，再和每一镜的原片区间比重叠：
+  /// 列表顺序和原片顺序一致时恰好对，一调序就指到别的段上，甚至首尾颠倒
+  /// （起点的原片时间比终点还晚），于是谁都不命中。
+  ///
+  /// 后果是这一段该用**纯人声**还是**原片原声（含背景音）**判反：老背景和新
+  /// 配乐一起响，或者背景音凭空消失。用户原话：「我把 U1 换到其他位置上……
+  /// 它的背景音乐就会出问题……放回原来的位置之后就恢复了」（2026-09-08 真机）。
+  ///
+  /// 配乐盖的是整格单元，所以下标粒度**正好够**，不需要再退到毫秒。
+  static Set<int> bgmCoveredUnits(List<SemanticUnit> units, BgmPlan bgm) {
+    if (units.isEmpty) return const {};
+    final out = <int>{};
+    for (final segment in bgm.segments) {
+      if (segment.startUnit < 0 || segment.startUnit >= units.length) continue;
+      final end = segment.endUnit.clamp(segment.startUnit, units.length - 1);
+      for (var i = segment.startUnit; i <= end; i++) {
+        out.add(i);
+      }
     }
-    return false;
+    return out;
   }
-
-  /// 配乐覆盖到的时间区间（按台词语义单元换算）
-  static List<(int, int)> bgmCoveredRanges(
-          List<SemanticUnit> units, BgmPlan bgm) =>
-      [
-        for (final segment in bgm.segments) ?BgmPlan.unitRangeOf(units, segment),
-      ];
-
 }

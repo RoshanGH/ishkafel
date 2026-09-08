@@ -48,12 +48,19 @@ void main() {
     expect(find.textContaining('字幕'), findsNothing);
   });
 
-  testWidgets('列出每一段，文字可以直接改', (tester) async {
+  testWidgets('列出每一段，文字可以直接改（离开这一格才提交）', (tester) async {
     await pump(tester, lines: two);
 
     expect(find.byType(TextField), findsNWidgets(2));
 
     await tester.enterText(find.byType(TextField).first, '李斯特菌');
+    await tester.pump();
+
+    expect(changed, isNull,
+        reason: '敲字的过程中不提交——每提交一次就要重烧一遍字幕');
+
+    // 光标离开这一格
+    await tester.tap(find.byType(TextField).last);
     await tester.pumpAndSettle();
 
     expect(changed!.first.text, '李斯特菌',
