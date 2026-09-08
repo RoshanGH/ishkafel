@@ -99,6 +99,34 @@ class ExportCombination {
 /// 枚举顺序是**里程表式**：最后一个单元变化最快，第一个单元变化最慢。这样
 /// 前几条成片之间只有片尾不同，用户对着导出目录一眼就能看出规律；随机顺序
 /// 会让「这一批到底覆盖了什么」变得没法核对。
+/// 哪些单元**根本没东西可放**：原片上没有它（[SemanticUnit.hasSource] 为假，
+/// 也就是用户手动加的），又一条候选素材都没挑。
+///
+/// 为什么必须单独拦一道：导出那边「没挑素材」一律走「用原片这一段」，
+/// 而这些单元的 `startMs`~`endMs` 根本不指向原片的任何位置——真让它跑下去，
+/// 出来的是一段空白或者直接崩在 ffmpeg 里，而人要等片子导完才发现。
+///
+/// 返回单元下标，调用方**必须指着说是哪几个**（「U3 还没挑素材」），
+/// 不许拿黑帧顶上、也不许悄悄跳过这一段。
+List<int> unitsWithNothingToShow(
+  List<SemanticUnit> units,
+  List<UnitReplacement> replacements,
+) =>
+    [
+      for (var i = 0; i < units.length; i++)
+        if (!units[i].hasSource && !_hasAnyCandidate(_planAt(replacements, i)))
+          i,
+    ];
+
+UnitReplacement? _planAt(List<UnitReplacement> plans, int i) =>
+    i < plans.length ? plans[i] : null;
+
+bool _hasAnyCandidate(UnitReplacement? plan) {
+  if (plan == null) return false;
+  if (plan.wholeCandidateIds.isNotEmpty) return true;
+  return plan.shotCandidateIds.values.any((ids) => ids.isNotEmpty);
+}
+
 class ExportPlanner {
   ExportPlanner._();
 

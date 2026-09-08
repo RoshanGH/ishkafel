@@ -4,13 +4,17 @@ import 'package:path/path.dart' as p;
 
 import '../analysis/providers.dart' show AsrSentence;
 import '../audio/bgm_plan.dart';
+import '../audio/material_audio.dart';
 import '../audio/voice_plan.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 import '../audio/audio_track_builder.dart';
+import 'composed_timeline.dart';
+import 'shot_audio_plan.dart';
 import '../subtitle/subtitle_overlay.dart';
+import '../subtitle/subtitle_track.dart';
 import '../subtitle/subtitle_rasterizer.dart';
 import '../subtitle/subtitle_style.dart';
 import 'export_commands.dart';
@@ -166,6 +170,10 @@ class ExportRunner {
     int limit = ReplacementPlan.maxCombinations,
     ExportSpec? spec,
     List<AsrSentence> subtitleSentences = const [],
+
+    /// 「保留素材原声」的全片打底设置。单个视觉镜头可以覆盖它
+    /// （见 [Shot.keepMaterialAudio]）。默认关：存量任务导出来的声音不变
+    MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
     ExportProgress? onProgress,
   }) async {
     final combos = ExportPlanner.enumerate(
@@ -185,6 +193,7 @@ class ExportRunner {
       vocalsPath: vocalsPath,
       spec: spec,
       subtitleSentences: subtitleSentences,
+      materialAudio: materialAudio,
       onProgress: onProgress,
     );
   }
@@ -213,6 +222,13 @@ class ExportRunner {
     /// 里的台词字幕跟着没了——用它在替换切片上重渲同一句台词；空表示没有
     /// 转写（老任务/空白任务），切片照渲、不带字幕
     List<AsrSentence> subtitleSentences = const [],
+
+    /// 「保留素材原声」的全片打底设置。单个视觉镜头可以覆盖它
+    /// （见 [Shot.keepMaterialAudio]）。默认关：存量任务导出来的声音不变
+    MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
+
+    /// **手改过的**字幕。没改过的坑位照 ASR 现算（见 [SubtitleTrack]）
+    SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
     ExportProgress? onProgress,
   }) async {
     if (combos.isEmpty) return const [];
@@ -317,6 +333,23 @@ class ExportRunner {
                 for (final e in (wholeByCombo[i] ?? const {}).entries)
                   e.key: e.value.ms,
               },
+              // 视觉镜头替换里开了「保留素材原声」的那几镜。参数全部沿用
+              // 画面那一段的（同一条素材、同一个截取起点、同一个倍率），
+              // 差一点声音和画面就越走越偏
+              shotAudio: await planShotMaterialAudio(
+                units: units,
+                segments: combos[i].segments,
+                taskDefault: materialAudio,
+                timeline: ComposedTimeline.of(
+                  units: units,
+                  wholeDurations: {
+                    for (final e in (wholeByCombo[i] ?? const {}).entries)
+                      e.key: e.value.ms,
+                  },
+                ),
+                resolveMaterial: material,
+                probe: probeOnce,
+              ),
             );
       } catch (e) {
         throw Exception('声音合成失败：$e');
@@ -357,6 +390,7 @@ class ExportRunner {
       try {
         final path = await _composeOne(
           combo: combo,
+          subtitleTrack: subtitleTrack,
           sourcePath: sourcePath,
           material: material,
           probe: probeOnce,
@@ -403,6 +437,7 @@ class ExportRunner {
     required Future<int?> Function(String path) probe,
     required ExportSpec renderSpec,
     required List<AsrSentence> subtitleSentences,
+    required SubtitleTrack subtitleTrack,
   }) async {
     // 段落渲染并行（窗口 3）：一条成片几十段逐段串行是导出慢的主因之一。
     // 窗口不开大——每个 ffmpeg 自己就吃多核，开太多只会互相抢
@@ -418,6 +453,7 @@ class ExportRunner {
             probe,
             renderSpec,
             subtitleSentences,
+            subtitleTrack,
           ).then((path) => parts[j] = path),
       ];
       await Future.wait(batch);
@@ -478,17 +514,24 @@ class ExportRunner {
     Future<int?> Function(String path) probe,
     ExportSpec renderSpec,
     List<AsrSentence> subtitleSentences,
+    SubtitleTrack subtitleTrack,
   ) async {
     // 规格进指纹：同一段在 1080 和 720 下是两份不同的产物，
     // 不区分的话第二次导出会直接命中第一次的缓存，用户拿到的还是旧规格。
     // 镜头替换的字幕（内容 + 样式）同理——字幕在指纹里，改了就重渲
+    // 手改过的字幕以人改的为准；没改过的照 ASR 现算。
+    //
+    // **整体替换不渲字幕**（shotIndex == null）：时长跟候选走、和原坑位对不齐，
+    // 按原片时间戳算的字幕贴上去必然错位——这条没变
     final subtitleLines = segment.shotIndex == null
         ? const <SubtitleLine>[]
-        : subtitleLinesInSlot(
-            sentences: subtitleSentences,
-            slotStartMs: segment.startMs,
-            slotEndMs: segment.endMs,
-          );
+        : subtitleTrack.linesOf(SubtitleSlot(
+                unitIndex: segment.unitIndex, shotIndex: segment.shotIndex!)) ??
+            subtitleLinesInSlot(
+              sentences: subtitleSentences,
+              slotStartMs: segment.startMs,
+              slotEndMs: segment.endMs,
+            );
     final subKey = subtitleLines.isEmpty
         ? ''
         : '_sub${[for (final l in subtitleLines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'

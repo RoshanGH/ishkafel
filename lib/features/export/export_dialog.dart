@@ -22,6 +22,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/audio/bgm_plan.dart';
+import '../../core/audio/material_audio.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
 import '../../core/subtitle/subtitle_style.dart';
@@ -78,6 +79,9 @@ Future<void> showExportDialog(
   /// 候选素材各有多长（候选 id → 毫秒）。整体替换的成片时长靠它算
   Map<int, int> materialDurations = const {},
   List<PickedMaterial> pickedMaterials = const [],
+
+  /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
+  MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
 }) =>
     showDialog<void>(
       context: context,
@@ -88,6 +92,7 @@ Future<void> showExportDialog(
         sourcePath: sourcePath,
         subtitleSentences: subtitleSentences,
         subtitleStyle: subtitleStyle,
+        materialAudio: materialAudio,
         units: units,
         replacements: replacements,
         bgm: bgm,
@@ -142,6 +147,9 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final VoicePlan voices;
   final String? vocalsPath;
   final List<AsrSentence> subtitleSentences;
+
+  /// 「保留素材原声」的全片打底设置——不带进来的话，界面上改了导出还是老样子
+  final MaterialAudioSetting materialAudio;
   final SubtitleStyle subtitleStyle;
   final Directory outputDir;
   final Future<String?> Function() pickDirectory;
@@ -170,6 +178,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.voices,
     required this.vocalsPath,
     this.subtitleSentences = const [],
+    this.materialAudio = MaterialAudioSetting.off,
     this.subtitleStyle = SubtitleStyle.standard,
     required this.outputDir,
     required this.pickDirectory,
@@ -215,6 +224,16 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
       materialDurations: widget.materialDurations);
 
   Future<void> _start() async {
+    // 手动加的单元原片上没有它，没挑素材就是**真的缺一段**。让它跑下去，
+    // 导出那边会当成「用原片这一段」——出来的是空白或者直接崩在 ffmpeg 里，
+    // 而人要等整批片子导完才发现。停下来点名，不许拿黑帧顶上
+    final empty = unitsWithNothingToShow(widget.units, widget.replacements);
+    if (empty.isNotEmpty) {
+      setState(() => _failure =
+          '${empty.map((i) => 'U${i + 1}').join('、')} 还没挑素材。'
+          '这些单元是手动加的，原片里没有对应画面，不挑就没东西可放。');
+      return;
+    }
     final factory = ref.read(exportRunnerFactoryProvider);
     if (factory == null) {
       setState(() => _failure = '未检测到 ffmpeg，无法合成成片。装好后重启应用再试');
@@ -241,6 +260,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         voices: widget.voices,
         vocalsPath: widget.vocalsPath,
         subtitleSentences: widget.subtitleSentences,
+        materialAudio: widget.materialAudio,
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
         },
@@ -257,6 +277,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               voices: widget.voices,
               vocalsPath: widget.vocalsPath,
               subtitleSentences: widget.subtitleSentences,
+              materialAudio: widget.materialAudio,
               onProgress: (d, t, w) {
                 if (mounted) setState(() => _progress = (d, t, w));
               },
