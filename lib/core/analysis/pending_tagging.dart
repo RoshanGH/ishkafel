@@ -20,7 +20,8 @@ bool shotTagged(Shot shot) => (shot.description ?? '').trim().isNotEmpty;
 /// 这个单元里还有几镜没被看过
 List<int> untaggedShotIndexes(SemanticUnit unit) => [
       for (var i = 0; i < unit.shots.length; i++)
-        if (!shotTagged(unit.shots[i])) i,
+        // 人手改过的不算欠着——哪怕他改成了空（那是「我就是不要标签」）
+        if (!unit.shots[i].tagsHandpicked && !shotTagged(unit.shots[i])) i,
     ];
 
 /// 哪些单元还欠打标（下标，升序）。
@@ -34,9 +35,13 @@ Set<int> unitsPendingTagging(RenewTask task) {
   if (task.isBlank) return const {};
   return {
     for (var i = 0; i < units.length; i++)
-      if (units[i].shots.isEmpty
-          ? units[i].tags.isEmpty
-          : untaggedShotIndexes(units[i]).isNotEmpty)
+      // **人手改过的一律跳过**：他把标签改成空，意思是「我就是不要标签」，
+      // 而不是「还没打」。分不清的话后台会默默补一份回去，把他刚做的判断
+      // 盖掉——他看不见这一步，只会觉得改了没生效
+      if (!units[i].tagsHandpicked &&
+          (units[i].shots.isEmpty
+              ? units[i].tags.isEmpty
+              : untaggedShotIndexes(units[i]).isNotEmpty))
         i,
   };
 }
