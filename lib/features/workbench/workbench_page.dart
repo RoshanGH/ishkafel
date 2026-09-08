@@ -898,13 +898,23 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               '请回配乐轨确认一下')));
     }
 
+    final movedReplacements = remapReplacementsAfterMove(
+        _replacements ?? const [],
+        from: from,
+        to: to,
+        unitCount: next.length);
     setState(() {
-      _replacements = remapReplacementsAfterMove(_replacements ?? const [],
-          from: from, to: to, unitCount: next.length);
+      _replacements = movedReplacements;
       _task = _task.copyWith(
           bgm: bgm.plan,
+          // **也要写进 _task 并落盘**：只改内存的话，重开任务时素材会退回
+          // 挪动之前那一格——挑给这个单元的素材跑到别人身上，不报任何错
+          // （2026-09-08 真机）。挑素材、剔候选那几条路一直是三步一起做的，
+          // 唯独重排和删单元漏了后两步
+          replacements: movedReplacements,
           voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
     });
+    await _savePickingPlanQuietly(movedReplacements);
     // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
     // 而 durationMs 的语义是原片时长——传链上去的假末尾会让底部摘要写出
     // 「时长 75.3s（原片 85.3s）」这种把两个数对调的话（2026-09-08 真机）。
@@ -1306,14 +1316,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
 
     final units = BlankUnitOps.removeAt(editor.units, unitIndex);
+    final shifted = shiftReplacementsAfterRemoval(_replacements ?? const [],
+        removed: unitIndex);
     setState(() {
-      _replacements = shiftReplacementsAfterRemoval(
-          _replacements ?? const [], removed: unitIndex);
+      _replacements = shifted;
       _task = _task.copyWith(
           bgm: shiftBgmAfterRemoval(_task.bgm, removed: unitIndex),
+          // 和重排同理：内存、_task、盘上三处都要改
+          replacements: shifted,
           // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
           voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex));
     });
+    await _savePickingPlanQuietly(shifted);
     editor.replaceUnitsForBlankTask(
         units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
     unawaited(_saveBgm(_task.bgm));
@@ -2226,6 +2240,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 切片全部作废，而用户毫不知情。见 [EditLocks]
   void _syncEditLocks() =>
       _editor?.locks = EditLocks.of(_replacements ?? const []);
+
+  /// 把替换方案落盘。**重排/删单元这类「顺带改到方案」的操作用它**——
+  /// 失败要说出来，不然人只会在下次打开时发现素材跑到了别人身上
+  Future<void> _savePickingPlanQuietly(List<UnitReplacement> next) async {
+    try {
+      await _tasks!.savePickingPlan(_task, next);
+    } catch (e) {
+      AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('替换方案');
+    }
+  }
 
   /// 右栏改了替换方案：立刻落库，并让底部栏的组合数与 tab 角标跟着更新
   Future<void> _onReplacementsChanged(List<UnitReplacement> next) async {

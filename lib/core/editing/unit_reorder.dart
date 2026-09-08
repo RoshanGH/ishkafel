@@ -23,9 +23,7 @@ List<SemanticUnit> moveUnit(
   required int to,
 }) {
   if (!_movable(units.length, from, to)) return units;
-  final next = [...units]..insert(to, [...units][from]);
-  // 上面 insert 的是原列表的元素，先删掉它原来的位置（插在前面时下标要 +1）
-  next.removeAt(from < to ? from : from + 1);
+  final next = moveIndexed(units, from: from, to: to);
   return [
     // 下标必须跟位置一致：所有按下标记的东西都指着它
     for (var i = 0; i < next.length; i++) next[i].copyWith(index: i),
@@ -54,9 +52,7 @@ List<UnitReplacement> remapReplacementsAfterMove(
     for (var i = replacements.length; i < unitCount; i++)
       UnitReplacement.keepOriginal(),
   ];
-  final next = [...padded]..insert(to, padded[from]);
-  next.removeAt(from < to ? from : from + 1);
-  return List.unmodifiable(next);
+  return List.unmodifiable(moveIndexed(padded, from: from, to: to));
 }
 
 /// 配音按 [VoiceAssignment.unitIndex] 记，每条各自换算到新位置
@@ -134,6 +130,22 @@ bool _movable(int length, int from, int to) =>
     from != to && from >= 0 && from < length && to >= 0 && to < length;
 
 /// 一个旧下标在挪动之后落到哪里
+/// **挪一格：先取出来，再插到最终下标上。全项目只有这一处定义这件事。**
+///
+/// 曾经是「先 insert 再 remove」，往后挪时落点少一格——挪到相邻的下一位
+/// （`to == from + 1`）**完全是个空操作**：人拖了一下，列表纹丝不动。
+/// 而配音、配乐走的是 [_mapIndex]，语义是对的。同一件事两套算法，
+/// 结果自然对不上：单元挪了、挑给它的素材没跟着走（2026-09-08 真机）。
+///
+/// 现在这一处和 [_mapIndex] 必须永远一致，有穷举测试盯着
+/// （`test/core/editing/reorder_index_agreement_test.dart`）。
+List<T> moveIndexed<T>(List<T> list, {required int from, required int to}) {
+  final out = [...list];
+  out.insert(to, out.removeAt(from));
+  return out;
+}
+
+/// 挪完之后，原来第 [index] 个去了哪儿。和 [moveIndexed] 是同一套语义
 int _mapIndex(int index, {required int from, required int to}) {
   if (index == from) return to;
   if (from < to) {
