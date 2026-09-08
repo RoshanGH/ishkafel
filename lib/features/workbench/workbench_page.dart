@@ -10,13 +10,22 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
+import '../../core/analysis/tag_merge.dart';
+import '../../core/audio/material_audio.dart';
+import '../director/tag_picker.dart';
+import '../tasks/new_task_wizard/wizard_providers.dart';
+import '../../core/analysis/handpicked_tags.dart';
+import '../../core/subtitle/subtitle_track.dart';
+import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/editing/edit_locks.dart';
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/review/review_receipt.dart';
 import '../review/review_page.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
+import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
+import '../../core/editing/unit_reorder.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/ai/ai_usage_scope.dart';
 import '../../core/audio/voice_swap_service.dart';
@@ -796,10 +805,343 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 走 [SegmentationEditorController.replaceUnitsForBlankTask] 而不是切分
   /// 那套操作——那套要保证「无缝覆盖固定的原片时长」，而这里总长本来就是
   /// 加出来的。
-  void _addBlankUnit() {
+  /// 把某个单元拖到另一个位置——**列表顺序就是成片顺序**。
+  ///
+  /// 挪列表本身很简单，风险全在旁边那三份按下标记的数据上：替换方案、配音、
+  /// 配乐。不跟着搬不会报错，只会让成片悄悄变成另一个样子（挑给 U2 的素材
+  /// 跑到 U1 身上）。三个 remap 见 `unit_reorder.dart`。
+  ///
+  /// 配乐记的是**区间**，把区间里的单元挪出去，这一段盖的范围就变了——
+  /// 那是用户照着内容选的曲子，不能悄悄改，所以要弹出来点名。
+  Future<void> _reorderUnit(int from, int to) async {
     final editor = _editor;
     if (editor == null || !_isEditable || _lock != null) return;
-    final next = BlankUnitOps.append(editor.units);
+    final next = moveUnit(editor.units, from: from, to: to);
+    if (identical(next, editor.units)) return;
+
+    final bgm = remapBgmAfterMove(_task.bgm, from: from, to: to);
+    if (bgm.brokenSegments.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('有配乐是按连续几段铺的，挪动之后盖的范围变了——'
+              '请回配乐轨确认一下')));
+    }
+
+    setState(() {
+      _replacements = remapReplacementsAfterMove(_replacements ?? const [],
+          from: from, to: to, unitCount: next.length);
+      _task = _task.copyWith(
+          bgm: bgm.plan,
+          voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
+    });
+    editor.replaceUnitsForBlankTask(next, next.last.endMs);
+    editor.select(EditorSelection.unit(to));
+    await _saveBgm(_task.bgm);
+    _scheduleAutosave();
+  }
+
+  /// 全片打底：替换分镜放哪一路声音。单个镜头可以覆盖它（见镜头属性栏）
+  Future<void> _editMaterialAudio() async {
+    final current = _task.materialAudio;
+    var mode = current.mode;
+    var volume = current.volume;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('替换分镜的声音（全片）'),
+          content: SizedBox(
+            width: 420,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Text(
+                '视觉镜头替换换的是画面，那一段的口播照旧来自原片。'
+                '素材自己的声音可以作为额外一层叠回来——'
+                '口播、这一路声音、配乐同时响。',
+                style: TextStyle(fontSize: AppFontSize.caption, height: 1.6),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              RadioGroup<MaterialAudioMode>(
+                groupValue: mode,
+                onChanged: (v) => setLocal(() => mode = v ?? mode),
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  for (final m in MaterialAudioMode.values)
+                    RadioListTile<MaterialAudioMode>(
+                      value: m,
+                      title: Text(m.label),
+                      subtitle: Text(m.hint,
+                          style:
+                              const TextStyle(fontSize: AppFontSize.caption)),
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                    ),
+                ]),
+              ),
+              if (mode.audible)
+                Row(children: [
+                  Text('音量 ${(volume * 100).round()}%',
+                      style: const TextStyle(fontSize: AppFontSize.caption)),
+                  Expanded(
+                    child: Slider(
+                      value: volume,
+                      onChanged: (v) => setLocal(() => volume = v),
+                    ),
+                  ),
+                ]),
+              if (mode.needsSeparation)
+                const Text('人声和背景声要先把素材分成两路，'
+                    '每条素材十几秒，选中后会当场开始',
+                    style: TextStyle(
+                        fontSize: AppFontSize.caption,
+                        height: 1.5,
+                        color: AppColors.textTertiary)),
+            ]),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消')),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('好')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _task = _task.copyWith(
+        materialAudio: MaterialAudioSetting(mode: mode, volume: volume)));
+    await _tasks?.saveMaterialAudio(_task);
+  }
+
+  /// 手改台词语义单元的标签。
+  ///
+  /// **只从这条任务的标签组里选**：标签是搜素材的检索键，给出标签组以外的词
+  /// 等于让人挑一个这个项目根本没素材的标签，搜完才发现是空的。
+  ///
+  /// 改完标成「人改过」——重新打标时会跳过它，不然模型照台词重打一遍，
+  /// 人刚做的判断就被一个后台步骤抹掉了，而且不问一声。
+  Future<void> _editUnitTags(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final units = editor.units;
+    if (unitIndex >= units.length) return;
+    final picked = await showTagPicker(
+      context,
+      tags: ref.read(miaoaTagServiceProvider),
+      selected: units[unitIndex].tags,
+      preferredGroupIds: {for (final g in _task.unitTagGroups) g.id},
+      onlyPreferred: true,
+    );
+    if (picked == null || !mounted) return;
+    editor.replaceUnits([
+      for (var i = 0; i < units.length; i++)
+        if (i != unitIndex)
+          units[i]
+        else
+          withHandpickedTags(units[i], [for (final t in picked) t.name]),
+    ]);
+    _scheduleAutosave();
+    _remindResearch();
+  }
+
+  /// 手改视觉镜头的标签（规矩同上，只是词表换成镜头层那几个标签组）
+  Future<void> _editShotTags(int unitIndex, int shotIndex) async {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final units = editor.units;
+    if (unitIndex >= units.length) return;
+    final shots = units[unitIndex].shots;
+    if (shotIndex >= shots.length) return;
+    final picked = await showTagPicker(
+      context,
+      tags: ref.read(miaoaTagServiceProvider),
+      selected: shots[shotIndex].tags,
+      preferredGroupIds: {for (final g in _task.shotTagGroups) g.id},
+      onlyPreferred: true,
+    );
+    if (picked == null || !mounted) return;
+    editor.replaceUnits([
+      for (var i = 0; i < units.length; i++)
+        if (i != unitIndex)
+          units[i]
+        else
+          units[i].copyWith(shots: [
+            for (var j = 0; j < shots.length; j++)
+              if (j != shotIndex)
+                shots[j]
+              else
+                withHandpickedShotTags(
+                    shots[j], [for (final t in picked) t.name]),
+          ]),
+    ]);
+    _scheduleAutosave();
+    _remindResearch();
+  }
+
+  /// 标签就是搜素材的检索键——改了，之前搜出来的候选就是按旧标签搜的。
+  /// **只提醒一句，不替他重搜**：重搜要花时间、还会冲掉他已经挑好的
+  void _remindResearch() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('标签改了。之前的候选是按旧标签搜出来的，'
+            '可能要去「替换素材」重新搜一次')));
+  }
+
+  /// 这一镜当前的字幕。
+  ///
+  /// **手改过就给手改的，没改过就把自动算的那份算出来给人看** ——
+  /// 直接给空列表的话，人一打开看到的是「没有字幕」，而导出时其实会烧上一份，
+  /// 他改的第一步会变成「凭空敲一遍」。
+  List<SubtitleLine> _subtitleLinesOf(int unitIndex, int shotIndex) {
+    final slot = SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex);
+    final edited = _task.subtitleTrack.linesOf(slot);
+    if (edited != null) return edited;
+    final units = _editor?.units ?? const [];
+    if (unitIndex >= units.length) return const [];
+    final shots = units[unitIndex].shots;
+    if (shotIndex >= shots.length) return const [];
+    return subtitleLinesInSlot(
+      sentences: _task.asrSentences ?? const [],
+      slotStartMs: shots[shotIndex].startMs,
+      slotEndMs: shots[shotIndex].endMs,
+    );
+  }
+
+  bool _subtitleEdited(int unitIndex, int shotIndex) =>
+      _task.subtitleTrack.linesOf(
+          SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex)) !=
+      null;
+
+  /// 这一镜字幕的头一句，画在时间线的字幕轨上当预览
+  String _subtitleTextOf(int unitIndex, int shotIndex) {
+    final lines = _subtitleLinesOf(unitIndex, shotIndex);
+    return lines.isEmpty ? '' : lines.first.text;
+  }
+
+  void _setSubtitleLines(
+      int unitIndex, int shotIndex, List<SubtitleLine> lines) {
+    if (!_isEditable || _lock != null) return;
+    setState(() => _task = _task.copyWith(
+        subtitleTrack: _task.subtitleTrack.withLines(
+            SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex), lines)));
+    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+  }
+
+  void _resetSubtitle(int unitIndex, int shotIndex) {
+    if (!_isEditable || _lock != null) return;
+    setState(() => _task = _task.copyWith(
+        subtitleTrack: _task.subtitleTrack.cleared(
+            SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex))));
+    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+  }
+
+  /// 这一镜换过素材没有。没换就没有「素材的声音」可言，那张卡片不出现
+  bool _shotReplaced(int unitIndex, int shotIndex) {
+    final plans = _replacements ?? const [];
+    if (unitIndex >= plans.length) return false;
+    return plans[unitIndex].shotCandidateIds[shotIndex]?.isNotEmpty ?? false;
+  }
+
+  /// 换上来那条素材自己的语音转写。非空 = 它自己带口播，保留原声会和台词
+  /// 打架——界面上就地提示一句，但**不拦**：有时候要的就是那句话
+  String? _shotMaterialVoiceover(int unitIndex, int shotIndex) {
+    final plans = _replacements ?? const [];
+    if (unitIndex >= plans.length) return null;
+    final ids = plans[unitIndex].shotCandidateIds[shotIndex];
+    if (ids == null || ids.isEmpty) return null;
+    final picked = _task.pickedMaterials
+        .where((m) => m.id == ids.first)
+        .firstOrNull;
+    return picked?.voiceover;
+  }
+
+  /// 改这一镜的「保留素材原声」。keep 传 null = 清掉覆盖、改回跟随全片
+  /// 选了「人声」「背景声」就**当场把这条素材分成两路**。
+  ///
+  /// 为什么不等到导出：那时才分，人要等整批导完才知道分不出来；而这一步
+  /// 十几秒，就地跑掉、就地报错，他还能当场改成别的档位。分完按素材缓存，
+  /// 同一条素材在别的镜头再选一次不会重跑。
+  Future<void> _ensureMaterialSeparated(int unitIndex, int shotIndex) async {
+    final path = _shotMaterialPath(unitIndex, shotIndex);
+    if (path == null) return;
+    final separate = ref.read(materialSeparatorProvider);
+    if (separate == null) {
+      setState(() => _materialSeparationError =
+          '没装人声分离工具，分不出人声/背景声。去「设置 → 运行环境」装好，'
+          '或把这一镜改成「原声」/「不播放」');
+      return;
+    }
+    setState(() {
+      _separatingMaterial = path;
+      _materialSeparationError = null;
+    });
+    try {
+      final vocals = await separate(_task.id, path);
+      if (!mounted) return;
+      setState(() => _materialSeparationError = vocals == null
+          // 不许悄悄退回原声：他选的是另一路声音
+          ? '这条素材分离失败。重试一次，或把这一镜改成「原声」/「不播放」'
+          : null);
+    } catch (e) {
+      if (mounted) setState(() => _materialSeparationError = '素材分离失败：$e');
+    } finally {
+      if (mounted) setState(() => _separatingMaterial = null);
+    }
+  }
+
+  /// 这一镜换上来那条素材的本地路径（还没落地就返回 null）
+  String? _shotMaterialPath(int unitIndex, int shotIndex) {
+    final plans = _replacements ?? const [];
+    if (unitIndex >= plans.length) return null;
+    final ids = plans[unitIndex].shotCandidateIds[shotIndex];
+    if (ids == null || ids.isEmpty) return null;
+    return _mediaCache?.localPathOf(ids.first);
+  }
+
+  void _setShotMaterialAudio(int unitIndex, int shotIndex,
+      MaterialAudioMode? mode, double? volume) {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final units = editor.units;
+    if (unitIndex >= units.length) return;
+    final shots = units[unitIndex].shots;
+    if (shotIndex >= shots.length) return;
+    editor.replaceUnits([
+      for (var i = 0; i < units.length; i++)
+        if (i != unitIndex)
+          units[i]
+        else
+          units[i].copyWith(shots: [
+            for (var j = 0; j < shots.length; j++)
+              if (j != shotIndex)
+                shots[j]
+              else
+                // 走 withMaterialAudioOverride：copyWith 传 null 等于「不改」，
+                // 而「跟随全片」正是 null，用 copyWith 会清不掉覆盖
+                shots[j]
+                    .withMaterialAudioOverride(mode: mode, volume: volume),
+          ]),
+    ]);
+    _scheduleAutosave();
+    // 选了要分离的档位就当场开分——「选了就当场跑」是产品定的
+    final effective = resolveMaterialAudio(
+        taskDefault: _task.materialAudio, shotMode: mode);
+    if (effective.mode.needsSeparation) {
+      unawaited(_ensureMaterialSeparated(unitIndex, shotIndex));
+    }
+  }
+
+  /// 加一个台词语义单元。
+  ///
+  /// 空白任务走 [BlankUnitOps]（本来就没有原片，分子随便加）；有原片的任务
+  /// 走 [SegmentationEditOps.appendUnit]——加出来的那个标着「原片上没有它」，
+  /// 只能接在末尾（想排到前面加完再拖）。两条路产出的都是「待填」的单元：
+  /// 不给它挑素材，导出会点名拦住，不会拿黑帧顶上。
+  void _addUnit() {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final next = _task.isBlank
+        ? BlankUnitOps.append(editor.units)
+        : SegmentationEditOps.appendUnit(editor.units);
     editor.replaceUnitsForBlankTask(next, next.last.endMs);
     editor.select(EditorSelection.unit(next.length - 1));
     _scheduleAutosave();
@@ -832,7 +1174,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   Future<void> _deleteBlankUnit(int unitIndex) async {
     final editor = _editor;
     if (editor == null || !_isEditable || _lock != null) return;
-    if (editor.units.length <= blankMinUnits) {
+    // 「至少留几个」是空白任务的规矩：那条片子整个由分子排出来。有原片的
+    // 任务这里删的只是手动加的那个，删光了还有分析切出来的一整条
+    if (_task.isBlank && editor.units.length <= blankMinUnits) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text('至少要留 $blankMinUnits 个分子')));
       return;
@@ -864,7 +1208,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       _replacements = shiftReplacementsAfterRemoval(
           _replacements ?? const [], removed: unitIndex);
       _task = _task.copyWith(
-          bgm: shiftBgmAfterRemoval(_task.bgm, removed: unitIndex));
+          bgm: shiftBgmAfterRemoval(_task.bgm, removed: unitIndex),
+          // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
+          voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex));
     });
     editor.replaceUnitsForBlankTask(
         units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
@@ -1102,6 +1448,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 正在单独补这条任务的人声轨。分离要十几秒，界面得说清在做什么
   bool _separatingVocals = false;
+
+  /// 正在给哪条素材分离（人声/背景声这两档要先分）。null = 没在分
+  String? _separatingMaterial;
+
+  /// 素材分离失败了，说明这一条。人是特意选了那一档的，
+  /// 静默退回原声等于给他一个不是他选的声音
+  String? _materialSeparationError;
 
   /// 只补这条任务自己的人声轨，不重跑整轮分析。
   ///
@@ -1472,6 +1825,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 _replacements ?? const [], decisions);
             unawaited(_onReplacementsChanged(pruned));
           },
+          // 审核页改的标签由这边落库：内嵌时它和工作台是同一次会话，
+          // 两边各写各的整份任务对象，谁后写谁赢（人在审核页改的会被
+          // 工作台的下一次保存抹掉）。走 replaceUnits 是为了让 ⌘Z 也管得着
+          onTagsChanged: (units) => _editor?.replaceUnits(units),
         ),
       ),
     );
@@ -1681,6 +2038,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
       subtitleSentences: _task.asrSentences ?? const [],
       subtitleStyle: _task.subtitle,
+      materialAudio: _task.materialAudio,
       // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片。
       // 但临时目录不算数：CLI 测试之类导进 /tmp 的一次性位置被记成默认，
       // 下次成片就会落进重启即清的地方（真机踩过）
@@ -2004,8 +2362,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return null;
   }
 
+  /// 把盘上新打好的标签接回来。
+  ///
+  /// 只补标签，**不碰切分**：这几分钟里人可能一直在拖边界，那些改动以他的
+  /// 为准（[mergeTagsInto] 只认边界没变的单元）。没有可补的就什么都不做——
+  /// 每次列表刷新都无脑回填会把 undo 栈灌满，⌘Z 就废了。
+  void _adoptTags(List<RenewTask>? tasks) {
+    final editor = _editor;
+    if (editor == null || tasks == null) return;
+    final stored =
+        tasks.where((t) => t.id == widget.task.id).firstOrNull?.units;
+    if (stored == null) return;
+    final merged = mergeTagsInto(editor.units, stored);
+    if (identical(merged, editor.units)) return;
+    editor.replaceUnits(merged);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 打标是在人**已经被放进这一页之后**才跑的：切分一好就放人进来干活，
+    // 打标占总时长七成，在后台补（见 [AnalysisPipeline]）。它跑完只写了盘，
+    // 开着的这一页自己不会知道——真机上就是这样：属性栏一直写着「未打标」，
+    // 而盘上标签一个不少；连带「替换素材」也搜不出东西，因为检索键正是取自
+    // 单元与镜头的标签（见 [PickingScope]）。
+    ref.listen(taskListProvider, (_, next) => _adoptTags(next.valueOrNull));
+
     final editor = _editor;
     final playback = _playback;
     if (editor == null || playback == null) {
@@ -2047,6 +2428,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           task: _task,
           onBack: _handleBackRequest,
           onEditTagGroups: _isEditable ? _editTagGroups : null,
+          onEditMaterialAudio:
+              _isEditable && _lock == null ? _editMaterialAudio : null,
+          materialAudioOn: _task.materialAudio.mode.audible,
           onEditSubtitle: _isEditable ? _editSubtitleStyle : null,
         ),
         body: Column(
@@ -2060,6 +2444,30 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 text: notice,
                 building: (_tracks?.speedFitter?.pending ?? 0) > 0,
                 onRetry: _retryPreviewAudio,
+              ),
+            // 素材分离同样十几秒，照原片那条的规矩：正在跑就说在跑，
+            // 失败给原因和重试，不许转圈不说话、也不许只写日志
+            if (_separatingMaterial != null)
+              const PreviewAudioBanner(
+                  key: Key('material-separating-banner'),
+                  text: '正在把这条素材分成人声与背景，约十几秒…',
+                  building: true)
+            else if (_materialSeparationError case final err?)
+              PreviewAudioBanner(
+                key: const Key('material-separating-banner'),
+                text: err,
+                building: false,
+                retryLabel: '重新分离',
+                onRetry: _isEditable && _lock == null
+                    ? () {
+                        final sel = _editor?.selection;
+                        final u = sel?.unitIndex;
+                        final sh = sel?.shotIndex;
+                        if (u != null && sh != null) {
+                          unawaited(_ensureMaterialSeparated(u, sh));
+                        }
+                      }
+                    : null,
               ),
             // 分离要十几秒，正在跑就先说在跑——转圈不说话是不合格的
             if (_separatingVocals)
@@ -2096,15 +2504,40 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onBgmResize: _isEditable ? _resizeBgm : null,
                 onBgmDelete: _isEditable ? _deleteBgm : null,
                 editor: editor,
-                // 分子手动加只发生在空白任务上。有原片的任务的分子是分析切出来的，
-                // 给它一个「添加」按钮只会让人误以为能凭空插一段
-                onAddUnit: _task.isBlank && _isEditable && _lock == null
-                    ? _addBlankUnit
+                // 两种任务都能加单元。有原片的任务加出来的那个**原片上没有它**
+                // （hasSource=false）：画面只能来自挑到的素材，成片因此比原片长
+                onAddUnit: _isEditable && _lock == null ? _addUnit : null,
+                onReorderUnit:
+                    _isEditable && _lock == null ? _reorderUnit : null,
+                materialAudioDefault: _task.materialAudio,
+                shotReplaced: _shotReplaced,
+                shotMaterialVoiceover: _shotMaterialVoiceover,
+                onEditUnitTags:
+                    _isEditable && _lock == null ? _editUnitTags : null,
+                onEditShotTags:
+                    _isEditable && _lock == null ? _editShotTags : null,
+                subtitleLinesOf: _subtitleLinesOf,
+                subtitleEdited: _subtitleEdited,
+                subtitleTextOf: _subtitleTextOf,
+                onSubtitleChanged:
+                    _isEditable && _lock == null ? _setSubtitleLines : null,
+                onSubtitleReset:
+                    _isEditable && _lock == null ? _resetSubtitle : null,
+                onShotMaterialAudioChanged:
+                    _isEditable && _lock == null ? _setShotMaterialAudio : null,
+                // 标签手填：空白任务的分子全都手加，有原片的任务里只有手加的
+                // 那些。手加的单元没有台词，模型没东西可以据以打标，而标签是
+                // 搜素材的检索键——不给它手填就等于让它永远搜不出东西
+                unitTagEditor: (i, u) => _task.isBlank || !u.hasSource
+                    ? _blankTagEditor(i, u.tags)
                     : null,
-                unitTagEditor: _task.isBlank ? _blankTagEditor : null,
-                onDeleteUnit: _task.isBlank && _isEditable && _lock == null
+                blankTask: _task.isBlank,
+                onDeleteUnit: _isEditable && _lock == null
                     ? _deleteBlankUnit
                     : null,
+                // 有原片的任务只有**手动加的**单元能删。分析切出来的单元
+                // 删掉等于把原片少放一段，那是另一件事，不在这个入口做
+                canDeleteUnit: _task.isBlank ? null : (u) => !u.hasSource,
                 playback: playback,
                 videoWidget: _videoWidget,
                 media: _media,

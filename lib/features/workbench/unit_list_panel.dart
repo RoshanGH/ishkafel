@@ -13,12 +13,22 @@ class UnitListPanel extends StatelessWidget {
   final SegmentationEditorController controller;
   final ValueChanged<SemanticUnit>? onUnitTap;
 
-  /// 空白任务：分子是手动加出来的，所以列表头上要有「添加」。
-  /// 有原片的任务的分子是分析切出来的，不给这个按钮
+  /// 加一个台词语义单元。两种任务都给——有原片的任务加出来的那个原片上
+  /// 没有它，画面只能来自挑到的素材
   final VoidCallback? onAddUnit;
 
-  /// 删掉一个分子（同样只有空白任务给）
+  /// 删掉一个单元
   final ValueChanged<int>? onDeleteUnit;
+
+  /// 哪些单元能删。为空表示 [onDeleteUnit] 给了就都能删。
+  ///
+  /// 有原片的任务只有**手动加的**那些能删（分析切出来的单元删掉等于把原片
+  /// 少放一段，那是另一件事）。给不能删的行也摆一个删除按钮，点了没反应，
+  /// 比没有按钮更糟
+  final bool Function(SemanticUnit unit)? canDeleteUnit;
+
+  /// 把第 from 个单元拖到第 to 个位置。**列表顺序就是成片顺序**
+  final void Function(int from, int to)? onReorderUnit;
 
   const UnitListPanel({
     super.key,
@@ -26,6 +36,8 @@ class UnitListPanel extends StatelessWidget {
     this.onUnitTap,
     this.onAddUnit,
     this.onDeleteUnit,
+    this.canDeleteUnit,
+    this.onReorderUnit,
   });
 
   @override
@@ -38,34 +50,57 @@ class UnitListPanel extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _ListHeader(count: units.length, onAdd: onAddUnit),
-            Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                itemCount: units.length,
-                separatorBuilder: (context, i) =>
-                    const SizedBox(height: AppSpacing.xs),
-                itemBuilder: (context, i) {
-                  final unit = units[i];
-                  final selected = controller.selection?.unitIndex == i &&
-                      controller.selection?.shotIndex == null;
-                  return _UnitRow(
-                    unit: unit,
-                    index: i,
-                    fps: controller.fps,
-                    selected: selected,
-                    onDelete: onDeleteUnit == null
-                        ? null
-                        : () => onDeleteUnit!(i),
-                    onTap: () {
-                      controller.select(EditorSelection.unit(i));
-                      onUnitTap?.call(unit);
-                    },
-                  );
-                },
-              ),
-            ),
+            Expanded(child: _list(units)),
           ],
         );
+      },
+    );
+  }
+
+  /// 能拖排序时用 [ReorderableListView]，否则还是普通列表——拖不动却
+  /// 摆着一个拖拽手柄，比没有更糟
+  Widget _list(List<SemanticUnit> units) {
+    final reorder = onReorderUnit;
+    if (reorder == null) {
+      return ListView.separated(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        itemCount: units.length,
+        separatorBuilder: (context, i) => const SizedBox(height: AppSpacing.xs),
+        itemBuilder: (context, i) => _row(units, i),
+      );
+    }
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      buildDefaultDragHandles: false,
+      itemCount: units.length,
+      // onReorderItem 已经替调用方修正过「插入点」下标，不用再自己减一
+      onReorderItem: reorder,
+      itemBuilder: (context, i) => Padding(
+        // 不能叫 unit-row-$i——里面的 _UnitRow 已经占了这个 key，
+        // 重名会让所有按 key 找行的测试和自动化一次命中两个
+        key: ValueKey('unit-drag-$i'),
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+        child: ReorderableDragStartListener(index: i, child: _row(units, i)),
+      ),
+    );
+  }
+
+  Widget _row(List<SemanticUnit> units, int i) {
+    final unit = units[i];
+    final selected = controller.selection?.unitIndex == i &&
+        controller.selection?.shotIndex == null;
+    return _UnitRow(
+      unit: unit,
+      index: i,
+      fps: controller.fps,
+      selected: selected,
+      onDelete: (onDeleteUnit == null ||
+              !(canDeleteUnit?.call(unit) ?? true))
+          ? null
+          : () => onDeleteUnit!(i),
+      onTap: () {
+        controller.select(EditorSelection.unit(i));
+        onUnitTap?.call(unit);
       },
     );
   }

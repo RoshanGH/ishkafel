@@ -1,6 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../../core/audio/material_audio.dart';
+import '../../core/subtitle/subtitle_overlay.dart';
+import '../../core/models/semantic_unit.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -50,11 +53,52 @@ class WorkbenchBody extends StatefulWidget {
   /// 空白任务：分子手动加。有原片的任务为 null（分子是分析切出来的）
   final VoidCallback? onAddUnit;
 
+  /// 把第 from 个单元拖到第 to 个位置（列表顺序就是成片顺序）
+  final void Function(int from, int to)? onReorderUnit;
+
   /// 空白任务：分子标签手填，检查器里给一个能选的编辑器
-  final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
+  final Widget? Function(int unitIndex, SemanticUnit unit)? unitTagEditor;
+
+  /// 手改单元 / 镜头的标签
+  final void Function(int unitIndex)? onEditUnitTags;
+  final void Function(int unitIndex, int shotIndex)? onEditShotTags;
+
+  /// 这一镜当前的字幕（手改过就是手改的，否则是按 ASR 算的那份）
+  final List<SubtitleLine> Function(int unitIndex, int shotIndex)?
+      subtitleLinesOf;
+
+  /// 这一镜的字幕手改过没有
+  final bool Function(int unitIndex, int shotIndex)? subtitleEdited;
+
+  /// 字幕轨上画的预览文字
+  final String Function(int unitIndex, int shotIndex)? subtitleTextOf;
+
+  final void Function(int unitIndex, int shotIndex, List<SubtitleLine> lines)?
+      onSubtitleChanged;
+  final void Function(int unitIndex, int shotIndex)? onSubtitleReset;
+
+  /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
+  final MaterialAudioSetting materialAudioDefault;
+
+  /// 这一镜换过素材没有
+  final bool Function(int unitIndex, int shotIndex)? shotReplaced;
+
+  /// 换上来那条素材自己的语音转写（非空 = 自带口播，要提示）
+  final String? Function(int unitIndex, int shotIndex)? shotMaterialVoiceover;
+
+  /// 改这一镜「替换分镜的声音」。mode 传 null = 改回跟随全片
+  final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
+      double? volume)? onShotMaterialAudioChanged;
+
+  /// 整条任务都没有原片（空白任务）。**别拿它判断某一个单元有没有台词**——
+  /// 有原片的任务里也会有手加的、没有原片来源的单元，那要看 unit.hasSource
+  final bool blankTask;
 
   /// 空白任务：删掉一个分子
   final ValueChanged<int>? onDeleteUnit;
+
+  /// 哪些单元能删（有原片的任务只有手动加的能删）
+  final bool Function(SemanticUnit unit)? canDeleteUnit;
   final PlaybackController playback;
   final Widget? videoWidget;
   final TimelineMedia? media;
@@ -106,8 +150,22 @@ class WorkbenchBody extends StatefulWidget {
     required this.editor,
     this.agentFocus,
     this.onAddUnit,
+    this.onReorderUnit,
     this.unitTagEditor,
+    this.blankTask = false,
+    this.materialAudioDefault = MaterialAudioSetting.off,
+    this.shotReplaced,
+    this.shotMaterialVoiceover,
+    this.onEditUnitTags,
+    this.onEditShotTags,
+    this.subtitleLinesOf,
+    this.subtitleEdited,
+    this.subtitleTextOf,
+    this.onSubtitleChanged,
+    this.onSubtitleReset,
+    this.onShotMaterialAudioChanged,
     this.onDeleteUnit,
+    this.canDeleteUnit,
     required this.playback,
     this.videoWidget,
     this.media,
@@ -354,7 +412,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     child: UnitListPanel(
                       controller: editor,
                       onAddUnit: widget.onAddUnit,
+                      onReorderUnit: widget.onReorderUnit,
                       onDeleteUnit: widget.onDeleteUnit,
+                      canDeleteUnit: widget.canDeleteUnit,
                       onUnitTap: (unit) =>
                           playback.seekMs(_composed(unit.startMs)),
                     ),
@@ -401,7 +461,21 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 onChangeVoice: widget.onChangeVoice,
                                 previewVoice: widget.previewVoice,
                                 unitTagEditor: widget.unitTagEditor,
-                                blankTask: widget.unitTagEditor != null,
+                                blankTask: widget.blankTask,
+                                composedDurationOf: (i) =>
+                                    widget.composedDurations[i],
+                                materialAudioDefault: widget.materialAudioDefault,
+                                shotReplaced: widget.shotReplaced,
+                                shotMaterialVoiceover:
+                                    widget.shotMaterialVoiceover,
+                                onEditUnitTags: widget.onEditUnitTags,
+                                onEditShotTags: widget.onEditShotTags,
+                                subtitleLinesOf: widget.subtitleLinesOf,
+                                subtitleEdited: widget.subtitleEdited,
+                                onSubtitleChanged: widget.onSubtitleChanged,
+                                onSubtitleReset: widget.onSubtitleReset,
+                                onShotMaterialAudioChanged:
+                                    widget.onShotMaterialAudioChanged,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),
@@ -489,7 +563,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                     units: editor.units,
                     wholeDurations: widget.composedDurations);
                 _axis = axis;
-                if (_geometry != null && _geometry!.axis?.totalMs != axis.totalMs) {
+                // **比的是整条布局，不能只比总时长**：调整单元顺序不改变总长，
+                // 只比总时长的话时间线会一直用着拖动之前那份轴——左栏顺序变了、
+                // 时间线纹丝不动（2026-09-07 真机 bug）
+                final currentAxis = _geometry?.axis;
+                if (_geometry != null &&
+                    !(currentAxis?.sameLayoutAs(axis) ?? false)) {
                   _geometry = _geometry!.withAxis(axis);
                 }
                 if (width != _timelineViewportWidth) {
@@ -509,6 +588,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                 return TimelineView(
                   controller: editor,
                   geometry: _geometry!,
+                  subtitleEdited: widget.subtitleEdited,
+                  subtitleTextOf: widget.subtitleTextOf,
                   media: widget.media,
                   playhead: widget.playhead,
                   mediaStatus: widget.mediaStatus,

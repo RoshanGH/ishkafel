@@ -217,6 +217,12 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
   /// 了——那条任务从此打不出标签，候选检索的主路径永远用不上。
   final VoidCallback? onEditTagGroups;
 
+  /// 「保留素材原声」的全片打底开关
+  final VoidCallback? onEditMaterialAudio;
+
+  /// 全片打底当前是开着的吗——按钮上要写出来，不然人得点进去才知道
+  final bool materialAudioOn;
+
   /// 打开「字幕样式」。**遇到自带烧录字幕的素材只能靠它**：默认的白字黑描边
   /// 盖不住，原字幕会从描边缝里透出来，成片上两行字打架；切成底条或毛玻璃
   /// 才能盖住。以前这条线连改都改不了
@@ -227,6 +233,8 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
     required this.task,
     required this.onBack,
     this.onEditTagGroups,
+    this.onEditMaterialAudio,
+    this.materialAudioOn = false,
     this.onEditSubtitle,
   });
 
@@ -309,6 +317,23 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
               label: const Text('字幕'),
               style: TextButton.styleFrom(
                   foregroundColor: AppColors.textSecondary),
+            ),
+          // 「素材原声」的全片打底开关。摆在这一排是因为它和字幕、标签组
+          // 一样是**整条片子**的设定，不属于某一个单元
+          if (onEditMaterialAudio != null)
+            TextButton.icon(
+              key: const Key('workbench-material-audio-btn'),
+              onPressed: onEditMaterialAudio,
+              icon: Icon(
+                  materialAudioOn
+                      ? Icons.volume_up_outlined
+                      : Icons.volume_off_outlined,
+                  size: 15),
+              label: Text('素材原声${materialAudioOn ? '·开' : ''}'),
+              style: TextButton.styleFrom(
+                  foregroundColor: materialAudioOn
+                      ? AppColors.accentBlue
+                      : AppColors.textSecondary),
             ),
           if (onEditTagGroups != null)
             TextButton.icon(

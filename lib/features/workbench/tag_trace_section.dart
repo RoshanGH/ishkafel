@@ -27,6 +27,12 @@ class TagTraceSection extends StatefulWidget {
 
   final TagTrace? trace;
 
+  /// 手改标签。为 null 表示这一处不给改（比如只读态、或被别人占着）
+  final VoidCallback? onEdit;
+
+  /// 这些标签是人手改的（标出来，并且重新打标时会跳过它）
+  final bool handpicked;
+
   const TagTraceSection({
     super.key,
     required this.title,
@@ -34,6 +40,8 @@ class TagTraceSection extends StatefulWidget {
     this.tagsStale = false,
     this.description,
     this.trace,
+    this.onEdit,
+    this.handpicked = false,
   });
 
   @override
@@ -48,8 +56,27 @@ class _TagTraceSectionState extends State<TagTraceSection> {
         Row(
           children: [
             inspectorLabel(widget.title),
+            const SizedBox(width: AppSpacing.xs),
+            // 人改过的标出来：重新打标会跳过它，人得知道为什么
+            if (widget.handpicked)
+              const Text('手改过',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.accentBlue)),
             const Spacer(),
             if (widget.tagsStale) const _StaleBadge(),
+            if (widget.onEdit case final edit?)
+              TextButton(
+                key: const ValueKey('tag-edit'),
+                onPressed: edit,
+                style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.xs),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                child: const Text('改标签',
+                    style: TextStyle(fontSize: AppFontSize.caption)),
+              ),
           ],
         ),
         _tags(),

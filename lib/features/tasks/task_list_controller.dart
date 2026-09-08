@@ -536,6 +536,20 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   ///
   /// 标签组本来只在新建向导里选一次；选漏了或选错了就再也改不了，那条任务
   /// 从此打不出标签、候选检索的标签主路径也就永远用不上。
+  /// 存「保留素材原声」的全片打底设置。传进来的 task 已经带上新值了
+  Future<void> saveMaterialAudio(RenewTask task) async {
+    final updated = task.copyWith(updatedAt: DateTime.now());
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
+  /// 存手改过的字幕轨。传进来的 task 已经带上新值了
+  Future<void> saveSubtitleTrack(RenewTask task) async {
+    final updated = task.copyWith(updatedAt: DateTime.now());
+    await ref.read(taskRepositoryProvider).save(updated);
+    await _refreshAfterSave(updated);
+  }
+
   Future<void> saveTagGroups(
     RenewTask task, {
     required List<TagGroupRef> unit,

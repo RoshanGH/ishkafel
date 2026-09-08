@@ -3,8 +3,13 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
+import '../../core/audio/material_audio.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/subtitle/subtitle_overlay.dart';
 import 'inspector_widgets.dart';
+import 'inserted_unit_label.dart';
+import 'material_audio_card.dart';
+import 'subtitle_editor_card.dart';
 import '../../core/audio/voice_plan.dart';
 import 'tag_trace_section.dart';
 import 'voice_card.dart';
@@ -64,16 +69,54 @@ class InspectorPanel extends StatefulWidget {
   /// 试听这个单元已生成的配音；返回 null 表示还没生成过
   final VoidCallback? Function(int unitIndex)? previewVoice;
 
-  /// 空白任务：没有台词、没有原片，检查器里这几样都不成立——
-  /// 拆分/并入（没有台词可拆）、换音色（没有台词可念）、单元台词（本来就空）。
-  /// 摆着它们只会让人点了没反应，或者以为软件坏了
+  /// 这一段在成片里占多长（被整体替换时跟着候选走）。时间线画的就是它
+  final int? Function(int unitIndex)? composedDurationOf;
+
+  /// 手改这个单元的标签
+  final void Function(int unitIndex)? onEditUnitTags;
+
+  /// 手改这一镜的标签
+  final void Function(int unitIndex, int shotIndex)? onEditShotTags;
+
+  /// 这一镜当前的字幕（手改过就是手改的，否则是按 ASR 算的那份）
+  final List<SubtitleLine> Function(int unitIndex, int shotIndex)?
+      subtitleLinesOf;
+
+  /// 这一镜的字幕手改过没有
+  final bool Function(int unitIndex, int shotIndex)? subtitleEdited;
+
+  /// 改这一镜的字幕
+  final void Function(int unitIndex, int shotIndex, List<SubtitleLine> lines)?
+      onSubtitleChanged;
+
+  /// 清掉手改，回到按 ASR 自动算
+  final void Function(int unitIndex, int shotIndex)? onSubtitleReset;
+
+  /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
+  final MaterialAudioSetting materialAudioDefault;
+
+  /// 这一镜换过素材没有。没换就没有「素材的声音」，那张卡片不出现
+  final bool Function(int unitIndex, int shotIndex)? shotReplaced;
+
+  /// 换上来那条素材自己的语音转写（非空 = 它自己带口播，要提示）
+  final String? Function(int unitIndex, int shotIndex)? shotMaterialVoiceover;
+
+  /// 改这一镜「替换分镜的声音」。mode 传 null = 改回跟随全片
+  final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
+      double? volume)? onShotMaterialAudioChanged;
+
+  /// 空白任务：整条片子都没有原片。**注意这只是「全都没有」的那种情况**——
+  /// 有原片的任务里也可能有个别单元没有原片来源（用户手加的），
+  /// 判断某一个单元有没有台词要看 [SemanticUnit.hasSource]，不是看这个 flag
   final bool blankTask;
 
-  /// 空白任务：分子标签是**手填**的，所以这里要能改。
+  /// 单元标签的**手填**编辑器。返回 null 表示这个单元不该手填
+  /// （分析切出来的单元：标签是模型按台词打的，在这儿手改会和「重新打标」
+  /// 互相覆盖，而用户看不出是谁赢了）。
   ///
-  /// 有原片的任务为 null——那边的标签是模型按台词打出来的，在这儿手改会和
-  /// 「重新打标」互相覆盖，而用户看不出是谁赢了。
-  final Widget Function(int unitIndex, List<String> tags)? unitTagEditor;
+  /// 手加的单元必须给：它没有台词，模型没有任何东西可以据以打标，
+  /// 而标签正是去搜素材的检索键——不给的话这个单元永远搜不出东西
+  final Widget? Function(int unitIndex, SemanticUnit unit)? unitTagEditor;
 
   const InspectorPanel({
     super.key,
@@ -86,6 +129,17 @@ class InspectorPanel extends StatefulWidget {
     this.previewVoice,
     this.unitTagEditor,
     this.blankTask = false,
+    this.composedDurationOf,
+    this.onEditUnitTags,
+    this.onEditShotTags,
+    this.subtitleLinesOf,
+    this.subtitleEdited,
+    this.onSubtitleChanged,
+    this.onSubtitleReset,
+    this.materialAudioDefault = MaterialAudioSetting.off,
+    this.shotReplaced,
+    this.shotMaterialVoiceover,
+    this.onShotMaterialAudioChanged,
     this.readOnly = false,
   });
 
@@ -284,7 +338,11 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          inspectorTitle('台词语义单元 — U${unit.index + 1}'),
+          // 手加的单元没有台词，它是插进来的一段纯画面——标出来，
+          // 不然混在真台词单元里看不出区别
+          inspectorTitle(unit.hasSource
+              ? '台词语义单元 — U${unit.index + 1}'
+              : '插入段 — U${unit.index + 1}（原片里没有，纯画面）'),
           const SizedBox(height: 10),
           inspectorCard([
             inspectorTimeRow(
@@ -308,21 +366,31 @@ class _InspectorPanelState extends State<InspectorPanel> {
               onPlus: () => _nudgeAndFollow(startEdge: false, frames: 1),
             ),
             inspectorInfoRow(
-                '时长', '${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
+                '时长',
+                unitDurationLabel(
+                  placeholderMs: unit.durationMs,
+                  composedMs: widget.composedDurationOf?.call(unitIndex),
+                  hasSource: unit.hasSource,
+                )),
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
           // 空白任务给一个能选的编辑器；有原片的任务照旧只展示模型打的结果
-          widget.unitTagEditor?.call(unitIndex, unit.tags) ??
+          widget.unitTagEditor?.call(unitIndex, unit) ??
               TagTraceSection(
                 title: '台词语义单元标签',
                 tags: unit.tags,
                 tagsStale: unit.tagsStale,
                 trace: unit.trace,
+                handpicked: unit.tagsHandpicked,
+                onEdit: widget.onEditUnitTags == null
+                    ? null
+                    : () => widget.onEditUnitTags!(unitIndex),
               ),
-          // 空白任务没有台词：换音色没得念、台词框永远是空的
-          if (!widget.blankTask) ...[
+          // 没有原片来源的单元没有台词：换音色没得念、台词框永远是空的。
+          // **按单元判而不是按任务判**——有原片的任务里也会有手加的单元
+          if (unit.hasSource) ...[
             const SizedBox(height: 10),
             VoiceCard(
               voice: widget.voiceOf?.call(unitIndex),
@@ -340,9 +408,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
               _transcriptField(unitIndex),
             ]),
           ],
-          // 拆分/并入是「在一条固定的原片时间轴上换个切法」。空白任务的分子
+          // 拆分/并入是「在一条固定的原片时间轴上换个切法」。手加的单元
           // 是加出来的，没有台词可拆、也没有原片区间可并
-          if (!widget.blankTask) ...[
+          if (unit.hasSource) ...[
             const SizedBox(height: 10),
             inspectorActionsRow(
               splitLabel: '✂ 在游标处拆分单元',
@@ -420,6 +488,34 @@ class _InspectorPanelState extends State<InspectorPanel> {
             tagsStale: shot.tagsStale,
             description: shot.description,
             trace: shot.trace,
+            handpicked: shot.tagsHandpicked,
+            onEdit: widget.onEditShotTags == null
+                ? null
+                : () => widget.onEditShotTags!(unitIndex, shotIndex),
+          ),
+          const SizedBox(height: 10),
+          // 换过素材的镜头，原片的字跟着旧画面没了，这里的字会重新烧上去
+          SubtitleEditorCard(
+            replaced: widget.shotReplaced?.call(unitIndex, shotIndex) ?? false,
+            lines: widget.subtitleLinesOf?.call(unitIndex, shotIndex) ??
+                const [],
+            edited: widget.subtitleEdited?.call(unitIndex, shotIndex) ?? false,
+            onChanged: (v) =>
+                widget.onSubtitleChanged?.call(unitIndex, shotIndex, v),
+            onResetToAuto: () =>
+                widget.onSubtitleReset?.call(unitIndex, shotIndex),
+          ),
+          const SizedBox(height: 10),
+          // 这一镜换过素材才有「素材的声音」可言
+          MaterialAudioCard(
+            taskDefault: widget.materialAudioDefault,
+            shotMode: shot.materialAudioMode,
+            shotVolume: shot.materialAudioVolume,
+            replaced: widget.shotReplaced?.call(unitIndex, shotIndex) ?? false,
+            materialVoiceover:
+                widget.shotMaterialVoiceover?.call(unitIndex, shotIndex),
+            onChanged: (mode, volume) => widget.onShotMaterialAudioChanged
+                ?.call(unitIndex, shotIndex, mode, volume),
           ),
           const SizedBox(height: 10),
           inspectorActionsRow(
