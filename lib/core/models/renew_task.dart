@@ -3,7 +3,9 @@ import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../ai/ai_usage.dart';
 import '../audio/bgm_plan.dart';
+import '../audio/material_audio.dart';
 import '../subtitle/subtitle_style.dart';
+import '../subtitle/subtitle_track.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/picked_material.dart';
 import '../script/script_doc.dart';
@@ -156,6 +158,17 @@ class RenewTask {
   /// 以前这条线写死用标准样式——人和 Agent 都没得选，遇到这种素材无解。
   final SubtitleStyle subtitle;
 
+  /// **手改过的**字幕（只有被替换的视觉镜头才会进来）。没改过的坑位
+  /// 导出时照 ASR 现算——见 [SubtitleTrack]。
+  ///
+  /// 「字幕是字幕，台词是台词」：改它不动 [SemanticUnit.transcript]
+  final SubtitleTrack subtitleTrack;
+
+  /// 「保留素材原声」的**全片打底**设置。单个视觉镜头可以覆盖它
+  /// （见 [Shot.keepMaterialAudio]）。默认关——升级一版不该让存量任务
+  /// 导出来的片子突然多出一层声音
+  final MaterialAudioSetting materialAudio;
+
   /// 这个任务累计花掉的 AI 用量。**会一直涨**：在工作台里每重打一次标、
   /// 每复核一次切点都记进来。见 [AiUsage]。
   final AiUsage aiUsage;
@@ -190,6 +203,8 @@ class RenewTask {
     this.firstReadyMs,
     this.aiUsage = AiUsage.empty,
     this.subtitle = SubtitleStyle.standard,
+    this.subtitleTrack = const SubtitleTrack.empty(),
+    this.materialAudio = MaterialAudioSetting.off,
   })  : unitTagGroups = List.unmodifiable(unitTagGroups),
         shotTagGroups = List.unmodifiable(shotTagGroups),
         pickedMaterials = List.unmodifiable(pickedMaterials),
@@ -272,6 +287,8 @@ class RenewTask {
     int? firstReadyMs,
     AiUsage? aiUsage,
     SubtitleStyle? subtitle,
+    SubtitleTrack? subtitleTrack,
+    MaterialAudioSetting? materialAudio,
   }) =>
       RenewTask(
         id: id ?? this.id,
@@ -315,6 +332,8 @@ class RenewTask {
         firstReadyMs: firstReadyMs ?? this.firstReadyMs,
         aiUsage: aiUsage ?? this.aiUsage,
         subtitle: subtitle ?? this.subtitle,
+        subtitleTrack: subtitleTrack ?? this.subtitleTrack,
+        materialAudio: materialAudio ?? this.materialAudio,
       );
 
   Map<String, dynamic> toJson() => {
@@ -348,6 +367,8 @@ class RenewTask {
         'exports': exports.map((e) => e.toJson()).toList(),
         'bgm': bgm.toJson(),
         'subtitle': subtitle.toJson(),
+        if (!subtitleTrack.isEmpty) 'subtitleTrack': subtitleTrack.toJson(),
+        'materialAudio': materialAudio.toJson(),
         'voices': voices.toJson(),
         'firstReadyMs': firstReadyMs,
         'aiUsage': aiUsage.toJson(),
@@ -399,6 +420,10 @@ class RenewTask {
         voices: VoicePlan.fromJson(json['voices']),
         // 老任务没有这个字段，退回标准样式
         subtitle: SubtitleStyle.fromJson(json['subtitle']),
+        subtitleTrack: SubtitleTrack.fromJson(json['subtitleTrack']),
+        // 存量存档没有这个字段——兜底成「关」，不能让老任务升一版就多一层声音
+        materialAudio: MaterialAudioSetting.fromJson(
+            json['materialAudio'] as Map<String, dynamic>?),
         firstReadyMs:
             json['firstReadyMs'] is num ? (json['firstReadyMs'] as num).toInt() : null,
         aiUsage: AiUsage.fromJson(json['aiUsage']),

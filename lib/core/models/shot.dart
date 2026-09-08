@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 
+import '../audio/material_audio.dart';
 import 'tag_trace.dart';
 
 /// 视觉镜头：语义单元内部的画面切换单元（不可变）
@@ -26,11 +27,25 @@ class Shot {
   /// 标签/描述是否已过期：这个镜头的边界被改过，但用户选择了暂不重新打标
   final bool tagsStale;
 
+  /// 这些标签是**人手改的**，不是模型打的。重新打标时跳过它
+  /// （理由见 [SemanticUnit.tagsHandpicked]）
+  final bool tagsHandpicked;
+
   /// 这次打标的过程量（喂了哪些帧、什么词表、模型原样回了什么）
   final TagTrace? trace;
 
   /// 这个镜头的起点是怎么定出来的（画面差异分数、是否经过画面复核）
   final BoundaryTrace? boundaryTrace;
+
+  /// 这一镜被替换时，**放候选素材自己的哪一路声音**
+  /// （不播 / 人声 / 背景声 / 原声，见 [MaterialAudioMode]）。
+  ///
+  /// null = 跟任务级的设置走。单独设是给个别镜头开小灶用的：整片放原声，
+  /// 但这一条素材自己带口播，就把它单独改成「背景声」。
+  final MaterialAudioMode? materialAudioMode;
+
+  /// 保留素材原声时压到几成（0~1）。null = 跟任务级走
+  final double? materialAudioVolume;
 
   const Shot({
     required this.startMs,
@@ -38,7 +53,10 @@ class Shot {
     this.tags = const [],
     this.description,
     this.productBrand,
+    this.materialAudioMode,
+    this.materialAudioVolume,
     this.tagsStale = false,
+    this.tagsHandpicked = false,
     this.trace,
     this.boundaryTrace,
   });
@@ -52,8 +70,11 @@ class Shot {
     String? description,
     String? productBrand,
     bool? tagsStale,
+    bool? tagsHandpicked,
     TagTrace? trace,
     BoundaryTrace? boundaryTrace,
+    MaterialAudioMode? materialAudioMode,
+    double? materialAudioVolume,
   }) =>
       Shot(
         startMs: startMs ?? this.startMs,
@@ -62,8 +83,31 @@ class Shot {
         description: description ?? this.description,
         productBrand: productBrand ?? this.productBrand,
         tagsStale: tagsStale ?? this.tagsStale,
+        tagsHandpicked: tagsHandpicked ?? this.tagsHandpicked,
         trace: trace ?? this.trace,
         boundaryTrace: boundaryTrace ?? this.boundaryTrace,
+        materialAudioMode: materialAudioMode ?? this.materialAudioMode,
+        materialAudioVolume: materialAudioVolume ?? this.materialAudioVolume,
+      );
+
+  /// 改这一镜「保留素材原声」的覆盖。**传 null 表示清掉覆盖、回到跟随任务**
+  /// ——[copyWith] 的 `??` 语义做不到这件事（传 null 等于「不改」）
+  Shot withMaterialAudioOverride({
+    required MaterialAudioMode? mode,
+    required double? volume,
+  }) =>
+      Shot(
+        startMs: startMs,
+        endMs: endMs,
+        tags: tags,
+        description: description,
+        productBrand: productBrand,
+        tagsStale: tagsStale,
+        tagsHandpicked: tagsHandpicked,
+        trace: trace,
+        boundaryTrace: boundaryTrace,
+        materialAudioMode: mode,
+        materialAudioVolume: volume,
       );
 
   Map<String, dynamic> toJson() => {
@@ -73,8 +117,15 @@ class Shot {
         'description': description,
         if (productBrand != null) 'productBrand': productBrand,
         'tagsStale': tagsStale,
+        if (tagsHandpicked) 'tagsHandpicked': true,
         'trace': trace?.toJson(),
         'boundaryTrace': boundaryTrace?.toJson(),
+        // 只在真的覆盖过时才写：写成 null 会让「跟随任务」和「明确设成默认值」
+        // 在存档里长得一模一样
+        if (materialAudioMode != null)
+          'materialAudioMode': materialAudioMode!.name,
+        if (materialAudioVolume != null)
+          'materialAudioVolume': materialAudioVolume,
       };
 
   factory Shot.fromJson(Map<String, dynamic> json) => Shot(
@@ -84,8 +135,18 @@ class Shot {
         description: json['description'] as String?,
         productBrand: json['productBrand'] as String?,
         tagsStale: json['tagsStale'] as bool? ?? false,
+        tagsHandpicked: json['tagsHandpicked'] == true,
         trace: TagTrace.tryFromJson(json['trace']),
         boundaryTrace: BoundaryTrace.tryFromJson(json['boundaryTrace']),
+        // 存量存档：这个覆盖原来只有 true/false，true 就是不分离的原声
+        materialAudioMode: MaterialAudioMode.byName(
+                json['materialAudioMode'] as String?) ??
+            (json['keepMaterialAudio'] == true
+                ? MaterialAudioMode.original
+                : json['keepMaterialAudio'] == false
+                    ? MaterialAudioMode.none
+                    : null),
+        materialAudioVolume: (json['materialAudioVolume'] as num?)?.toDouble(),
       );
 
   @override
@@ -96,6 +157,8 @@ class Shot {
       other.description == description &&
       other.productBrand == productBrand &&
       other.tagsStale == tagsStale &&
+      other.materialAudioMode == materialAudioMode &&
+      other.materialAudioVolume == materialAudioVolume &&
       const ListEquality<String>().equals(other.tags, tags);
 
   @override
