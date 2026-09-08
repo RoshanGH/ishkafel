@@ -79,4 +79,27 @@ void main() {
     expect(src, contains('(int, int, int)? anchorAt('),
         reason: '锚在原片时刻上，垫黑场那种没有真实原片坐标的段必然错');
   });
+
+  test('面板不接一条算好的成片轴——接进来的会变旧', () {
+    // 2026-09-08 真机回归时点出来的：连点三次「开始 +1 帧」，盘上确实走了
+    // 3 帧，属性栏只动 1 帧。轴是外层 build 时算的，而微调只
+    // notifyListeners()——面板自己的 AnimatedBuilder 重建了，轴还是旧的。
+    // 「改了没反应」这一类的又一个形态。
+    //
+    // 结构上禁掉：面板只收原料（composedDurationOf），在自己的重建里现算。
+    for (final path in [
+      'lib/features/workbench/inspector_panel.dart',
+      'lib/features/workbench/unit_list_panel.dart',
+    ]) {
+      final src = File(path).readAsStringSync();
+
+      // 只禁**可空的外部入参**（`ComposedTimeline? composed`）——那是原来
+      // 那个会变旧的形态。面板内部把现算的那条传给子 widget 是对的
+      expect(src.contains('ComposedTimeline? composed'), isFalse,
+          reason: '$path 又从外面接一条算好的轴进来，'
+              '它会停在上一次外层 build');
+      expect(src, contains('ComposedTimeline.of('),
+          reason: '$path 要在自己的重建里现算');
+    }
+  });
 }

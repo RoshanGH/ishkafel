@@ -30,11 +30,6 @@ class InspectorPanel extends StatefulWidget {
   final SegmentationEditorController controller;
   final double fps;
 
-  /// **成片**时间轴。属性栏上所有时间数字都是「在成片里落到哪儿」，
-  /// 每次现算、不落库——存的永远是原片毫秒（那是切分点，是数据本身）。
-  /// 为 null 时退回原片时间（测试/老调用点）
-  final ComposedTimeline? composed;
-
   /// 「在游标处拆分」的实际拆分时机（当前播放头位置）由外部（审片台页面）
   /// 决定，本面板只负责转发点击事件。
   final VoidCallback? onSplitAtPlayhead;
@@ -110,7 +105,6 @@ class InspectorPanel extends StatefulWidget {
     super.key,
     required this.controller,
     required this.fps,
-    this.composed,
     this.onSplitAtPlayhead,
     this.onSeekTo,
     this.voiceOf,
@@ -137,12 +131,19 @@ class InspectorPanel extends StatefulWidget {
 }
 
 class _InspectorPanelState extends State<InspectorPanel> {
-  /// 成片时间轴。**外面没给就地现算一条**——直接退回原片时间是静默降级：
-  /// 数字看着对，其实是另一条轴，人拿它去对时会对错
-  ComposedTimeline get _axis =>
-      widget.composed ??
-      ComposedTimeline.of(
-          units: widget.controller.units, wholeDurations: const {});
+  /// 成片时间轴。**在这里现算，绝不从外面接一个算好的进来。**
+  ///
+  /// 接进来的那个是外层 build 时算的，而逐帧微调只 `notifyListeners()`——
+  /// 面板自己的 AnimatedBuilder 重建了，轴却还是旧的：连点三次「+1 帧」，
+  /// 盘上走了 3 帧，属性栏只动 1 帧（2026-09-08 真机回归时点出来的）。
+  /// 这正是「改了没反应」那一类。实测全量重算 0.4µs，不值得为它冒这个险。
+  ComposedTimeline get _axis => ComposedTimeline.of(
+        units: widget.controller.units,
+        wholeDurations: {
+          for (var i = 0; i < widget.controller.units.length; i++)
+            i: ?widget.composedDurationOf?.call(i),
+        },
+      );
 
   /// 这个单元在**成片**里的起点
   int _unitStart(int unitIndex, SemanticUnit unit) => _axis.startOf(unitIndex);

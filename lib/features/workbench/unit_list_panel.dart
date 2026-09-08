@@ -31,15 +31,16 @@ class UnitListPanel extends StatelessWidget {
   /// 把第 from 个单元拖到第 to 个位置。**列表顺序就是成片顺序**
   final void Function(int from, int to)? onReorderUnit;
 
-  /// **成片**时间轴。左栏那两个数是这个单元在成片里从哪到哪，不是原片位置。
+  /// 这个单元被整体替换后在成片里有多长（下标 → 毫秒）。
   ///
-  /// 手加的单元原片里根本没有它（它的 startMs/endMs 只是塞在原片末尾的占位），
-  /// 照原片显示就是一个纯假数字——真机上它写着 01:36.07–01:46.07，
-  /// 而原片只有 96.2s。为 null 时退回原片时间（测试/老调用点）
-  final ComposedTimeline? composed;
+  /// **不接一条算好的轴进来**：那个是外层 build 时算的，而编辑只
+  /// `notifyListeners()`，面板自己重建时轴已经旧了，数字就停在改动之前
+  /// （2026-09-08 真机：连点三次「+1 帧」属性栏只动 1 帧）。
+  /// 收原料、在重建里现算，旧不了
+  final int? Function(int unitIndex)? composedDurationOf;
 
   const UnitListPanel({
-    this.composed,
+    this.composedDurationOf,
     super.key,
     required this.controller,
     this.onUnitTap,
@@ -96,10 +97,10 @@ class UnitListPanel extends StatelessWidget {
 
   Widget _row(List<SemanticUnit> units, int i) {
     final unit = units[i];
-    // **拿不到外面那条轴就地现算一条**：直接退回原片时间是静默降级——
-    // 数字看着对，其实是另一条轴，人拿它去对时会对错
-    final axis = composed ??
-        ComposedTimeline.of(units: units, wholeDurations: const {});
+    // **在这里现算**：接一条算好的进来会变旧，见 [composedDurationOf]
+    final axis = ComposedTimeline.of(units: units, wholeDurations: {
+      for (var k = 0; k < units.length; k++) k: ?composedDurationOf?.call(k),
+    });
     final selected = controller.selection?.unitIndex == i &&
         controller.selection?.shotIndex == null;
     return _UnitRow(

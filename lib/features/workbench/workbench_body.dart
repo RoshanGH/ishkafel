@@ -439,7 +439,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                 // 单元就要重写每一个单元再落盘，写一半崩了就烂在盘上。
                 // 实测全量重算 0.4µs（60 单元 2700 镜也只要 3.5µs），
                 // 而时间线光画省略号每帧就要 2.1ms
-                final composedAxis = ComposedTimeline.of(
+                // **每次要用时现算，不缓存成一个变量传下去。**
+                // 缓存的那个是外层 build 时算的，而编辑（逐帧微调、拆分）
+                // 只 notifyListeners()，各面板自己重建时它已经旧了——
+                // 数字停在改动之前，正是「改了没反应」那一类
+                // （2026-09-08 真机：连点三次「+1 帧」属性栏只动 1 帧）
+                ComposedTimeline currentAxis() => ComposedTimeline.of(
                     units: editor.units,
                     wholeDurations: widget.composedDurations);
                 return Row(
@@ -447,27 +452,32 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   SizedBox(
                     width: widths.left,
                     child: UnitListPanel(
-                      composed: composedAxis,
+                      composedDurationOf: (i) => widget.composedDurations[i],
                       controller: editor,
                       onAddUnit: widget.onAddUnit,
                       onReorderUnit: widget.onReorderUnit,
                       onDeleteUnit: widget.onDeleteUnit,
                       canDeleteUnit: widget.canDeleteUnit,
-                      onUnitTap: (unit) => playback
-                          .seekMs(composedAxis.startOf(unit.index)),
+                      onUnitTap: (unit) =>
+                          playback.seekMs(currentAxis().startOf(unit.index)),
                     ),
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
                   Expanded(
-                    child: PlayerPanel(
-                      key: _playerPanelKey,
-                      playback: playback,
-                      videoWidget: widget.videoWidget,
-                      // **成片总长，不是原片总长**：手加的单元、整体替换都会
-                      // 改变片长。用原片总长的话末尾对不上时间线——真机上
-                      // 时间线画到 01:46 而播放器只到 01:36（2026-09-08）
-                      durationMs: composedAxis.totalMs,
-                      fps: editor.fps,
+                    // 跟着编辑重建：片长会被拆分、微调、加单元改掉，
+                    // 停在旧值上就会末尾对不齐
+                    child: AnimatedBuilder(
+                      animation: editor,
+                      builder: (context, _) => PlayerPanel(
+                        key: _playerPanelKey,
+                        playback: playback,
+                        videoWidget: widget.videoWidget,
+                        // **成片总长，不是原片总长**：手加的单元、整体替换都会
+                        // 改变片长。用原片总长的话末尾对不上时间线——真机上
+                        // 时间线画到 01:46 而播放器只到 01:36（2026-09-08）
+                        durationMs: currentAxis().totalMs,
+                        fps: editor.fps,
+                      ),
                     ),
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
@@ -489,7 +499,6 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                             SidePanelTab.inspector => InspectorPanel(
                                 controller: editor,
                                 fps: editor.fps,
-                                composed: composedAxis,
                                 onSplitAtPlayhead: () =>
                                     _splitAtPlayhead(context, editor, playback),
                                 // 逐帧调边界时预览跟到那一帧（先停播——

@@ -904,7 +904,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           bgm: bgm.plan,
           voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
     });
-    editor.replaceUnitsForBlankTask(next, next.last.endMs);
+    // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
+    // 而 durationMs 的语义是原片时长——传链上去的假末尾会让底部摘要写出
+    // 「时长 75.3s（原片 85.3s）」这种把两个数对调的话（2026-09-08 真机）。
+    // 空白任务没有原片，总长就是排出来的那些分子，照旧
+    editor.replaceUnitsForBlankTask(
+        next, _task.isBlank ? next.last.endMs : editor.durationMs);
     editor.select(EditorSelection.unit(to));
     await _saveBgm(_task.bgm);
     _scheduleAutosave();
