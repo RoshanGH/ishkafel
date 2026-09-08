@@ -2,50 +2,81 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 
-/// **时间线上一格在哪儿，只能按列表下标问成片轴。**
+/// **「原片时刻 → 成片时刻」这个方向已经删掉，不许复活。**
 ///
-/// `geometry.msToPx(原片毫秒)` 这条路已经在三处各犯了一次同样的错，
-/// 而且每次的表现都不一样、都不报错：
+/// 它是一串真机故障的共同病灶（见
+/// `docs/2026-09-08-成片时间轴重构-TRD.md`）：给一个原片时刻问它在成片哪儿，
+/// 这个问题**本身没有唯一答案**——可能无人覆盖（手加的单元）、可能多人覆盖，
+/// 而 `endMs` 是开区间，边界必然落到相邻那一段身上。列表顺序和原片顺序一致时
+/// 恰好相等，所以平时看不出来；拖动调序是一等功能，一调就失效。
 ///
-/// - 绘制：原片里最后那个单元整格消失（镜头轨还画着，单元轨是空的）
-/// - 播放：双击它，播放区间变成「从 104 秒播到 0 秒」，什么也放不出来
-/// - 命中：那一格根本点不中，选中态停在上一格
-///
-/// 病根都是 `endMs` 是开区间，而「原片毫秒 → 成片毫秒」按「谁的原片区间盖住
-/// 它」找——它落进的是**相邻那一段**。列表顺序和原片顺序一致时两者正好相等，
-/// 所以平时看不出来；手加的单元一被拖到最前就全露馅（2026-09-08 真机）。
+/// 同一个病灶发出过四个症状，每个都不报错、表现还各不一样：
+/// 整格画不出来 / 点不中 / 双击播不了 / 末尾对不齐。
 void main() {
-  test('绘制与命中都不再拿单元/镜头的原片毫秒去换算像素', () {
-    // 只允许两处：_unitPx 和 _shotPx 里「没有成片轴时」的兜底。
-    // 用计数而不是「在不在助手里」——后者要靠猜函数边界，猜错了守卫就形同
-    // 虚设（第一版就是这样，把接线改回旧写法它照样绿）。
-    const allowedPerFile = 4;  // _unitPx 与 _shotPx 各 2 处兜底
-    const files = [
-      'lib/features/workbench/timeline/timeline_painter.dart',
-      'lib/features/workbench/timeline/timeline_hit_tester.dart',
+  Iterable<File> dartFiles(String dir) => Directory(dir)
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((f) => f.path.endsWith('.dart'));
+
+  test('lib 里不存在 toComposedMs', () {
+    final offenders = [
+      for (final f in dartFiles('lib'))
+        if (RegExp(r'\btoComposedMs\s*\(').hasMatch(f.readAsStringSync()))
+          f.path,
     ];
 
-    for (final path in files) {
-      final src = File(path).readAsStringSync();
-      final hits = RegExp(r'msToPx\((?:unit|shot|units\[[^\]]+\])[^)]*\)')
-          .allMatches(src)
-          .map((m) => m.group(0)!)
-          .toList();
+    expect(offenders, isEmpty,
+        reason: '「原片 → 成片」这条路又回来了：\n${offenders.join('\n')}\n'
+            '要「这一段在成片哪儿」，按列表下标问 startOf/durationOf/'
+            'composedShotStart/composedShotEnd');
+  });
 
-      expect(hits.length, lessThanOrEqualTo(allowedPerFile),
-          reason: '$path 里有 ${hits.length} 处拿原片毫秒换算像素'
-              '（只该有 $allowedPerFile 处兜底）：\n${hits.join('\n')}\n'
-              '顺序一乱就会算到别的段上，改成 _unitPx(下标) / '
-              '_shotPx(单元下标, 镜头下标)');
+  test('几何层不接受原片毫秒', () {
+    final src =
+        File('lib/features/workbench/timeline/timeline_geometry.dart')
+            .readAsStringSync();
+
+    expect(RegExp(r'double\s+msToPx\s*\(').hasMatch(src), isFalse,
+        reason: 'msToPx(原片毫秒) 是那条病态路的入口，已删除');
+  });
+
+  test('位置只能按下标问——绘制、命中、视图里一处例外都没有', () {
+    // 兜底也集中在 track_px.dart 一个文件里，别处一处都不许有
+    const allowed = 'lib/features/workbench/timeline/track_px.dart';
+    final offenders = <String>[];
+    for (final f in dartFiles('lib')) {
+      if (f.path == allowed) continue;
+      final src = f.readAsStringSync();
+      for (final m in RegExp(r'msToPx\s*\(').allMatches(src)) {
+        // 注释里提到名字不算
+        final lineStart = src.lastIndexOf('\n', m.start) + 1;
+        if (src.substring(lineStart, m.start).trimLeft().startsWith('///')) {
+          continue;
+        }
+        offenders.add(f.path);
+        break;
+      }
     }
+
+    expect(offenders, isEmpty,
+        reason: '这些地方拿原片毫秒换算像素：\n${offenders.join('\n')}\n'
+            '改成 unitPx(下标, units, geometry) / '
+            'shotPx(单元下标, 镜头下标, units, geometry)');
   });
 
   test('双击播放传的是下标，不是毫秒', () {
-    final src =
-        File('lib/features/workbench/timeline/timeline_view.dart')
-            .readAsStringSync();
+    final src = File('lib/features/workbench/timeline/timeline_view.dart')
+        .readAsStringSync();
 
     expect(src, contains('void Function(int unitIndex, int? shotIndex)?'),
         reason: '传毫秒的话上层还得换算一次，又会踩同一个坑');
+  });
+
+  test('换方案时的位置锚点是「单元下标 + 偏移 + 当时长度」，不绕原片时刻', () {
+    final src =
+        File('lib/core/playback/track_plan.dart').readAsStringSync();
+
+    expect(src, contains('(int, int, int)? anchorAt('),
+        reason: '锚在原片时刻上，垫黑场那种没有真实原片坐标的段必然错');
   });
 }

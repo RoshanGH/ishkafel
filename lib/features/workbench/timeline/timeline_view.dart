@@ -19,6 +19,7 @@ import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_painter.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
+import 'track_px.dart';
 
 /// 时间线视图：手势交互 + 缩略图预解码 + 监听编辑器状态重绘
 ///
@@ -209,14 +210,16 @@ class _TimelineViewState extends State<TimelineView> {
     // fit 状态下整片都在视口里，没有滚动余地
     if (geometry.totalWidthPx <= _viewportWidth) return;
 
-    final x = geometry.msToPx(widget.playhead.value);
+    // 播放头本来就是**成片**毫秒（播放器直接给的），不能再走一次
+    // 「原片 → 成片」换算——那会把它当原片时刻，跟随滚动就跑偏了
+    final x = geometry.composedMsToPx(widget.playhead.value);
     if (x >= 0 && x <= _viewportWidth) {
       _followSuspended = false;
       return;
     }
     if (_followSuspended) return;
 
-    final targetScroll = geometry.msToPx(widget.playhead.value) +
+    final targetScroll = geometry.composedMsToPx(widget.playhead.value) +
         geometry.scrollPx -
         _viewportWidth / 3;
     final next = geometry.scrolledBy(targetScroll - geometry.scrollPx,
@@ -292,12 +295,13 @@ class _TimelineViewState extends State<TimelineView> {
     if (_hitReplacementBadge(position)) return;
     if (_isOnBgmTrack(position)) {
       // 删除按钮优先：它压在块体上，先判它才点得到
-      for (final span in bgmSpans(widget.bgm, widget.controller.units)) {
+      for (final span
+          in bgmSpans(widget.bgm, widget.controller.units, widget.geometry.axis)) {
         if (!hitsBgmDelete(
             dx: position.dx,
             dy: position.dy,
-            left: widget.geometry.msToPx(span.startMs),
-            right: widget.geometry.msToPx(span.endMs),
+            left: widget.geometry.composedMsToPx(span.startMs),
+            right: widget.geometry.composedMsToPx(span.endMs),
             top: TimelineTracks.bgmTop,
             bottom: TimelineTracks.bgmBottom)) {
           continue;
@@ -426,11 +430,14 @@ class _TimelineViewState extends State<TimelineView> {
     final onBadge = widget.onReplacementBadgeTap;
     if (onBadge == null) return false;
 
-    for (final unit in widget.controller.units) {
+    final units = widget.controller.units;
+    for (var u = 0; u < units.length; u++) {
+      final unit = units[u];
+      final (uLeft, uRight) = unitPx(u, units, widget.geometry);
       final rect = Rect.fromLTRB(
-        widget.geometry.msToPx(unit.startMs),
+        uLeft,
         TimelineTracks.unitsTop,
-        widget.geometry.msToPx(unit.endMs),
+        uRight,
         TimelineTracks.unitsBottom,
       );
       // 没挑素材的地方压根没画徽标，点下去不该误跳
@@ -442,11 +449,11 @@ class _TimelineViewState extends State<TimelineView> {
         return true;
       }
       for (var s = 0; s < unit.shots.length; s++) {
-        final shot = unit.shots[s];
+        final (sLeft, sRight) = shotPx(u, s, units, widget.geometry);
         final shotRect = Rect.fromLTRB(
-          widget.geometry.msToPx(shot.startMs),
+          sLeft,
           TimelineTracks.shotsTop,
-          widget.geometry.msToPx(shot.endMs),
+          sRight,
           TimelineTracks.shotsBottom,
         );
         final hasShot =
@@ -486,8 +493,8 @@ class _TimelineViewState extends State<TimelineView> {
   /// 光标是不是抓在某一段的边界手柄上
   ({int startUnit, BgmEdge edge, int from, int to})? _grabBgmEdge(double dx) {
     for (final span in bgmSpans(widget.bgm, widget.controller.units)) {
-      final left = widget.geometry.msToPx(span.startMs);
-      final right = widget.geometry.msToPx(span.endMs);
+      final left = widget.geometry.composedMsToPx(span.startMs);
+      final right = widget.geometry.composedMsToPx(span.endMs);
       final edge = bgmEdgeAt(dx: dx, left: left, right: right);
       if (edge == null) continue;
       return (

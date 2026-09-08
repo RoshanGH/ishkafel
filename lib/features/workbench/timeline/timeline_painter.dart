@@ -15,6 +15,7 @@ import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'bgm_edge_hit.dart';
 import 'thumbs_span.dart';
+import 'track_px.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/text_layout_cache.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
@@ -210,45 +211,10 @@ class TimelinePainter extends CustomPainter {
   }
 
 
-  /// 这一格在**成片**时间轴上的左右像素。
-  ///
-  /// **按列表下标问成片轴，绝不拿原片时间去换算。**
-  /// `unit.endMs` 是开区间，而「原片毫秒 → 成片毫秒」是按「谁的原片区间盖住
-  /// 它」找的——`endMs` 落进的是**相邻那一段**。列表顺序和原片顺序一致时两者
-  /// 正好相等，看不出问题；手加的单元被拖到最前之后（它在原片上的占位排在
-  /// 末尾），原片里最后那个单元的右边界会被算成手加单元的成片起点 0，
-  /// 矩形左右翻转、整格什么都画不出来——镜头轨上还有块，单元轨那儿是空的
-  /// （2026-09-08 真机）。
-  (double, double) _unitPx(int listIndex) {
-    final axis = geometry.axis;
-    final unit = units[listIndex];
-    if (axis == null) {
-      return (geometry.msToPx(unit.startMs), geometry.msToPx(unit.endMs));
-    }
-    final start = axis.startOf(listIndex);
-    return (
-      geometry.composedMsToPx(start),
-      geometry.composedMsToPx(start + axis.durationOf(listIndex))
-    );
-  }
-
-  /// 这一镜在**成片**上的左右像素。理由同 [_unitPx]——最后一镜的 `endMs`
-  /// 等于所属单元的 `endMs`，一样会翻转
-  (double, double) _shotPx(int unitIndex, int shotIndex) {
-    final axis = geometry.axis;
-    final a = axis?.composedShotStart(unitIndex, shotIndex);
-    final b = axis?.composedShotEnd(unitIndex, shotIndex);
-    if (a == null || b == null) {
-      final shot = units[unitIndex].shots[shotIndex];
-      return (geometry.msToPx(shot.startMs), geometry.msToPx(shot.endMs));
-    }
-    return (geometry.composedMsToPx(a), geometry.composedMsToPx(b));
-  }
-
   /// 整体替换的单元在镜头轨上画成一整块，写明「整段已替换」
   void _paintReplacedShotSpan(Canvas canvas, Size size, int listIndex,
       SemanticUnit unit, Color unitColor) {
-    final (left, right) = _unitPx(listIndex);
+    final (left, right) = unitPx(listIndex, units, geometry);
     if (right < 0 || left > size.width) return;
     final rect = Rect.fromLTRB(left + _shotGap / 2, TimelineTracks.shotsTop,
         right - _shotGap / 2, TimelineTracks.shotsBottom);
@@ -285,7 +251,7 @@ class TimelinePainter extends CustomPainter {
   void _paintUnitsTrack(Canvas canvas, Size size) {
     for (var u = 0; u < units.length; u++) {
       final unit = units[u];
-      final (left, right) = _unitPx(u);
+      final (left, right) = unitPx(u, units, geometry);
       if (right < 0 || left > size.width) continue;
 
       final rect = Rect.fromLTRB(
@@ -412,7 +378,7 @@ class TimelinePainter extends CustomPainter {
         continue;
       }
       for (var s = 0; s < unit.shots.length; s++) {
-        final (left, right) = _shotPx(u, s);
+        final (left, right) = shotPx(u, s, units, geometry);
         if (right < 0 || left > size.width) continue;
 
         // 内缩出相邻块体之间的间隙；块体本身比间隙还窄时不再内缩，
@@ -490,8 +456,8 @@ class TimelinePainter extends CustomPainter {
         final last = units.length - 1;
         final lo = math.min(sel.from, sel.to).clamp(0, last);
         final hi = math.max(sel.from, sel.to).clamp(0, last);
-        final (loLeft, _) = _unitPx(lo);
-        final (_, hiRight) = _unitPx(hi);
+        final (loLeft, _) = unitPx(lo, units, geometry);
+        final (_, hiRight) = unitPx(hi, units, geometry);
         final rect = Rect.fromLTRB(loLeft, top, hiRight, bottom);
         canvas.drawRect(
             rect, Paint()..color = AppColors.accentBlue.withValues(alpha: 0.3));
@@ -505,9 +471,10 @@ class TimelinePainter extends CustomPainter {
       }
     }
 
-    for (final span in bgmSpans(bgm, units)) {
-      final left = geometry.msToPx(span.startMs);
-      final right = geometry.msToPx(span.endMs);
+    for (final span in bgmSpans(bgm, units, geometry.axis)) {
+      // span 已经是**成片**区间，直接转像素
+      final left = geometry.composedMsToPx(span.startMs);
+      final right = geometry.composedMsToPx(span.endMs);
       if (right < 0 || left > size.width) continue;
       final rect = Rect.fromLTRB(left + 1, top, right - 1, bottom);
       if (rect.width <= 0) continue;
@@ -593,7 +560,7 @@ class TimelinePainter extends CustomPainter {
         // 换没换素材直接看替换方案——外面再传一份只会多一处可能对不上
         if (u >= replacements.length) continue;
         if ((replacements[u].shotCandidateIds[i]?.isEmpty ?? true)) continue;
-        final (left, right) = _shotPx(u, i);
+        final (left, right) = shotPx(u, i, units, geometry);
         if (right < 0 || left > size.width) continue;
         final edited = subtitleEdited?.call(u, i) ?? false;
         final box = Rect.fromLTRB(left + 1, TimelineTracks.subsTop + 2,
@@ -630,27 +597,20 @@ class TimelinePainter extends CustomPainter {
         0, TimelineTracks.thumbsTop, size.width, TimelineTracks.thumbsBottom);
     canvas.save();
     canvas.clipRect(trackRect);
-    // **按原片跨度等分，不是按成片总长**：缩略图是从原片抽的，代表原片
-    // 0~原片时长。手动加的单元在原片上不存在，拿成片总长去等分会让整条
-    // 胶片条压扁、和上面的单元块全部错位（2026-09-07 真机 bug）。
-    // 那一段本来就没有原片画面可放，留空是对的
-    final spanMs = sourceSpanMs(units);
-    if (spanMs <= 0) {
-      canvas.restore();
-      return;
-    }
-    final count = images.length;
+    // **按单元分段放**：一个单元在成片上占哪一段是按下标问出来的（确定），
+    // 它取自原片哪一段也是已知的，两者一比例就得到每一格该落在哪儿。
+    // 以前是把每格的原片时刻直接换算成像素——那走的是病态的
+    // 「原片 → 成片」方向，调过序整条胶片条就错位到别人身上
     final imagePaint = Paint()..filterQuality = FilterQuality.low;
-    for (var i = 0; i < count; i++) {
-      final segStartMs = spanMs * i / count;
-      final segEndMs = spanMs * (i + 1) / count;
-      final left = geometry.msToPx(segStartMs.round());
-      final right = geometry.msToPx(segEndMs.round());
-      if (right < 0 || left > size.width) continue;
-
-      final dst = Rect.fromLTRB(
-          left, TimelineTracks.thumbsTop, right, TimelineTracks.thumbsBottom);
-      final image = images[i];
+    for (final cell in thumbCells(
+      units: units,
+      count: images.length,
+      pxOfUnit: (i) => unitPx(i, units, geometry),
+    )) {
+      if (cell.right < 0 || cell.left > size.width) continue;
+      final dst = Rect.fromLTRB(cell.left, TimelineTracks.thumbsTop, cell.right,
+          TimelineTracks.thumbsBottom);
+      final image = images[cell.imageIndex];
       if (image == null) {
         // 这一格抽帧失败：画灰底而不是让后面的画面顶上来（顶上来等于整条
         // 胶片条与时间轴错位，用户按画面定位切点会一直定错）

@@ -67,7 +67,7 @@ void main() {
 
       // 播放推进到视口之外
       const aheadMs = 60000;
-      expect(zoomed.msToPx(aheadMs), greaterThan(_viewportWidth),
+      expect(zoomed.composedMsToPx(aheadMs), greaterThan(_viewportWidth),
           reason: '前提：该位置在当前视口右侧之外');
 
       playhead.value = aheadMs;
@@ -75,7 +75,7 @@ void main() {
 
       expect(latest, isNotNull,
           reason: '播放头跑出可视区却不滚动，用户放大后一播放就"丢失"了播放头');
-      final x = latest!.msToPx(aheadMs);
+      final x = latest!.composedMsToPx(aheadMs);
       expect(x, greaterThanOrEqualTo(0));
       expect(x, lessThanOrEqualTo(_viewportWidth));
     });

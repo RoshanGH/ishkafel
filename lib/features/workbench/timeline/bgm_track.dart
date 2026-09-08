@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../../../core/audio/bgm_plan.dart';
+import '../../../core/export/composed_timeline.dart';
 export '../../../core/audio/bgm_range.dart' show unitRangeMs;
 import '../../../core/models/semantic_unit.dart';
 
@@ -56,16 +57,26 @@ class BgmSpan {
 /// 起点已经指不到任何单元的段直接跳过：用户删掉单元之后，旧方案会指向不存在
 /// 的下标——画一段悬空的配乐比不画更让人困惑。尾端越界则夹到最后一个单元
 /// （起点还在，说明这段配乐仍然有意义，只是变短了）。
-List<BgmSpan> bgmSpans(BgmPlan plan, List<SemanticUnit> units) {
+/// **给的是成片区间**：配乐本来就按单元下标记（startUnit..endUnit），
+/// 位置按下标问成片轴就有。绕原片时间一圈的话，调序之后会算到别的段上——
+/// `endMs` 是开区间，换算时落进的是相邻那一段（见
+/// `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2）。
+/// [axis] 为 null 时退回原片时间（没有轴 = 没有调序，两者相等）。
+List<BgmSpan> bgmSpans(BgmPlan plan, List<SemanticUnit> units,
+    [ComposedTimeline? axis]) {
   if (units.isEmpty) return const [];
   return List.unmodifiable([
     for (final s in plan.segments)
       if (s.startUnit >= 0 && s.startUnit < units.length)
-        BgmSpan(
-          segment: s,
-          startMs: units[s.startUnit].startMs,
-          endMs: units[math.min(s.endUnit, units.length - 1)].endMs,
-        ),
+        () {
+          final last = math.min(s.endUnit, units.length - 1);
+          final range = axis?.rangeOfUnits(s.startUnit, last);
+          return BgmSpan(
+            segment: s,
+            startMs: range?.$1 ?? units[s.startUnit].startMs,
+            endMs: range?.$2 ?? units[last].endMs,
+          );
+        }(),
   ]);
 }
 

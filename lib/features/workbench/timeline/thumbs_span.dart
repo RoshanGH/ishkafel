@@ -18,3 +18,59 @@ int sourceSpanMs(List<SemanticUnit> units) {
   }
   return max;
 }
+
+/// 一格缩略图画在哪儿：第 [imageIndex] 张，横向 [left]~[right] 像素
+typedef ThumbCell = ({int imageIndex, double left, double right});
+
+/// 把 [count] 张原片缩略图摆到**成片**时间轴上。
+///
+/// 缩略图是从原片按等间隔抽的，代表「原片 0 ~ 原片时长」。以前的做法是把
+/// 每一格的原片时刻直接 `msToPx` 过去——那走的是病态的「原片 → 成片」换算，
+/// 调过序之后整条胶片条会错位到别人身上（见
+/// `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2）。
+///
+/// 现在**按单元分段放**：一个单元在成片上占哪一段是按下标问出来的（确定），
+/// 它取自原片的哪一段也是已知的（`startMs/endMs`），两者一比例就得到这个单元
+/// 里每一格该落在哪儿。手加的单元没有原片来源，那一段留空——本来就没有
+/// 原片画面可放。
+///
+/// [pxOfUnit] 给出第 i 个单元在成片上的左右像素（由 `track_px.dart` 提供）。
+List<ThumbCell> thumbCells({
+  required List<SemanticUnit> units,
+  required int count,
+  required (double, double) Function(int unitIndex) pxOfUnit,
+}) {
+  if (count <= 0) return const [];
+  final spanMs = sourceSpanMs(units);
+  if (spanMs <= 0) return const [];
+
+  final cells = <ThumbCell>[];
+  final cellMs = spanMs / count;
+  for (var u = 0; u < units.length; u++) {
+    final unit = units[u];
+    if (!unit.hasSource) continue;
+    final srcStart = unit.startMs;
+    final srcLen = unit.endMs - unit.startMs;
+    if (srcLen <= 0) continue;
+    final (uLeft, uRight) = pxOfUnit(u);
+    final uWidth = uRight - uLeft;
+    if (uWidth <= 0) continue;
+
+    // 与这个单元的原片区间有交集的那几格
+    final first = (srcStart / cellMs).floor().clamp(0, count - 1);
+    for (var i = first; i < count; i++) {
+      final tStart = cellMs * i;
+      if (tStart >= unit.endMs) break;
+      final tEnd = cellMs * (i + 1);
+      if (tEnd <= srcStart) continue;
+      final a = (tStart < srcStart ? srcStart : tStart) - srcStart;
+      final b = (tEnd > unit.endMs ? unit.endMs : tEnd) - srcStart;
+      cells.add((
+        imageIndex: i,
+        left: uLeft + uWidth * a / srcLen,
+        right: uLeft + uWidth * b / srcLen,
+      ));
+    }
+  }
+  return cells;
+}

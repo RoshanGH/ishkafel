@@ -5,17 +5,18 @@ import 'package:ishkafel/core/playback/track_plan.dart';
 import 'package:ishkafel/core/playback/track_plan_builder.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 
-/// 镜头替换段在**原片时间轴**上的位置。
+/// 换方案那一刻，人正看的位置要留在原地。
 ///
-/// 这里钉的是一个真实故障（任务 hl30v3y45q，U2 的 S6）：变速切片段建出来时
-/// 没带原片坐标，`sourceStartMs` 默认取了 `inMs`——而切片是从头播的，inMs=0。
-/// 于是这一段声称自己对应「原片的 0~2.9 秒」，同时把它真正占着的原片区间
-/// 24.6~27.5 秒从映射表里挖成一个空洞。
+/// 这里钉的是一个真实故障（任务 hl30v3y45q，U2 的 S6）：切片刚渲染好、
+/// 点一下 ★、改配乐，都会换一次轨；换完要把播放头拉回「他刚才在看的地方」。
+/// 原来的锚点是**原片时刻**，而变速切片段没带原片坐标，`sourceStartMs`
+/// 默认取了 `inMs`（切片从头播，inMs=0），于是它声称自己对应「原片 0~2.9 秒」，
+/// 把真正占着的 24.6~27.5 秒挖成空洞——回不去，兜底一路跳到片尾。用户看到的是
+/// 「播放指针突然快速往后走」，声音也跟着被拽过去。
 ///
-/// 后果是换轨那一刻（切片刚渲染好、点一下 ★、改配乐）要按逻辑位置回到原处：
-/// `toComposedMs(原片25秒)` 谁都不命中，兜底一路跳到片尾。用户看到的是
-/// 「播放指针突然快速往后走，后面几秒像是被快进了」，声音也跟着被拽过去
-/// （口播是跟随轨，主时钟跳了它就被纠偏跟上）。
+/// 一期重构之后锚点改成 **(单元下标, 单元内偏移)**：不再绕原片时刻，
+/// 也就不再依赖每一段有没有正确的原片坐标（垫黑场那种段本来就没有）。
+/// 见 `docs/2026-09-08-成片时间轴重构-TRD.md` 四、一期。
 void main() {
   // 真实数据：U1 15.3s（整体换成 16.3s 的候选）、U2 八个镜头、S6 是 24.6~27.467
   final units = [
@@ -86,55 +87,57 @@ void main() {
     });
   });
 
-  group('原片轴上不能有空洞——空洞会让换轨那一刻跳到片尾', () {
-    test('被替换镜头覆盖的每一毫秒都换算得回成片，且落在这一段里', () {
-      final plan = planWith();
-      final fit = fitSegmentOf(plan);
-      for (final sourceMs in [24600, 25000, 26000, 27000, 27466]) {
-        final composed = plan.toComposedMs(sourceMs);
-        expect(composed, greaterThanOrEqualTo(fit.atMs),
-            reason: '原片 $sourceMs 落到了这一段之前');
-        expect(composed, lessThan(fit.endMs), reason: '原片 $sourceMs 被甩到了后面');
-      }
-    });
-
-    test('切片刚渲染好的那一刻，正播在这个镜头里的位置要留在原地', () {
+  group('换方案时位置留在原地', () {
+    test('切片刚渲染好的那一刻，正播在这个镜头里的位置不动', () {
       final before = planWith(fitted: false);
       final after = planWith();
       // 用户正看着 S6 中间（成片 26000）
       const watching = 26000;
-      final sourceMs = before.toSourceMs(watching);
-      expect(sourceMs, 25000, reason: '还没变速时这一段就是原片本身');
-      // 换上切片之后应该还在同一个地方，而不是被扔到片尾
-      expect(after.toComposedMs(sourceMs), watching);
-      expect(after.toComposedMs(sourceMs), isNot(after.totalMs));
+
+      final anchor = before.anchorAt(watching);
+
+      expect(anchor, isNotNull, reason: '这个位置必须锚得住，锚不住就会跳片尾');
+      expect(after.composedAt(anchor!), watching,
+          reason: '换上切片之后应该还在同一个地方');
+      expect(after.composedAt(anchor), isNot(after.totalMs));
     });
 
-    test('没有整体替换时同样成立——两条路都不能有空洞', () {
-      final plan = planWith(whole: false);
-      final fit = fitSegmentOf(plan);
-      expect(plan.toComposedMs(25000), inInclusiveRange(fit.atMs, fit.endMs));
-      expect(plan.toSourceMs(fit.atMs), 24600);
+    test('没有整体替换时同样成立', () {
+      final before = planWith(whole: false, fitted: false);
+      final after = planWith(whole: false);
+      const watching = 26000;
+
+      final anchor = before.anchorAt(watching);
+
+      expect(after.composedAt(anchor!), watching);
     });
 
-    test('往返换算在整条片子上都对得上', () {
+    test('整条片子上任何一处都锚得住', () {
       final plan = planWith();
       for (var composed = 0; composed < plan.totalMs; composed += 250) {
-        final back = plan.toComposedMs(plan.toSourceMs(composed));
-        expect((back - composed).abs(), lessThanOrEqualTo(1),
-            reason: '成片 $composed 转一圈回来变成了 $back');
+        final anchor = plan.anchorAt(composed);
+        expect(anchor, isNotNull, reason: '成片 $composed 锚不住');
+        expect(plan.composedAt(anchor!), composed,
+            reason: '成片 $composed 转一圈回来对不上');
       }
     });
   });
 
-  group('映射不上时不许悄悄跳到片尾', () {
-    test('原片时刻超出所有段落时，落到最近的边界而不是终点', () {
+  group('锚不住时不许悄悄跳到片尾', () {
+    test('单元在新方案里没了：落到片头，而不是终点', () {
       const plan = TrackPlan(video: [
         TrackSegment(atMs: 0, durationMs: 1000, source: '/A.mp4', inMs: 5000),
-      ]);
-      // 5000~6000 之外的时刻本来就没有对应的成片位置，但也不该一律甩到片尾
-      expect(plan.toComposedMs(4000), 0);
-      expect(plan.toComposedMs(9000), 1000);
+      ], unitRanges: {0: (0, 1000)});
+
+      expect(plan.composedAt((9, 100, 1000)), 0);
+    });
+
+    test('偏移超出这个单元时夹在它里面，不跑到别的段上', () {
+      const plan = TrackPlan(video: [
+        TrackSegment(atMs: 0, durationMs: 1000, source: '/A.mp4', inMs: 5000),
+      ], unitRanges: {0: (0, 1000), 1: (1000, 2000)});
+
+      expect(plan.composedAt((0, 99999, 1000)), 999);
     });
   });
 }

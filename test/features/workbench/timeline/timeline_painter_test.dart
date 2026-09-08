@@ -88,7 +88,7 @@ void main() {
           await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       addTearDown(image.dispose);
 
-      final playheadX = painter.geometry.msToPx(playheadMs).round();
+      final playheadX = painter.geometry.composedMsToPx(playheadMs).round();
       // 取样点落在所有轨道下方的空白区域，只有最后绘制的播放头会经过；
       // 线宽 2px 且落在半像素上会被抗锯齿摊到相邻列，故取左右各 2px 的最亮点
       const sampleY = 210;

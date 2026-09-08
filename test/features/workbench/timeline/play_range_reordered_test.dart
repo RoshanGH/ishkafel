@@ -36,11 +36,12 @@ void main() {
 
   final axis = ComposedTimeline.of(units: units, wholeDurations: const {});
 
-  test('拿原片时间换算：最后一个单元的终点会掉到别人身上', () {
-    // 这条是**记录病灶**，不是期望行为——留着它，改回旧写法立刻会被发现
-    expect(axis.toComposedMs(units[2].endMs), 0,
-        reason: 'endMs=20000 落进手加单元的原片占位 [20000,30000)，'
-            '于是被算成它的成片起点 0');
+  test('病态方向已经删掉了——想犯这个错都没有 API 可用', () {
+    // 原来这里记录的是病灶本身：
+    //   axis.toComposedMs(units[2].endMs) == 0   ← 应该是 30000
+    // 一期重构把 toComposedMs 整个删了（见 TRD 四、一期），
+    // 剩下的守卫在 test/architecture/no_source_ms_to_px_test.dart
+    expect(axis.startOf(2), 20000);
   });
 
   test('按下标问：最后一个单元的成片区间是对的', () {

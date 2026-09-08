@@ -215,6 +215,7 @@ class TrackPlanBuilder {
           _bgmTrack(bgm, unitRanges, bgmPaths, missing)),
       bgmMissing: List.unmodifiable(missing),
       skippedEmptyUnits: List.unmodifiable(skipped),
+      unitRanges: Map.unmodifiable(unitRanges),
       unplayable: List.unmodifiable(unplayable),
       composedTotalMs: at,
     );

@@ -90,10 +90,11 @@ class MultitrackPlayback implements PlaybackController {
 
   Future<void> setPlan(TrackPlan plan) async {
     final wasPlaying = video.isPlaying;
-    // 换之前先记下逻辑位置（用旧的那套轨换算）
-    final sourceMs = _plan.video.isEmpty
-        ? null
-        : _plan.toSourceMs(video.positionMs);
+    // 换之前先记下逻辑位置：**(单元下标, 单元内偏移)**。
+    // 记成片毫秒的话新方案总长一变就指到别处；绕原片时刻的话要走病态的
+    // 「原片 → 成片」换算，而垫黑场那一段的「原片区间」本来就是假的
+    final anchor =
+        _plan.video.isEmpty ? null : _plan.anchorAt(video.positionMs);
 
     _plan = plan;
     final videoEdl = Edl.of(plan.video);
@@ -132,9 +133,8 @@ class MultitrackPlayback implements PlaybackController {
 
     if (videoChanged || voiceChanged) {
       // 换源之后位置回到 0，按逻辑位置拉回用户原来看的地方
-      final at = sourceMs == null
-          ? 0
-          : plan.toComposedMs(sourceMs).clamp(0, plan.totalMs);
+      final at =
+          anchor == null ? 0 : plan.composedAt(anchor).clamp(0, plan.totalMs);
       if (at > 0) {
         await video.seekMs(at);
         await voice.seekMs(at);

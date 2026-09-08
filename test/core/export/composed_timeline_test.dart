@@ -152,36 +152,33 @@ void _composedAxis() {
         ComposedTimeline.of(units: units(), wholeDurations: const {0: 2000});
 
     test('被替换的那一格按新长度画，后面整体左移', () {
+      // 原来这一组测的是 toComposedMs(原片毫秒)，那条路已经删掉——
+      // 「原片时刻 → 成片时刻」没有唯一答案（见 TRD 二、2.2）。
+      // 同样的性质改成按**下标**问：这才是界面和播放真正需要的问法
       final axis = shortened();
 
-      expect(axis.toComposedMs(0), 0);
-      expect(axis.toComposedMs(4000), 2000, reason: 'U1 只剩 2 秒');
-      expect(axis.toComposedMs(10000), 8000, reason: 'U2 跟着前移 2 秒');
+      expect(axis.startOf(0), 0);
+      expect(axis.durationOf(0), 2000, reason: 'U1 只剩 2 秒');
+      expect(axis.startOf(1), 2000, reason: 'U2 跟着前移 2 秒');
+      expect(axis.startOf(1) + axis.durationOf(1), 8000);
       expect(axis.totalMs, 8000);
     });
 
-    test('格子内部按比例——用户拖到一半就是一半', () {
-      expect(shortened().toComposedMs(2000), 1000);
-    });
-
-    test('没被替换的单元一一对应', () {
-      expect(shortened().toComposedMs(7000), 5000,
-          reason: 'U2 内部不缩放：4000→2000 之后再走 3000');
-    });
-
-    test('与反向换算互为逆运算（没被替换的段落上严格可逆）', () {
+    test('反方向（成片 → 原片）保留，它是良定义的', () {
       final axis = shortened();
 
-      for (final ms in [4000, 5000, 7000, 9999]) {
-        expect(axis.toSourceMs(axis.toComposedMs(ms)), ms);
-      }
+      expect(axis.toSourceMs(0), 0);
+      expect(axis.toSourceMs(1000), 2000,
+          reason: '被替换的格子内部按比例——走到一半就是原片的一半');
+      expect(axis.toSourceMs(5000), 7000,
+          reason: 'U2 内部不缩放：成片 2000 起对应原片 4000 起');
     });
 
     test('越界不炸，夹到两端', () {
       final axis = shortened();
 
-      expect(axis.toComposedMs(-100), 0);
-      expect(axis.toComposedMs(999999), 8000);
+      expect(axis.toSourceMs(-100), 0);
+      expect(axis.toSourceMs(999999), 10000);
     });
 
     test('认得出哪个单元被整体替换了', () {

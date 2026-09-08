@@ -27,7 +27,12 @@ class TimelineGeometry {
   });
 
   /// **原片**毫秒转像素坐标
-  double msToPx(int ms) => composedMsToPx(axis?.toComposedMs(ms) ?? ms);
+  /// **已删除**：`msToPx(原片毫秒)` 走的是「原片 → 成片」换算，那个方向
+  /// 是病态的——`endMs` 是开区间，换算按「谁的原片区间盖住它」找，
+  /// 落进的是相邻那一段；列表顺序和原片顺序一致时恰好相等，一调序就失效。
+  /// 一格在成片上的位置改用 `track_px.dart` 的 `unitPx` / `shotPx` 按**下标**问，
+  /// 别的地方直接用 [composedMsToPx]。
+  /// 见 `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2。
 
   /// **成片**毫秒转像素坐标（刻度尺、播放头用）
   double composedMsToPx(int composedMs) => composedMs / msPerPx - scrollPx;

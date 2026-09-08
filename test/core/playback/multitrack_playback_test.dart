@@ -154,6 +154,7 @@ void main() {
                 atMs: 2000, durationMs: 6000, source: '/v/a.mp4', inMs: 4000),
           ],
           voice: [TrackSegment(atMs: 0, durationMs: 8000, source: '/m/71.mp4')],
+          unitRanges: {0: (0, 2000), 1: (2000, 8000)},
         );
 
     TrackPlan original() => const TrackPlan(
@@ -161,32 +162,41 @@ void main() {
             TrackSegment(atMs: 0, durationMs: 10000, source: '/v/a.mp4'),
           ],
           voice: [TrackSegment(atMs: 0, durationMs: 10000, source: '/v/a.mp4')],
+          unitRanges: {0: (0, 4000), 1: (4000, 10000)},
         );
 
     test('取消 ★ 之后，「我停在 U1 的中间」这件事要保住', () {
-      // 播到成片 1000ms（替换后的 U1 走了一半）
-      final at = replaced().toSourceMs(1000);
-      expect(at, 2000, reason: '对应原片 U1 的一半');
+      // 播到成片 1000ms：替换后的 U1（2 秒）走了一半
+      final anchor = replaced().anchorAt(1000);
 
-      // 换回原片：同一个逻辑位置在新轴上是 2000ms
-      expect(original().toComposedMs(at), 2000);
+      expect(anchor, (0, 1000, 2000),
+          reason: '锚的是「第 0 个单元、往里 1000ms、当时它有 2000ms 长」');
+      // 换回原片：U1 恢复成 4 秒，同一个偏移还在它里面
+      // U1 恢复成 4 秒，「一半」应该还是一半 → 2000
+      expect(original().composedAt(anchor!), 2000);
     });
 
-    test('反过来也对：从原片切到替换，位置按比例落回同一处', () {
-      final at = original().toSourceMs(2000);
-      expect(replaced().toComposedMs(at), 1000);
+    test('反过来也对：从原片切到替换，还在同一个单元里', () {
+      final anchor = original().anchorAt(2000);
+
+      expect(anchor!.$1, 0);
+      expect(replaced().composedAt(anchor), lessThan(2000),
+          reason: 'U1 短了，同一个单元的这个偏移在新轴上要夹回它自己那一段');
     });
 
-    test('换算是可逆的——来回切几次不会越飘越远', () {
+    test('来回切几次不会越飘越远', () {
       for (final ms in [0, 500, 1000, 1999]) {
-        final source = replaced().toSourceMs(ms);
-        expect(replaced().toComposedMs(source), closeTo(ms, 1));
+        final anchor = replaced().anchorAt(ms);
+        expect(replaced().composedAt(anchor!), ms);
       }
     });
 
-    test('位置落在替换段之后时，还是真实的原片时刻', () {
-      expect(replaced().toSourceMs(3000), 5000);
-      expect(original().toComposedMs(5000), 5000);
+    test('位置落在替换段之后时，锚到后一个单元', () {
+      final anchor = replaced().anchorAt(3000);
+
+      expect(anchor!.$1, 1, reason: '成片 3000 已经过了被换短的 U1');
+      expect(original().composedAt(anchor), 5000,
+          reason: '原片轴上 U2 从 4000 起，往里 1000');
     });
   });
 
@@ -343,10 +353,12 @@ void _switchBehaviour() {
               atMs: 2000, durationMs: 6000, source: '/v/a.mp4', inMs: 4000),
         ],
         voice: [TrackSegment(atMs: 0, durationMs: 8000, source: '/v/a.mp4')],
+        unitRanges: {0: (0, 2000), 1: (2000, 8000)},
       );
       const plain = TrackPlan(
         video: [TrackSegment(atMs: 0, durationMs: 10000, source: '/v/a.mp4')],
         voice: [TrackSegment(atMs: 0, durationMs: 10000, source: '/v/a.mp4')],
+        unitRanges: {0: (0, 4000), 1: (4000, 10000)},
       );
 
       await playback.setPlan(replaced);

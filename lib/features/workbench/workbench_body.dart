@@ -335,7 +335,21 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   ComposedTimeline? _axis;
 
   /// 原片时刻 → 播放器该定位到的成片时刻
-  int _composed(int sourceMs) => _axis?.toComposedMs(sourceMs) ?? sourceMs;
+  /// 选中项（单元或镜头）在**成片**上的起点。按下标问轴——拿原片毫秒去
+  /// 换算是病态方向，调过序就会算到别的段上（见
+  /// `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2）
+  int? _composedStartOfSelection(SegmentationEditorController editor) {
+    final sel = editor.selection;
+    if (sel == null) return null;
+    final axis = _axis;
+    if (axis == null) return editor.selectedStartMs;
+    final u = sel.unitIndex;
+    if (u < 0 || u >= axis.units.length) return null;
+    final s = sel.shotIndex;
+    return s == null
+        ? axis.startOf(u)
+        : (axis.composedShotStart(u, s) ?? axis.startOf(u));
+  }
 
   /// 双击某一格要播的**成片**区间。整体替换的单元里点某一镜时给整段——
   /// 那些镜头在成片里已经不存在了，单独播它没有意义
@@ -439,8 +453,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       onReorderUnit: widget.onReorderUnit,
                       onDeleteUnit: widget.onDeleteUnit,
                       canDeleteUnit: widget.canDeleteUnit,
-                      onUnitTap: (unit) =>
-                          playback.seekMs(_composed(unit.startMs)),
+                      onUnitTap: (unit) => playback
+                          .seekMs(composedAxis.startOf(unit.index)),
                     ),
                   ),
                   const VerticalDivider(width: 1, color: AppColors.border),
@@ -532,8 +546,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   void _selectAdjacent(
       SegmentationEditorController editor, PlaybackController playback, int delta) {
     editor.selectAdjacent(delta);
-    final startMs = editor.selectedStartMs;
-    if (startMs != null) playback.seekMs(_composed(startMs));
+    final startMs = _composedStartOfSelection(editor);
+    if (startMs != null) playback.seekMs(startMs);
   }
 
   /// JKL 走带：L 正向播放、K 停、J 反向。

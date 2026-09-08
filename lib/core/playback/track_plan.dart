@@ -182,6 +182,9 @@ class TrackPlan {
   /// 整条成片有多长——**含那些放不了的段**。画面轨末尾算不出它
   final int composedTotalMs;
 
+  /// 每个单元在**成片**上占的 [起, 止)。换方案时靠它记住「我停在哪儿」
+  final Map<int, (int, int)> unitRanges;
+
   const TrackPlan({
     this.video = const [],
     this.voice = const [],
@@ -190,6 +193,7 @@ class TrackPlan {
     this.skippedEmptyUnits = const [],
     this.unplayable = const [],
     this.composedTotalMs = 0,
+    this.unitRanges = const {},
     this.voiceVolume = 1.0,
   });
 
@@ -206,6 +210,44 @@ class TrackPlan {
     return byVideo > composedTotalMs ? byVideo : composedTotalMs;
   }
 
+  /// 换方案时的位置锚点：**(单元下标, 单元内偏移, 当时这个单元有多长)**。
+  ///
+  /// 直接记成片毫秒不行——新方案的总长一变，同一个毫秒对应的内容就完全不是
+  /// 同一处了，用户点一下 ★ 就被扔到片子的别处。
+  ///
+  /// 也**不能绕原片时刻**：那要走「原片 → 成片」的换算，而那个方向是病态的
+  /// （开区间边界会落到相邻段上，调过序后彻底失效，见
+  /// `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2）。而且垫黑场那一段的
+  /// 「原片区间」本来就是假的，锚在上面必然错。
+  ///
+  /// **带上当时的长度是为了按比例还原**：整体替换把 4 秒的单元换成 2 秒的
+  /// 素材，人看到一半是 1 秒处；取消替换之后「一半」应该是 2 秒处，
+  /// 而不是还停在 1 秒（那才走了四分之一）。长度没变时按比例算恰好等于
+  /// 原样搬过去，不引入误差。
+  (int, int, int)? anchorAt(int composedMs) {
+    for (final e in unitRanges.entries) {
+      if (composedMs >= e.value.$1 && composedMs < e.value.$2) {
+        return (e.key, composedMs - e.value.$1, e.value.$2 - e.value.$1);
+      }
+    }
+    return null;
+  }
+
+  /// 把锚点还原成新方案里的成片毫秒。单元没了就落到片头——
+  /// 悄悄跳到片尾是最糟的，用户会以为片子被截断了
+  int composedAt((int, int, int) anchor) {
+    final range = unitRanges[anchor.$1];
+    if (range == null) return 0;
+    final span = range.$2 - range.$1;
+    if (span <= 0) return range.$1;
+    final was = anchor.$3;
+    final into = was <= 0
+        ? anchor.$2
+        : (anchor.$2 * span / was).round();
+    return range.$1 + into.clamp(0, span - 1);
+  }
+
+
   /// 成片时刻 → 原片时刻。**换方案时要靠它记住「我停在哪儿」**：
   /// 直接记成片毫秒的话，新方案的总长一变，同一个毫秒对应的内容就完全不是
   /// 同一处了——用户点一下 ★ 就被扔到片子的别处。
@@ -216,33 +258,6 @@ class TrackPlan {
     return video.isEmpty ? composedMs : video.last.sourceMsAt(video.last.endMs - 1);
   }
 
-  /// 原片时刻 → 这一套轨上的成片时刻（[toSourceMs] 的逆）。
-  ///
-  /// 落不进任何一段时**取最近的那一段的边界**，而不是一律甩到片尾。这条
-  /// 兜底以前写的是「非 0 即 totalMs」，一旦哪条轨在原片轴上留了空洞
-  /// （见 [TrackPlanBuilder] 里变速切片那段的说明），用户正看着的位置就会
-  /// 被一脚踢到片子结尾——那是最糟的一种失败方式：看上去像播放器发疯。
-  int toComposedMs(int sourceMs) {
-    var bestMs = 0;
-    var bestGap = -1;
-    for (final segment in video) {
-      final from = segment.sourceStartMs;
-      final to = from + segment.sourceSpanMs;
-      if (sourceMs >= from && sourceMs < to) {
-        if (segment.sourceSpanMs <= 0) return segment.atMs;
-        final into = sourceMs - from;
-        return segment.atMs +
-            (into * segment.durationMs / segment.sourceSpanMs).round();
-      }
-      // 离得多远：在这一段之前就是 from-sourceMs，之后就是 sourceMs-(to-1)
-      final gap = sourceMs < from ? from - sourceMs : sourceMs - to + 1;
-      if (bestGap < 0 || gap < bestGap) {
-        bestGap = gap;
-        bestMs = sourceMs < from ? segment.atMs : segment.endMs;
-      }
-    }
-    return bestMs.clamp(0, totalMs);
-  }
 
   /// [ms] 时刻该播哪一段配乐；没有就返回 null
   BgmTrackSegment? bgmAt(int ms) {
@@ -252,16 +267,5 @@ class TrackPlan {
     return null;
   }
 
-  @override
-  bool operator ==(Object other) =>
-      other is TrackPlan &&
-      listEquals(other.video, video) &&
-      listEquals(other.voice, voice) &&
-      listEquals(other.bgm, bgm) &&
-      listEquals(other.bgmMissing, bgmMissing);
 
-  @override
-  int get hashCode =>
-      Object.hash(Object.hashAll(video), Object.hashAll(voice),
-          Object.hashAll(bgm));
 }

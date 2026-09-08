@@ -117,39 +117,19 @@ class ComposedTimeline {
     if (unitIndex < 0 || unitIndex >= units.length) return false;
     return replaced != units[unitIndex].endMs - units[unitIndex].startMs;
   }
+  /// **已删除 `toComposedMs`（原片时刻 → 成片时刻）。**
+  ///
+  /// 这个方向病态：给一个原片时刻问它在成片哪儿，本身没有唯一答案——
+  /// 可能无人覆盖（手加的单元）、可能多人覆盖，而 `endMs` 是开区间，
+  /// 边界必然落到相邻那一段身上。列表顺序和原片顺序一致时恰好相等，
+  /// 所以平时看不出来；拖动调序是一等功能，一调就失效。
+  ///
+  /// 要「这一段在成片哪儿」，按**列表下标**问 [startOf] / [durationOf] /
+  /// [composedShotStart] / [composedShotEnd]。
+  /// 反方向 [toSourceMs] 是良定义的，保留。
+  ///
+  /// 见 `docs/2026-09-08-成片时间轴重构-TRD.md` 二、2.2。
 
-  /// 原片的某一刻画在成片时间轴的哪儿。**时间线要用**：格子按成片长度画，
-  /// 整体替换之后那一格就该变窄/变宽，后面的跟着挪——用户看到的宽度就是
-  /// 它在成片里真实的长度，不必在脑子里再换算一次。
-  int toComposedMs(int sourceMs) {
-    if (units.isEmpty) return 0;
-    // **按「谁的原片区间盖住它」找，不能顺序扫着比大小**：单元可以被拖乱
-    // 顺序（列表顺序 = 成片顺序，startMs 只说明取自原片哪一段），顺序扫会
-    // 先撞上排在前面、但原片时间更靠后的那个单元
-    for (var i = 0; i < units.length; i++) {
-      if (sourceMs < units[i].startMs || sourceMs >= units[i].endMs) continue;
-      final into = sourceMs - units[i].startMs;
-      final sourceLen = units[i].endMs - units[i].startMs;
-      if (sourceLen <= 0 || _durations[i] == sourceLen) {
-        return _starts[i] + into;
-      }
-      return _starts[i] + (into * _durations[i] / sourceLen).round();
-    }
-    // 落在所有单元的原片区间之外（比如手动加的单元占的那段时间）：
-    // 夹到最近的一端，别返回一个凭空的数字
-    var earliest = units.first;
-    var latest = units.first;
-    var latestIndex = 0;
-    for (var i = 0; i < units.length; i++) {
-      if (units[i].startMs < earliest.startMs) earliest = units[i];
-      if (units[i].endMs > latest.endMs) {
-        latest = units[i];
-        latestIndex = i;
-      }
-    }
-    if (sourceMs <= earliest.startMs) return 0;
-    return _starts[latestIndex] + _durations[latestIndex];
-  }
 
   /// 成片上的某一刻落在**第几个单元**上。
   ///

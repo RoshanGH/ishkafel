@@ -10,13 +10,13 @@ void main() {
     final g = TimelineGeometry.fit(durationMs: 96000, viewportWidthPx: 960);
     expect(g.msPerPx, 100);
     expect(g.totalWidthPx, 960);
-    expect(g.msToPx(0), 0);
-    expect(g.msToPx(96000), 960);
+    expect(g.composedMsToPx(0), 0);
+    expect(g.composedMsToPx(96000), 960);
   });
 
   test('ms↔px 互逆且 pxToMs 有界', () {
     const g = TimelineGeometry(durationMs: 10000, msPerPx: 10, scrollPx: 50);
-    expect(g.msToPx(1500), 100);
+    expect(g.composedMsToPx(1500), 100);
     expect(g.pxToMs(100), 1500);
     expect(g.pxToMs(-999), 0);
     expect(g.pxToMs(99999), 10000);
@@ -152,13 +152,19 @@ void _composedAxis() {
       expect(geometry.msPerPx, 10, reason: '8000ms 铺满 800px');
     });
 
-    test('原片刻度画在成片位置上——那一格变窄，后面的左移', () {
+    test('一格在成片上的位置按下标问轴——那一格变窄，后面的左移', () {
+      // 原来这里测的是 msToPx(原片毫秒)，而那条路已经删掉了：
+      // 「原片时刻 → 成片时刻」没有唯一答案，调过序就会算到别的段上
+      // （见 docs/2026-09-08-成片时间轴重构-TRD.md 二、2.2）
       final geometry = TimelineGeometry.fit(
           durationMs: 10000, viewportWidthPx: 800, axis: axis());
+      final t = axis();
 
-      expect(geometry.msToPx(0), 0);
-      expect(geometry.msToPx(4000), 200, reason: 'U1 只剩 2 秒 = 200px');
-      expect(geometry.msToPx(10000), 800);
+      expect(geometry.composedMsToPx(t.startOf(0)), 0);
+      expect(geometry.composedMsToPx(t.startOf(1)), 200,
+          reason: 'U1 只剩 2 秒 = 200px，U2 从这儿开始');
+      expect(
+          geometry.composedMsToPx(t.startOf(1) + t.durationOf(1)), 800);
     });
 
     test('点在画布上换算回原片刻度——选中的是原片切分里的单元', () {
@@ -193,7 +199,7 @@ void _composedAxis() {
           TimelineGeometry.fit(durationMs: 10000, viewportWidthPx: 800);
 
       expect(plain.durationMs, 10000);
-      expect(plain.msToPx(4000), 320);
+      expect(plain.composedMsToPx(4000), 320);
       expect(plain.pxToMs(320), 4000);
     });
   });
