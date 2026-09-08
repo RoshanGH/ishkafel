@@ -20,6 +20,18 @@ if ! grep -q "^## ${NEXT}\b" CHANGELOG.md; then
   exit 1
 fi
 
+# CLI 冒烟：**必须在版本号自增之前**。
+#
+# 选项重名这类错误 `flutter analyze` 和单测都发现不了——ArgParser 是运行期
+# 才抛 Duplicate option，而后果是整个 CLI 一执行就崩。package_macos.sh 末尾
+# 确实会真跑一次，但那时版本号已经加过了：2026-09-07 就这么白烧掉一个 0.1.186
+# （上面那段注释担心的正是这件事，只是当时只防住了 CHANGELOG 那一半）。
+if ! dart run bin/ishkafel.dart --help > /dev/null 2>&1; then
+  echo "命令行工具起不来，先修好再打包：" >&2
+  dart run bin/ishkafel.dart --help >&2 || true
+  exit 1
+fi
+
 ./scripts/bump_build.sh
 ./scripts/build_macos.sh --release
 ./scripts/package_macos.sh
