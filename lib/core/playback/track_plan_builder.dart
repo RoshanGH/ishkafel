@@ -61,6 +61,8 @@ class TrackPlanBuilder {
     final video = <TrackSegment>[];
     final voice = <TrackSegment>[];
     final skipped = <int>[];
+    /// 放不了的那几段在成片上的区间——播放头走到这儿要停下来点名
+    final unplayable = <UnplayableSpan>[];
     // 成片时间轴上的游标：整体替换会改变段落长度，后面的全跟着挪
     var at = 0;
     // 单元下标 → 它在成片上占的 [起, 止)，配乐要按它定位
@@ -109,7 +111,14 @@ class TrackPlanBuilder {
       // 或者干脆卡住（2026-09-08 真机：「添加的台词语义单元不能正常播放」）。
       if (sourcePath == null || !unit.hasSource) {
         skipped.add(unit.index);
+        // **跳过的是画面，不是时间**：这一段照样占着它在成片里的位置，
+        // 游标必须往前走，否则后面的单元全部前移——真机上用户把手加的单元
+        // 拖到最前，一按播放直接从 U2 开始，时间线画到 01:46 而播放器只到
+        // 01:36，他以为软件把他加的那一段吃了（2026-09-08）
+        at += unit.durationMs;
         unitRanges[unit.index] = (start, at);
+        unplayable.add(UnplayableSpan(
+            unitIndex: unit.index, startMs: start, endMs: at));
         continue;
       }
 
@@ -185,6 +194,8 @@ class TrackPlanBuilder {
           _bgmTrack(bgm, unitRanges, bgmPaths, missing)),
       bgmMissing: List.unmodifiable(missing),
       skippedEmptyUnits: List.unmodifiable(skipped),
+      unplayable: List.unmodifiable(unplayable),
+      composedTotalMs: at,
     );
   }
 

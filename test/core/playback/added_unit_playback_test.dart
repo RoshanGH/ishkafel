@@ -86,4 +86,74 @@ void main() {
 
     expect(plan.video.any((s) => s.source == '/v/src.mp4'), isTrue);
   });
+
+  group('没素材的单元照样占成片时间——不许把它从时间轴上抹掉', () {
+    // 2026-09-08 真机，用户原话：「我播放的时候，你竟然是从第二个台词语义
+    // 单元开始播放……你不是应该提醒吗？你必须得选个视频，他这个部分才能播放。
+    // 然后你看末尾也没对齐。」
+    //
+    // 上一版为了不去原片里取一段不存在的时间，把这些单元跳过了——结果变成
+    // 另一种静默降级：它在成片里凭空消失，后面全部前移 10s，时间线画到
+    // 01:46 而播放器只到 01:36。跳过的是**画面**，不是**时间**。
+
+    test('它在成片里占的那一段，后面的单元不许往前挪', () {
+      final plan = build();
+
+      // U1 原片 0–20s，U2 手加 10s。手加的排在后面，不影响 U1
+      final first = plan.video.first;
+      expect(first.atMs, 0);
+      expect(plan.totalMs, 30000,
+          reason: '成片是 20s 原片 + 10s 待填 = 30s。'
+              '按画面轨末尾算的话只有 20s，末尾就和时间线对不上了');
+    });
+
+    test('点名哪一段放不了、在成片的哪个区间——播到那儿要停下来说话', () {
+      final plan = build();
+
+      expect(plan.unplayable, hasLength(1));
+      expect(plan.unplayable.single.unitIndex, 1);
+      expect(plan.unplayable.single.startMs, 20000);
+      expect(plan.unplayable.single.endMs, 30000);
+    });
+
+    test('排在最前面时，后面的单元从它之后开始——不是从 0 开始', () {
+      final units = [
+        const SemanticUnit(
+            index: 0,
+            startMs: 20000,
+            endMs: 30000,
+            transcript: '',
+            hasSource: false),
+        const SemanticUnit(
+            index: 1,
+            startMs: 0,
+            endMs: 20000,
+            transcript: '原片这一段',
+            shots: [Shot(startMs: 0, endMs: 20000)]),
+      ];
+      final plan = TrackPlanBuilder.build(
+        units: units,
+        sourcePath: '/v/src.mp4',
+        replacements: const [],
+        materials: const {},
+      );
+
+      expect(plan.unplayable.single.startMs, 0);
+      expect(plan.video.first.atMs, 10000,
+          reason: '真机上这里是 0——于是一按播放就直接从 U2 开始，'
+              '用户以为软件把他加的那一段吃了');
+    });
+
+    test('挑了素材就不在这张名单上', () {
+      final plan = build(
+        replacements: [
+          UnitReplacement.keepOriginal(),
+          UnitReplacement.whole(const [7], previewId: 7),
+        ],
+        materials: {7: const LocalMaterial(path: '/m/7.mp4', durationMs: 8000)},
+      );
+
+      expect(plan.unplayable, isEmpty);
+    });
+  });
 }

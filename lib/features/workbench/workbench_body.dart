@@ -435,7 +435,10 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       key: _playerPanelKey,
                       playback: playback,
                       videoWidget: widget.videoWidget,
-                      durationMs: editor.durationMs,
+                      // **成片总长，不是原片总长**：手加的单元、整体替换都会
+                      // 改变片长。用原片总长的话末尾对不上时间线——真机上
+                      // 时间线画到 01:46 而播放器只到 01:36（2026-09-08）
+                      durationMs: composedAxis.totalMs,
                       fps: editor.fps,
                     ),
                   ),

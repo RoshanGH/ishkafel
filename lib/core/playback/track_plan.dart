@@ -126,6 +126,21 @@ class BgmTrackSegment {
 /// 听得出来）。没铺配乐的段落直接用原混音、一个字节不改，只有被配乐盖住的
 /// 段落才换成纯人声——否则全片都要先损一道。
 @immutable
+/// 一段放不了的成片区间：这个单元还没挑素材，画面无从谈起。
+class UnplayableSpan {
+  final int unitIndex;
+  final int startMs;
+  final int endMs;
+
+  const UnplayableSpan(
+      {required this.unitIndex, required this.startMs, required this.endMs});
+
+  bool covers(int composedMs) => composedMs >= startMs && composedMs < endMs;
+
+  @override
+  String toString() => 'U${unitIndex + 1} $startMs-$endMs';
+}
+
 class TrackPlan {
   /// 画面：没替换的用原片、整体替换用候选整条、镜头替换用变速对齐后的切片
   final List<TrackSegment> video;
@@ -153,12 +168,28 @@ class TrackPlan {
   /// 的片子比他排的短一段，还以为是自己记错了
   final List<int> skippedEmptyUnits;
 
+  /// 放不了的那几段在**成片**时间轴上占的区间。
+  ///
+  /// **跳过的是画面，不是时间**：这些单元照样占着它们在成片里的位置，
+  /// 后面的单元不许因此往前挪。2026-09-08 真机上就是挪了——用户把手加的
+  /// 单元拖到最前面，一按播放直接从 U2 开始，时间线画到 01:46 而播放器只到
+  /// 01:36，他以为软件把他加的那一段吃了。
+  ///
+  /// 播放头走到这些区间要**停下来并点名**，不是悄悄滑过去。用户原话：
+  /// 「你提醒他就好了呀，你必须得选个视频，他这个部分才能播放。」
+  final List<UnplayableSpan> unplayable;
+
+  /// 整条成片有多长——**含那些放不了的段**。画面轨末尾算不出它
+  final int composedTotalMs;
+
   const TrackPlan({
     this.video = const [],
     this.voice = const [],
     this.bgm = const [],
     this.bgmMissing = const [],
     this.skippedEmptyUnits = const [],
+    this.unplayable = const [],
+    this.composedTotalMs = 0,
     this.voiceVolume = 1.0,
   });
 
@@ -166,8 +197,14 @@ class TrackPlan {
 
   bool get isEmpty => video.isEmpty && voice.isEmpty && bgm.isEmpty;
 
-  /// 成片总长（按画面轨算——它才是片子的长度）
-  int get totalMs => video.isEmpty ? 0 : video.last.endMs;
+  /// 成片总长。
+  ///
+  /// **不能只按画面轨末尾算**：还没挑素材的那几段没有画面可放，却照样占着
+  /// 成片里的位置。只按画面算的话，末尾会比时间线短一截（真机上短了 10s）
+  int get totalMs {
+    final byVideo = video.isEmpty ? 0 : video.last.endMs;
+    return byVideo > composedTotalMs ? byVideo : composedTotalMs;
+  }
 
   /// 成片时刻 → 原片时刻。**换方案时要靠它记住「我停在哪儿」**：
   /// 直接记成片毫秒的话，新方案的总长一变，同一个毫秒对应的内容就完全不是

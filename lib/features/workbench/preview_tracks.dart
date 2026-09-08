@@ -58,6 +58,14 @@ class PreviewTracks extends ChangeNotifier {
       return '正在准备 $pending 段替换镜头的变速画面，其余部分已经能播';
     }
     if (_plan.bgmMissing.isNotEmpty) return _plan.bgmMissing.join('；');
+    // 还没挑素材的那几段：**不等人播到那儿才说**。它们在成片里占着位置却
+    // 没有画面，人一按播放就会在那儿停住——先把话说在前面，并点名是哪几段
+    if (_plan.unplayable.isNotEmpty) {
+      final names =
+          _plan.unplayable.map((s) => 'U${s.unitIndex + 1}').join('、');
+      return '$names 还没选素材，这几段放不了——去「替换素材」给它们挑，'
+          '或者把它们删掉';
+    }
     return null;
   }
 

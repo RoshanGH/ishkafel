@@ -592,6 +592,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 是原片切分——播放头要换算回原片时刻，否则整体替换之后指针就飘了
       // 时间线现在画的就是成片，播放头直接用播放器位置——不必再换算回
       // 原片时刻（那一步在整体替换段上是按比例估的，本来就不精确）
+      // **先判「这一段能不能放」，再做去重**：播放头本来就停在 0，而 0 可能
+      // 正落在放不了的那一段里（手加的单元拖到最前就是这样）。放在去重后面
+      // 的话，mpv 上报的还是 0、被当成重复丢掉，人点了播放只看到停住、
+      // 没有任何解释（2026-09-08 自测时踩到）
+      _stopAtUnplayable(ms, playback);
       if (_playhead.value == ms) return;
       _playhead.value = ms;
     });
@@ -662,6 +667,53 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   }
 
   /// 方案变了就重推轨道。与画面/声音无关的改动会被轨道指纹挡掉。
+  /// 上一次为「这一段放不了」停在哪个单元上——同一段只提醒一次，
+  /// 否则每上报一次位置就弹一条
+  int? _stoppedAtUnit;
+
+  /// 播到还没挑素材的那一段就**停下来点名**。
+  ///
+  /// 用户原话：「你不是应该提醒吗？你不要觉得这个东西就一定要解决，你提醒他
+  /// 就好了呀。你必须得选个视频，他这个部分才能播放。」
+  ///
+  /// 不许悄悄滑过去：那一段在成片里是空的，画面停着不动，人只会以为播放器卡了。
+  void _stopAtUnplayable(int ms, PlaybackController playback) {
+    final spans = _tracks?.plan.unplayable ?? const [];
+    if (spans.isEmpty) {
+      _stoppedAtUnit = null;
+      return;
+    }
+    final hit = spans.where((s) => s.covers(ms)).firstOrNull;
+    if (hit == null) {
+      _stoppedAtUnit = null;
+      return;
+    }
+    // **只在真的在播时才拦**：进页面那一刻播放头就停在 0，而 0 可能正落在
+    // 这一段里——不加这条的话，人刚打开任务、还没按播放就先挨一句提示。
+    // 常驻横幅已经把话说在前面了，这里只管「他按了播放之后」
+    if (!playback.isPlaying) return;
+    if (_stoppedAtUnit == hit.unitIndex) {
+      // 已经为这一段停过一次，人又按了播放：**跳过它继续往下看**。
+      // 再停一次的表现就是「点了没反应」，而停在原地不动地播完这 10 秒空白
+      // 更糟——画面冻住，人只会以为软件卡死了
+      playback.seekMs(hit.endMs);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('跳过 U${hit.unitIndex + 1}（还没选素材），继续往下播'),
+        duration: const Duration(seconds: 3),
+      ));
+      return;
+    }
+    _stoppedAtUnit = hit.unitIndex;
+    playback.pause();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('U${hit.unitIndex + 1} 还没选素材，这一段放不了。'
+          '去「替换素材」给它挑一条，或者把它删掉'),
+      duration: const Duration(seconds: 5),
+    ));
+  }
+
   void _syncPreviewAudio() {
     final editor = _editor;
     if (editor == null) return;
