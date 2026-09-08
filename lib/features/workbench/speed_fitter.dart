@@ -12,7 +12,9 @@ import '../../core/log/app_log.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/subtitle/slot_subtitles.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
+import '../../core/subtitle/subtitle_track.dart';
 import '../../core/subtitle/subtitle_rasterizer.dart';
 import '../../core/subtitle/subtitle_style.dart';
 
@@ -42,6 +44,10 @@ class SpeedFitter extends ChangeNotifier {
   /// （老任务/空白任务），切片照渲、不带字幕
   final List<AsrSentence> sentences;
 
+  /// **手改过的**字幕，活取。用户在属性面板改完立刻要在预览里看到，
+  /// 拷一份进来的话这个 fitter 是页面初始化时建的，永远停在打开那一刻。
+  final SubtitleTrack Function()? subtitleTrackOf;
+
   final SubtitleStyle subtitleStyle;
 
   /// 把字幕行渲成透明 PNG 的渲染器（系统渲字，见 SubtitleRasterizer）。
@@ -66,6 +72,7 @@ class SpeedFitter extends ChangeNotifier {
     required this.probeDurationMs,
     this.targetSpec,
     this.sentences = const [],
+    this.subtitleTrackOf,
     this.subtitleStyle = SubtitleStyle.standard,
     SubtitleRasterizer? rasterizer,
   }) : rasterizer = rasterizer ?? SubtitleRasterizer();
@@ -101,8 +108,14 @@ class SpeedFitter extends ChangeNotifier {
     required List<UnitReplacement> replacements,
     required String? Function(int candidateId) materialPathOf,
   }) async {
-    final wanted =
-        <String, ({int candidateId, int slotStartMs, int slotEndMs})>{};
+    final wanted = <String,
+        ({
+      int candidateId,
+      int unitIndex,
+      int shotIndex,
+      int slotStartMs,
+      int slotEndMs
+    })>{};
     for (var u = 0; u < units.length && u < replacements.length; u++) {
       final replacement = replacements[u];
       if (replacement.mode != ReplacementMode.perShot) continue;
@@ -110,8 +123,10 @@ class SpeedFitter extends ChangeNotifier {
       for (var s = 0; s < shots.length; s++) {
         final pick = replacement.shotPreviewId(s);
         if (pick == null) continue;
-        wanted[TrackPlanBuilder.shotKey(u, s)] = (
+          wanted[TrackPlanBuilder.shotKey(u, s)] = (
           candidateId: pick,
+          unitIndex: u,
+          shotIndex: s,
           slotStartMs: shots[s].startMs,
           slotEndMs: shots[s].endMs,
         );
@@ -135,6 +150,8 @@ class SpeedFitter extends ChangeNotifier {
       unawaited(_fit(
         key: entry.key,
         candidatePath: path,
+        unitIndex: entry.value.unitIndex,
+        shotIndex: entry.value.shotIndex,
         slotStartMs: entry.value.slotStartMs,
         slotEndMs: entry.value.slotEndMs,
       ));
@@ -144,11 +161,22 @@ class SpeedFitter extends ChangeNotifier {
   Future<void> _fit({
     required String key,
     required String candidatePath,
+    required int unitIndex,
+    required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
   }) async {
     // 已经就绪且入参没变：什么都不做。**这一条是死循环的闸**，见 [_fittedFrom]
-    final from = '$candidatePath|$slotStartMs-$slotEndMs';
+    //
+    // **字幕指纹必须进这道判定**：只比候选路径和坑位长度的话，用户改完字幕
+    // 这里会认定「入参没变」直接返回，预览永远停在旧那一版——2026-09-08 真机
+    // 的「调整字幕根本不生效」就是这么来的
+    final from = _fingerprintOf(
+        candidatePath: candidatePath,
+        unitIndex: unitIndex,
+        shotIndex: shotIndex,
+        slotStartMs: slotStartMs,
+        slotEndMs: slotEndMs);
     final ready = _fitted[key];
     if (_fittedFrom[key] == from &&
         ready != null &&
@@ -166,6 +194,8 @@ class SpeedFitter extends ChangeNotifier {
       await _fitLocked(
           key: key,
           candidatePath: candidatePath,
+          unitIndex: unitIndex,
+          shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs);
     } finally {
@@ -174,25 +204,57 @@ class SpeedFitter extends ChangeNotifier {
     }
   }
 
+  /// 「这一段是用什么渲出来的」——候选、坑位、**以及要烧的那几行字**
+  String _fingerprintOf({
+    required String candidatePath,
+    required int unitIndex,
+    required int shotIndex,
+    required int slotStartMs,
+    required int slotEndMs,
+  }) =>
+      '$candidatePath|$slotStartMs-$slotEndMs|'
+      '${subtitleFingerprint(_linesFor(unitIndex: unitIndex, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}';
+
+  /// 这一镜要烧的字。手改过就用手改的——和导出、属性面板同一个出口
+  List<SubtitleLine> _linesFor({
+    required int unitIndex,
+    required int shotIndex,
+    required int slotStartMs,
+    required int slotEndMs,
+  }) =>
+      subtitleLinesForSlot(
+        track: subtitleTrackOf?.call() ?? const SubtitleTrack.empty(),
+        sentences: sentences,
+        unitIndex: unitIndex,
+        shotIndex: shotIndex,
+        slotStartMs: slotStartMs,
+        slotEndMs: slotEndMs,
+      );
+
   Future<void> _fitLocked({
     required String key,
     required String candidatePath,
+    required int unitIndex,
+    required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
   }) async {
     final slotMs = slotEndMs - slotStartMs;
     final candidateMs = await probeDurationMs(candidatePath);
     final target = await _resolveTarget();
-    // 这一段坑位里要显示的台词。**内容进指纹**：改了切分或重新转写之后，
-    // 旧切片上烧的字幕就是错的，不能再命中
-    final lines = subtitleLinesInSlot(
-        sentences: sentences, slotStartMs: slotStartMs, slotEndMs: slotEndMs);
+    // 这一段坑位里要显示的台词。**内容进指纹**：改了切分、重新转写、或者人
+    // 手改过这一镜的字幕之后，旧切片上烧的字就是错的，不能再命中
+    final lines = _linesFor(
+        unitIndex: unitIndex,
+        shotIndex: shotIndex,
+        slotStartMs: slotStartMs,
+        slotEndMs: slotEndMs);
     final width = target?.width ?? ExportCommands.width;
     final height = target?.height ?? ExportCommands.height;
-    final subKey = lines.isEmpty
+    final subFingerprint = subtitleFingerprint(lines);
+    final subKey = subFingerprint.isEmpty
         ? ''
-        : '|sub${[for (final l in lines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
-            '|${subtitleStyle.fingerprint}';
+        : '|sub$subFingerprint|${subtitleStyle.fingerprint}';
     // **和导出、剪映走同一个函数**：那两条路都改成「从素材里截一段」了，
     // 预览要是还整条压缩，人在软件里看到的是快进、导出来却不是——
     // 比两边都快进更糟，因为人会照着预览下判断
@@ -208,7 +270,12 @@ class SpeedFitter extends ChangeNotifier {
         _fitted[key] = expected;
         _notify();
       }
-      _fittedFrom[key] = '$candidatePath|$slotStartMs-$slotEndMs';
+      _fittedFrom[key] = _fingerprintOf(
+          candidatePath: candidatePath,
+          unitIndex: unitIndex,
+          shotIndex: shotIndex,
+          slotStartMs: slotStartMs,
+          slotEndMs: slotEndMs);
       return;
     }
 
@@ -241,7 +308,12 @@ class SpeedFitter extends ChangeNotifier {
         what: '把替换镜头变速对齐坑位',
       );
       _fitted[key] = out;
-      _fittedFrom[key] = '$candidatePath|$slotStartMs-$slotEndMs';
+      _fittedFrom[key] = _fingerprintOf(
+          candidatePath: candidatePath,
+          unitIndex: unitIndex,
+          shotIndex: shotIndex,
+          slotStartMs: slotStartMs,
+          slotEndMs: slotEndMs);
     } catch (e) {
       // 变速失败只影响这一段：它退回播原片，其余照旧
       AppLog.warn('镜头替换变速失败（$key）：$e');

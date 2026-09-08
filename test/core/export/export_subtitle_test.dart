@@ -10,6 +10,7 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'package:ishkafel/core/subtitle/subtitle_rasterizer.dart';
 import 'package:ishkafel/core/subtitle/subtitle_style.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'package:path/path.dart' as p;
 
 /// 假渲染器：不起 osascript，记录渲了什么并写个假 PNG
@@ -65,7 +66,9 @@ void main() {
       ];
 
   Future<_FakeRasterizer> export(
-      {required List<AsrSentence> sentences, ExportSpec? spec}) async {
+      {required List<AsrSentence> sentences,
+      ExportSpec? spec,
+      SubtitleTrack subtitleTrack = const SubtitleTrack.empty()}) async {
     calls.clear();
     final rasterizer = _FakeRasterizer();
     final work = Directory.systemTemp.createTempSync('ishkafel_sub_work_');
@@ -93,6 +96,7 @@ void main() {
       outputDir: out,
       spec: spec,
       subtitleSentences: sentences,
+      subtitleTrack: subtitleTrack,
     );
     expect(results.single.ok, isTrue, reason: results.single.failure ?? '');
     return rasterizer;
@@ -143,5 +147,53 @@ void main() {
     expect(rasterizer.rendered, isEmpty);
     final fit = calls.where((a) => joined(a).contains('m9.mp4')).single;
     expect(joined(fit), isNot(contains('overlay')));
+  });
+
+  group('手改过的字幕：烧进片子的必须是人改的那份', () {
+    // 2026-09-08 真机，用户原话：「我改了字幕以后，烧录的字幕没有变化。」
+    // 属性面板读了手改轨，导出这条路却各算各的，两边谁也不知道谁——
+    // 而这类错不进任何日志，只有把片子导出来看一眼才发现。
+    const sentences = [
+      AsrSentence(startMs: 0, endMs: 2000, text: '第一句'),
+      AsrSentence(startMs: 2000, endMs: 5000, text: '第二句'),
+    ];
+
+    test('渲进去的是手改的文字，不是 ASR 那句', () async {
+      final rasterizer = await export(
+        sentences: sentences,
+        subtitleTrack: const SubtitleTrack.empty().withLines(
+            // 被替换的是 U1 的 S2
+            const SubtitleSlot(unitIndex: 0, shotIndex: 1),
+            const [SubtitleLine(startMs: 0, endMs: 3000, text: '我改过的字')]),
+      );
+
+      expect(rasterizer.rendered, ['我改过的字'],
+          reason: '烧的还是「第二句」的话，人改完导出一看没变化，'
+              '只会以为「改了没生效」');
+    });
+
+    test('手改成空：这一镜就是不要字幕，不许把 ASR 那句贴回去', () async {
+      final rasterizer = await export(
+        sentences: sentences,
+        subtitleTrack: const SubtitleTrack.empty()
+            .withLines(const SubtitleSlot(unitIndex: 0, shotIndex: 1), const []),
+      );
+
+      expect(rasterizer.rendered, isEmpty);
+      expect(calls.where((a) => a.join(' ').contains('m9.mp4')).single.join(' '),
+          isNot(contains('overlay')),
+          reason: '人把这一镜的字删光了，成片上就不该有字');
+    });
+
+    test('改的是别的镜头，这一镜照旧按 ASR 算', () async {
+      final rasterizer = await export(
+        sentences: sentences,
+        subtitleTrack: const SubtitleTrack.empty().withLines(
+            const SubtitleSlot(unitIndex: 9, shotIndex: 9),
+            const [SubtitleLine(startMs: 0, endMs: 1, text: '别人的')]),
+      );
+
+      expect(rasterizer.rendered, ['第二句']);
+    });
   });
 }

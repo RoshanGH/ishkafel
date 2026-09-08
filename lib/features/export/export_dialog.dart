@@ -26,6 +26,7 @@ import '../../core/audio/material_audio.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
 import '../../core/subtitle/subtitle_style.dart';
+import '../../core/subtitle/subtitle_track.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/replacement/replacement_plan.dart';
 
@@ -82,6 +83,10 @@ Future<void> showExportDialog(
 
   /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
   MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
+
+  /// **手改过的**字幕。不传下去的话，人在属性面板改完，导出烧的还是按 ASR
+  /// 现算的那一份——而这件事只有把片子导出来看一眼才发现（2026-09-08 真机）
+  SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
 }) =>
     showDialog<void>(
       context: context,
@@ -93,6 +98,7 @@ Future<void> showExportDialog(
         subtitleSentences: subtitleSentences,
         subtitleStyle: subtitleStyle,
         materialAudio: materialAudio,
+        subtitleTrack: subtitleTrack,
         units: units,
         replacements: replacements,
         bgm: bgm,
@@ -150,6 +156,9 @@ class _ExportDialog extends ConsumerStatefulWidget {
 
   /// 「保留素材原声」的全片打底设置——不带进来的话，界面上改了导出还是老样子
   final MaterialAudioSetting materialAudio;
+
+  /// **手改过的**字幕（见 [SubtitleTrack]）
+  final SubtitleTrack subtitleTrack;
   final SubtitleStyle subtitleStyle;
   final Directory outputDir;
   final Future<String?> Function() pickDirectory;
@@ -179,6 +188,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.vocalsPath,
     this.subtitleSentences = const [],
     this.materialAudio = MaterialAudioSetting.off,
+    this.subtitleTrack = const SubtitleTrack.empty(),
     this.subtitleStyle = SubtitleStyle.standard,
     required this.outputDir,
     required this.pickDirectory,
@@ -261,6 +271,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         vocalsPath: widget.vocalsPath,
         subtitleSentences: widget.subtitleSentences,
         materialAudio: widget.materialAudio,
+        subtitleTrack: widget.subtitleTrack,
         onProgress: (d, t, w) {
           if (mounted) setState(() => _progress = (d, t, w));
         },
@@ -278,6 +289,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               vocalsPath: widget.vocalsPath,
               subtitleSentences: widget.subtitleSentences,
               materialAudio: widget.materialAudio,
+              subtitleTrack: widget.subtitleTrack,
               onProgress: (d, t, w) {
                 if (mounted) setState(() => _progress = (d, t, w));
               },

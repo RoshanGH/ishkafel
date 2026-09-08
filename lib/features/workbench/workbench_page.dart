@@ -16,6 +16,7 @@ import '../director/tag_picker.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../../core/analysis/handpicked_tags.dart';
 import '../../core/subtitle/subtitle_track.dart';
+import '../../core/subtitle/slot_subtitles.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/editing/edit_locks.dart';
 import '../../core/editing/blank_unit_ops.dart';
@@ -641,6 +642,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       targetSpec: () async => ProxySpec.at(_frameRateArg),
       // 镜头替换保留台词字幕：用任务里的句级转写在切片上重渲
       sentences: widget.task.asrSentences ?? const [],
+      // 人手改过的那几镜以他改的为准。**活取**：这个 fitter 是进页面时建的，
+      // 拷一份进去的话预览永远停在打开那一刻
+      subtitleTrackOf: () => _task.subtitleTrack,
     );
   }
 
@@ -992,15 +996,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 直接给空列表的话，人一打开看到的是「没有字幕」，而导出时其实会烧上一份，
   /// 他改的第一步会变成「凭空敲一遍」。
   List<SubtitleLine> _subtitleLinesOf(int unitIndex, int shotIndex) {
-    final slot = SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex);
-    final edited = _task.subtitleTrack.linesOf(slot);
-    if (edited != null) return edited;
     final units = _editor?.units ?? const [];
     if (unitIndex >= units.length) return const [];
     final shots = units[unitIndex].shots;
     if (shotIndex >= shots.length) return const [];
-    return subtitleLinesInSlot(
+    return subtitleLinesForSlot(
+      track: _task.subtitleTrack,
       sentences: _task.asrSentences ?? const [],
+      unitIndex: unitIndex,
+      shotIndex: shotIndex,
       slotStartMs: shots[shotIndex].startMs,
       slotEndMs: shots[shotIndex].endMs,
     );
@@ -1023,6 +1027,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _task = _task.copyWith(
         subtitleTrack: _task.subtitleTrack.withLines(
             SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex), lines)));
+    // 预览里那一段是烧好字的切片，不重推就永远停在旧那一版
+    _syncPreviewAudio();
     unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
   }
 
@@ -1031,6 +1037,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _task = _task.copyWith(
         subtitleTrack: _task.subtitleTrack.cleared(
             SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex))));
+    _syncPreviewAudio();
     unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
   }
 
@@ -2039,6 +2046,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       subtitleSentences: _task.asrSentences ?? const [],
       subtitleStyle: _task.subtitle,
       materialAudio: _task.materialAudio,
+      // 人手改过的那几镜的字幕，以他改的为准
+      subtitleTrack: _task.subtitleTrack,
       // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片。
       // 但临时目录不算数：CLI 测试之类导进 /tmp 的一次性位置被记成默认，
       // 下次成片就会落进重启即清的地方（真机踩过）

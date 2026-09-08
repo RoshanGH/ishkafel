@@ -18,7 +18,7 @@ import 'inspector_widgets.dart';
 ///
 /// **字幕是字幕，台词是台词**：改这里不动单元的台词，打标、检索、换音色
 /// 照旧用台词。
-class SubtitleEditorCard extends StatelessWidget {
+class SubtitleEditorCard extends StatefulWidget {
   /// 这一镜换过素材没有
   final bool replaced;
 
@@ -43,8 +43,68 @@ class SubtitleEditorCard extends StatelessWidget {
   });
 
   @override
+  State<SubtitleEditorCard> createState() => _SubtitleEditorCardState();
+}
+
+class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
+  /// 每一行一个**长期持有**的 controller。
+  ///
+  /// 曾经在 build 里现造（`TextEditingController(text: ...)`），中文就此打不
+  /// 进去：输入法要先把拼音摆在候选区（composing）、选好字才上屏，而每敲一个
+  /// 字母都会 onChanged → 父层重建 → 新 controller，候选区当场被清掉。粘贴是
+  /// 一次性整段塞进来、不经过候选区，所以只有粘贴是好的——用户就是这么描述的。
+  final List<TextEditingController> _controllers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(SubtitleEditorCard old) {
+    super.didUpdateWidget(old);
+    _sync();
+  }
+
+  /// 让 controller 的条数与内容跟上外面那份数据。
+  ///
+  /// **文字相同就一个字都不碰**：碰了就会把光标推到末尾、把候选区清掉。
+  /// 人正在敲的那一行，走的正是「相同」这条路——他敲的字已经通过 onChanged
+  /// 传出去又传回来了。
+  void _sync() {
+    final lines = widget.lines;
+    while (_controllers.length < lines.length) {
+      _controllers.add(TextEditingController());
+    }
+    while (_controllers.length > lines.length) {
+      _controllers.removeLast().dispose();
+    }
+    for (var i = 0; i < lines.length; i++) {
+      if (_controllers[i].text == lines[i].text) continue;
+      _controllers[i].value = TextEditingValue(
+        text: lines[i].text,
+        selection: TextSelection.collapsed(offset: lines[i].text.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  List<SubtitleLine> get lines => widget.lines;
+  bool get edited => widget.edited;
+  ValueChanged<List<SubtitleLine>> get onChanged => widget.onChanged;
+  VoidCallback get onResetToAuto => widget.onResetToAuto;
+
+  @override
   Widget build(BuildContext context) {
-    if (!replaced) return const SizedBox.shrink();
+    if (!widget.replaced) return const SizedBox.shrink();
     return inspectorCard([
       Row(children: [
         inspectorLabel('这一镜的字幕'),
@@ -104,11 +164,8 @@ class SubtitleEditorCard extends StatelessWidget {
           Expanded(
             child: TextField(
               key: ValueKey('subtitle-text-$i'),
-              // 用 controller 而不是 initialValue：外面改了（比如点了「改回
-              // 自动」）这里要跟着变，只给初值的话框里还留着旧文字
-              controller: TextEditingController(text: lines[i].text)
-                ..selection =
-                    TextSelection.collapsed(offset: lines[i].text.length),
+              // 长期持有的那一个，见 [_sync]。绝不在 build 里现造
+              controller: _controllers[i],
               style: const TextStyle(fontSize: AppFontSize.caption),
               decoration: const InputDecoration(
                 isDense: true,

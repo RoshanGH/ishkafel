@@ -13,6 +13,7 @@ import '../replacement/replacement_plan.dart';
 import '../audio/audio_track_builder.dart';
 import 'composed_timeline.dart';
 import 'shot_audio_plan.dart';
+import '../subtitle/slot_subtitles.dart';
 import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_track.dart';
 import '../subtitle/subtitle_rasterizer.dart';
@@ -174,6 +175,9 @@ class ExportRunner {
     /// 「保留素材原声」的全片打底设置。单个视觉镜头可以覆盖它
     /// （见 [Shot.keepMaterialAudio]）。默认关：存量任务导出来的声音不变
     MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
+
+    /// **手改过的**字幕。没改过的坑位照 ASR 现算（见 [SubtitleTrack]）
+    SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
     ExportProgress? onProgress,
   }) async {
     final combos = ExportPlanner.enumerate(
@@ -194,6 +198,7 @@ class ExportRunner {
       spec: spec,
       subtitleSentences: subtitleSentences,
       materialAudio: materialAudio,
+      subtitleTrack: subtitleTrack,
       onProgress: onProgress,
     );
   }
@@ -525,17 +530,19 @@ class ExportRunner {
     // 按原片时间戳算的字幕贴上去必然错位——这条没变
     final subtitleLines = segment.shotIndex == null
         ? const <SubtitleLine>[]
-        : subtitleTrack.linesOf(SubtitleSlot(
-                unitIndex: segment.unitIndex, shotIndex: segment.shotIndex!)) ??
-            subtitleLinesInSlot(
-              sentences: subtitleSentences,
-              slotStartMs: segment.startMs,
-              slotEndMs: segment.endMs,
-            );
-    final subKey = subtitleLines.isEmpty
+        : subtitleLinesForSlot(
+            track: subtitleTrack,
+            sentences: subtitleSentences,
+            unitIndex: segment.unitIndex,
+            shotIndex: segment.shotIndex!,
+            slotStartMs: segment.startMs,
+            slotEndMs: segment.endMs,
+          );
+    final subFingerprint = subtitleFingerprint(subtitleLines);
+    final subKey = subFingerprint.isEmpty
         ? ''
-        : '_sub${[for (final l in subtitleLines) '${l.startMs}-${l.endMs}:${l.text}'].join('|').hashCode}'
-              '_${subtitleStyle.fingerprint.hashCode}';
+        : '_sub$subFingerprint'
+            '_${subtitleStyle.fingerprint.hashCode}';
     final key =
         '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
         // 取段起点进指纹：改了截哪一段却复用上一份切片，

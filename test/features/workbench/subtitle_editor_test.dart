@@ -105,4 +105,132 @@ void main() {
 
     expect(clearedToAuto, isTrue);
   });
+
+  /// 2026-09-08 真机，用户原话：「我还是可以粘贴，就改字幕我可以粘贴进去汉字，
+  /// 但是我打汉字是打不进去的。」
+  ///
+  /// 中文输入法要先把拼音摆在**候选区**（composing），选好字才上屏。每敲一个
+  /// 字母都会走一次 onChanged，父层跟着重建；编辑框如果每次重建都换一个新的
+  /// controller，候选区当场被清掉，拼音永远拼不完——而粘贴是一次性整段塞进来，
+  /// 不经过候选区，所以粘贴是好的。这个差别正是这条 bug 的指纹。
+  group('中文输入法：拼音还在候选区时，父层重建不能把它冲掉', () {
+    /// 和真实属性面板一样：onChanged 之后父层 setState 重建
+    Future<void> pumpLive(WidgetTester tester) async {
+      var lines = const [SubtitleLine(startMs: 0, endMs: 800, text: '')];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => SubtitleEditorCard(
+              replaced: true,
+              lines: lines,
+              edited: true,
+              onChanged: (v) => setState(() => lines = v),
+              onResetToAuto: () {},
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('敲到一半的拼音还在，候选区没被清掉', (tester) async {
+      await pumpLive(tester);
+      await tester.tap(find.byType(TextField).first);
+      await tester.pumpAndSettle();
+
+      // 输入法：'ni' 还在候选区，一个汉字都还没上屏
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'ni',
+        selection: TextSelection.collapsed(offset: 2),
+        composing: TextRange(start: 0, end: 2),
+      ));
+      await tester.pumpAndSettle();
+
+      final state =
+          tester.state<EditableTextState>(find.byType(EditableText).first);
+      expect(state.textEditingValue.text, 'ni');
+      expect(state.textEditingValue.composing, const TextRange(start: 0, end: 2),
+          reason: '每次重建都新建 controller 的话候选区在这里就没了，'
+              '人打第二个字母时前一个已经被吞掉——表现就是「汉字打不进去，'
+              '只能粘贴」');
+    });
+
+    testWidgets('接着敲第二个字母，前面的不会被吞掉', (tester) async {
+      await pumpLive(tester);
+      await tester.tap(find.byType(TextField).first);
+      await tester.pumpAndSettle();
+
+      for (final v in const ['n', 'ni', 'nih', 'niha', 'nihao']) {
+        tester.testTextInput.updateEditingValue(TextEditingValue(
+          text: v,
+          selection: TextSelection.collapsed(offset: v.length),
+          composing: TextRange(start: 0, end: v.length),
+        ));
+        await tester.pumpAndSettle();
+      }
+
+      final state =
+          tester.state<EditableTextState>(find.byType(EditableText).first);
+      expect(state.textEditingValue.text, 'nihao');
+      expect(state.textEditingValue.composing.isValid, isTrue);
+    });
+
+    testWidgets('外面把内容换掉（改回自动）时，框里要跟着变', (tester) async {
+      // 这是当初每帧新建 controller 想解决的问题，改法不能把它弄丢
+      var lines = const [SubtitleLine(startMs: 0, endMs: 800, text: '旧的')];
+      late StateSetter setOuter;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(builder: (context, setState) {
+            setOuter = setState;
+            return SubtitleEditorCard(
+              replaced: true,
+              lines: lines,
+              edited: true,
+              onChanged: (v) => setState(() => lines = v),
+              onResetToAuto: () {},
+            );
+          }),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      setOuter(() =>
+          lines = const [SubtitleLine(startMs: 0, endMs: 800, text: '自动算的')]);
+      await tester.pumpAndSettle();
+
+      expect(find.text('自动算的'), findsOneWidget);
+      expect(find.text('旧的'), findsNothing);
+    });
+
+    testWidgets('删掉一段之后，剩下那段的文字不会串位', (tester) async {
+      // controller 按行下标复用，删掉第 0 行时第 1 行会顶上来
+      var lines = const [
+        SubtitleLine(startMs: 0, endMs: 800, text: '第一段'),
+        SubtitleLine(startMs: 800, endMs: 1600, text: '第二段'),
+      ];
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: StatefulBuilder(
+            builder: (context, setState) => SubtitleEditorCard(
+              replaced: true,
+              lines: lines,
+              edited: true,
+              onChanged: (v) => setState(() => lines = v),
+              onResetToAuto: () {},
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('subtitle-remove-0')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('第二段'), findsOneWidget);
+      expect(find.text('第一段'), findsNothing,
+          reason: 'controller 没跟着挪的话，删完第一行框里还留着「第一段」，'
+              '而数据里已经是「第二段」——人再敲一下就把内容改错了');
+    });
+  });
 }

@@ -229,6 +229,8 @@ Future<int> runExportCommand({
     vocalsPath: task.vocalsPath,
     // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
     subtitleSentences: task.asrSentences ?? const [],
+    // 手改过的字幕以人改的为准——Agent 走的是同一条导出路
+    subtitleTrack: task.subtitleTrack,
     onProgress: (done, total, what) {
       sink.writeln('[$done/$total] $what');
       // 心跳而不是握手：导出不能为了等界面回执停下来
