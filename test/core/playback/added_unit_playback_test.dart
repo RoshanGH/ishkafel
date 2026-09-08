@@ -156,4 +156,58 @@ void main() {
       expect(plan.unplayable, isEmpty);
     });
   });
+
+  group('垫上黑场之后，EDL 里就不再有洞', () {
+    // EDL 没有「空档」这个概念——留洞会被压掉，从那儿起后面所有内容都提前
+    // 一截：时间线画到 01:47、播放器只走到 01:37，双击最后一格跳过去落在
+    // 片尾（2026-09-08 真机：「U6 不能正常播放」）。
+    test('垫片进了画面轨和声音轨，位置与时长都对得上', () {
+      final plan = TrackPlanBuilder.build(
+        units: units(),
+        sourcePath: '/v/src.mp4',
+        replacements: const [],
+        materials: const {},
+        gapClips: const {1: '/tmp/gap.mp4'},
+      );
+
+      final gap = plan.video.where((s) => s.source == '/tmp/gap.mp4').single;
+      expect(gap.atMs, 20000);
+      expect(gap.durationMs, 10000);
+      expect(gap.volume, 0, reason: '画面轨不出声，声音一律走口播轨');
+
+      expect(plan.voice.where((s) => s.source == '/tmp/gap.mp4').single.atMs,
+          20000,
+          reason: '声音轨留洞的表现是「最后几个字一直重复」，同样得垫');
+    });
+
+    test('画面轨首尾相接，没有洞', () {
+      final plan = TrackPlanBuilder.build(
+        units: units(),
+        sourcePath: '/v/src.mp4',
+        replacements: const [],
+        materials: const {},
+        gapClips: const {1: '/tmp/gap.mp4'},
+      );
+
+      var at = plan.video.first.atMs;
+      for (final s in plan.video) {
+        expect(s.atMs, at, reason: 'EDL 会把洞压掉，后面的内容全部提前');
+        at += s.durationMs;
+      }
+      expect(at, plan.totalMs);
+    });
+
+    test('垫上了也照样点名——人还是要知道这一段是空的', () {
+      final plan = TrackPlanBuilder.build(
+        units: units(),
+        sourcePath: '/v/src.mp4',
+        replacements: const [],
+        materials: const {},
+        gapClips: const {1: '/tmp/gap.mp4'},
+      );
+
+      expect(plan.unplayable.single.unitIndex, 1,
+          reason: '垫黑场是为了时间对得上，不是把问题盖过去');
+    });
+  });
 }

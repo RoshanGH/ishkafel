@@ -42,6 +42,14 @@ class TrackPlanBuilder {
     required List<UnitReplacement> replacements,
     required Map<int, LocalMaterial> materials,
     Map<String, String> speedFitted = const {},
+
+    /// 还没挑素材的那几段垫的黑场（单元下标 → 本地文件）。
+    ///
+    /// **必须垫**：预览走 mpv 的 edl://，而 EDL 没有「空档」——留洞会被压掉，
+    /// 从那儿起后面所有内容都提前一截，时间线和播放器就此对不上
+    /// （2026-09-08 真机：时间线画到 01:47，播放器只走到 01:37）。
+    /// 没垫上时照旧留洞：位置会错，但至少还能播，且 Edl 会打警告
+    Map<int, String> gapClips = const {},
     String? vocalsPath,
     Map<int, String> voiceAudio = const {},
     BgmPlan bgm = BgmPlan.empty,
@@ -119,6 +127,19 @@ class TrackPlanBuilder {
         unitRanges[unit.index] = (start, at);
         unplayable.add(UnplayableSpan(
             unitIndex: unit.index, startMs: start, endMs: at));
+        // 垫上黑场，让这一段在 EDL 里真的占着时间。人一播到这儿仍然会
+        // 停下来点名（见 unplayable），不会对着黑屏猜
+        if (gapClips[unit.index] case final gap?) {
+          video.add(TrackSegment(
+              atMs: start,
+              durationMs: unit.durationMs,
+              source: gap,
+              volume: 0,
+              sourceStartMs: unit.startMs,
+              sourceSpanMs: unit.durationMs));
+          voice.add(TrackSegment(
+              atMs: start, durationMs: unit.durationMs, source: gap));
+        }
         continue;
       }
 

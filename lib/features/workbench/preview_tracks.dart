@@ -13,6 +13,8 @@ import '../../core/playback/multitrack_playback.dart';
 import '../../core/playback/track_plan.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/playback/gap_clip.dart';
+import '../../core/ffmpeg/media_spec.dart';
 import '../picking/picked_media_cache.dart';
 import 'speed_fitter.dart';
 
@@ -30,6 +32,13 @@ class PreviewTracks extends ChangeNotifier {
   final PickedMediaCache? bgmMedia;
   final SpeedFitter? speedFitter;
 
+  /// 给「还没挑素材」的那几段垫黑场。为 null（测试环境没有数据目录）时
+  /// 照旧留洞——位置会错，但 Edl 会打警告，不会无声无息
+  final GapClip? gapClip;
+
+  /// 已经垫好的：单元下标 → 黑场文件
+  final Map<int, String> _gaps = {};
+
   /// 把一条素材分离成纯人声。为 null 表示这台机器上分不了——那时配乐会和
   /// 素材原声叠在一起，由界面如实提示
   final Future<String?> Function(String materialPath)? separateMaterial;
@@ -43,6 +52,7 @@ class PreviewTracks extends ChangeNotifier {
     this.materials,
     this.bgmMedia,
     this.speedFitter,
+    this.gapClip,
     this.separateMaterial,
   }) {
     speedFitter?.addListener(_onFitterChanged);
@@ -101,18 +111,68 @@ class PreviewTracks extends ChangeNotifier {
     unawaited(_ensureMaterialVocals(
         task: task, units: units, replacements: replacements));
 
-    final plan = _build(
+    var plan = _build(
       task: task,
       units: units,
       voiceAudio: voiceAudio,
       replacements: replacements,
     );
+    // 还没挑素材的那几段要垫上黑场，否则 EDL 把洞压掉、后面全部提前。
+    // 已经垫好的这一轮就用上；没垫好的后台去渲，渲完再推一次
+    if (await _ensureGaps(plan, units)) {
+      plan = _build(
+        task: task,
+        units: units,
+        voiceAudio: voiceAudio,
+        replacements: replacements,
+      );
+    }
     final key = _keyOf(plan);
     if (key == _lastKey) return;
     _lastKey = key;
     _plan = plan;
     await playback.setPlan(plan);
     _notify();
+  }
+
+  /// 给放不了的那几段补黑场。**同步能拿到的当轮就用**（盘上已有），
+  /// 缺的丢后台渲，渲完重推一次。返回 true 表示这一轮的方案要重算
+  Future<bool> _ensureGaps(TrackPlan plan, List<SemanticUnit> units) async {
+    final filler = gapClip;
+    if (filler == null || plan.unplayable.isEmpty) return false;
+    final spec = await _gapSpec();
+    var changed = false;
+    for (final span in plan.unplayable) {
+      if (_gaps.containsKey(span.unitIndex)) continue;
+      final ms = span.endMs - span.startMs;
+      final ready = filler.existing(durationMs: ms, spec: spec);
+      if (ready != null) {
+        _gaps[span.unitIndex] = ready;
+        changed = true;
+        continue;
+      }
+      unawaited(filler.render(durationMs: ms, spec: spec).then((path) {
+        if (path == null) return;
+        _gaps[span.unitIndex] = path;
+        _lastKey = null; // 强制下一轮重推
+        _notify();
+      }));
+    }
+    return changed;
+  }
+
+  MediaSpec? _gapSpecCache;
+  bool _gapSpecResolved = false;
+
+  Future<MediaSpec?> _gapSpec() async {
+    if (_gapSpecResolved) return _gapSpecCache;
+    _gapSpecResolved = true;
+    try {
+      _gapSpecCache = await speedFitter?.targetSpec?.call();
+    } on Object {
+      _gapSpecCache = null;
+    }
+    return _gapSpecCache;
   }
 
   /// 已经分离好的素材人声（素材路径 → 人声轨）。异步分离在后台跑，
@@ -186,6 +246,7 @@ class PreviewTracks extends ChangeNotifier {
       bgm: task.bgm,
       bgmPaths: bgmPaths,
       materialVocals: materialVocals,
+      gapClips: _gaps,
     );
   }
 

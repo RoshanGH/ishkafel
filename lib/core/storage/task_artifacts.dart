@@ -34,6 +34,7 @@ class TaskArtifacts {
     'picked_thumbs', // 已选素材的首帧图
     'review_thumbs', // 审核页原片段落的首帧图
     'speed_fit', // 预览的变速切片（曾经不在清单里：任务删了目录还躺着）
+    'gap_clip', // 还没挑素材那几段垫的黑场（EDL 不能留洞）
     'materials', // 这个任务用到的素材原始下载（**导出读这里**）
     'bgm', // 这个任务用到的配乐
     'proxy', // 预览代理（派生产物，删了会重转）

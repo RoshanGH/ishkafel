@@ -37,7 +37,7 @@ SegmentationEditorController _editor() => SegmentationEditorController(
     );
 
 late SegmentationEditorController controller;
-late List<(int, int)> segments;
+late List<(int, int?)> segments;
 
 /// 可控时钟：tester.pump(Duration) 推进的是框架假时钟，DateTime.now() 不动
 late DateTime now;
@@ -66,7 +66,9 @@ Future<void> _pump(WidgetTester tester) async {
           playhead: playhead,
           onSeek: (_) {},
           onGeometryChanged: (_) {},
-          onPlaySegment: (start, end) => segments.add((start, end)),
+          // 回调给的是**列表下标**（单元, 镜头），不是毫秒——毫秒要经过
+          // 「原片 → 成片」换算，而 endMs 是开区间会落到相邻那一段身上
+          onPlaySegment: (u, s) => segments.add((u, s)),
           clock: () => now,
         ),
       ),
@@ -129,7 +131,7 @@ void main() {
       await tester.tapAt(Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
-      expect(segments, [(2000, 5000)],
+      expect(segments, [(0, 1)],
           reason: '双击 S2 应当只播 S2 这一段（2.0s–5.0s）');
     });
 
@@ -141,7 +143,7 @@ void main() {
       await tester.tapAt(Offset(_inShot2.dx, _unitsY));
       await tester.pumpAndSettle();
 
-      expect(segments, [(0, 5000)]);
+      expect(segments, [(0, null)]);
     });
 
     testWidgets('双击后选中态仍停在被双击的那一块', (tester) async {
@@ -189,7 +191,7 @@ void main() {
       await tester.tapAt(Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
-      expect(segments, anyOf(isEmpty, [(2000, 5000)]),
+      expect(segments, anyOf(isEmpty, [(0, 1)]),
           reason: '无论系统把它判成两次单击还是一次双击，'
               '都绝不能播成先点的那一块');
     });

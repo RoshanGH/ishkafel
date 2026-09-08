@@ -274,6 +274,43 @@ class TimelineHitTester {
   /// 单元轨命中判定
   /// 边界优先：检查是否靠近单元边界（容差随相邻两块宽度自适应）
   /// 否则检查块体
+  /// 这一格在**成片**时间轴上的左右像素。
+  ///
+  /// **按列表下标问成片轴，绝不拿原片时间换算**：`endMs` 是开区间，
+  /// 「原片毫秒 → 成片毫秒」按「谁的原片区间盖住它」找，它落进的是相邻那一段。
+  /// 手加的单元被拖到最前之后（它在原片上的占位排在末尾），原片里最后那个
+  /// 单元的右边界会被算成手加单元的成片起点 0，区间左右翻转，
+  /// `x >= start && x < end` 永远不成立——那一格点不中，也就双击不出播放
+  /// （2026-09-08 真机：「U6 不能正常播放」）。绘制那边是同一个错误。
+  static (double, double) _unitPx(
+      int i, List<SemanticUnit> units, TimelineGeometry geometry) {
+    final axis = geometry.axis;
+    if (axis == null) {
+      return (
+        geometry.msToPx(units[i].startMs),
+        geometry.msToPx(units[i].endMs)
+      );
+    }
+    final start = axis.startOf(i);
+    return (
+      geometry.composedMsToPx(start),
+      geometry.composedMsToPx(start + axis.durationOf(i))
+    );
+  }
+
+  /// 这一镜在**成片**上的左右像素。理由同 [_unitPx]
+  static (double, double) _shotPx(
+      int u, int s, List<SemanticUnit> units, TimelineGeometry geometry) {
+    final axis = geometry.axis;
+    final a = axis?.composedShotStart(u, s);
+    final b = axis?.composedShotEnd(u, s);
+    if (a == null || b == null) {
+      final shot = units[u].shots[s];
+      return (geometry.msToPx(shot.startMs), geometry.msToPx(shot.endMs));
+    }
+    return (geometry.composedMsToPx(a), geometry.composedMsToPx(b));
+  }
+
   static TimelineHit? _hitTestUnitTrack(
     double x,
     List<SemanticUnit> units,
@@ -285,10 +322,12 @@ class TimelineHitTester {
     // 遍历单元边界，检查是否靠近边界（优先级高）
     for (int i = 0; i < units.length - 1; i++) {
       // 边界应该相邻（units[i].endMs == units[i+1].startMs）
-      final boundaryPx = geometry.msToPx(units[i].endMs);
+      final (leftStart, leftEnd) = _unitPx(i, units, geometry);
+      final (rightStart, rightEnd) = _unitPx(i + 1, units, geometry);
+      final boundaryPx = leftEnd;
       final tolerance = boundaryToleranceFor(
-        _widthPx(units[i].startMs, units[i].endMs, geometry),
-        _widthPx(units[i + 1].startMs, units[i + 1].endMs, geometry),
+        leftEnd - leftStart,
+        rightEnd - rightStart,
       );
 
       if (tolerance > 0 && (x - boundaryPx).abs() <= tolerance) {
@@ -305,9 +344,7 @@ class TimelineHitTester {
     // 返回的也是列表位置。两者靠 SegmentationEditOps._reindex 恒等才没出事，
     // 但任何一条产出 units 的路径忘了 reindex，点击就会选中错误的单元甚至越界。
     for (var i = 0; i < units.length; i++) {
-      final unit = units[i];
-      final startPx = geometry.msToPx(unit.startMs);
-      final endPx = geometry.msToPx(unit.endMs);
+      final (startPx, endPx) = _unitPx(i, units, geometry);
 
       if (x >= startPx && x < endPx) {
         return UnitBlockHit(unitIndex: i);
@@ -383,14 +420,12 @@ class TimelineHitTester {
             (
               unitIndex: u,
               shotIndex: s,
-              startPx: geometry.msToPx(units[u].shots[s].startMs),
-              endPx: geometry.msToPx(units[u].shots[s].endMs),
+              startPx: _shotPx(u, s, units, geometry).$1,
+              endPx: _shotPx(u, s, units, geometry).$2,
               endsUnit: s == units[u].shots.length - 1,
             ),
       ];
 
-  static double _widthPx(int startMs, int endMs, TimelineGeometry geometry) =>
-      geometry.msToPx(endMs) - geometry.msToPx(startMs);
 }
 
 /// 镜头轨上的一个块体（拉平后的镜头 + 其像素范围）

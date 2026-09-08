@@ -337,6 +337,20 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
   /// 原片时刻 → 播放器该定位到的成片时刻
   int _composed(int sourceMs) => _axis?.toComposedMs(sourceMs) ?? sourceMs;
 
+  /// 双击某一格要播的**成片**区间。整体替换的单元里点某一镜时给整段——
+  /// 那些镜头在成片里已经不存在了，单独播它没有意义
+  (int, int)? _playRange(ComposedTimeline axis, int unitIndex, int? shotIndex) {
+    if (unitIndex < 0 || unitIndex >= axis.units.length) return null;
+    if (shotIndex != null) {
+      final a = axis.composedShotStart(unitIndex, shotIndex);
+      final b = axis.composedShotEnd(unitIndex, shotIndex);
+      if (a != null && b != null && b > a) return (a, b);
+    }
+    final start = axis.startOf(unitIndex);
+    final end = start + axis.durationOf(unitIndex);
+    return end > start ? (start, end) : null;
+  }
+
   /// 缩放倍数一律从 geometry 反推，不维护独立字段——滚轮/触控板/跟随播放头
   /// 都只更新 geometry，滑块若自己记历史值就会与实际缩放脱节，下一次拖动
   /// 以错误基准算 factor，出现「往左拖想缩小、画面反而放大」。
@@ -615,9 +629,15 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   onGeometryChanged: (g) => setState(() => _geometry = g),
                   onScrubStart: _onScrubStart,
                   onScrubEnd: _onScrubEnd,
-                  onPlaySegment: (start, end) =>
-                      unawaited(_segment.play(
-                          _composed(start), _composed(end), editor.fps)),
+                  // **按下标问成片轴，不拿原片毫秒换算**：endMs 是开区间，
+                  // 换算会落到相邻那一段身上——手加的单元拖到最前之后，
+                  // 原片里最后那个单元的终点被算成 0，播放区间翻转成
+                  // 「从 104 秒播到 0 秒」（2026-09-08 真机：U6 不能正常播放）
+                  onPlaySegment: (unitIndex, shotIndex) {
+                    final range = _playRange(axis, unitIndex, shotIndex);
+                    if (range == null) return;
+                    unawaited(_segment.play(range.$1, range.$2, editor.fps));
+                  },
                   clock: widget.clock ?? DateTime.now,
                   bgm: widget.bgm,
                   voices: widget.voices,

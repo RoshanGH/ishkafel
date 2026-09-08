@@ -30,7 +30,11 @@ Map<String, dynamic> taskToJson(RenewTask task) {
           (plans[i].wholeCandidateIds.isEmpty
               ? null
               : plans[i].wholeCandidateIds.first);
-      final ms = pick == null ? null : durationOf[pick];
+      // **一条候选都没选 ≠ 素材时长未知**：那只是「还没挑」，这一段照旧
+      // 用它自己的长度，成片位置算得出来。混为一谈的话，只要有一个单元切到
+      // 整体替换还没挑素材，整条片子的成片位置就全都不报了
+      if (pick == null) continue;
+      final ms = durationOf[pick];
       if (ms == null) {
         unknown.add(i);
       } else {

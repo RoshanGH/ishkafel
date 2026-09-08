@@ -39,6 +39,7 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/playback/gap_clip.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
@@ -617,6 +618,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         materials: _mediaCache,
         bgmMedia: _bgmMediaCache,
         speedFitter: _speedFitter = _buildSpeedFitter(),
+        gapClip: _buildGapClip(),
       )
         ..addListener(_onTracksChanged)
         ..onNeedsRebuild = _syncPreviewAudio;
@@ -626,6 +628,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _syncPreviewAudio();
     _watchLock();
     _watchAgent();
+  }
+
+  /// 给「还没挑素材」的那几段垫黑场的渲染器。没有数据目录（测试环境）
+  /// 就不垫——那时照旧留洞，Edl 会打警告
+  GapClip? _buildGapClip() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return GapClip(RenderedCache(
+      dir: Directory(p.join(dataDir.path, 'gap_clip', widget.task.id)),
+      run: const ResolvingProcessRunner().call,
+    ));
   }
 
   /// 变速切片的渲染器。没有数据目录（测试环境）就不做变速——

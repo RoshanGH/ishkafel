@@ -66,7 +66,13 @@ class TimelineView extends StatefulWidget {
 
   /// 双击某一块：从它的起点播到它的终点（含头不含尾，单位毫秒）。
   /// 逐段试看是审片的主要动作，比「从这里一直播下去」有用得多。
-  final void Function(int startMs, int endMs)? onPlaySegment;
+  /// 双击某一格：播它。**给的是列表下标，不是毫秒**——毫秒要经过
+  /// 「原片 → 成片」换算，而 endMs 是开区间，会落到相邻那一段身上。
+  /// 手加的单元拖到最前之后，原片里最后那个单元的终点被算成 0，
+  /// 播放区间翻转成「从 104 秒播到 0 秒」（2026-09-08 真机：「U6 不能正常
+  /// 播放」）。下标交给上层去问成片轴，精确且与顺序无关。
+  /// [shotIndex] 为 null 表示播整个单元
+  final void Function(int unitIndex, int? shotIndex)? onPlaySegment;
 
   /// 配乐方案（画在配乐轨上）
   final BgmPlan bgm;
@@ -336,16 +342,14 @@ class _TimelineViewState extends State<TimelineView> {
         // 没点上；想选单元点上面这一行就是了，那层粗粒度兜底是多余的。
         widget.controller.select(EditorSelection.unit(unitIndex));
         if (isDoubleTap && unitIndex < units.length) {
-          final unit = units[unitIndex];
-          widget.onPlaySegment?.call(unit.startMs, unit.endMs);
+          widget.onPlaySegment?.call(unitIndex, null);
         }
       case ShotBlockHit(:final unitIndex, :final shotIndex):
         widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
         if (isDoubleTap &&
             unitIndex < units.length &&
             shotIndex < units[unitIndex].shots.length) {
-          final shot = units[unitIndex].shots[shotIndex];
-          widget.onPlaySegment?.call(shot.startMs, shot.endMs);
+          widget.onPlaySegment?.call(unitIndex, shotIndex);
         }
       case UnitBoundaryHit():
       case ShotBoundaryHit():
