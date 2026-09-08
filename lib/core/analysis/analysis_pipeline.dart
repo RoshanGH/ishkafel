@@ -10,6 +10,7 @@ import 'source_print.dart';
 import 'prepared_cache.dart';
 import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
+import 'tag_merge.dart';
 import '../models/tag_trace.dart';
 import '../models/semantic_unit.dart';
 import '../storage/task_repository.dart';
@@ -445,7 +446,18 @@ class AnalysisPipeline {
     ].join('、')}；合计 '
         '${(_stageMs.values.fold<int>(0, (a, b) => a + b) / 1000).toStringAsFixed(1)}s');
 
-    final updated = ready.copyWith(units: taggedUnits, updatedAt: clock());
+    // **不能拿 ready 直接写回去**：打标占总时长七成，这七成里人已经被放进
+    // 工作台干活了（上面那句 onUnitsReady 就是干这个的）。他拖过的边界、
+    // 改过的台词此刻在盘上，而 ready 是打标开始那一刻的样子——整份写回去
+    // 等于把他这几分钟的活悄没声儿地抹掉。
+    //
+    // 所以重读一次，只把标签合并到**当前**的单元上（边界变过的不认，
+    // 见 [mergeTagsInto]）。
+    final latest = await repository.findById(ready.id) ?? ready;
+    final updated = latest.copyWith(
+      units: mergeTagsInto(latest.units ?? const [], taggedUnits),
+      updatedAt: clock(),
+    );
     await repository.save(updated);
     return updated;
   }
