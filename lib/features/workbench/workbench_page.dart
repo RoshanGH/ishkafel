@@ -98,6 +98,7 @@ import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
+import 'subtitle_popover.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
 ///
@@ -1086,6 +1087,28 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       _task.subtitleTrack.linesOf(
           SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex)) !=
       null;
+
+  /// 这一镜有几行字幕。时间线上多于一行就标个数——轨上只画得下头一句，
+  /// 不标的话人不知道双击进去还有别的行
+  int _subtitleLineCount(int unitIndex, int shotIndex) =>
+      _subtitleLinesOf(unitIndex, shotIndex).length;
+
+  /// 双击时间线上的字幕块：贴着它弹一个浮层就地改。
+  ///
+  /// 内容复用右侧那张字幕卡——两个入口共用一份实现，否则迟早行为不一样
+  /// （一边离开才提交、另一边每敲一下就提交，人只会觉得「时好时坏」）
+  Future<void> _editSubtitleAtBlock(
+      int unitIndex, int shotIndex, Rect blockOnScreen) async {
+    if (!_isEditable || _lock != null) return;
+    await showSubtitlePopover(
+      context,
+      anchor: blockOnScreen,
+      lines: _subtitleLinesOf(unitIndex, shotIndex),
+      edited: _subtitleEdited(unitIndex, shotIndex),
+      onChanged: (lines) => _setSubtitleLines(unitIndex, shotIndex, lines),
+      onResetToAuto: () => _resetSubtitle(unitIndex, shotIndex),
+    );
+  }
 
   /// 这一镜字幕的头一句，画在时间线的字幕轨上当预览
   String _subtitleTextOf(int unitIndex, int shotIndex) {
@@ -2603,6 +2626,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 subtitleLinesOf: _subtitleLinesOf,
                 subtitleEdited: _subtitleEdited,
                 subtitleTextOf: _subtitleTextOf,
+                subtitleLineCount: _subtitleLineCount,
+                onEditSubtitleBlock: _editSubtitleAtBlock,
                 onSubtitleChanged:
                     _isEditable && _lock == null ? _setSubtitleLines : null,
                 onSubtitleReset:

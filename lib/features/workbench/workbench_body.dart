@@ -73,6 +73,13 @@ class WorkbenchBody extends StatefulWidget {
   /// 字幕轨上画的预览文字
   final String Function(int unitIndex, int shotIndex)? subtitleTextOf;
 
+  /// 这一镜有几行字幕（时间线上标个数）
+  final int Function(int unitIndex, int shotIndex)? subtitleLineCount;
+
+  /// 双击时间线上的字幕块：就地改。给的是块体在屏幕上的位置
+  final void Function(int unitIndex, int shotIndex, Rect blockOnScreen)?
+      onEditSubtitleBlock;
+
   final void Function(int unitIndex, int shotIndex, List<SubtitleLine> lines)?
       onSubtitleChanged;
   final void Function(int unitIndex, int shotIndex)? onSubtitleReset;
@@ -161,6 +168,8 @@ class WorkbenchBody extends StatefulWidget {
     this.subtitleLinesOf,
     this.subtitleEdited,
     this.subtitleTextOf,
+    this.subtitleLineCount,
+    this.onEditSubtitleBlock,
     this.onSubtitleChanged,
     this.onSubtitleReset,
     this.onShotMaterialAudioChanged,
@@ -641,6 +650,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   geometry: _geometry!,
                   subtitleEdited: widget.subtitleEdited,
                   subtitleTextOf: widget.subtitleTextOf,
+                  subtitleLineCount: widget.subtitleLineCount,
+                  onEditSubtitleBlock: widget.onEditSubtitleBlock,
                   media: widget.media,
                   playhead: widget.playhead,
                   mediaStatus: widget.mediaStatus,

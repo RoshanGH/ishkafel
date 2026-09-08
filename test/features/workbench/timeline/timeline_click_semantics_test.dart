@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
@@ -41,9 +42,25 @@ late List<(int, int?)> segments;
 
 /// 可控时钟：tester.pump(Duration) 推进的是框架假时钟，DateTime.now() 不动
 late DateTime now;
-void _advance(Duration d) => now = now.add(d);
+/// 带**硬件时间戳**点一下。
+///
+/// 双击判定用的是事件自带的时间戳，不是墙钟——第一下会引发选中与重建
+/// （真机实测 230ms），拿墙钟量的话第二下已经排到 353ms，双击时灵时不灵。
+/// `tester.tapAt` 不带时间戳（恒为 0），所以这里手动发。
+Duration _ts = const Duration(seconds: 1);
+
+Future<void> _tapAt(WidgetTester tester, Offset at) async {
+  final p = TestPointer(1, PointerDeviceKind.mouse);
+  await tester.sendEventToBinding(p.down(at, timeStamp: _ts));
+  await tester.sendEventToBinding(p.up(timeStamp: _ts));
+  await tester.pumpAndSettle();
+}
+
+/// 把「下一次点击」的硬件时间戳往后推
+void _advanceTs(Duration d) => _ts += d;
 
 Future<void> _pump(WidgetTester tester) async {
+  _ts = const Duration(seconds: 1);
   controller = _editor();
   segments = [];
   now = DateTime.utc(2026, 7, 31);
@@ -95,7 +112,7 @@ void main() {
     testWidgets('单击视觉镜头块立刻选中那个镜头', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pump();
 
       expect(_selected(), (0, 1),
@@ -106,7 +123,7 @@ void main() {
     testWidgets('单击不需要等待，pump 一帧就已生效', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pump(); // 不给双击窗口的 300ms
 
       expect(controller.selection, isNotNull);
@@ -115,7 +132,7 @@ void main() {
     testWidgets('单击台词语义单元块选中那个单元', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _unitsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _unitsY));
       await tester.pump();
 
       expect(_selected(), (0, null));
@@ -126,9 +143,9 @@ void main() {
     testWidgets('双击视觉镜头：从它的起点播到它的终点', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pump(const Duration(milliseconds: 50));
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
       expect(segments, [(0, 1)],
@@ -138,9 +155,9 @@ void main() {
     testWidgets('双击台词语义单元：播整个单元', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _unitsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _unitsY));
       await tester.pump(const Duration(milliseconds: 50));
-      await tester.tapAt(Offset(_inShot2.dx, _unitsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _unitsY));
       await tester.pumpAndSettle();
 
       expect(segments, [(0, null)]);
@@ -149,9 +166,9 @@ void main() {
     testWidgets('双击后选中态仍停在被双击的那一块', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pump(const Duration(milliseconds: 50));
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
       expect(_selected(), (0, 1),
@@ -161,7 +178,7 @@ void main() {
     testWidgets('单击不触发播放', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
       expect(segments, isEmpty,
@@ -171,10 +188,10 @@ void main() {
     testWidgets('两次点击间隔过久算两次单击，不算双击', (tester) async {
       await _pump(tester);
 
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
-      _advance(const Duration(milliseconds: 600));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
+      _advanceTs(const Duration(milliseconds: 600));
       await tester.pump();
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
       expect(segments, isEmpty,
@@ -185,10 +202,10 @@ void main() {
       await _pump(tester);
 
       // x=50 落在 U1 的 S1（0~2000）
-      await tester.tapAt(Offset(50, _shotsY));
-      _advance(const Duration(milliseconds: 50));
+      await _tapAt(tester, Offset(50, _shotsY));
+      _advanceTs(const Duration(milliseconds: 50));
       await tester.pump();
-      await tester.tapAt(Offset(_inShot2.dx, _shotsY));
+      await _tapAt(tester, Offset(_inShot2.dx, _shotsY));
       await tester.pumpAndSettle();
 
       expect(segments, anyOf(isEmpty, [(0, 1)]),

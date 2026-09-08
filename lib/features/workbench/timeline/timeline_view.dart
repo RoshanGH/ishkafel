@@ -75,6 +75,18 @@ class TimelineView extends StatefulWidget {
   /// [shotIndex] 为 null 表示播整个单元
   final void Function(int unitIndex, int? shotIndex)? onPlaySegment;
 
+  /// 这一镜有几行字幕（多于一行时在块上标个数——轨上只画得下头一句）
+  final int Function(int unitIndex, int shotIndex)? subtitleLineCount;
+
+  /// 双击字幕轨上的某一块：就地改这一镜的字幕。
+  ///
+  /// 给的是**块体在屏幕坐标系里的位置**，上层照着它把浮层贴上去。
+  /// 字幕轨只有 22px 高、窄镜头的块可能只有几十像素宽——把块体本身变成
+  /// 输入框做不出能用的东西，所以弹一个定宽的浮层（用户 2026-09-08：
+  /// 「我双击那个字幕轨上的那个字幕的时候，能不能在那个地方改？」）
+  final void Function(int unitIndex, int shotIndex, Rect blockOnScreen)?
+      onEditSubtitleBlock;
+
   /// 配乐方案（画在配乐轨上）
   final BgmPlan bgm;
 
@@ -124,6 +136,7 @@ class TimelineView extends StatefulWidget {
     required this.geometry,
     this.subtitleEdited,
     this.subtitleTextOf,
+    this.subtitleLineCount,
     this.media,
     required this.playhead,
     this.mediaStatus = TimelineMediaStatus.ready,
@@ -132,6 +145,7 @@ class TimelineView extends StatefulWidget {
     this.onScrubStart,
     this.onScrubEnd,
     this.onPlaySegment,
+    this.onEditSubtitleBlock,
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.replacements = const [],
@@ -162,7 +176,11 @@ class _TimelineViewState extends State<TimelineView> {
   /// 本次拖拽是「拖播放头」而不是「拖时间线」
   bool _scrubbing = false;
   double _viewportWidth = 0;
-  DateTime? _lastTapTime;
+  /// 上一次按下的**硬件时间戳**（引擎在事件产生时打的，不受 UI 卡顿影响）
+  Duration? _lastDownTs;
+
+  /// 这一下算不算双击的第二下——按下那一刻就定好，tap-up 只是取用
+  bool _pendingDoubleTap = false;
   Offset? _lastTapPosition;
 
   /// 缩略图解码请求的递增序号：连续两次 media 变更时，慢的那次解码结果到达
@@ -287,8 +305,6 @@ class _TimelineViewState extends State<TimelineView> {
   void _handleTapUp(TapUpDetails details) {
     final position = details.localPosition;
     final isDoubleTap = _isDoubleTap(position);
-    _lastTapTime = widget.clock();
-    _lastTapPosition = position;
 
     final units = widget.controller.units;
     // 替换数量徽标优先命中：它压在块体上，先判它才点得到
@@ -329,7 +345,11 @@ class _TimelineViewState extends State<TimelineView> {
           onShots, widget.controller.units, widget.geometry,
           locks: widget.controller.locks);
       if (shotHit case ShotBlockHit(:final unitIndex, :final shotIndex)) {
+        // 单击照旧只是选中——双击才就地改，不打断已有习惯
         widget.controller.select(EditorSelection.shot(unitIndex, shotIndex));
+        if (isDoubleTap) {
+          _editSubtitleAt(unitIndex, shotIndex);
+        }
       }
       return;
     }
@@ -362,15 +382,38 @@ class _TimelineViewState extends State<TimelineView> {
     }
   }
 
+  /// 把这一镜的字幕块换算成屏幕坐标，交给上层去贴浮层
+  void _editSubtitleAt(int unitIndex, int shotIndex) {
+    final onEdit = widget.onEditSubtitleBlock;
+    if (onEdit == null) return;
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+    final (left, right) =
+        shotPx(unitIndex, shotIndex, widget.controller.units, widget.geometry);
+    final topLeft = box.localToGlobal(Offset(left, TimelineTracks.subsTop));
+    onEdit(
+      unitIndex,
+      shotIndex,
+      Rect.fromLTWH(topLeft.dx, topLeft.dy, (right - left).abs(),
+          TimelineTracks.subsBottom - TimelineTracks.subsTop),
+    );
+  }
+
   /// 与上一次单击的时间间隔在 [kDoubleTapTimeout] 内、位置偏移在
   /// [kDoubleTapSlop] 内即视为双击
-  bool _isDoubleTap(Offset position) {
-    final lastTime = _lastTapTime;
+  bool _isDoubleTap(Offset position) => _pendingDoubleTap;
+
+  /// 按下那一刻就把「这算不算第二下」定下来——用事件自带的时间戳，
+  /// 量的是人手上那两下的真实间隔，不受中间那些活影响（见 build 里的说明）。
+  void _rememberDown(PointerDownEvent event) {
+    final last = _lastDownTs;
     final lastPosition = _lastTapPosition;
-    if (lastTime == null || lastPosition == null) return false;
-    final withinTime = widget.clock().difference(lastTime) <= kDoubleTapTimeout;
-    final withinSlop = (position - lastPosition).distance <= kDoubleTapSlop;
-    return withinTime && withinSlop;
+    _pendingDoubleTap = last != null &&
+        lastPosition != null &&
+        event.timeStamp - last <= kDoubleTapTimeout &&
+        (event.localPosition - lastPosition).distance <= kDoubleTapSlop;
+    _lastDownTs = event.timeStamp;
+    _lastTapPosition = event.localPosition;
   }
 
   /// 命中边界手柄时开启拖拽会话（多次 update 合并为一条撤销记录）；
@@ -567,6 +610,17 @@ class _TimelineViewState extends State<TimelineView> {
       builder: (context, constraints) {
         _viewportWidth = constraints.maxWidth;
         return Listener(
+          // **双击判定用事件自带的时间戳，不用墙钟。**
+          //
+          // 墙钟量的是「我处理到这两下之间隔了多久」，中间夹着选中、重建这些
+          // 活；`PointerEvent.timeStamp` 是引擎在事件产生时打的，量的才是人
+          // 手上那两下的真实间隔。两者平时接近，UI 忙的时候前者会偏大——
+          // 偏大就意味着人明明双击了却被判成两次单击。用后者不花任何代价。
+          //
+          // （2026-09-08 自测时我一度以为双击失灵是这个原因，后来用时间戳量
+          // 出来是自动化工具两次点击本身就隔了 381ms——**功能一直是好的**。
+          // 这个改动留着，因为它本来就是更该用的那个来源。）
+          onPointerDown: _rememberDown,
           onPointerSignal: _handlePointerSignal,
           onPointerPanZoomStart: (_) {
             _panZoomScale = 1.0;
@@ -630,6 +684,7 @@ class _TimelineViewState extends State<TimelineView> {
                     composedDurations: widget.composedDurations,
                     subtitleEdited: widget.subtitleEdited,
                     subtitleTextOf: widget.subtitleTextOf,
+                    subtitleLineCount: widget.subtitleLineCount,
                     textCache: _textCache,
                   ),
                 ),

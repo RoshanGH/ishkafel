@@ -74,6 +74,10 @@ class TimelinePainter extends CustomPainter {
 
   /// 这一镜字幕的头一句，画在轨上当预览
   final String Function(int unitIndex, int shotIndex)? subtitleTextOf;
+
+  /// 这一镜有几行字幕。轨上只画得下头一句，多于一行时在右上角标个数——
+  /// 否则人不知道双击进去还有别的行
+  final int Function(int unitIndex, int shotIndex)? subtitleLineCount;
   final List<double>? waveEnvelope;
   /// 播放头位置——**成片**毫秒（播放器直接给的那个值）
   final int playheadMs;
@@ -119,6 +123,7 @@ class TimelinePainter extends CustomPainter {
     this.thumbImages,
     this.subtitleEdited,
     this.subtitleTextOf,
+    this.subtitleLineCount,
     this.waveEnvelope,
     required this.playheadMs,
     this.replacements = const [],
@@ -572,13 +577,30 @@ class TimelinePainter extends CustomPainter {
             ..color = (edited ? AppColors.accentBlue : AppColors.textTertiary)
                 .withValues(alpha: edited ? 0.5 : 0.22),
         );
+        // 多于一行时右上角标个数：轨上只画得下头一句
+        // **窄块上文字优先**：角标只是「这一镜还有几行」，而文字告诉你是哪
+        // 一句。两个都塞进去的话，30px 宽的块上出来的是「就想.2」——
+        // 角标压在文字上，谁也看不懂（2026-09-08 自测时看到的）。
+        // 放不下就不画角标：双击进去照样看得到全部行
+        final count = subtitleLineCount?.call(u, i) ?? 0;
+        final roomForBoth =
+            box.width >= 24 + ReplacementBadges.width + 2 + 8;
+        final badge = count > 1 && roomForBoth
+            ? ReplacementBadges.unitBadgeRect(box)
+            : null;
+        if (badge != null) _drawBadge(canvas, badge, '$count');
         final label = subtitleTextOf?.call(u, i) ?? '';
-        if (label.isEmpty || box.width < 24) continue;
+        // **给角标让位**：不减掉它的宽度，窄块上文字会被压在角标底下，
+        // 出来是「就想.2」这种谁也看不懂的东西（2026-09-08 自测时看到的）
+        final labelWidth = box.width -
+            8 -
+            (badge == null ? 0 : ReplacementBadges.width + 2);
+        if (label.isEmpty || labelWidth < 16) continue;
         canvas.save();
         canvas.clipRect(box);
         _drawText(canvas, label, Offset(box.left + 4, box.top + 3),
             AppColors.textPrimary,
-            fontSize: AppFontSize.micro, maxWidth: box.width - 8);
+            fontSize: AppFontSize.micro, maxWidth: labelWidth);
         canvas.restore();
       }
     }
