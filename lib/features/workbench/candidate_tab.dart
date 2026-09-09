@@ -155,7 +155,28 @@ class CandidateTabState extends State<CandidateTab> {
   String? _lastSearchKey;
 
   /// 上一次见到的单元数：编辑到增删单元时方案要跟着重建
-  late int _unitCount;
+  /// 「哪几个单元、按什么顺序」——单元的身份连起来。顺序一变它就变，
+  /// 而个数是看不出顺序的
+  late String _unitsKey;
+
+  String _unitFingerprint() =>
+      [for (final u in widget.editor.units) u.uid].join(',');
+
+  /// 把上一份方案按**单元的身份**重新铺到当前顺序上。
+  ///
+  /// 挑给某个单元的素材是挂在那个单元身上的（[SemanticUnit.uid]），
+  /// 不是挂在「第几格」上。单元一挪，铺的位置就跟着挪；新来的、或者
+  /// 认不出身份的那几格就是「还没挑」。
+  List<UnitReplacement> _relaidByUid(PickingController old) {
+    final byUid = <String, UnitReplacement>{
+      for (var i = 0; i < old.units.length && i < old.replacements.length; i++)
+        old.units[i].uid: old.replacements[i],
+    };
+    return [
+      for (final u in widget.editor.units)
+        byUid[u.uid] ?? UnitReplacement.keepOriginal(),
+    ];
+  }
 
   /// 已挑中素材的落地记录（候选 id → 记录）。种子来自任务，之后跟着勾选走
   late Map<int, PickedMaterial> _picked;
@@ -168,7 +189,7 @@ class CandidateTabState extends State<CandidateTab> {
     super.initState();
     _picking = _buildPicking(widget.initialReplacements);
     _picked = {for (final m in widget.pickedMaterials) m.id: m};
-    _unitCount = widget.editor.units.length;
+    _unitsKey = _unitFingerprint();
     _search = CandidateSearchController(
       service: widget.contentService ?? MiaoaContentService(),
       probe: widget.candidateProbe ?? CandidateProbe(),
@@ -269,13 +290,23 @@ class CandidateTabState extends State<CandidateTab> {
   /// 真的变了**时才动手——[_refreshSearchIfNeeded] 里的指纹比对是第二道闸。
   void _onEditorChanged() {
     if (!mounted) return;
-    if (widget.editor.units.length != _unitCount) {
-      // 增删单元会让按下标存的方案整体错位。方案是按 index 存的，重建时
-      // 沿用不下来的那部分只能丢——「改了 U 要不要清掉它挑好的素材」这个
-      // 问题由工作台在编辑后询问用户，这里只保证不越界。
-      _unitCount = widget.editor.units.length;
+    // **看的是「哪几个单元、按什么顺序」，不是个数。**
+    //
+    // 原来只比个数：调换顺序个数不变，于是这个面板一直用着**老位置**那份
+    // 方案——时间线上那一格明明没挑过素材，这里的镜头标签却写着「×1」，
+    // 点进去又什么都没有。用户原话：「这些被调换过位置的台词语义单元，
+    // 它的 S1、S2、S3 显示的是之前位置上替换的数量，但它实际上没有被
+    // 替换」（2026-09-09 真机）。
+    //
+    // 重建时**按单元的身份把手里那份重新铺一遍**，不是原样接着用——
+    // 接着用等于把错位搬过去。也不能指望 `widget.initialReplacements`
+    // 已经是新的：工作台是 setState 刷新的（下一帧），而编辑器的通知是
+    // 同步的，这一刻拿到的很可能还是旧那份。
+    final fingerprint = _unitFingerprint();
+    if (fingerprint != _unitsKey) {
+      _unitsKey = fingerprint;
       final old = _picking;
-      _picking = _buildPicking(old.replacements);
+      _picking = _buildPicking(_relaidByUid(old));
       old.removeListener(_onPickingChanged);
       old.dispose();
     }

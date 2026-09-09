@@ -61,6 +61,7 @@ class _FakeTagService implements MiaoaTagService {
 /// 两个单元，各两个镜头，镜头标签各不相同——检索键能唯一指认是哪个作用域
 List<SemanticUnit> _units() => const [
       SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 2000,
@@ -72,6 +73,7 @@ List<SemanticUnit> _units() => const [
         ],
       ),
       SemanticUnit(
+        uid: 'u1',
         index: 1,
         startMs: 2000,
         endMs: 4000,
@@ -140,6 +142,45 @@ Future<void> _chooseWhole(WidgetTester tester) async {
 
 void main() {
   _projectScope();
+
+  /// 2026-09-09 真机，用户原话：「这些被调换过位置的台词语义单元，它的
+  /// S1、S2、S3 显示的是之前位置上替换的数量，但它实际上没有被替换……
+  /// 我点进去后发现替换的上面它有个数量一，我点进去看以后也没有。」
+  ///
+  /// 这个面板原来只在**单元个数变了**时才重建自己那份方案。调换顺序个数
+  /// 不变，于是它一直用着老位置那份——时间线上那一格明明没挑过素材，
+  /// 这里的镜头标签却写着「×1」，点进去又什么都没有。
+  group('调换单元顺序之后，面板上的数量跟着单元走', () {
+    testWidgets('挑给第一句的素材，挪到后面之后不再算在第一格头上',
+        (tester) async {
+      final (editor, _) = await _pump(tester, initial: [
+        UnitReplacement.perShot({
+          0: [101]
+        }),
+        UnitReplacement.keepOriginal(),
+      ]);
+
+      editor.select(const EditorSelection.unit(0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-mode-per-shot')));
+      await tester.pumpAndSettle();
+      expect(find.text('×1'), findsOneWidget, reason: '挪之前它就在第一句上');
+
+      // 把第一句挪到后面：列表顺序就是成片顺序
+      final moved = [editor.units[1], editor.units[0]];
+      editor.replaceUnitsForBlankTask(
+          [for (var i = 0; i < moved.length; i++) moved[i].copyWith(index: i)],
+          4000);
+      editor.select(const EditorSelection.unit(0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-mode-per-shot')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('×1'), findsNothing,
+          reason: '现在排在第一格的是原来的第二句，它没挑过素材——'
+              '还写着「×1」的话，人点进去会发现什么都没有');
+    });
+  });
 
   group('候选面板跟着工作台的选中走，不自己维护一份', () {
     testWidgets('在时间线上选中另一个单元，检索键跟着换', (tester) async {

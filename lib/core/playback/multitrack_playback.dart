@@ -88,7 +88,23 @@ class MultitrackPlayback implements PlaybackController {
     await video.clearSource();
   }
 
-  Future<void> setPlan(TrackPlan plan) async {
+  /// 上一次 [setPlan] 还没跑完时，后来的排队等它。
+  ///
+  /// 换源要重开文件，中途播放器的位置是 0。两次推方案叠在一起的话，后一次
+  /// 读到的就是那个 0——记下来的「人看到哪儿」成了片头，换完再还原也就还原
+  /// 到片头。真机上调字幕样式时必然叠：拖一下推一次，切片重烧好又推一次。
+  /// 用户看到的是「一拖就跳回开头」，正对着调的那一帧当场没了
+  /// （2026-09-09）。
+  Future<void> _pending = Future<void>.value();
+
+  Future<void> setPlan(TrackPlan plan) {
+    final next = _pending.then((_) => _setPlan(plan));
+    // 前一次失败不该把后面全堵死
+    _pending = next.catchError((_) {});
+    return next;
+  }
+
+  Future<void> _setPlan(TrackPlan plan) async {
     final wasPlaying = video.isPlaying;
     // 换之前先记下逻辑位置：**(单元下标, 单元内偏移)**。
     // 记成片毫秒的话新方案总长一变就指到别处；绕原片时刻的话要走病态的
