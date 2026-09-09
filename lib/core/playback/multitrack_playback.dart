@@ -83,6 +83,11 @@ class MultitrackPlayback implements PlaybackController {
   /// - **按逻辑位置恢复**。记的是「我停在原片的哪一刻」，不是「第几毫秒」
   ///   ——取消整体替换之后成片总长会变，同一个毫秒对应的内容完全不是同一处。
   @override
+  /// 主时钟等它自己的加载——这一层只是转发
+  @override
+  Future<void> waitUntilLoaded() => video.waitUntilLoaded();
+
+  @override
   Future<void> clearSource() async {
     _videoEdl = null;
     await video.clearSource();
@@ -152,6 +157,10 @@ class MultitrackPlayback implements PlaybackController {
       final at =
           anchor == null ? 0 : plan.composedAt(anchor).clamp(0, plan.totalMs);
       if (at > 0) {
+        // **等文件真正加载完再跳**：open 返回时播放器可能还在 loadfile，
+        // 这个当口的 seek 会被整个吞掉，人就被扔回片头（见
+        // [PlaybackController.waitUntilLoaded]）
+        if (videoChanged) await video.waitUntilLoaded();
         await video.seekMs(at);
         await voice.seekMs(at);
       }

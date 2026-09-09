@@ -72,6 +72,24 @@ void main() {
             '「边调边看」当场变成看不到');
   });
 
+  /// 2026-09-09 真机上这条才是真凶：还原的 seek 确实发出去了，只是
+  /// **播放器还在 loadfile，把它整个吞掉了**。代码里早有一条注释写着同一
+  /// 件事（「参考弹窗每个分镜都从头播就是这么来的」），只是换方案这条路
+  /// 没等。
+  test('换源之后要等文件真加载完再跳——不等的话那一下会被吞掉', () async {
+    await playback.setPlan(planWith('/fit/old.mp4'));
+    master.emitPosition(6800);
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    master.calls.clear();
+
+    await playback.setPlan(planWith('/fit/new.mp4'));
+
+    final waited = master.calls.indexOf('waitUntilLoaded');
+    final sought = master.calls.indexWhere((c) => c.startsWith('seek'));
+    expect(waited, isNot(-1), reason: '不等就跳，跳了也白跳');
+    expect(waited, lessThan(sought), reason: '要先等加载完，再跳');
+  });
+
   test('片长没变时是原样搬过去，不是按比例挪一点', () async {
     await playback.setPlan(planWith('/fit/old.mp4'));
     master.emitPosition(12345);

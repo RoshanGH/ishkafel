@@ -7,6 +7,16 @@ abstract class PlaybackController {
   /// 打开并暂停在首帧。
   Future<void> open(String path);
 
+  /// 等文件真正加载完再返回。
+  ///
+  /// **换源之后的 seek 必须等它**：`open` 返回时播放器可能还在 loadfile，
+  /// 这个当口发出的 seek 会被加载过程整个吞掉，位置就停在片头。
+  /// 2026-09-09 真机：调字幕样式时切片重烧一次就换一次源，人正对着第 45 秒
+  /// 那一镜调位置，一拖就被扔回 00:00 —— 还原的那一下发出去了，只是没人接。
+  ///
+  /// 默认什么都不做：不是所有实现都需要等（测试假件、空实现）。
+  Future<void> waitUntilLoaded() async {}
+
   /// 开始播放。
   Future<void> play();
 
@@ -90,6 +100,10 @@ abstract class MasterTrack implements PlaybackController {
 /// 测试替身：内存位置模拟，记录调用，零 libmpv 依赖。
 class FakePlaybackController implements MasterTrack {
   final List<String> calls = [];
+
+  /// 假件里文件是「立刻就绪」的，等于不用等
+  @override
+  Future<void> waitUntilLoaded() async => calls.add('waitUntilLoaded');
 
   @override
   Future<void> clearSource() async => calls.add('clearSource');

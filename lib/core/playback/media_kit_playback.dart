@@ -48,6 +48,7 @@ class MediaKitPlaybackController implements MasterTrack {
   /// loadfile，这个当口发出的 seek 会被加载过程吞掉——参考弹窗
   /// 「每个分镜都从头播」就是这么来的。超时不抛：播放继续尝试，
   /// 大不了退回从头播，不能让弹窗卡死
+  @override
   Future<void> waitUntilLoaded(
       {Duration timeout = const Duration(seconds: 5)}) async {
     if (player.state.duration > Duration.zero) return;

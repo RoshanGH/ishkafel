@@ -11,6 +11,9 @@ class NoopPlaybackController implements PlaybackController {
   Future<void> open(String path) async {}
 
   @override
+  Future<void> waitUntilLoaded() async {}
+
+  @override
   Future<void> play() async {}
 
   @override
