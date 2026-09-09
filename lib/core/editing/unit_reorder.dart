@@ -155,3 +155,34 @@ int _mapIndex(int index, {required int from, required int to}) {
   // 往前挪：夹在中间的整体后移一格
   return (index >= to && index < from) ? index + 1 : index;
 }
+
+/// 从列表里去掉第 [index] 个单元，**只重排下标，一个单元的起止都不动**。
+///
+/// 空白任务那套（`BlankUnitOps.removeAt`）会把所有单元的 `startMs/endMs`
+/// 重新铺成连续的一条。对空白任务那是对的——它的时间轴就是分子一个个排出来
+/// 的，而且分子里根本没有视觉镜头。
+///
+/// **有原片的任务不行**：那里单元的起止是原片坐标，单元里的视觉镜头也是
+/// 原片坐标。把单元挪了、镜头不动，两层就此对不上——镜头轨画到别处、单元
+/// 尾部空出一截、点中的和播的不是同一段。2026-09-09 真机上「合并视觉镜头
+/// 之后后面变成缺失的」「选中镜头后预览跳回 U1·S1」都是这么来的：起因不是
+/// 合并，是在那之前删过一个手动加的台词语义单元。
+List<SemanticUnit> removeUnitAt(List<SemanticUnit> units, int index) {
+  if (index < 0 || index >= units.length) return units;
+  final next = [...units]..removeAt(index);
+  return [
+    for (var i = 0; i < next.length; i++) next[i].copyWith(index: i),
+  ];
+}
+
+/// 这批单元覆盖到原片的第几毫秒——**取最大值，不是取最后一个**。
+///
+/// 列表顺序就是成片顺序，和原片顺序无关：手加的单元拖到最前、或者单元被
+/// 调过序之后，`units.last.endMs` 就不再是覆盖的终点了。
+int coveredEndMs(List<SemanticUnit> units) {
+  var end = 0;
+  for (final u in units) {
+    if (u.endMs > end) end = u.endMs;
+  }
+  return end;
+}

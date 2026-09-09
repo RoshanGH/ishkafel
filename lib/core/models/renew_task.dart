@@ -1,4 +1,5 @@
 import 'package:collection/collection.dart';
+import '../editing/unit_bounds_repair.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../ai/ai_usage.dart';
@@ -376,9 +377,13 @@ class RenewTask {
 
   factory RenewTask.fromJson(Map<String, dynamic> json) {
     // 先解出单元：配乐的老存档要靠它把镜头下标换算成单元下标
-    final units = (json['units'] as List<dynamic>?)
+    final parsedUnits = (json['units'] as List<dynamic>?)
         ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
         .toList();
+    // 被旧版删单元那条路挪错的起止，读档时按镜头修回来（见
+    // [repairUnitBoundsFromShots]）——盘上已经坏掉的任务不会自己好
+    final units =
+        parsedUnits == null ? null : repairUnitBoundsFromShots(parsedUnits);
     return RenewTask(
         id: json['id'] as String,
         name: json['name'] as String,

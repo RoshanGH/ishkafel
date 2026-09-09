@@ -1315,7 +1315,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (ok != true) return;
     }
 
-    final units = BlankUnitOps.removeAt(editor.units, unitIndex);
+    // **有原片的任务只重排下标，不重铺时间轴**：单元的起止是原片坐标，
+    // 单元里的视觉镜头也是。把单元重新铺成连续的一条、镜头留在原地，
+    // 两层就此对不上（见 [removeUnitAt]）
+    final units = _task.isBlank
+        ? BlankUnitOps.removeAt(editor.units, unitIndex)
+        : removeUnitAt(editor.units, unitIndex);
     final shifted = shiftReplacementsAfterRemoval(_replacements ?? const [],
         removed: unitIndex);
     setState(() {
@@ -1329,7 +1334,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     });
     await _savePickingPlanQuietly(shifted);
     editor.replaceUnitsForBlankTask(
-        units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
+        units,
+        units.isEmpty
+            ? BlankUnitOps.placeholderMs
+            // 取最大值而不是最后一个：列表顺序是成片顺序，调过序之后
+            // 最后那个未必覆盖到最远
+            : (_task.isBlank ? units.last.endMs : coveredEndMs(units)));
     unawaited(_saveBgm(_task.bgm));
     _scheduleAutosave();
   }

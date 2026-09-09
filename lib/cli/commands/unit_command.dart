@@ -160,7 +160,11 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
     return exitBadUsage;
   }
   final next = task.copyWith(
-    units: BlankUnitOps.removeAt(units, unit),
+    // 有原片的任务只重排下标：单元的起止和单元里的视觉镜头都是原片坐标，
+    // 重铺时间轴会让两层对不上（见 [removeUnitAt]）
+    units: task.isBlank
+        ? BlankUnitOps.removeAt(units, unit)
+        : removeUnitAt(units, unit),
     replacements:
         shiftReplacementsAfterRemoval(task.replacements ?? const [], removed: unit),
     bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
