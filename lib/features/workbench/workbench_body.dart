@@ -412,10 +412,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     final playback = widget.playback;
     return Shortcuts(
       shortcuts: workbenchPlaybackShortcuts,
-      // 输入框交出焦点之后由它接住，否则焦点落空、整套键位一起哑掉
-      // （见 [KeyboardHome]）
-      child: KeyboardHome(
-          child: Actions(
+      child: Actions(
         actions: workbenchPlaybackActions(
           onTogglePlay: _togglePlaybackFromShortcut,
           onStepFrame: _stepPlaybackFromShortcut,
@@ -426,7 +423,11 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
               .seekMs(toStart ? 0 : (_axis?.totalMs ?? editor.durationMs)),
           onSelectAdjacent: (delta) => _selectAdjacent(editor, playback, delta),
         ),
-        child: Column(
+        // 输入框交出焦点之后由它接住，否则焦点落空、整套键位一起哑掉。
+        // **必须摆在 Actions 里面**：按键是从拿着焦点的那个节点往上找动作的，
+        // 摆到 Actions 外面就找不到 —— 空格能匹配上，却没人执行
+        child: KeyboardHome(
+            child: Column(
           children: [
             // 三栏区 : 时间线区 = 5 : 4（时间线约 44%）。
             //
@@ -558,8 +559,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
               child: _buildTimelineArea(editor, playback),
             ),
           ],
-        ),
-      )),
+        )),
+      ),
     );
   }
 

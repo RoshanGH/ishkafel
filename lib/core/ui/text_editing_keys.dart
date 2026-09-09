@@ -78,7 +78,34 @@ class _KeyboardHomeState extends State<KeyboardHome> {
   final FocusNode _node = FocusNode(debugLabel: 'KeyboardHome');
 
   @override
+  void initState() {
+    super.initState();
+    // **盯着焦点，落空就接回来。**
+    //
+    // 光在输入框的 onTapOutside 里 requestFocus 是不够的：那一下发生在
+    // pointer down，紧接着时间线自己的手势处理又会把焦点清掉，结果照样落空
+    // （2026-09-09 真机：点台词框→点时间线，空格和 ←→ 全哑）。
+    //
+    // 所以改成盯着 FocusManager：只要页面上没有任何具体控件拿着焦点
+    // （null，或者只剩一个 FocusScopeNode），就把它接回自己身上。
+    // 焦点在输入框/按钮上时一概不动——那是人家的。
+    FocusManager.instance.addListener(_catchDroppedFocus);
+  }
+
+  void _catchDroppedFocus() {
+    if (!mounted) return;
+    final current = FocusManager.instance.primaryFocus;
+    if (current != null && current is! FocusScopeNode) return;
+    if (identical(current, _node)) return;
+    // 不在当前路由上（被弹层/别的页面盖住）时不抢：抢了会把弹层里的
+    // 输入框顶掉
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    if (!_node.hasFocus) _node.requestFocus();
+  }
+
+  @override
   void dispose() {
+    FocusManager.instance.removeListener(_catchDroppedFocus);
     _node.dispose();
     super.dispose();
   }
@@ -86,7 +113,8 @@ class _KeyboardHomeState extends State<KeyboardHome> {
   @override
   Widget build(BuildContext context) => Focus(
         focusNode: _node,
-        // 只做落脚点，不吃按键：按键照旧往上冒泡到页面的 Shortcuts
+        autofocus: true,
+        // 只做落脚点，不参与 Tab 遍历；按键照旧往上冒泡到页面的 Shortcuts
         skipTraversal: true,
         child: widget.child,
       );

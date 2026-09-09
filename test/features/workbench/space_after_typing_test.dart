@@ -88,6 +88,26 @@ void main() {
         reason: '要落在页面这个落脚点上，按键才能继续走 Shortcuts');
   });
 
+  /// 光在 onTapOutside 里 requestFocus 还不够：那一下发生在 pointer down，
+  /// 紧接着时间线自己的手势处理又会把焦点清掉——真机上照样全哑。所以落脚点
+  /// 要盯着 FocusManager，落空就接回来。
+  testWidgets('别人把焦点清掉之后，落脚点自己接回来', (tester) async {
+    await tester.pumpWidget(const MaterialApp(
+      home: Scaffold(
+        body: KeyboardHome(child: SizedBox(width: 200, height: 200)),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    // 模拟时间线那一下：把焦点清掉
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+
+    expect(FocusManager.instance.primaryFocus?.debugLabel, 'KeyboardHome',
+        reason: '焦点落空的话，页面级快捷键收不到任何按键——'
+            '空格、←→、⌘Z 会一起哑掉');
+  });
+
   testWidgets('没有接 onTapOutside 的输入框，点别处焦点是不会走的',
       (tester) async {
     // 这条不是在测 Flutter，是把「为什么必须显式接这一手」钉下来：
