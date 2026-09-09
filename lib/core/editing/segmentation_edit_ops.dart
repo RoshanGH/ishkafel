@@ -1,6 +1,7 @@
 import '../analysis/boundary_snapper.dart';
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
+import '../models/unit_uid.dart';
 import '../models/shot.dart';
 import '../time/timecode.dart';
 import 'transcript_splitter.dart';
@@ -234,8 +235,14 @@ abstract final class SegmentationEditOps {
 
     final leftUnit =
         unit.copyWith(endMs: b, transcript: leftText, shots: leftShots);
-    final rightUnit =
-        unit.copyWith(startMs: b, transcript: rightText, shots: rightShots);
+    // **左边留用原身份，右边发新的**：产品上「左边还是原来那一句」，
+    // 挑给它的素材、音色、配乐、手改字幕都该留在左边。共用一个身份的话
+    // 那些东西会同时落到两格上（见 [newUnitUid]）
+    final rightUnit = unit.copyWith(
+        uid: newUnitUid(),
+        startMs: b,
+        transcript: rightText,
+        shots: rightShots);
 
     final result = _reindex([
       ...units.sublist(0, u),
@@ -445,6 +452,7 @@ abstract final class SegmentationEditOps {
     return [
       ...units,
       SemanticUnit(
+        uid: newUnitUid(),
         index: units.length,
         startMs: start,
         endMs: start + alignToFrame(appendedUnitPlaceholderMs, fps),

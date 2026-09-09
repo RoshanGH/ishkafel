@@ -1,4 +1,5 @@
 import '../models/semantic_unit.dart';
+import '../models/unit_uid.dart';
 
 /// 空白任务里已填 / 未填的统计。
 ///
@@ -50,6 +51,7 @@ abstract final class BlankUnitOps {
     return [
       ...units,
       SemanticUnit(
+        uid: newUnitUid(),
         index: units.length,
         startMs: start,
         endMs: start + placeholderMs,

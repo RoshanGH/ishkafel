@@ -57,6 +57,7 @@ void main() {
 
   List<SemanticUnit> units() => const [
         SemanticUnit(
+          uid: 'u0',
           index: 0,
           startMs: 0,
           endMs: 5000,
@@ -163,7 +164,7 @@ void main() {
         sentences: sentences,
         subtitleTrack: const SubtitleTrack.empty().withLines(
             // 被替换的是 U1 的 S2
-            const SubtitleSlot(unitIndex: 0, shotIndex: 1),
+            const SubtitleSlot(unitUid: 'u0', shotIndex: 1),
             const [SubtitleLine(startMs: 0, endMs: 3000, text: '我改过的字')]),
       );
 
@@ -176,7 +177,7 @@ void main() {
       final rasterizer = await export(
         sentences: sentences,
         subtitleTrack: const SubtitleTrack.empty()
-            .withLines(const SubtitleSlot(unitIndex: 0, shotIndex: 1), const []),
+            .withLines(const SubtitleSlot(unitUid: 'u0', shotIndex: 1), const []),
       );
 
       expect(rasterizer.rendered, isEmpty);
@@ -189,7 +190,7 @@ void main() {
       final rasterizer = await export(
         sentences: sentences,
         subtitleTrack: const SubtitleTrack.empty().withLines(
-            const SubtitleSlot(unitIndex: 9, shotIndex: 9),
+            const SubtitleSlot(unitUid: 'u9', shotIndex: 9),
             const [SubtitleLine(startMs: 0, endMs: 1, text: '别人的')]),
       );
 

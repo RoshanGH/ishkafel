@@ -169,7 +169,8 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
         shiftReplacementsAfterRemoval(task.replacements ?? const [], removed: unit),
     bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
     voices: shiftVoicesAfterRemoval(task.voices, removed: unit),
-    subtitleTrack: shiftSubtitlesAfterRemoval(task.subtitleTrack, removed: unit),
+    subtitleTrack: task.subtitleTrack
+        .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
     updatedAt: DateTime.now(),
   );
   await repository.save(next);
@@ -199,8 +200,6 @@ Future<int> _move(FileTaskRepository repository, RenewTask task, int? unit,
     replacements: remapReplacementsAfterMove(task.replacements ?? const [],
         from: unit, to: to, unitCount: moved.length),
     voices: remapVoicesAfterMove(task.voices, from: unit, to: to),
-    subtitleTrack:
-        remapSubtitlesAfterMove(task.subtitleTrack, from: unit, to: to),
     bgm: bgm.plan,
     updatedAt: DateTime.now(),
   );
@@ -360,7 +359,9 @@ Future<int> _subtitle(
     sink.writeln('要给 --shot <下标>（0 起，U${unit + 1} 有 ${shots.length} 个镜头）');
     return exitBadUsage;
   }
-  final slot = SubtitleSlot(unitIndex: unit, shotIndex: shot);
+  // 按单元的**身份**记：人在界面上说 U3，存的却是它自己那个编号，
+  // 挪过顺序也还认得回来
+  final slot = SubtitleSlot(unitUid: units[unit].uid, shotIndex: shot);
 
   // --auto：清掉手改，回到按 ASR 现算
   if (auto) {

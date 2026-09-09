@@ -14,12 +14,14 @@ import 'subtitle_track.dart';
 List<SubtitleLine> subtitleLinesForSlot({
   required SubtitleTrack track,
   required List<AsrSentence> sentences,
-  required int unitIndex,
+  /// 这一镜所属单元的**身份**（不是位置）——手改的字幕按身份记，
+  /// 单元怎么挪都还认得回来
+  required String unitUid,
   required int shotIndex,
   required int slotStartMs,
   required int slotEndMs,
 }) =>
-    track.linesOf(SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex)) ??
+    track.linesOf(SubtitleSlot(unitUid: unitUid, shotIndex: shotIndex)) ??
     subtitleLinesInSlot(
       sentences: sentences,
       slotStartMs: slotStartMs,

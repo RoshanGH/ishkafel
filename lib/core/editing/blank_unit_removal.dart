@@ -1,7 +1,6 @@
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
-import '../subtitle/subtitle_track.dart';
 
 /// 删掉一个分子之后，把**所有按分子下标记的东西**跟着挪。
 ///
@@ -10,10 +9,12 @@ import '../subtitle/subtitle_track.dart';
 /// 它们不挪不会报错，只会让成片悄悄变成另一个样子——原本挑给 U2 的素材跑到
 /// U1 身上、配乐盖错段落、配音念错地方。
 ///
-/// 这句话原本写的是「两份」，而配音是后来加的第三种，就这么漏在了外面
-/// （2026-09-07 补上）。手改字幕是第四种，2026-09-09 清点时才发现它从头到尾
-/// 就没搬过。**加第五种时把它也放进这个文件**，别再散出去。
-/// 挪顺序那一组对应的是 `unit_reorder.dart`。
+/// 这句话原本写的是「两份」，配音是后来补的第三种，手改字幕是 2026-09-09
+/// 清点时才发现从头到尾没搬过的第四种。
+///
+/// **这个文件正在退休**：单元有了自己的身份（[SemanticUnit.uid]）之后，
+/// 挂在它下面的东西按身份记，删一个单元只是「这个身份没了」，剩下的一份都
+/// 不用动。剩在这里的是还没改完的那几份。
 
 /// 替换方案按下标记，删了一个就整体前移
 List<UnitReplacement> shiftReplacementsAfterRemoval(
@@ -62,12 +63,3 @@ VoicePlan shiftVoicesAfterRemoval(VoicePlan plan, {required int removed}) =>
                   a.unitIndex > removed ? a.unitIndex - 1 : a.unitIndex,
               voice: a.voice),
     ]);
-
-/// 手改过的字幕按 `(单元下标, 镜头下标)` 记，删了一个单元之后：它自己那几句
-/// 丢掉，后面的整体前移。
-///
-/// **这一条是补的**：删除原本只搬了替换方案、配乐、配音三份，字幕漏在外面
-/// ——删掉 U2 之后，人给 U3 改好的那句字幕会烧到 U2 的画面上，不报错。
-SubtitleTrack shiftSubtitlesAfterRemoval(SubtitleTrack track,
-        {required int removed}) =>
-    track.afterRemoval(removed);

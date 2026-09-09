@@ -17,6 +17,10 @@ class ExportSegment {
   final int unitIndex;
   final int? shotIndex;
 
+  /// 那个单元的**身份**（[SemanticUnit.uid]）。手改的字幕按它取——
+  /// 按位置取的话，人挪过单元之后烧上去的就是别人的字幕
+  final String unitUid;
+
   /// **整体替换**时这一段在成片里真正占多长。
   ///
   /// 整体替换是「原样接上」——时长跟候选走，不裁不补（见四种替换的导出
@@ -38,6 +42,7 @@ class ExportSegment {
     required this.startMs,
     required this.endMs,
     required this.unitIndex,
+    this.unitUid = '',
     this.shotIndex,
     this.candidateId,
     this.composedMs,
@@ -223,7 +228,10 @@ class ExportPlanner {
       UnitReplacement? replacement, Map<int, int> materialDurations) {
     final original = [
       ExportSegment(
-          startMs: unit.startMs, endMs: unit.endMs, unitIndex: unit.index),
+          startMs: unit.startMs,
+          endMs: unit.endMs,
+          unitIndex: unit.index,
+          unitUid: unit.uid),
     ];
     if (replacement == null) return [original];
 
@@ -241,6 +249,7 @@ class ExportPlanner {
                 startMs: unit.startMs,
                 endMs: unit.endMs,
                 unitIndex: unit.index,
+                unitUid: unit.uid,
                 candidateId: id,
                 // 整体替换是原样接上，成片时长跟候选走。探不出来就按原单元
                 // 算——报得保守好过拿 0 顶（那会把总时长算成一团）
@@ -271,7 +280,10 @@ class ExportPlanner {
       return [
         [
           ExportSegment(
-              startMs: unit.startMs, endMs: unit.endMs, unitIndex: unit.index),
+              startMs: unit.startMs,
+              endMs: unit.endMs,
+              unitIndex: unit.index,
+              unitUid: unit.uid),
         ],
       ];
     }
@@ -318,6 +330,7 @@ class ExportPlanner {
         startMs: shot.startMs,
         endMs: shot.endMs,
         unitIndex: unit.index,
+        unitUid: unit.uid,
         shotIndex: shotIndex,
       );
     }
@@ -332,6 +345,7 @@ class ExportPlanner {
       startMs: shot.startMs,
       endMs: shot.endMs,
       unitIndex: unit.index,
+      unitUid: unit.uid,
       shotIndex: shotIndex,
       candidateId: candidateId,
       // 起点 0 就不写：写成 0 和不写是同一件事，而 null 让下游的命令里

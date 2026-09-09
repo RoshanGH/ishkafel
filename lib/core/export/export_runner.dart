@@ -533,7 +533,7 @@ class ExportRunner {
         : subtitleLinesForSlot(
             track: subtitleTrack,
             sentences: subtitleSentences,
-            unitIndex: segment.unitIndex,
+            unitUid: segment.unitUid,
             shotIndex: segment.shotIndex!,
             slotStartMs: segment.startMs,
             slotEndMs: segment.endMs,

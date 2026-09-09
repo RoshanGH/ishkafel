@@ -246,6 +246,7 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
     if (chosen == null || chosen.mode == 'keepOriginal') {
       segments.add(ExportSegment(
         unitIndex: unit.index,
+        unitUid: unit.uid,
         startMs: unit.startMs,
         endMs: unit.endMs,
       ));
@@ -254,6 +255,7 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
     if (chosen.mode == 'whole') {
       segments.add(ExportSegment(
         unitIndex: unit.index,
+        unitUid: unit.uid,
         startMs: unit.startMs,
         endMs: unit.endMs,
         candidateId: chosen.material,
@@ -271,6 +273,7 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
       );
       segments.add(ExportSegment(
         unitIndex: unit.index,
+        unitUid: unit.uid,
         shotIndex: s,
         startMs: shot.startMs,
         endMs: shot.endMs,

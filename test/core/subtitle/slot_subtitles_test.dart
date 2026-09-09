@@ -17,7 +17,7 @@ void main() {
   List<SubtitleLine> resolve(SubtitleTrack track) => subtitleLinesForSlot(
         track: track,
         sentences: sentences,
-        unitIndex: 3,
+        unitUid: 'u3',
         shotIndex: 1,
         slotStartMs: 0,
         slotEndMs: 2000,
@@ -29,7 +29,7 @@ void main() {
 
   test('手改过：用手改的那份', () {
     final track = const SubtitleTrack.empty().withLines(
-        const SubtitleSlot(unitIndex: 3, shotIndex: 1),
+        const SubtitleSlot(unitUid: 'u3', shotIndex: 1),
         const [SubtitleLine(startMs: 0, endMs: 900, text: '游乐场')]);
 
     expect(resolve(track).single.text, '游乐场');
@@ -37,14 +37,14 @@ void main() {
 
   test('手改成空：这一镜就是不要字幕，不许回退到自动算', () {
     final track = const SubtitleTrack.empty()
-        .withLines(const SubtitleSlot(unitIndex: 3, shotIndex: 1), const []);
+        .withLines(const SubtitleSlot(unitUid: 'u3', shotIndex: 1), const []);
 
     expect(resolve(track), isEmpty);
   });
 
   test('改的是别的坑位，这一镜照旧自动算', () {
     final track = const SubtitleTrack.empty().withLines(
-        const SubtitleSlot(unitIndex: 0, shotIndex: 0),
+        const SubtitleSlot(unitUid: 'u0', shotIndex: 0),
         const [SubtitleLine(startMs: 0, endMs: 1, text: '别人的')]);
 
     expect(resolve(track).first.text, contains('游乐场'));

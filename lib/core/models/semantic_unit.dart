@@ -2,9 +2,22 @@ import 'package:collection/collection.dart';
 import '../audio/material_audio.dart';
 import 'shot.dart';
 import 'tag_trace.dart';
+import 'unit_uid.dart';
 
 /// 台词语义单元：以台词语义为准的切分单元，内部包含若干视觉镜头（不可变）
 class SemanticUnit {
+  /// **这个单元自己的身份**，永不变（见 [newUnitUid]）。
+  ///
+  /// 挂在单元上的东西——挑好的素材、音色、配乐、手改字幕、生成的配音文件
+  /// ——全按它记，所以挪动顺序、删掉别的单元都不需要再搬任何东西。
+  ///
+  /// 空串 = 还没发过（老存档、或刚 new 出来的对象）。读档时补发
+  /// （见 [ensureUnitUids]），编辑器收下单元时也补发一次——**进了编辑器
+  /// 的单元一定有身份**，别的地方可以放心拿它当键。
+  final String uid;
+
+  /// 它在列表里排第几。**这是位置，不是身份**：人一拖就变。
+  /// 界面上的 U1/U2/U3 说的是它
   final int index;
   final int startMs;
   final int endMs;
@@ -51,6 +64,7 @@ class SemanticUnit {
   final bool hasSource;
 
   const SemanticUnit({
+    this.uid = '',
     required this.index,
     required this.startMs,
     required this.endMs,
@@ -72,6 +86,7 @@ class SemanticUnit {
       shots.every((s) => s.startMs >= startMs && s.endMs <= endMs);
 
   SemanticUnit copyWith({
+    String? uid,
     int? index,
     int? startMs,
     int? endMs,
@@ -86,6 +101,7 @@ class SemanticUnit {
     double? wholeAudioVolume,
   }) =>
       SemanticUnit(
+        uid: uid ?? this.uid,
         index: index ?? this.index,
         startMs: startMs ?? this.startMs,
         endMs: endMs ?? this.endMs,
@@ -101,6 +117,8 @@ class SemanticUnit {
       );
 
   Map<String, dynamic> toJson() => {
+        // 空串不写：老存档里本来就没有，写个空串只会让人以为「发过但是空的」
+        if (uid.isNotEmpty) 'uid': uid,
         'index': index,
         'startMs': startMs,
         'endMs': endMs,
@@ -117,6 +135,8 @@ class SemanticUnit {
       };
 
   factory SemanticUnit.fromJson(Map<String, dynamic> json) => SemanticUnit(
+        // 老存档没有这个字段，读出来是空串，由 [ensureUnitUids] 补发
+        uid: json['uid'] is String ? json['uid'] as String : '',
         index: json['index'] as int,
         startMs: json['startMs'] as int,
         endMs: json['endMs'] as int,

@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import '../editing/unit_bounds_repair.dart';
+import 'unit_uid.dart';
 import '../analysis/providers.dart';
 import '../log/app_log.dart';
 import '../ai/ai_usage.dart';
@@ -382,8 +383,11 @@ class RenewTask {
         .toList();
     // 被旧版删单元那条路挪错的起止，读档时按镜头修回来（见
     // [repairUnitBoundsFromShots]）——盘上已经坏掉的任务不会自己好
-    final units =
-        parsedUnits == null ? null : repairUnitBoundsFromShots(parsedUnits);
+    // 补发身份：老存档没有这个字段，而挂在单元上的东西全按它记
+    // （见 [ensureUnitUids]）
+    final units = parsedUnits == null
+        ? null
+        : ensureUnitUids(repairUnitBoundsFromShots(parsedUnits));
     return RenewTask(
         id: json['id'] as String,
         name: json['name'] as String,
@@ -425,7 +429,13 @@ class RenewTask {
         voices: VoicePlan.fromJson(json['voices']),
         // 老任务没有这个字段，退回标准样式
         subtitle: SubtitleStyle.fromJson(json['subtitle']),
-        subtitleTrack: SubtitleTrack.fromJson(json['subtitleTrack']),
+        // 老存档里字幕坑位按**单元下标**记，读出来翻译成单元的身份
+        // ——单元被挪过之后，按下标记的那份早就指错人了，所以只在这一步
+        // 认下标，之后一律按身份
+        subtitleTrack: SubtitleTrack.fromJson(json['subtitleTrack'],
+            uidAt: (i) => units != null && i >= 0 && i < units.length
+                ? units[i].uid
+                : null),
         // 存量存档没有这个字段——兜底成「关」，不能让老任务升一版就多一层声音
         materialAudio: MaterialAudioSetting.fromJson(
             json['materialAudio'] as Map<String, dynamic>?),

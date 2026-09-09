@@ -7,23 +7,28 @@ import 'subtitle_overlay.dart';
 /// **绑镜头，不绑素材**：同一镜可以挑好几条候选（导出几条变体），口播是同一句，
 /// 字幕当然也是同一份。镜头替换是变速对齐原坑位、时长不变，所以这份字幕的
 /// 时间轴在各条变体上通用。
+///
+/// **按单元的身份记，不按位置**（[SemanticUnit.uid]）。按位置记的时候，
+/// 挪一次单元、删一次单元都要人工把它跟着搬——2026-09-09 清点才发现这一份
+/// 从头到尾就没搬过：人给 U3 改好的那句会烧到 U2 的画面上，不报错。
+/// 镜头下标照旧按位置：镜头是跟着单元整体搬家的。
 class SubtitleSlot {
-  final int unitIndex;
+  final String unitUid;
   final int shotIndex;
 
-  const SubtitleSlot({required this.unitIndex, required this.shotIndex});
+  const SubtitleSlot({required this.unitUid, required this.shotIndex});
 
   @override
   bool operator ==(Object other) =>
       other is SubtitleSlot &&
-      other.unitIndex == unitIndex &&
+      other.unitUid == unitUid &&
       other.shotIndex == shotIndex;
 
   @override
-  int get hashCode => Object.hash(unitIndex, shotIndex);
+  int get hashCode => Object.hash(unitUid, shotIndex);
 
   @override
-  String toString() => 'U${unitIndex + 1}·S${shotIndex + 1}';
+  String toString() => '$unitUid·S${shotIndex + 1}';
 }
 
 /// **手改过的**字幕。只有被替换的视觉镜头才会进来。
@@ -64,39 +69,23 @@ class SubtitleTrack {
   SubtitleTrack cleared(SubtitleSlot slot) =>
       SubtitleTrack._({..._edited}..remove(slot));
 
-  /// 把所有坑位按 [move] 重新映射一遍——**挪动单元顺序时必须调**。
+  /// 删掉一个单元之后：把没人认领的那几句丢掉。
   ///
-  /// 手改的字幕是按 `(单元下标, 镜头下标)` 记的，而单元下标就是列表位置。
-  /// 挪了单元不搬它，人给 U3 改好的那句字幕会烧到 U2 的画面上——不报错，
-  /// 只有把片子导出来看一遍才发现（2026-09-09 清点时查出来的，这条从来
-  /// 没搬过）。镜头下标不动：镜头跟着单元整体搬家。
-  SubtitleTrack remapped(int Function(int unitIndex) move) {
+  /// **挪动顺序什么都不用做**——坑位按单元的身份记，单元怎么排都还是它。
+  /// 删单元也只是「这个身份没了」，剩下的一份都不动。
+  SubtitleTrack keepingOnly(Set<String> liveUids) {
     if (_edited.isEmpty) return this;
-    return SubtitleTrack._({
+    final kept = {
       for (final e in _edited.entries)
-        SubtitleSlot(
-            unitIndex: move(e.key.unitIndex), shotIndex: e.key.shotIndex): e.value,
-    });
-  }
-
-  /// 删掉第 [removed] 个单元之后：它自己那几句丢掉，后面的整体前移
-  SubtitleTrack afterRemoval(int removed) {
-    if (_edited.isEmpty) return this;
-    return SubtitleTrack._({
-      for (final e in _edited.entries)
-        if (e.key.unitIndex != removed)
-          SubtitleSlot(
-              unitIndex: e.key.unitIndex > removed
-                  ? e.key.unitIndex - 1
-                  : e.key.unitIndex,
-              shotIndex: e.key.shotIndex): e.value,
-    });
+        if (liveUids.contains(e.key.unitUid)) e.key: e.value,
+    };
+    return kept.length == _edited.length ? this : SubtitleTrack._(kept);
   }
 
   List<Map<String, dynamic>> toJson() => [
         for (final e in _edited.entries)
           {
-            'unit': e.key.unitIndex,
+            'unit': e.key.unitUid,
             'shot': e.key.shotIndex,
             'lines': [
               for (final l in e.value)
@@ -106,7 +95,11 @@ class SubtitleTrack {
       ];
 
   /// **脏数据一律跳过，绝不抛**：一条读不动的记录不该让整条任务打不开
-  factory SubtitleTrack.fromJson(Object? json) {
+  ///
+  /// [uidAt] 是给**老存档**用的：那时坑位按单元下标记，读的时候要把下标
+  /// 翻译成身份。返回 null 表示那个下标已经不存在（单元被删过），这条丢掉
+  factory SubtitleTrack.fromJson(Object? json,
+      {String? Function(int unitIndex)? uidAt}) {
     if (json is! List) return const SubtitleTrack.empty();
     final out = <SubtitleSlot, List<SubtitleLine>>{};
     for (final raw in json) {
@@ -114,8 +107,12 @@ class SubtitleTrack {
       final unit = raw['unit'];
       final shot = raw['shot'];
       final lines = raw['lines'];
-      if (unit is! int || shot is! int || lines is! List) continue;
-      out[SubtitleSlot(unitIndex: unit, shotIndex: shot)] = List.unmodifiable([
+      if (shot is! int || lines is! List) continue;
+      final uid = unit is String
+          ? unit
+          : (unit is int ? uidAt?.call(unit) : null);
+      if (uid == null || uid.isEmpty) continue;
+      out[SubtitleSlot(unitUid: uid, shotIndex: shot)] = List.unmodifiable([
         for (final l in lines)
           if (l is Map && l['startMs'] is int && l['endMs'] is int)
             SubtitleLine(

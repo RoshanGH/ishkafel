@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
+import '../models/unit_uid.dart';
 import 'edit_locks.dart';
 import 'segmentation_edit_ops.dart';
 
@@ -68,9 +69,9 @@ class SegmentationEditorController extends ChangeNotifier {
     required this.durationMs,
     required this.fps,
     required this.sentences,
-  })  : _initialUnits = initialUnits,
-        _units = initialUnits,
-        _unitsView = List.unmodifiable(initialUnits);
+  })  : _initialUnits = ensureUnitUids(initialUnits),
+        _units = ensureUnitUids(initialUnits),
+        _unitsView = List.unmodifiable(ensureUnitUids(initialUnits));
 
   /// 当前切分结构（**只读视图**）。
   ///
@@ -250,7 +251,8 @@ class SegmentationEditorController extends ChangeNotifier {
   /// 那边有一条固定的原片时长要无缝覆盖。空白任务没有原片，分子是加出来的，
   /// 总长跟着变——这条通路把两者分开，免得为了让「加一个分子」通过校验而把
   /// 那套不变量放松掉。
-  void replaceUnitsForBlankTask(List<SemanticUnit> units, int totalMs) {
+  void replaceUnitsForBlankTask(List<SemanticUnit> rawUnits, int totalMs) {
+    final units = ensureUnitUids(rawUnits);
     _undoStack.add(_units);
     _redoStack.clear();
     _units = units;
@@ -260,9 +262,13 @@ class SegmentationEditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool _apply(List<SemanticUnit>? result,
+  bool _apply(List<SemanticUnit>? raw,
       {EditorSelection? Function()? remapSelection}) {
-    if (result == null) return false;
+    if (raw == null) return false;
+    // **单元进编辑器的唯一闸口**：拆分/合并/手动添加造出来的新单元还是空
+    // 身份，在这里补发。跑过之后就有一条保证——编辑器里的单元一定有身份、
+    // 而且互不相同，挂在它下面的东西可以放心拿它当键（见 [ensureUnitUids]）
+    final result = ensureUnitUids(raw);
     // 会话中（拖拽或台词编辑）：不逐次入栈，交由 endDragSession/
     // endTextSession 合并为一条记录
     if (_dragSessionSnapshot == null && _textSessionSnapshot == null) {

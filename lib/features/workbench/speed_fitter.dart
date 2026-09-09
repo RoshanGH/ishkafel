@@ -122,6 +122,7 @@ class SpeedFitter extends ChangeNotifier {
         ({
       int candidateId,
       int unitIndex,
+      String unitUid,
       int shotIndex,
       int slotStartMs,
       int slotEndMs,
@@ -137,6 +138,7 @@ class SpeedFitter extends ChangeNotifier {
           wanted[TrackPlanBuilder.shotKey(u, s)] = (
           candidateId: pick,
           unitIndex: u,
+          unitUid: units[u].uid,
           shotIndex: s,
           slotStartMs: shots[s].startMs,
           slotEndMs: shots[s].endMs,
@@ -167,6 +169,7 @@ class SpeedFitter extends ChangeNotifier {
         key: entry.key,
         candidatePath: path,
         unitIndex: entry.value.unitIndex,
+        unitUid: entry.value.unitUid,
         shotIndex: entry.value.shotIndex,
         slotStartMs: entry.value.slotStartMs,
         slotEndMs: entry.value.slotEndMs,
@@ -179,6 +182,7 @@ class SpeedFitter extends ChangeNotifier {
     required String key,
     required String candidatePath,
     required int unitIndex,
+    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
@@ -191,7 +195,7 @@ class SpeedFitter extends ChangeNotifier {
     // 的「调整字幕根本不生效」就是这么来的
     final from = _fingerprintOf(
         candidatePath: candidatePath,
-        unitIndex: unitIndex,
+        unitUid: unitUid,
         shotIndex: shotIndex,
         slotStartMs: slotStartMs,
         slotEndMs: slotEndMs,
@@ -214,6 +218,7 @@ class SpeedFitter extends ChangeNotifier {
           key: key,
           candidatePath: candidatePath,
           unitIndex: unitIndex,
+          unitUid: unitUid,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,
@@ -227,19 +232,19 @@ class SpeedFitter extends ChangeNotifier {
   /// 「这一段是用什么渲出来的」——候选、坑位、**以及要烧的那几行字**
   String _fingerprintOf({
     required String candidatePath,
-    required int unitIndex,
+    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
     int? trimStartMs,
   }) =>
       '$candidatePath|$slotStartMs-$slotEndMs|t${trimStartMs ?? 0}|'
-      '${subtitleFingerprint(_linesFor(unitIndex: unitIndex, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}|'
+      '${subtitleFingerprint(_linesFor(unitUid: unitUid, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}|'
       '${_style.fingerprint}';
 
   /// 这一镜要烧的字。手改过就用手改的——和导出、属性面板同一个出口
   List<SubtitleLine> _linesFor({
-    required int unitIndex,
+    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
@@ -247,7 +252,7 @@ class SpeedFitter extends ChangeNotifier {
       subtitleLinesForSlot(
         track: subtitleTrackOf?.call() ?? const SubtitleTrack.empty(),
         sentences: sentences,
-        unitIndex: unitIndex,
+        unitUid: unitUid,
         shotIndex: shotIndex,
         slotStartMs: slotStartMs,
         slotEndMs: slotEndMs,
@@ -257,6 +262,7 @@ class SpeedFitter extends ChangeNotifier {
     required String key,
     required String candidatePath,
     required int unitIndex,
+    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
@@ -268,7 +274,7 @@ class SpeedFitter extends ChangeNotifier {
     // 这一段坑位里要显示的台词。**内容进指纹**：改了切分、重新转写、或者人
     // 手改过这一镜的字幕之后，旧切片上烧的字就是错的，不能再命中
     final lines = _linesFor(
-        unitIndex: unitIndex,
+        unitUid: unitUid,
         shotIndex: shotIndex,
         slotStartMs: slotStartMs,
         slotEndMs: slotEndMs);
@@ -295,7 +301,7 @@ class SpeedFitter extends ChangeNotifier {
       }
       _fittedFrom[key] = _fingerprintOf(
           candidatePath: candidatePath,
-          unitIndex: unitIndex,
+          unitUid: unitUid,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,
@@ -335,7 +341,7 @@ class SpeedFitter extends ChangeNotifier {
       _fitted[key] = out;
       _fittedFrom[key] = _fingerprintOf(
           candidatePath: candidatePath,
-          unitIndex: unitIndex,
+          unitUid: unitUid,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,

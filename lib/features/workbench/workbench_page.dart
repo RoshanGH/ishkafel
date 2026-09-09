@@ -912,11 +912,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           // （2026-09-08 真机）。挑素材、剔候选那几条路一直是三步一起做的，
           // 唯独重排和删单元漏了后两步
           replacements: movedReplacements,
-          voices: remapVoicesAfterMove(_task.voices, from: from, to: to),
-          // 手改过的字幕也是按单元下标记的——不搬的话，给 U3 改好的那句
-          // 会烧到 U2 的画面上
-          subtitleTrack:
-              remapSubtitlesAfterMove(_task.subtitleTrack, from: from, to: to));
+          voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
+    // 手改的字幕**什么都不用做**：它按单元的身份记，单元怎么排都还是它
     });
     await _savePickingPlanQuietly(movedReplacements);
     // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
@@ -1090,17 +1087,24 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return subtitleLinesForSlot(
       track: _task.subtitleTrack,
       sentences: _task.asrSentences ?? const [],
-      unitIndex: unitIndex,
+      unitUid: units[unitIndex].uid,
       shotIndex: shotIndex,
       slotStartMs: shots[shotIndex].startMs,
       slotEndMs: shots[shotIndex].endMs,
     );
   }
 
-  bool _subtitleEdited(int unitIndex, int shotIndex) =>
-      _task.subtitleTrack.linesOf(
-          SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex)) !=
-      null;
+  /// 这一格字幕坑位。单元的**身份**是键——单元怎么挪，手改的字幕都还认得回来
+  SubtitleSlot? _subtitleSlot(int unitIndex, int shotIndex) {
+    final units = _editor?.units ?? const [];
+    if (unitIndex < 0 || unitIndex >= units.length) return null;
+    return SubtitleSlot(unitUid: units[unitIndex].uid, shotIndex: shotIndex);
+  }
+
+  bool _subtitleEdited(int unitIndex, int shotIndex) {
+    final slot = _subtitleSlot(unitIndex, shotIndex);
+    return slot != null && _task.subtitleTrack.linesOf(slot) != null;
+  }
 
   /// 这一镜有几行字幕。时间线上多于一行就标个数——轨上只画得下头一句，
   /// 不标的话人不知道双击进去还有别的行
@@ -1133,9 +1137,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _setSubtitleLines(
       int unitIndex, int shotIndex, List<SubtitleLine> lines) {
     if (!_isEditable || _lock != null) return;
+    final slot = _subtitleSlot(unitIndex, shotIndex);
+    if (slot == null) return;
     setState(() => _task = _task.copyWith(
-        subtitleTrack: _task.subtitleTrack.withLines(
-            SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex), lines)));
+        subtitleTrack: _task.subtitleTrack.withLines(slot, lines)));
     // 预览里那一段是烧好字的切片，不重推就永远停在旧那一版
     _syncPreviewAudio();
     unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
@@ -1143,9 +1148,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   void _resetSubtitle(int unitIndex, int shotIndex) {
     if (!_isEditable || _lock != null) return;
-    setState(() => _task = _task.copyWith(
-        subtitleTrack: _task.subtitleTrack.cleared(
-            SubtitleSlot(unitIndex: unitIndex, shotIndex: shotIndex))));
+    final slot = _subtitleSlot(unitIndex, shotIndex);
+    if (slot == null) return;
+    setState(() =>
+        _task = _task.copyWith(subtitleTrack: _task.subtitleTrack.cleared(slot)));
     _syncPreviewAudio();
     unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
   }
@@ -1335,9 +1341,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           replacements: shifted,
           // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
           voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex),
-          // 手改过的字幕同理
-          subtitleTrack: shiftSubtitlesAfterRemoval(_task.subtitleTrack,
-              removed: unitIndex));
+          // 字幕只需要把没人认领的那几句丢掉——剩下的一份都不用动
+          subtitleTrack: _task.subtitleTrack
+              .keepingOnly({for (final u in units) u.uid}));
     });
     await _savePickingPlanQuietly(shifted);
     editor.replaceUnitsForBlankTask(

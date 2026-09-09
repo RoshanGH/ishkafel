@@ -10,7 +10,7 @@ import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 ///
 /// 所以给一条能手改的字幕轨：**字幕是字幕，台词是台词**，改字幕不动 transcript。
 void main() {
-  const slot = SubtitleSlot(unitIndex: 1, shotIndex: 2);
+  const slot = SubtitleSlot(unitUid: 'u1', shotIndex: 2);
 
   group('没手改过就不存', () {
     test('空轨里查不到任何坑位——导出照现在的算法现算', () {
@@ -46,7 +46,7 @@ void main() {
     test('改别的坑位不影响这个', () {
       final track = const SubtitleTrack.empty()
           .withLines(slot, const [SubtitleLine(startMs: 0, endMs: 1, text: 'a')])
-          .withLines(const SubtitleSlot(unitIndex: 0, shotIndex: 0),
+          .withLines(const SubtitleSlot(unitUid: 'u0', shotIndex: 0),
               const [SubtitleLine(startMs: 0, endMs: 1, text: 'b')]);
 
       expect(track.linesOf(slot)!.single.text, 'a');
@@ -65,7 +65,7 @@ void main() {
     test('列出来——界面要标记，切分变了也要照着它问', () {
       final track = const SubtitleTrack.empty()
           .withLines(slot, const [])
-          .withLines(const SubtitleSlot(unitIndex: 0, shotIndex: 0), const []);
+          .withLines(const SubtitleSlot(unitUid: 'u0', shotIndex: 0), const []);
 
       expect(track.editedSlots.length, 2);
       expect(track.editedSlots, contains(slot));
