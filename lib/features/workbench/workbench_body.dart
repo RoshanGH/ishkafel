@@ -4,6 +4,7 @@ import '../../core/ui/text_editing_keys.dart';
 import 'package:flutter/material.dart';
 import '../../core/audio/material_audio.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
+import '../../core/subtitle/subtitle_style.dart';
 import '../../core/models/semantic_unit.dart';
 import 'package:flutter/foundation.dart';
 
@@ -15,6 +16,7 @@ import '../../core/export/composed_timeline.dart';
 import '../../core/playback/playback_controller.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
+import 'preview_subtitle_layer.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/replacement/replacement_plan.dart';
@@ -109,6 +111,20 @@ class WorkbenchBody extends StatefulWidget {
   final bool Function(SemanticUnit unit)? canDeleteUnit;
   final PlaybackController playback;
   final Widget? videoWidget;
+
+  /// 预览画面上这一刻该显示的那行字（**成片**毫秒 → 文本，null = 不出字）。
+  /// 只有被我们换掉画面的镜头才有——没换的镜头字幕烧在原素材像素里，
+  /// 再叠一层就是两行字打架。见 `core/subtitle/preview_subtitle_at.dart`
+  final String? Function(int composedMs)? subtitleAt;
+
+  /// 画字幕用的样式。改一下就即刻重画，不重渲任何切片
+  final SubtitleStyle subtitleStyle;
+
+  /// 点画面上的字幕：打开样式面板
+  final VoidCallback? onSubtitleTap;
+
+  /// 上下拖画面上的字幕：松手时把新的 bottomRatio 落盘
+  final ValueChanged<double>? onSubtitleDragEnd;
   final TimelineMedia? media;
   /// 播放位置（只驱动时间线播放头，不参与页面重建，见 workbench_page.dart）
   final ValueListenable<int> playhead;
@@ -178,6 +194,10 @@ class WorkbenchBody extends StatefulWidget {
     this.canDeleteUnit,
     required this.playback,
     this.videoWidget,
+    this.subtitleAt,
+    this.subtitleStyle = SubtitleStyle.standard,
+    this.onSubtitleTap,
+    this.onSubtitleDragEnd,
     this.media,
     required this.playhead,
     this.mediaStatus = TimelineMediaStatus.ready,
@@ -363,6 +383,26 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
 
   /// 双击某一格要播的**成片**区间。整体替换的单元里点某一镜时给整段——
   /// 那些镜头在成片里已经不存在了，单独播它没有意义
+  /// 预览舞台：画面本体 + **实时**字幕层。
+  ///
+  /// 字幕不烧进切片、由这一层现画，所以调样式（位置/字号/颜色/衬底）既不
+  /// 跑 ffmpeg 也不换播放源——不转圈、不跳回片头
+  Widget? _stage() {
+    final video = widget.videoWidget;
+    final at = widget.subtitleAt;
+    if (video == null || at == null) return video;
+    return Stack(fit: StackFit.expand, children: [
+      video,
+      PreviewSubtitleLayer(
+        positionMs: widget.playhead,
+        textAt: at,
+        style: widget.subtitleStyle,
+        onTap: widget.onSubtitleTap,
+        onDragEnd: widget.onSubtitleDragEnd,
+      ),
+    ]);
+  }
+
   (int, int)? _playRange(ComposedTimeline axis, int unitIndex, int? shotIndex) {
     if (unitIndex < 0 || unitIndex >= axis.units.length) return null;
     if (shotIndex != null) {
@@ -485,7 +525,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                       builder: (context, _) => PlayerPanel(
                         key: _playerPanelKey,
                         playback: playback,
-                        videoWidget: widget.videoWidget,
+                        videoWidget: _stage(),
                         // **成片总长，不是原片总长**：手加的单元、整体替换都会
                         // 改变片长。用原片总长的话末尾对不上时间线——真机上
                         // 时间线画到 01:46 而播放器只到 01:36（2026-09-08）

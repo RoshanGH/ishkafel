@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/subtitle/subtitle_style.dart';
-import 'package:ishkafel/features/director/preview_subtitle.dart';
+import 'package:ishkafel/features/shared/preview_subtitle.dart';
 
 /// 预览字幕层：与导出侧同一套 SubtitleStyle 映射——
 /// 字号 = fontRatio×画面高、底距 = bottomRatio×画面高、四形态。

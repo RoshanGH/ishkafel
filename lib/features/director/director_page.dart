@@ -67,7 +67,7 @@ import '../shared/long_task_dialog.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
-import 'preview_subtitle.dart';
+import '../shared/preview_subtitle.dart';
 import 'tag_picker.dart';
 import 'line_board.dart';
 import 'script_panel.dart';

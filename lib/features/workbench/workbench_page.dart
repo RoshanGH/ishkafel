@@ -17,6 +17,8 @@ import '../director/tag_picker.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../../core/analysis/handpicked_tags.dart';
 import '../../core/subtitle/subtitle_track.dart';
+import '../../core/subtitle/preview_subtitle_at.dart';
+import '../../core/export/composed_timeline.dart';
 import '../../core/subtitle/slot_subtitles.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/editing/edit_locks.dart';
@@ -660,13 +662,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               .inMilliseconds,
       // 切片也编成代理规格：预览链路上每一段规格一致，接缝处才不用重建解码器
       targetSpec: () async => ProxySpec.at(_frameRateArg),
-      // 镜头替换保留台词字幕：用任务里的句级转写在切片上重渲
-      sentences: widget.task.asrSentences ?? const [],
-      // 人手改过的那几镜以他改的为准。**活取**：这个 fitter 是进页面时建的，
-      // 拷一份进去的话预览永远停在打开那一刻
-      subtitleTrackOf: () => _task.subtitleTrack,
-      // 顶栏「字幕」里调的字号/位置/描边。**活取**，理由同上：调完立刻要看到
-      subtitleStyleOf: () => _task.subtitle,
+      // 字幕不烧进切片：调样式要即刻看到，烧的话每动一下就得重渲、重换源
+      // （见 [SpeedFitter] 类注释与 [_previewSubtitleAt]）
     );
   }
 
@@ -805,7 +802,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _agentPoll?.cancel();
     _releaseLock();
     _consequenceTimer?.cancel();
-    _subtitleStylePreview?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
@@ -2003,6 +1999,33 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 交替进行，那道闸门连同它的落库副作用一并删掉了（改动现在随手就存）。
   bool _jianyingBusy = false;
 
+  /// 预览画面上这一刻该显示的那行字。**只有被我们换掉画面的镜头才有**——
+  /// 没换的镜头，台词字幕烧在原素材的像素里，再叠一层就是两行字打架。
+  ///
+  /// 这一层是**现画**的（见 [PreviewSubtitleLayer]）：调样式不重渲切片、
+  /// 不换播放源，所以既不转圈也不跳回片头
+  String? _previewSubtitleAt(int composedMs) {
+    final editor = _editor;
+    if (editor == null) return null;
+    return previewSubtitleAt(
+      composedMs: composedMs,
+      timeline: ComposedTimeline.of(
+          units: editor.units, wholeDurations: _composedDurations),
+      replacements: _replacements ?? const [],
+      track: _task.subtitleTrack,
+      sentences: _task.asrSentences ?? const [],
+    );
+  }
+
+  /// 直接把画面上的字幕拖到想要的高度——比在面板里拧「距底 21%」直观得多
+  Future<void> _dragSubtitleTo(double bottomRatio) async {
+    final next = _task.copyWith(
+        subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio),
+        updatedAt: DateTime.now());
+    setState(() => _task = next);
+    await ref.read(taskRepositoryProvider).save(next);
+  }
+
   /// 改字幕样式。**主要用途是遮挡**：素材自带烧录字幕时（库里不少见，
   /// 而且画面描述里一个字都看不出来），默认的白字黑描边盖不住，
   /// 原字幕会从描边缝里透出来；切成底条或毛玻璃才能盖住。
@@ -2010,40 +2033,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final before = _task.subtitle;
     final picked = await showSubtitleStyleSheet(context,
         initial: before, onPreview: _previewSubtitleStyle);
-    _subtitleStylePreview?.cancel();
     if (!mounted) return;
     if (picked == null) {
       // 取消 = 不要这套。调的过程中已经把预览改成半路那一套了，退回去
       if (_task.subtitle.fingerprint != before.fingerprint) {
         setState(() => _task = _task.copyWith(subtitle: before));
-        _syncPreviewAudio();
       }
       return;
     }
     final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
+    // 预览的字幕是现画的一层，setState 就已经重画了——不推轨道、不换源
     setState(() => _task = next);
-    // 预览里被替换的那几段是**提前烧好字**的切片，样式变了要按新指纹重渲一遍。
-    // 不推的话人调完参数看不到任何变化（2026-09-08 真机）
-    _syncPreviewAudio();
     await ref.read(taskRepositoryProvider).save(next);
   }
 
-  /// 拖动途中的节流：预览里那几段字是**烧进切片**的，样式一变就要重跑一次
-  /// ffmpeg。每动一格跑一次会把机器拖死，所以停手一下再跑
-  Timer? _subtitleStylePreview;
-
-  /// 边调边看：样式改一下就把预览重推一遍。
+  /// 边调边看：样式改一下画面上的字就跟着变。
+  ///
+  /// **一次 ffmpeg 都不跑**——字幕是画上去的一层，不是烧进切片的像素。
+  /// 以前烧在切片里，所以这里还得节流、还得重推轨道，人看到的是每动一下
+  /// 转一次圈再弹回片头（用户原话：「这个跳转太煞笔了」）。
   ///
   /// **只改内存、不落盘**——人还没点「就这样」，这套样式随时可能被取消。
-  /// 用户原话：「现在能调整了，但是没法实时显示位置，有点在盲调的感觉」
   void _previewSubtitleStyle(SubtitleStyle style) {
     // 比指纹，不比对象：SubtitleStyle 没有值相等，`==` 只会永远为假
     if (!mounted || _task.subtitle.fingerprint == style.fingerprint) return;
     setState(() => _task = _task.copyWith(subtitle: style));
-    _subtitleStylePreview?.cancel();
-    _subtitleStylePreview = Timer(const Duration(milliseconds: 220), () {
-      if (mounted) _syncPreviewAudio();
-    });
   }
 
   /// 还有几条素材没落到本地、其中几条是彻底下不下来的。
@@ -2744,6 +2758,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 canDeleteUnit: _task.isBlank ? null : (u) => !u.hasSource,
                 playback: playback,
                 videoWidget: _videoWidget,
+                // 预览的字幕是**现画的一层**，不是烧进切片的像素：
+                // 调位置/字号/颜色即刻生效，不跑 ffmpeg、不换源、不跳帧
+                subtitleAt: _previewSubtitleAt,
+                subtitleStyle: _task.subtitle,
+                onSubtitleTap: _isEditable ? _editSubtitleStyle : null,
+                onSubtitleDragEnd: _isEditable ? _dragSubtitleTo : null,
                 media: _media,
                 mediaStatus: _mediaStatus,
                 playhead: _playhead,

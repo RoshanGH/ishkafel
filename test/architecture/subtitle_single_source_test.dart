@@ -81,14 +81,35 @@ void main() {
 
   test('预览的字幕样式跟着任务走，不能停在默认那套', () {
     // 2026-09-08 真机：「这个参数调整的还是用不了，调整参数也没有变化」。
-    // 导出一直用 _task.subtitle，而预览的变速切片构造时压根没接样式，
-    // 永远是 SubtitleStyle.standard——两边对不上，人怎么调都看不到变化。
+    // 导出一直用 _task.subtitle，而预览压根没接样式，永远是
+    // SubtitleStyle.standard——两边对不上，人怎么调都看不到变化。
+    //
+    // 2026-09-09 起预览的字幕改成画面上现画的一层（字幕不再烧进变速切片，
+    // 见 `preview_subtitle_at.dart`），所以盯的是这一层接没接上。
     final src =
         File('lib/features/workbench/workbench_page.dart').readAsStringSync();
 
-    expect(src, contains('subtitleStyleOf:'),
-        reason: '预览的变速切片没接字幕样式，调了参数只有导出能看到');
-    expect(src, contains('subtitleTrackOf:'),
+    expect(src, contains('subtitleStyle: _task.subtitle'),
+        reason: '预览的字幕层没接任务的样式，调了参数只有导出能看到');
+    expect(src, contains('subtitleAt: _previewSubtitleAt'),
+        reason: '预览没接字幕层，替换镜头上一个字都不会出');
+    expect(File('lib/core/subtitle/preview_subtitle_at.dart').readAsStringSync(),
+        contains('subtitleLinesForSlot('),
+        reason: '预览自己算字幕的话，人手改的那一份到不了画面上');
+    expect(src, contains('track: _task.subtitleTrack'),
         reason: '同理，手改过的字幕也要进预览');
+  });
+
+  test('预览的切片上不能再烧字幕——烧了就要重渲、换源、弹回片头', () {
+    // 2026-09-09 用户原话：「我调整字幕样式的时候应该实时显示，而不是每次
+    // 都要有一个加载的动效，然后跳转到第一帧，这个跳转太煞笔了」。
+    // 字幕一旦进了变速切片的渲染入参，每动一下滑杆就是一次 ffmpeg + 换源。
+    final src =
+        File('lib/features/workbench/speed_fitter.dart').readAsStringSync();
+
+    expect(src.contains('subtitleOverlays'), isFalse,
+        reason: '变速切片又开始烧字幕了，调样式会退回「转圈 + 跳回片头」');
+    expect(src.contains('rasterize('), isFalse,
+        reason: '同上：切片上不该有渲字这一步');
   });
 }

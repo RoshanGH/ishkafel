@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
-import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/export/export_commands.dart';
 import '../../core/replacement/candidate_trim.dart';
 import '../../core/ffmpeg/media_spec.dart';
@@ -12,11 +11,6 @@ import '../../core/log/app_log.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
-import '../../core/subtitle/slot_subtitles.dart';
-import '../../core/subtitle/subtitle_overlay.dart';
-import '../../core/subtitle/subtitle_track.dart';
-import '../../core/subtitle/subtitle_rasterizer.dart';
-import '../../core/subtitle/subtitle_style.dart';
 
 /// 把镜头替换的候选变速成「正好填满原坑位」的切片。
 ///
@@ -28,6 +22,13 @@ import '../../core/subtitle/subtitle_style.dart';
 /// 变速。」——所以有镜头替换时也只渲染那么一两段，不是把整条片子切一遍。
 ///
 /// 产物按内容指纹缓存（见 [RenderedCache]）：换候选才重渲染，换回来就是秒开。
+///
+/// **切片上不带字幕。** 字幕曾经烧在这里，于是调一次字号、挪一次位置就要
+/// 重渲一遍、换一次播放源——转圈几秒、播放头弹回片头（2026-09-09 用户原话：
+/// 「每次都要有一个加载的动效，然后跳转到第一帧，这个跳转太煞笔了」）。
+/// 现在预览的字幕由画面上现画的一层负责（见 [PreviewSubtitleLayer] 与
+/// `core/subtitle/preview_subtitle_at.dart`），这里只管把画面变速铺满坑位；
+/// 导出仍旧照 spec 烧录（见 `export_runner`）。
 class SpeedFitter extends ChangeNotifier {
   final RenderedCache cache;
 
@@ -38,30 +39,6 @@ class SpeedFitter extends ChangeNotifier {
   /// 一条 EDL 播，中间换一次编码播放器就要重建解码器——用户看到的是
   /// 「突然加速、突然变慢」。为 null 表示读不出来，那就不强求
   final Future<MediaSpec?> Function()? targetSpec;
-
-  /// 句级转写（任务的 asrSentences）。镜头替换换掉画面后，原片烧在像素里的
-  /// 台词字幕跟着没了——用它在切片上重渲同一句台词。空表示没有转写
-  /// （老任务/空白任务），切片照渲、不带字幕
-  final List<AsrSentence> sentences;
-
-  /// **手改过的**字幕，活取。用户在属性面板改完立刻要在预览里看到，
-  /// 拷一份进来的话这个 fitter 是页面初始化时建的，永远停在打开那一刻。
-  final SubtitleTrack Function()? subtitleTrackOf;
-
-  /// 字幕样式。**活取**，理由同 [subtitleTrackOf]：顶栏「字幕」里调字号、
-  /// 位置、描边，人调完立刻要在预览里看到。构造时拷一份的话，这个 fitter 是
-  /// 进页面那一刻建的，永远停在默认那套——2026-09-08 真机「调整参数也没有
-  /// 变化」就是这么来的（导出那条路一直用的是任务里的样式，两边对不上）。
-  final SubtitleStyle Function()? subtitleStyleOf;
-
-  /// 没给 [subtitleStyleOf] 时的兜底
-  final SubtitleStyle subtitleStyle;
-
-  SubtitleStyle get _style => subtitleStyleOf?.call() ?? subtitleStyle;
-
-  /// 把字幕行渲成透明 PNG 的渲染器（系统渲字，见 SubtitleRasterizer）。
-  /// 只有 [sentences] 非空才会用到
-  final SubtitleRasterizer rasterizer;
 
   /// 已经渲染好的：镜头 key（见 [TrackPlanBuilder.shotKey]）→ 本地切片
   final Map<String, String> _fitted = {};
@@ -80,12 +57,7 @@ class SpeedFitter extends ChangeNotifier {
     required this.cache,
     required this.probeDurationMs,
     this.targetSpec,
-    this.sentences = const [],
-    this.subtitleTrackOf,
-    this.subtitleStyleOf,
-    this.subtitleStyle = SubtitleStyle.standard,
-    SubtitleRasterizer? rasterizer,
-  }) : rasterizer = rasterizer ?? SubtitleRasterizer();
+  });
 
   MediaSpec? _target;
   bool _targetResolved = false;
@@ -122,7 +94,6 @@ class SpeedFitter extends ChangeNotifier {
         ({
       int candidateId,
       int unitIndex,
-      String unitUid,
       int shotIndex,
       int slotStartMs,
       int slotEndMs,
@@ -138,7 +109,6 @@ class SpeedFitter extends ChangeNotifier {
           wanted[TrackPlanBuilder.shotKey(u, s)] = (
           candidateId: pick,
           unitIndex: u,
-          unitUid: units[u].uid,
           shotIndex: s,
           slotStartMs: shots[s].startMs,
           slotEndMs: shots[s].endMs,
@@ -169,7 +139,6 @@ class SpeedFitter extends ChangeNotifier {
         key: entry.key,
         candidatePath: path,
         unitIndex: entry.value.unitIndex,
-        unitUid: entry.value.unitUid,
         shotIndex: entry.value.shotIndex,
         slotStartMs: entry.value.slotStartMs,
         slotEndMs: entry.value.slotEndMs,
@@ -182,7 +151,6 @@ class SpeedFitter extends ChangeNotifier {
     required String key,
     required String candidatePath,
     required int unitIndex,
-    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
@@ -195,8 +163,6 @@ class SpeedFitter extends ChangeNotifier {
     // 的「调整字幕根本不生效」就是这么来的
     final from = _fingerprintOf(
         candidatePath: candidatePath,
-        unitUid: unitUid,
-        shotIndex: shotIndex,
         slotStartMs: slotStartMs,
         slotEndMs: slotEndMs,
         trimStartMs: trimStartMs);
@@ -218,7 +184,6 @@ class SpeedFitter extends ChangeNotifier {
           key: key,
           candidatePath: candidatePath,
           unitIndex: unitIndex,
-          unitUid: unitUid,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,
@@ -229,40 +194,22 @@ class SpeedFitter extends ChangeNotifier {
     }
   }
 
-  /// 「这一段是用什么渲出来的」——候选、坑位、**以及要烧的那几行字**
+  /// 「这一段是用什么渲出来的」——候选、坑位、取段起点。
+  ///
+  /// **字幕不在里面**：切片上不带字（见类注释），所以改字号、挪位置、
+  /// 改台词都不该让这里失效重渲
   String _fingerprintOf({
     required String candidatePath,
-    required String unitUid,
-    required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
     int? trimStartMs,
   }) =>
-      '$candidatePath|$slotStartMs-$slotEndMs|t${trimStartMs ?? 0}|'
-      '${subtitleFingerprint(_linesFor(unitUid: unitUid, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}|'
-      '${_style.fingerprint}';
-
-  /// 这一镜要烧的字。手改过就用手改的——和导出、属性面板同一个出口
-  List<SubtitleLine> _linesFor({
-    required String unitUid,
-    required int shotIndex,
-    required int slotStartMs,
-    required int slotEndMs,
-  }) =>
-      subtitleLinesForSlot(
-        track: subtitleTrackOf?.call() ?? const SubtitleTrack.empty(),
-        sentences: sentences,
-        unitUid: unitUid,
-        shotIndex: shotIndex,
-        slotStartMs: slotStartMs,
-        slotEndMs: slotEndMs,
-      );
+      '$candidatePath|$slotStartMs-$slotEndMs|t${trimStartMs ?? 0}';
 
   Future<void> _fitLocked({
     required String key,
     required String candidatePath,
     required int unitIndex,
-    required String unitUid,
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
@@ -271,26 +218,14 @@ class SpeedFitter extends ChangeNotifier {
     final slotMs = slotEndMs - slotStartMs;
     final candidateMs = await probeDurationMs(candidatePath);
     final target = await _resolveTarget();
-    // 这一段坑位里要显示的台词。**内容进指纹**：改了切分、重新转写、或者人
-    // 手改过这一镜的字幕之后，旧切片上烧的字就是错的，不能再命中
-    final lines = _linesFor(
-        unitUid: unitUid,
-        shotIndex: shotIndex,
-        slotStartMs: slotStartMs,
-        slotEndMs: slotEndMs);
-    final width = target?.width ?? ExportCommands.width;
-    final height = target?.height ?? ExportCommands.height;
-    final subFingerprint = subtitleFingerprint(lines);
-    final subKey = subFingerprint.isEmpty
-        ? ''
-        : '|sub$subFingerprint|${_style.fingerprint}';
     // **和导出、剪映走同一个函数**：三条路必须给出同一个答案，
     // 否则人会照着预览下判断、拿到一条不一样的成片
     final cut = trimFor(
         materialMs: candidateMs ?? 0, slotMs: slotMs, startMs: trimStartMs);
-    // 取段起点进指纹：换了截哪一段却复用旧切片，人看到的是「调了没反应」
+    // 取段起点进指纹：换了截哪一段却复用旧切片，人看到的是「调了没反应」。
+    // **v3 起切片上不带字幕**：v2 的缓存里烧着字，复用它画面上就是两层字
     final cacheKey =
-        'fit|v2|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target$subKey';
+        'fit|v3|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -301,8 +236,6 @@ class SpeedFitter extends ChangeNotifier {
       }
       _fittedFrom[key] = _fingerprintOf(
           candidatePath: candidatePath,
-          unitUid: unitUid,
-          shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,
           trimStartMs: trimStartMs);
@@ -311,16 +244,6 @@ class SpeedFitter extends ChangeNotifier {
 
     _notify();
     try {
-      // 字幕图放在缓存目录里、按内容指纹命名——已渲过的句子直接复用
-      final overlays = lines.isEmpty
-          ? const <SubtitleOverlayImage>[]
-          : await rasterizer.rasterize(
-              lines: lines,
-              width: width,
-              height: height,
-              style: _style,
-              outDir: cache.dir,
-            );
       final out = await cache.render(
         key: cacheKey,
         prefix: 'fit',
@@ -334,15 +257,12 @@ class SpeedFitter extends ChangeNotifier {
           out: dest,
           // 和原片一个规格，播放器换段时才不用重建解码器
           target: target,
-          subtitleOverlays: overlays,
         ),
         what: '把替换镜头变速对齐坑位',
       );
       _fitted[key] = out;
       _fittedFrom[key] = _fingerprintOf(
           candidatePath: candidatePath,
-          unitUid: unitUid,
-          shotIndex: shotIndex,
           slotStartMs: slotStartMs,
           slotEndMs: slotEndMs,
           trimStartMs: trimStartMs);
