@@ -163,6 +163,52 @@ void _byDimension() {
         reason: '不显示的话用户会以为这个维度压根没送进去');
   });
 
+  /// 2026-09-09 真机，用户截图标注：「改完以后这里不变化」。
+  ///
+  /// 「改标签」写的是 shot.tags，而属性栏当时画的是 trace.tagsByDimension
+  /// ——那是打标那一刻模型的原始回答，手改一个字都不会动它。于是删到只剩
+  /// 一个，界面照旧摆着原来四个。
+  group('手改标签之后，分维度显示要跟着变', () {
+    const trace = TagTrace(
+      tagsByDimension: {
+        '植源场景': ['厨房情景', '客厅情景'],
+        '植源动作': ['打开电器'],
+      },
+    );
+
+    testWidgets('删掉的标签不再显示', (tester) async {
+      await _pump(tester, tags: ['厨房情景'], trace: trace);
+
+      expect(find.text('厨房情景'), findsOneWidget);
+      expect(find.text('客厅情景'), findsNothing,
+          reason: '人已经把它删了，属性栏还摆着就是「改完不变化」');
+      expect(find.text('打开电器'), findsNothing);
+    });
+
+    testWidgets('维度被删空了照旧留着这一行，写成「—」', (tester) async {
+      await _pump(tester, tags: ['厨房情景'], trace: trace);
+
+      expect(find.text('植源动作'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget);
+    });
+
+    testWidgets('人手加的标签一个都不能吞', (tester) async {
+      await _pump(tester, tags: ['厨房情景', '手加的一个'], trace: trace);
+
+      expect(find.text('手加的一个'), findsOneWidget,
+          reason: '维度表里没有它，归到「其他」也要露出来');
+      expect(find.text('其他'), findsOneWidget);
+    });
+
+    testWidgets('模型打的一个都没留下：退回一排，不摆空骨架', (tester) async {
+      await _pump(tester, tags: ['全换成手选的'], trace: trace);
+
+      expect(find.text('全换成手选的'), findsOneWidget);
+      expect(find.text('植源场景'), findsNothing);
+      expect(find.text('—'), findsNothing);
+    });
+  });
+
   testWidgets('展开过程量能看到这一层的约束', (tester) async {
     await _pump(
       tester,

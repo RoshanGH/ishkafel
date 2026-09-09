@@ -7,6 +7,7 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/models/tag_trace.dart';
 import 'inspector_widgets.dart';
+import 'tag_dimension_view.dart';
 
 /// 打标结果 + 打标过程量。
 ///
@@ -105,7 +106,11 @@ class _TagTraceSectionState extends State<TagTraceSection> {
           style: TextStyle(
               color: AppColors.textTertiary, fontSize: AppFontSize.caption));
     }
-    final byDimension = widget.trace?.tagsByDimension ?? const {};
+    // 拿 trace 里的维度当分组依据，内容以**当前**标签为准：那份分维度的
+    // 结果是打标那一刻的原始回答，手改一个字都不会动它（见
+    // [tagsByDimensionView]）
+    final byDimension = tagsByDimensionView(
+        widget.tags, widget.trace?.tagsByDimension ?? const {});
     if (byDimension.isEmpty) return inspectorTagChips(widget.tags);
 
     return Column(
