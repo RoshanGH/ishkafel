@@ -212,7 +212,7 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
               // 光标离开这一格时才交（见 [_commitIfLeft]）；回车也算改完
               onSubmitted: (_) => _commitIfLeft(i),
               // 点到别处就交出焦点：既把这一格提交掉，也把空格还给播放/暂停
-              onTapOutside: releaseFocusOnTapOutside,
+              onTapOutside: (_) => KeyboardHome.take(context),
             ),
           ),
           IconButton(

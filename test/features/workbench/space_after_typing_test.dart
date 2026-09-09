@@ -30,14 +30,17 @@ void main() {
       (tester) async {
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
-        body: Column(children: [
-          TextField(
-            key: const Key('f'),
-            onTapOutside: releaseFocusOnTapOutside,
+        body: KeyboardHome(
+            child: Column(children: [
+          Builder(
+            builder: (context) => TextField(
+              key: const Key('f'),
+              onTapOutside: (_) => KeyboardHome.take(context),
+            ),
           ),
           const SizedBox(
               key: Key('outside'), width: 200, height: 200),
-        ]),
+        ])),
       ),
     ));
 
@@ -52,6 +55,37 @@ void main() {
     expect(isEditableTextFocused(), isFalse,
         reason: '焦点还留在框里的话，空格会一直被当成「在框里打空格」，'
             '播放/暂停就此失灵');
+  });
+
+  /// 只 unfocus() 是不够的：焦点落空之后 Flutter 不知道该把按键送到哪个
+  /// Shortcuts 上，**空格和方向键会一起哑掉**——2026-09-09 真机实测，
+  /// 点一下台词框再点时间线，整套键位全部无反应。所以要有人接住焦点。
+  testWidgets('焦点交出去之后有人接住，不是落空', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: KeyboardHome(
+            child: Column(children: [
+          Builder(
+            builder: (context) => TextField(
+              key: const Key('f'),
+              onTapOutside: (_) => KeyboardHome.take(context),
+            ),
+          ),
+          const SizedBox(key: Key('outside'), width: 200, height: 200),
+        ])),
+      ),
+    ));
+
+    await tester.tap(find.byKey(const Key('f')));
+    await tester.pumpAndSettle();
+    await tester.tapAt(tester.getCenter(find.byKey(const Key('outside'))));
+    await tester.pumpAndSettle();
+
+    expect(isEditableTextFocused(), isFalse);
+    expect(FocusManager.instance.primaryFocus, isNotNull,
+        reason: '焦点落空的话，页面级快捷键收不到任何按键');
+    expect(FocusManager.instance.primaryFocus!.debugLabel, 'KeyboardHome',
+        reason: '要落在页面这个落脚点上，按键才能继续走 Shortcuts');
   });
 
   testWidgets('没有接 onTapOutside 的输入框，点别处焦点是不会走的',

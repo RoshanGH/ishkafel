@@ -588,7 +588,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
       onChanged: (text) => widget.controller.updateTranscript(unitIndex, text),
       // 点到别处就交出焦点，否则空格一直被当成「在框里打空格」，
       // 播放/暂停就此失灵（见 [releaseFocusOnTapOutside]）
-      onTapOutside: releaseFocusOnTapOutside,
+      onTapOutside: (_) => KeyboardHome.take(context),
     );
   }
 }

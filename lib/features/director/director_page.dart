@@ -3252,7 +3252,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           _redo();
         },
       },
-      child: FocusScope(
+      // 输入框交出焦点之后由它接住，否则焦点落空、整套键位一起哑掉
+      // （见 [KeyboardHome]）
+      child: KeyboardHome(
+          child: FocusScope(
         autofocus: true,
         child: Scaffold(
       backgroundColor: AppColors.background,
@@ -3509,7 +3512,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ),
       ]),
         ),
-      ),
+      )),
     );
   }
 

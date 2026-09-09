@@ -318,7 +318,7 @@ class _LineRowState extends State<_LineRow> {
                 child: TextField(
                   // 点到别处就交出焦点，否则空格一直被判成「在框里打空格」，
                   // 播放/暂停就此失灵
-                  onTapOutside: releaseFocusOnTapOutside,
+                  onTapOutside: (_) => KeyboardHome.take(context),
                   controller: _controller,
                   focusNode: _focus,
                   maxLines: null,

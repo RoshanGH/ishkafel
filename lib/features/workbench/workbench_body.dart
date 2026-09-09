@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/material.dart';
 import '../../core/audio/material_audio.dart';
@@ -411,7 +412,10 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     final playback = widget.playback;
     return Shortcuts(
       shortcuts: workbenchPlaybackShortcuts,
-      child: Actions(
+      // 输入框交出焦点之后由它接住，否则焦点落空、整套键位一起哑掉
+      // （见 [KeyboardHome]）
+      child: KeyboardHome(
+          child: Actions(
         actions: workbenchPlaybackActions(
           onTogglePlay: _togglePlaybackFromShortcut,
           onStepFrame: _stepPlaybackFromShortcut,
@@ -555,7 +559,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 

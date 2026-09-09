@@ -45,17 +45,52 @@ const Map<ShortcutActivator, Intent> textEditingPassthrough =
       DoNothingAndStopPropagationIntent(),
 };
 
-/// **点到别处就交出焦点。**
+/// **页面级快捷键的落脚点。**
 ///
-/// 用在输入框的 `onTapOutside` 上。macOS 上 Flutter 的 TextField 默认不会
-/// 因为点了别处就失焦——人在台词框里打完字，去时间线上点一下播放头，焦点
-/// 还留在框里，于是 [isEditableTextFocused] 照旧为真，空格被当成「在输入框
-/// 里打空格」放行掉，播放/暂停就此失灵。用户原话：「你改了打字输入中文之后
-/// 空格就不能正常暂停播放了。」
+/// 输入框交出焦点之后必须有人接住。只 `unfocus()` 的话焦点落空，Flutter
+/// 不知道该把按键送到哪个 `Shortcuts` 上，**空格和方向键会一起哑掉**——
+/// 比原来那个「空格被当成打空格」更糟，因为整套键位都没了。
+/// 2026-09-09 真机实测：点一下台词框、再点时间线，空格和 ←→ 全部无反应，
+/// 一直到手动点中一个能拿焦点的控件才恢复。
 ///
-/// 交出焦点顺带把输入法未上屏的组合提交掉，这正是「我打完了」该有的行为。
-void releaseFocusOnTapOutside(PointerDownEvent _) =>
-    FocusManager.instance.primaryFocus?.unfocus();
+/// 把它摆在页面的 `Shortcuts` 里面、包住整块内容；输入框的 `onTapOutside`
+/// 调 [KeyboardHome.take]，焦点就从输入框回到这里，按键照旧走页面快捷键。
+class KeyboardHome extends StatefulWidget {
+  final Widget child;
+  const KeyboardHome({super.key, required this.child});
+
+  /// 把焦点收回页面。找不到（不在 [KeyboardHome] 里）时退回单纯失焦——
+  /// 至少别把焦点继续留在输入框里
+  static void take(BuildContext context) {
+    final node = context.findAncestorStateOfType<_KeyboardHomeState>()?._node;
+    if (node == null) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      return;
+    }
+    node.requestFocus();
+  }
+
+  @override
+  State<KeyboardHome> createState() => _KeyboardHomeState();
+}
+
+class _KeyboardHomeState extends State<KeyboardHome> {
+  final FocusNode _node = FocusNode(debugLabel: 'KeyboardHome');
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Focus(
+        focusNode: _node,
+        // 只做落脚点，不吃按键：按键照旧往上冒泡到页面的 Shortcuts
+        skipTraversal: true,
+        child: widget.child,
+      );
+}
 
 /// 把一个输入框（或一片输入区）包起来，让上面那些键归它自己。
 class TextEditingKeys extends StatelessWidget {
