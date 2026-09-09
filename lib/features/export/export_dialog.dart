@@ -47,7 +47,7 @@ Future<void> showExportDialog(
   required List<SemanticUnit> units,
   required List<UnitReplacement> replacements,
   BgmPlan bgm = BgmPlan.empty,
-  Map<int, String> voiceAudio = const {},
+  Map<String, String> voiceAudio = const {},
   VoicePlan voices = VoicePlan.empty,
 
   /// 分离出来的纯人声轨：被配乐覆盖的段落要用它
@@ -149,7 +149,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final List<SemanticUnit> units;
   final List<UnitReplacement> replacements;
   final BgmPlan bgm;
-  final Map<int, String> voiceAudio;
+  final Map<String, String> voiceAudio;
   final VoicePlan voices;
   final String? vocalsPath;
   final List<AsrSentence> subtitleSentences;

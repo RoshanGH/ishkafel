@@ -13,6 +13,7 @@ const _vocals = '/v/纯人声.wav';
 /// U1 = 0~4000（两个镜头）、U2 = 4000~10000（一个镜头）
 List<SemanticUnit> _units() => const [
       SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 4000,
@@ -23,6 +24,7 @@ List<SemanticUnit> _units() => const [
         ],
       ),
       SemanticUnit(
+        uid: 'u1',
         index: 1,
         startMs: 4000,
         endMs: 10000,
@@ -36,7 +38,7 @@ TrackPlan build({
   Map<int, LocalMaterial> materials = const {},
   Map<String, String> speedFitted = const {},
   String? vocalsPath,
-  Map<int, String> voiceAudio = const {},
+  Map<String, String> voiceAudio = const {},
   BgmPlan bgm = BgmPlan.empty,
   Map<int, String> bgmPaths = const {},
 }) =>
@@ -155,7 +157,7 @@ void main() {
 
   group('声音按段落取源', () {
     test('换过音色的单元整段用配音', () {
-      final plan = build(voiceAudio: {0: '/tts/u0.wav'});
+      final plan = build(voiceAudio: {'u0': '/tts/u0.wav'});
 
       expect(plan.voice.first.source, '/tts/u0.wav');
       expect(plan.voice.first.durationMs, 4000);

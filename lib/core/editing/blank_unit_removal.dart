@@ -1,5 +1,4 @@
 import '../audio/bgm_plan.dart';
-import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
 
 /// 删掉一个分子之后，把**所有按分子下标记的东西**跟着挪。
@@ -48,18 +47,3 @@ BgmPlan shiftBgmAfterRemoval(BgmPlan plan, {required int removed}) {
   }
   return BgmPlan(kept);
 }
-
-/// 配音按 [VoiceAssignment.unitIndex] 记，删了一个之后后面的整体前移。
-///
-/// **这一条是补的**：删除原本只搬了替换方案和配乐两份，而配音是后来才加的
-/// 第三种按下标记的数据，漏在了外面——删掉 U2 之后，本该念 U3 的配音会跑到
-/// U2 身上，不报错，只有听出来才知道。
-VoicePlan shiftVoicesAfterRemoval(VoicePlan plan, {required int removed}) =>
-    VoicePlan([
-      for (final a in plan.assignments)
-        if (a.unitIndex != removed)
-          VoiceAssignment(
-              unitIndex:
-                  a.unitIndex > removed ? a.unitIndex - 1 : a.unitIndex,
-              voice: a.voice),
-    ]);

@@ -28,23 +28,36 @@ class VoiceRef {
   int get hashCode => Object.hash(id, name);
 }
 
-/// 某个台词语义单元换成哪个音色
+/// 某个台词语义单元换成哪个音色。
+///
+/// **按单元的身份记，不按位置**（[SemanticUnit.uid]）：位置一挪，本该念 U3
+/// 的配音就会跑到 U2 身上——2026-09-07 真机上就是这么错的，而且不报错，
+/// 只有听出来才知道。
 class VoiceAssignment {
-  final int unitIndex;
+  final String unitUid;
   final VoiceRef voice;
 
-  const VoiceAssignment({required this.unitIndex, required this.voice});
+  const VoiceAssignment({required this.unitUid, required this.voice});
 
   Map<String, dynamic> toJson() =>
-      {'unitIndex': unitIndex, 'voice': voice.toJson()};
+      {'unitUid': unitUid, 'voice': voice.toJson()};
 
-  static VoiceAssignment? tryFromJson(Object? raw) {
+  /// [uidAt] 是给**老存档**用的：那时按 `unitIndex` 记，读的时候翻译成身份。
+  /// 返回 null 表示那个下标已经不存在，这条丢掉
+  static VoiceAssignment? tryFromJson(Object? raw,
+      {String? Function(int unitIndex)? uidAt}) {
     if (raw is! Map) return null;
-    final index = raw['unitIndex'];
-    if (index is! int || index < 0) return null;
     final voice = VoiceRef.tryFromJson(raw['voice']);
     if (voice == null) return null;
-    return VoiceAssignment(unitIndex: index, voice: voice);
+    final uid = raw['unitUid'];
+    if (uid is String && uid.isNotEmpty) {
+      return VoiceAssignment(unitUid: uid, voice: voice);
+    }
+    final index = raw['unitIndex'];
+    if (index is! int || index < 0) return null;
+    final migrated = uidAt?.call(index);
+    if (migrated == null || migrated.isEmpty) return null;
+    return VoiceAssignment(unitUid: migrated, voice: voice);
   }
 }
 
@@ -63,32 +76,43 @@ class VoicePlan {
   bool get isEmpty => assignments.isEmpty;
 
   /// 这个单元换成了哪个音色；没换返回 null（=保持原声）
-  VoiceRef? voiceOf(int unitIndex) => assignments
-      .firstWhereOrNull((a) => a.unitIndex == unitIndex)
-      ?.voice;
+  VoiceRef? voiceOf(String unitUid) =>
+      assignments.firstWhereOrNull((a) => a.unitUid == unitUid)?.voice;
 
-  /// 所有被指定了音色的单元下标，升序
-  List<int> get assignedUnits =>
-      List.unmodifiable(assignments.map((a) => a.unitIndex).toList()..sort());
+  /// 所有被指定了音色的单元身份
+  Set<String> get assignedUnits =>
+      Set.unmodifiable({for (final a in assignments) a.unitUid});
 
   /// 给若干单元指定同一个音色。已经指定过的单元被覆盖——同一个单元留两条
   /// 记录，导出时不知道该听谁的。
-  VoicePlan assign(Iterable<int> unitIndexes, VoiceRef voice) {
-    final targets = unitIndexes.toSet();
+  VoicePlan assign(Iterable<String> unitUids, VoiceRef voice) {
+    final targets = unitUids.toSet();
     return VoicePlan(List.unmodifiable([
       for (final a in assignments)
-        if (!targets.contains(a.unitIndex)) a,
-      for (final i in targets) VoiceAssignment(unitIndex: i, voice: voice),
+        if (!targets.contains(a.unitUid)) a,
+      for (final uid in targets) VoiceAssignment(unitUid: uid, voice: voice),
     ]));
   }
 
   /// 取消指定，回到原声
-  VoicePlan clear(Iterable<int> unitIndexes) {
-    final targets = unitIndexes.toSet();
+  VoicePlan clear(Iterable<String> unitUids) {
+    final targets = unitUids.toSet();
     return VoicePlan(List.unmodifiable([
       for (final a in assignments)
-        if (!targets.contains(a.unitIndex)) a,
+        if (!targets.contains(a.unitUid)) a,
     ]));
+  }
+
+  /// 删掉单元之后：把没人认领的那几条丢掉。
+  /// **挪动顺序什么都不用做**——按身份记，单元怎么排都还是它
+  VoicePlan keepingOnly(Set<String> liveUids) {
+    final kept = [
+      for (final a in assignments)
+        if (liveUids.contains(a.unitUid)) a,
+    ];
+    return kept.length == assignments.length
+        ? this
+        : VoicePlan(List.unmodifiable(kept));
   }
 
   List<Map<String, dynamic>> toJson() =>
@@ -101,7 +125,7 @@ class VoicePlan {
     if (other is! VoicePlan) return false;
     if (other.assignments.length != assignments.length) return false;
     for (var i = 0; i < assignments.length; i++) {
-      if (other.assignments[i].unitIndex != assignments[i].unitIndex ||
+      if (other.assignments[i].unitUid != assignments[i].unitUid ||
           other.assignments[i].voice != assignments[i].voice) {
         return false;
       }
@@ -111,14 +135,15 @@ class VoicePlan {
 
   @override
   int get hashCode => Object.hashAll(
-      [for (final a in assignments) Object.hash(a.unitIndex, a.voice)]);
+      [for (final a in assignments) Object.hash(a.unitUid, a.voice)]);
 
   /// 宽松解析：一条畸形只丢那一条。任务 JSON 里一处解析失败就让整条任务
   /// 从列表消失，用户看到的是「我的任务不见了」。
-  static VoicePlan fromJson(Object? raw) {
+  static VoicePlan fromJson(Object? raw,
+      {String? Function(int unitIndex)? uidAt}) {
     if (raw is! List) return empty;
     return VoicePlan(List.unmodifiable([
-      for (final e in raw) ?VoiceAssignment.tryFromJson(e),
+      for (final e in raw) ?VoiceAssignment.tryFromJson(e, uidAt: uidAt),
     ]));
   }
 }

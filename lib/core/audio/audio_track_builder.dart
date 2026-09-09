@@ -94,7 +94,7 @@ class AudioTrackBuilder {
     required List<SemanticUnit> units,
     String? vocalsPath,
     BgmPlan bgm = BgmPlan.empty,
-    Map<int, String> voiceAudio = const {},
+    Map<String, String> voiceAudio = const {},
 
     /// 这是第几条导出变体。配乐每一段可以选多首**备选**，按这个序号轮流取
     /// （见 [BgmSegment.materialFor]）。预览传 null，那时用各段的预览版
@@ -276,7 +276,7 @@ class AudioTrackBuilder {
     required String? sourcePath,
     required String? vocalsPath,
     required Set<int> covered,
-    required Map<int, String> voiceAudio,
+    required Map<String, String> voiceAudio,
 
     /// 这个单元被整体替换了：口播来自这条候选素材，整段取用不裁不补
     String? wholeAudio,
@@ -317,7 +317,8 @@ class AudioTrackBuilder {
       ];
     }
 
-    final voice = voiceAudio[unit.index];
+    // 按单元的**身份**取：按位置取的话，人挪过顺序之后念的是别人那段
+    final voice = voiceAudio[unit.uid];
     if (voice != null && File(voice).existsSync()) {
       return [
         await _cache.render(

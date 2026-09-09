@@ -168,7 +168,8 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
     replacements:
         shiftReplacementsAfterRemoval(task.replacements ?? const [], removed: unit),
     bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
-    voices: shiftVoicesAfterRemoval(task.voices, removed: unit),
+    voices: task.voices
+        .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
     subtitleTrack: task.subtitleTrack
         .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
     updatedAt: DateTime.now(),
@@ -199,7 +200,6 @@ Future<int> _move(FileTaskRepository repository, RenewTask task, int? unit,
     units: moved,
     replacements: remapReplacementsAfterMove(task.replacements ?? const [],
         from: unit, to: to, unitCount: moved.length),
-    voices: remapVoicesAfterMove(task.voices, from: unit, to: to),
     bgm: bgm.plan,
     updatedAt: DateTime.now(),
   );

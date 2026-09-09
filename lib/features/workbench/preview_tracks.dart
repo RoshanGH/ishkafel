@@ -96,7 +96,7 @@ class PreviewTracks extends ChangeNotifier {
   Future<void> update({
     required RenewTask task,
     required List<SemanticUnit> units,
-    required Map<int, String> voiceAudio,
+    required Map<String, String> voiceAudio,
     List<UnitReplacement> replacements = const [],
   }) async {
     // 变速切片要按新方案补齐；补好了会回调，那时再重建一次
@@ -213,7 +213,7 @@ class PreviewTracks extends ChangeNotifier {
   TrackPlan _build({
     required RenewTask task,
     required List<SemanticUnit> units,
-    required Map<int, String> voiceAudio,
+    required Map<String, String> voiceAudio,
     required List<UnitReplacement> replacements,
   }) {
     // 时长取自落地记录（挑素材时探过一次，随任务存着），不必再 ffprobe

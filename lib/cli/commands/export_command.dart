@@ -210,10 +210,12 @@ Future<int> runExportCommand({
   // （见 VoiceSwapJob.audioFor）。不带上它们的话，CLI 导出会静默用回原声，
   // 且「选了音色未生成配音」的交付拦截也会因 voices 为空而失效
   final voiceDir = p.join(dataDir.path, 'voices', id);
+  // 按单元的**身份**取文件名（见 VoiceSwapJob.audioFor）：写下标的话，
+  // 人挪过单元之后取到的是别人的配音
   final voiceAudio = {
-    for (final i in task.voices.assignedUnits)
-      if (File(p.join(voiceDir, 'unit_$i.mp3')).existsSync())
-        i: p.join(voiceDir, 'unit_$i.mp3'),
+    for (final uid in task.voices.assignedUnits)
+      if (File(p.join(voiceDir, 'unit_$uid.mp3')).existsSync())
+        uid: p.join(voiceDir, 'unit_$uid.mp3'),
   };
 
   final outcomes = await runner.exportCombinations(

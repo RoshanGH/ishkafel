@@ -513,7 +513,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 已经生成好的配音文件，按台词语义单元下标。有文件才给试听按钮——
   /// 给一个点了没声音的按钮比不给还糟。
-  Map<int, String> _voiceAudio = const {};
+  Map<String, String> _voiceAudio = const {};
 
   /// 试听用的独立播放器：时间线那个正播着原片，不能把它的位置弄丢
   AudioPreview? _preview;
@@ -911,9 +911,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           // 挪动之前那一格——挑给这个单元的素材跑到别人身上，不报任何错
           // （2026-09-08 真机）。挑素材、剔候选那几条路一直是三步一起做的，
           // 唯独重排和删单元漏了后两步
-          replacements: movedReplacements,
-          voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
-    // 手改的字幕**什么都不用做**：它按单元的身份记，单元怎么排都还是它
+          // 配音和手改字幕**什么都不用做**：它们按单元的身份记，
+          // 单元怎么排都还是它
+          replacements: movedReplacements);
     });
     await _savePickingPlanQuietly(movedReplacements);
     // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
@@ -1340,8 +1340,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           // 和重排同理：内存、_task、盘上三处都要改
           replacements: shifted,
           // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
-          voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex),
-          // 字幕只需要把没人认领的那几句丢掉——剩下的一份都不用动
+          // 配音和字幕只需要把没人认领的那几条丢掉——剩下的一份都不用动
+          voices: _task.voices.keepingOnly({for (final u in units) u.uid}),
           subtitleTrack: _task.subtitleTrack
               .keepingOnly({for (final u in units) u.uid}));
     });
@@ -1439,9 +1439,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       focusedUnit: unitIndex,
     );
     if (choice == null || !mounted) return;
+    // 界面上人选的是 U1/U2（位置），存的是单元自己的身份
+    final uids = [
+      for (final i in choice.unitIndexes)
+        if (i >= 0 && i < editor.units.length) editor.units[i].uid,
+    ];
     final next = choice.voice == null
-        ? _task.voices.clear(choice.unitIndexes)
-        : _task.voices.assign(choice.unitIndexes, choice.voice!);
+        ? _task.voices.clear(uids)
+        : _task.voices.assign(uids, choice.voice!);
     setState(() => _task = _task.copyWith(voices: next));
     _syncPreviewAudio();
     try {
@@ -1480,7 +1485,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _voiceProgress = (0, _task.voices.assignedUnits.length));
     try {
       // 合成按字符计费，且用户会反复改台词重生成——记进这个任务的账
-      late Map<int, VoiceSwapResult> results;
+      late Map<String, VoiceSwapResult> results;
       final usage = await AiUsageScope.collect(
         () async {
           results = await job.service.run(
@@ -1498,7 +1503,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       );
       _task = _task.copyWith(aiUsage: _task.aiUsage.merge(usage));
       // 落盘：跑一轮要几十秒到几分钟，只留在内存里的话关掉页面就得重跑
-      final written = <int, String>{};
+      final written = <String, String>{};
       job.outputDir.createSync(recursive: true);
       for (final entry in results.entries) {
         final file = job.audioFor(entry.key)
@@ -1514,7 +1519,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             ? '已生成 ${written.length} 句配音，可在检查器里试听'
             // 失败的那几句要点名，用户才知道去重跑哪几句
             : '已生成 ${written.length} 句；'
-                '${failed.keys.map((i) => 'U${i + 1}').join('、')} 失败，可再点一次只补这几句'),
+                // 失败的按身份记，说给人听要翻译回 U1/U2
+                '${[for (var i = 0; i < editor.units.length; i++) if (failed.containsKey(editor.units[i].uid)) 'U${i + 1}'].join('、')} 失败，可再点一次只补这几句'),
         backgroundColor: failed.isEmpty ? null : AppColors.red,
       ));
     } catch (e) {
@@ -1530,9 +1536,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
-  /// 试听某个单元已生成的配音
+  /// 试听某个单元已生成的配音。**按身份取**：按位置取的话，人挪过顺序之后
+  /// 试听到的是别人那一段
   Future<void> _previewVoice(int unitIndex) async {
-    final path = _voiceAudio[unitIndex];
+    final units = _editor?.units ?? const [];
+    if (unitIndex < 0 || unitIndex >= units.length) return;
+    final path = _voiceAudio[units[unitIndex].uid];
     if (path == null) return;
     try {
       await (_preview ??= widget.audioPreview ?? AudioPreview()).play(path);
@@ -2705,8 +2714,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 voices: _task.voices,
                 replacements: _replacements ?? const [],
                 onChangeVoice: _isEditable ? _changeVoice : null,
-                previewVoice: (i) =>
-                    _voiceAudio.containsKey(i) ? () => _previewVoice(i) : null,
+                previewVoice: (i) {
+                  final units = _editor?.units ?? const [];
+                  if (i < 0 || i >= units.length) return null;
+                  return _voiceAudio.containsKey(units[i].uid)
+                      ? () => _previewVoice(i)
+                      : null;
+                },
                 candidateBadge: candidateBadgeText(_replacements ?? const []),
                 bgm: _task.bgm,
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,

@@ -101,18 +101,22 @@ class ExportRunner {
     required BgmPlan bgm,
     required String? vocalsPath,
     required VoicePlan voices,
-    required Map<int, String> voiceAudio,
+    required Map<String, String> voiceAudio,
+    // 单元列表：配音按**身份**记，而说给人听的话得说「U3」——那是位置，
+    // 只有对着列表才知道
+    required List<SemanticUnit> units,
     String? sourcePath,
     List<UnitReplacement> replacements = const [],
   }) {
     // 整体替换用的是候选素材自己的口播，换音色用的是 TTS 合成的口播——
     // 同一个单元两者矛盾，静默取其一正是用户反对的
     final conflict = [
-      for (final index in voices.assignedUnits)
-        if (index < replacements.length &&
-            replacements[index].mode == ReplacementMode.whole &&
-            replacements[index].wholeCandidateIds.isNotEmpty)
-          'U${index + 1}',
+      for (var i = 0; i < units.length; i++)
+        if (voices.assignedUnits.contains(units[i].uid) &&
+            i < replacements.length &&
+            replacements[i].mode == ReplacementMode.whole &&
+            replacements[i].wholeCandidateIds.isNotEmpty)
+          'U${i + 1}',
     ];
     if (conflict.isNotEmpty) {
       return '${conflict.join('、')} 既做了整体替换又选了音色。'
@@ -134,10 +138,11 @@ class ExportRunner {
 
     // 选了音色却没生成配音：那一段会静默用回原声
     final missing = <String>[];
-    for (final index in voices.assignedUnits) {
-      final path = voiceAudio[index];
+    for (var i = 0; i < units.length; i++) {
+      if (!voices.assignedUnits.contains(units[i].uid)) continue;
+      final path = voiceAudio[units[i].uid];
       if (path == null || !File(path).existsSync()) {
-        missing.add('U${index + 1}');
+        missing.add('U${i + 1}');
       }
     }
     if (missing.isNotEmpty) {
@@ -160,7 +165,7 @@ class ExportRunner {
     required List<UnitReplacement> replacements,
     required Directory outputDir,
     BgmPlan bgm = BgmPlan.empty,
-    Map<int, String> voiceAudio = const {},
+    Map<String, String> voiceAudio = const {},
 
     /// 换音色方案。用来核对「选了音色的单元是不是都生成了配音」——
     /// 少了会静默导出原声
@@ -218,7 +223,7 @@ class ExportRunner {
     required List<UnitReplacement> replacements,
     required Directory outputDir,
     BgmPlan bgm = BgmPlan.empty,
-    Map<int, String> voiceAudio = const {},
+    Map<String, String> voiceAudio = const {},
     VoicePlan voices = VoicePlan.empty,
     String? vocalsPath,
     ExportSpec? spec,
@@ -266,6 +271,7 @@ class ExportRunner {
           vocalsPath: vocalsPath,
           voices: voices,
           voiceAudio: voiceAudio,
+          units: units,
           sourcePath: sourcePath,
           replacements: replacements,
         );

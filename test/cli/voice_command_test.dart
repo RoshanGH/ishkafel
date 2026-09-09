@@ -48,7 +48,13 @@ void main() {
 
     expect(code, 0);
     final saved = (await repo.findById('t1'))!;
-    expect(saved.voices.assignedUnits.toSet(), {0, 2});
+    // 存的是单元自己的**身份**（读档时补发的随机串），所以按位置反查
+    expect(
+        {
+          for (var i = 0; i < saved.units!.length; i++)
+            if (saved.voices.assignedUnits.contains(saved.units![i].uid)) i,
+        },
+        {0, 2});
     expect(decode(out)['next'], contains('generate'),
         reason: '换完要告诉人下一步得生成配音，否则导出会被拦下');
   });
@@ -77,7 +83,13 @@ void main() {
         rest: ['t1'], dataDir: dir, units: '0', voiceId: '',
         out: StringBuffer(), err: StringBuffer());
 
-    expect((await repo.findById('t1'))!.voices.assignedUnits, [1]);
+    final left = (await repo.findById('t1'))!;
+    expect(
+        [
+          for (var i = 0; i < left.units!.length; i++)
+            if (left.voices.assignedUnits.contains(left.units![i].uid)) i,
+        ],
+        [1]);
   });
 
   test('单元下标越界要点名，别静默跳过', () async {

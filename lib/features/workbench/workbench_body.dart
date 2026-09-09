@@ -522,7 +522,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                   playback.seekMs(ms);
                                 },
                                 readOnly: widget.readOnly,
-                                voiceOf: widget.voices.voiceOf,
+                                // 界面按位置说话，方案按身份存——在这里翻译
+                                voiceOf: (i) => i >= 0 &&
+                                        i < editor.units.length
+                                    ? widget.voices
+                                        .voiceOf(editor.units[i].uid)
+                                    : null,
                                 onChangeVoice: widget.onChangeVoice,
                                 previewVoice: widget.previewVoice,
                                 unitTagEditor: widget.unitTagEditor,

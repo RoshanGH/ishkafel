@@ -21,14 +21,19 @@ class VoiceSwapJob {
 
   const VoiceSwapJob({required this.service, required this.outputDir});
 
-  /// 某个台词语义单元的配音文件（不保证存在）
-  File audioFor(int unitIndex) =>
-      File(p.join(outputDir.path, 'unit_$unitIndex.mp3'));
+  /// 某个台词语义单元的配音文件（不保证存在）。
+  ///
+  /// **按单元的身份命名**（[SemanticUnit.uid]），不按位置：文件名里写下标的
+  /// 话，人挪一次单元，方案里的指向被搬走了、盘上那个 mp3 还叫原来的名字，
+  /// 取到的就是**另一个单元的配音**——不报错，只有听出来才知道
+  /// （2026-09-09 清点时查出来的）。
+  File audioFor(String unitUid) =>
+      File(p.join(outputDir.path, 'unit_$unitUid.mp3'));
 
   /// 已经生成过的那些——重开页面时据此恢复「可试听」状态
-  Map<int, String> existingAudio(Iterable<int> unitIndexes) => {
-        for (final i in unitIndexes)
-          if (audioFor(i).existsSync()) i: audioFor(i).path,
+  Map<String, String> existingAudio(Iterable<String> unitUids) => {
+        for (final uid in unitUids)
+          if (audioFor(uid).existsSync()) uid: audioFor(uid).path,
       };
 }
 

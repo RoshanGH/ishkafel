@@ -1,15 +1,14 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
-import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/editing/unit_reorder.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 
 /// **挪一个单元，按下标记的那几份必须落到同一个位置。**
 ///
-/// 手改字幕已经不在这张表里了：它改成按单元的**身份**记
+/// 手改字幕和配音已经不在这张表里了：它们改成按单元的**身份**记
 /// （[SemanticUnit.uid]），单元怎么排都还是它，一份都不用搬。
-/// 剩下这三份是还没改完的。
+/// 剩下这两份是还没改完的。
 ///
 /// 2026-09-08 真机，用户原话：「我给这个自定义台词语义单元选了一个镜头，
 /// 然后我又把这个台词语义单元拉到后面……那个替换的镜头没有跟着 U2 走，
@@ -74,7 +73,7 @@ void main() {
     });
   });
 
-  group('三份数据落到同一个位置', () {
+  group('两份数据落到同一个位置', () {
     /// 给第 [mark] 个单元挂上「可辨认的东西」，挪完之后看它们在不在同一格
     void check(int n, int from, int to, int mark) {
       final replacements = [
@@ -83,10 +82,6 @@ void main() {
               ? UnitReplacement.whole(const [999])
               : UnitReplacement.keepOriginal(),
       ];
-      final voices = VoicePlan([
-        VoiceAssignment(
-            unitIndex: mark, voice: const VoiceRef(id: 'v', name: 'v')),
-      ]);
       final bgm = BgmPlan([
         BgmSegment(
             startUnit: mark, endUnit: mark, materials: const [], fit: BgmFit.loop),
@@ -100,9 +95,6 @@ void main() {
       expect(r.indexWhere((e) => e.wholeCandidateIds.isNotEmpty), where,
           reason: '替换方案没跟着单元走：n=$n from=$from to=$to mark=$mark');
 
-      final v = remapVoicesAfterMove(voices, from: from, to: to);
-      expect(v.assignments.single.unitIndex, where,
-          reason: '配音没跟着走：n=$n from=$from to=$to mark=$mark');
 
       final b = remapBgmAfterMove(bgm, from: from, to: to);
       expect(b.plan.segments.single.startUnit, where,

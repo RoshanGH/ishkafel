@@ -289,7 +289,7 @@ class TimelinePainter extends CustomPainter {
         _drawBadge(canvas, ReplacementBadges.unitBadgeRect(rect), '$wholeCount');
       }
 
-      if (voices.voiceOf(unit.index) != null) {
+      if (voices.voiceOf(unit.uid) != null) {
         canvas.drawRect(
           Rect.fromLTRB(rect.left, rect.bottom - _voiceMarkH, rect.right,
               rect.bottom),

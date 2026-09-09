@@ -19,6 +19,7 @@ SegmentationEditorController _editor() => SegmentationEditorController(
       sentences: const [],
       initialUnits: const [
         SemanticUnit(
+          uid: 'u0',
           index: 0,
           startMs: 0,
           endMs: 5000,
@@ -29,6 +30,7 @@ SegmentationEditorController _editor() => SegmentationEditorController(
           ],
         ),
         SemanticUnit(
+          uid: 'u1',
           index: 1,
           startMs: 5000,
           endMs: _durationMs,
@@ -229,7 +231,7 @@ void _voiceMarks() {
 
     const vivi = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi');
     final plain = await painterWith(VoicePlan.empty);
-    final marked = await painterWith(VoicePlan.empty.assign([0], vivi));
+    final marked = await painterWith(VoicePlan.empty.assign(['u0'], vivi));
 
     expect(marked.shouldRepaint(plain), isTrue,
         reason: '换了音色却不重画，时间线上永远看不到那道标记');

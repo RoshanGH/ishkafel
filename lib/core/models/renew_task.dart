@@ -426,7 +426,11 @@ class RenewTask {
         // 配乐会凭空消失
         bgm: BgmPlan.fromJson(json['bgm'])
             .migrateShotsToUnits(units ?? const []),
-        voices: VoicePlan.fromJson(json['voices']),
+        // 老存档里配音按**单元下标**记，读出来翻译成单元的身份
+        voices: VoicePlan.fromJson(json['voices'],
+            uidAt: (i) => units != null && i >= 0 && i < units.length
+                ? units[i].uid
+                : null),
         // 老任务没有这个字段，退回标准样式
         subtitle: SubtitleStyle.fromJson(json['subtitle']),
         // 老存档里字幕坑位按**单元下标**记，读出来翻译成单元的身份

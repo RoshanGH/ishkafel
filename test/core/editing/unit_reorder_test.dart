@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
-import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/editing/blank_unit_removal.dart';
 import 'package:ishkafel/core/editing/unit_reorder.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
@@ -81,26 +80,7 @@ void main() {
           reason: '原来在下标 2 的素材，整体后移一格到 3');
     });
 
-    test('配音跟着走', () {
-      const plan = VoicePlan([
-        VoiceAssignment(unitIndex: 1, voice: VoiceRef(id: 'v1', name: '女声')),
-      ]);
 
-      final moved = remapVoicesAfterMove(plan, from: 1, to: 0);
-
-      expect(moved.assignments.single.unitIndex, 0);
-    });
-
-    test('没被挪到的单元，配音下标跟着整体位移', () {
-      const plan = VoicePlan([
-        VoiceAssignment(unitIndex: 0, voice: VoiceRef(id: 'v1', name: '女声')),
-      ]);
-
-      // U2 插到最前面，原来的 U1 就被顶到 1
-      final moved = remapVoicesAfterMove(plan, from: 1, to: 0);
-
-      expect(moved.assignments.single.unitIndex, 1);
-    });
   });
 
   group('配乐是按区间记的，挪单元会打断它', () {
@@ -138,35 +118,8 @@ void main() {
   });
 
   group('删单元时配音也要跟着搬（原本漏了）', () {
-    test('删掉的那个单元，它的配音一并没了', () {
-      const plan = VoicePlan([
-        VoiceAssignment(unitIndex: 1, voice: VoiceRef(id: 'v1', name: '女声')),
-      ]);
 
-      expect(shiftVoicesAfterRemoval(plan, removed: 1).assignments, isEmpty);
-    });
 
-    test('后面单元的配音整体前移——不然本该念 U3 的会跑到 U2 身上', () {
-      const plan = VoicePlan([
-        VoiceAssignment(unitIndex: 2, voice: VoiceRef(id: 'v1', name: '女声')),
-      ]);
-
-      expect(shiftVoicesAfterRemoval(plan, removed: 1)
-          .assignments
-          .single
-          .unitIndex, 1);
-    });
-
-    test('删的在后面，前面的配音不受影响', () {
-      const plan = VoicePlan([
-        VoiceAssignment(unitIndex: 0, voice: VoiceRef(id: 'v1', name: '女声')),
-      ]);
-
-      expect(shiftVoicesAfterRemoval(plan, removed: 2)
-          .assignments
-          .single
-          .unitIndex, 0);
-    });
   });
 }
 

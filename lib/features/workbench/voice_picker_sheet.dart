@@ -57,7 +57,8 @@ class _VoicePickerDialog extends StatefulWidget {
 class _VoicePickerDialogState extends State<_VoicePickerDialog> {
   final _keyword = TextEditingController();
   late final Set<int> _selectedUnits = {widget.focusedUnit};
-  late VoiceRef? _voice = widget.plan.voiceOf(widget.focusedUnit);
+  late VoiceRef? _voice =
+      widget.plan.voiceOf(widget.units[widget.focusedUnit].uid);
 
   @override
   void dispose() {
@@ -145,7 +146,7 @@ class _VoicePickerDialogState extends State<_VoicePickerDialog> {
               itemCount: widget.units.length,
               itemBuilder: (_, i) {
                 final unit = widget.units[i];
-                final current = widget.plan.voiceOf(i);
+                final current = widget.plan.voiceOf(unit.uid);
                 return CheckboxListTile(
                   key: Key('voice-unit-$i'),
                   dense: true,

@@ -66,6 +66,7 @@ class _FakeTts implements TtsClient {
 
 List<SemanticUnit> _units() => const [
       SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 3000,
@@ -73,6 +74,7 @@ List<SemanticUnit> _units() => const [
         shots: [Shot(startMs: 0, endMs: 3000)],
       ),
       SemanticUnit(
+        uid: 'u1',
         index: 1,
         startMs: 3000,
         endMs: 7000,
@@ -109,10 +111,10 @@ void main() {
       final results = await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([1], _voice),
+        plan: VoicePlan.empty.assign(['u1'], _voice),
       );
 
-      expect(results.keys, [1]);
+      expect(results.keys, ['u1']);
       expect(analyzer.calls, ['第二句台词'],
           reason: '给没换音色的单元也去分析一遍，是白花钱');
     });
@@ -128,7 +130,7 @@ void main() {
       await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([1], _voice),
+        plan: VoicePlan.empty.assign(['u1'], _voice),
         onProgress: (done, total) => progress.add((done, total)),
       );
 
@@ -168,7 +170,7 @@ void main() {
       await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([0], _voice),
+        plan: VoicePlan.empty.assign(['u0'], _voice),
       );
 
       expect(tts.requests.first.instruction, '你可以很生气地说吗？');
@@ -187,7 +189,7 @@ void main() {
       await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([0], _voice),
+        plan: VoicePlan.empty.assign(['u0'], _voice),
       );
 
       expect(tts.requests, hasLength(2));
@@ -207,7 +209,7 @@ void main() {
       await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([0], _voice),
+        plan: VoicePlan.empty.assign(['u0'], _voice),
       );
 
       expect(tts.requests, hasLength(1));
@@ -226,12 +228,12 @@ void main() {
       final results = await service.run(
         units: _units(),
         sentences: _sentences,
-        plan: VoicePlan.empty.assign([0, 1], _voice),
+        plan: VoicePlan.empty.assign(['u0', 'u1'], _voice),
       );
 
-      expect(results.keys, [1], reason: '第 0 个失败了，第 1 个必须照常出');
-      expect(service.failures.keys, [0]);
-      expect(service.failures[0], isNotEmpty);
+      expect(results.keys, ['u1'], reason: '第 0 个失败了，第 1 个必须照常出');
+      expect(service.failures.keys, ['u0']);
+      expect(service.failures['u0'], isNotEmpty);
     });
   });
 }

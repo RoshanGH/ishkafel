@@ -1,5 +1,4 @@
 import '../audio/bgm_plan.dart';
-import '../audio/voice_plan.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
 
@@ -53,21 +52,6 @@ List<UnitReplacement> remapReplacementsAfterMove(
       UnitReplacement.keepOriginal(),
   ];
   return List.unmodifiable(moveIndexed(padded, from: from, to: to));
-}
-
-/// 配音按 [VoiceAssignment.unitIndex] 记，每条各自换算到新位置
-VoicePlan remapVoicesAfterMove(
-  VoicePlan plan, {
-  required int from,
-  required int to,
-}) {
-  if (from == to) return plan;
-  return VoicePlan([
-    for (final a in plan.assignments)
-      VoiceAssignment(
-          unitIndex: _mapIndex(a.unitIndex, from: from, to: to),
-          voice: a.voice),
-  ]);
 }
 
 /// 配乐挪动的结果：新方案 + **被打断的那几段**。

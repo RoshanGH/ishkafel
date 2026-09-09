@@ -9,12 +9,15 @@ const _vivi = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi 2.0');
 
 List<SemanticUnit> _units() => const [
       SemanticUnit(
+          uid: 'u0',
           index: 0, startMs: 0, endMs: 2000, transcript: '第一句',
           shots: [Shot(startMs: 0, endMs: 2000)]),
       SemanticUnit(
+          uid: 'u1',
           index: 1, startMs: 2000, endMs: 4000, transcript: '第二句',
           shots: [Shot(startMs: 2000, endMs: 4000)]),
       SemanticUnit(
+          uid: 'u2',
           index: 2, startMs: 4000, endMs: 6000, transcript: '第三句',
           shots: [Shot(startMs: 4000, endMs: 6000)]),
     ];
@@ -117,7 +120,7 @@ void main() {
   group('已经换过的单元要看得出来', () {
     testWidgets('列表里写上它现在用的音色名', (tester) async {
       await _open(tester,
-          plan: VoicePlan.empty.assign([2], _vivi), focused: 0);
+          plan: VoicePlan.empty.assign(['u2'], _vivi), focused: 0);
 
       expect(find.textContaining('vivi 2.0'), findsWidgets,
           reason: '不写的话用户看不出哪几句已经处理过，只能靠记');
@@ -125,7 +128,7 @@ void main() {
 
     testWidgets('打开时默认选中当前单元已用的音色', (tester) async {
       await _open(tester,
-          plan: VoicePlan.empty.assign([0], _vivi), focused: 0);
+          plan: VoicePlan.empty.assign(['u0'], _vivi), focused: 0);
 
       final btn = tester.widget<FilledButton>(
           find.byKey(const Key('voice-confirm')));
@@ -145,7 +148,7 @@ void main() {
                 onPressed: () async {
                   picked = await showVoicePicker(context,
                       units: _units(),
-                      plan: VoicePlan.empty.assign([0], _vivi),
+                      plan: VoicePlan.empty.assign(['u0'], _vivi),
                       focusedUnit: 0);
                 },
                 child: const Text('开'),

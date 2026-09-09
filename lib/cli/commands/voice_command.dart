@@ -91,7 +91,7 @@ Future<int> runVoiceGenerateCommand({
       },
     );
     job.outputDir.createSync(recursive: true);
-    final written = <int, String>{};
+    final written = <String, String>{};
     for (final e in results.entries) {
       final file = job.audioFor(e.key)..writeAsBytesSync(e.value.audio);
       written[e.key] = file.path;
@@ -151,14 +151,17 @@ Future<int> runVoiceCommand({
   if (voiceId == null) {
     emitJson({
       'taskId': task.id,
+      // 对外照旧说 U1/U2（下标）——那是人和 Agent 说话的方式；
+      // 存的是单元自己的身份，两者在这里翻译
       'assigned': [
-        for (final i in task.voices.assignedUnits)
-          {
-            'unit': i,
-            'voiceId': task.voices.voiceOf(i)?.id,
-            'voiceName': task.voices.voiceOf(i)?.name,
-            'transcript': i < all.length ? all[i].transcript : null,
-          },
+        for (var i = 0; i < all.length; i++)
+          if (task.voices.assignedUnits.contains(all[i].uid))
+            {
+              'unit': i,
+              'voiceId': task.voices.voiceOf(all[i].uid)?.id,
+              'voiceName': task.voices.voiceOf(all[i].uid)?.name,
+              'transcript': all[i].transcript,
+            },
       ],
       'hint': '换音色：ishkafel voice <任务> --units 0,2 --voice <音色 id>。'
           '有哪些音色用 ishkafel voices 看。'
@@ -191,7 +194,7 @@ Future<int> runVoiceCommand({
   try {
     final VoicePlan next;
     if (voiceId.trim().isEmpty) {
-      next = task.voices.clear(targets);
+      next = task.voices.clear([for (final i in targets) all[i].uid]);
     } else {
       final voice = VoiceCatalog.all
           .where((v) => v.ref.id == voiceId.trim())
@@ -201,12 +204,15 @@ Future<int> runVoiceCommand({
         sink.writeln('没有这个音色：$voiceId。用 ishkafel voices 看有哪些');
         return exitBadUsage;
       }
-      next = task.voices.assign(targets, voice);
+      next = task.voices.assign([for (final i in targets) all[i].uid], voice);
     }
     await repository.save(task.copyWith(voices: next, updatedAt: DateTime.now()));
     emitJson({
       'ok': true,
-      'assigned': next.assignedUnits,
+      'assigned': [
+        for (var i = 0; i < all.length; i++)
+          if (next.assignedUnits.contains(all[i].uid)) i,
+      ],
       'next': voiceId.trim().isEmpty
           ? '这几句改回原声了'
           : '换好了，但还没合成。跑 ishkafel voice generate ${task.id} '

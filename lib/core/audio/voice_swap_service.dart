@@ -52,7 +52,7 @@ class VoiceSwapService {
 
   /// 每个单元的失败原因（成功的不在里面）。一个单元失败不该让整批停下——
   /// 十句里坏一句，重跑那一句就行。
-  final Map<int, String> failures = {};
+  final Map<String, String> failures = {};
 
   VoiceSwapService({
     required this.tts,
@@ -64,32 +64,34 @@ class VoiceSwapService {
   /// 合成出来与目标差多少就重来一次。低于这个比例不值得多花一次调用。
   static const double _realignThreshold = 0.06;
 
-  Future<Map<int, VoiceSwapResult>> run({
+  /// 结果按**单元的身份**记（[SemanticUnit.uid]）：按下标记的话，人挪一次
+  /// 单元，本该念 U3 的那段就跑到 U2 身上——不报错，只有听出来才知道
+  Future<Map<String, VoiceSwapResult>> run({
     required List<SemanticUnit> units,
     required List<AsrSentence> sentences,
     required VoicePlan plan,
     void Function(int done, int total)? onProgress,
   }) async {
     failures.clear();
-    final targets = plan.assignedUnits
-        .where((i) => i >= 0 && i < units.length)
-        .toList();
+    final targets = [
+      for (final unit in units)
+        if (plan.assignedUnits.contains(unit.uid)) unit,
+    ];
     if (targets.isEmpty) return const {};
 
     final reference = _referenceCharsPerSec(sentences);
-    final out = <int, VoiceSwapResult>{};
+    final out = <String, VoiceSwapResult>{};
     var done = 0;
     onProgress?.call(0, targets.length);
 
-    for (final index in targets) {
-      final unit = units[index];
-      final voice = plan.voiceOf(index);
+    for (final unit in targets) {
+      final voice = plan.voiceOf(unit.uid);
       if (voice == null) continue;
       try {
-        out[index] = await _swapOne(unit, voice, sentences, reference);
+        out[unit.uid] = await _swapOne(unit, voice, sentences, reference);
       } catch (e) {
         AppLog.warn('单元 ${unit.index} 换音色失败：$e');
-        failures[index] = '$e';
+        failures[unit.uid] = '$e';
       }
       onProgress?.call(++done, targets.length);
     }

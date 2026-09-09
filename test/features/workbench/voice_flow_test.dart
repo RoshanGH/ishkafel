@@ -58,9 +58,11 @@ RenewTask _task({VoicePlan voices = VoicePlan.empty}) => RenewTask(
       voices: voices,
       units: const [
         SemanticUnit(
+            uid: 'u0',
             index: 0, startMs: 0, endMs: 2000, transcript: '第一句',
             shots: [Shot(startMs: 0, endMs: 2000)]),
         SemanticUnit(
+            uid: 'u1',
             index: 1, startMs: 2000, endMs: 4000, transcript: '第二句',
             shots: [Shot(startMs: 2000, endMs: 4000)]),
       ],
@@ -71,7 +73,7 @@ RenewTask _task({VoicePlan voices = VoicePlan.empty}) => RenewTask(
 
 /// 假的换音色服务：不碰云端，直接产出几个字节，让流程能被端到端验证
 class _FakeSwap extends VoiceSwapService {
-  final Set<int> failOn;
+  final Set<String> failOn;
   final progress = <(int, int)>[];
 
   _FakeSwap({this.failOn = const {}})
@@ -83,7 +85,7 @@ class _FakeSwap extends VoiceSwapService {
         );
 
   @override
-  Future<Map<int, VoiceSwapResult>> run({
+  Future<Map<String, VoiceSwapResult>> run({
     required List<SemanticUnit> units,
     required List<AsrSentence> sentences,
     required VoicePlan plan,
@@ -91,7 +93,7 @@ class _FakeSwap extends VoiceSwapService {
   }) async {
     failures.clear();
     final targets = plan.assignedUnits;
-    final out = <int, VoiceSwapResult>{};
+    final out = <String, VoiceSwapResult>{};
     for (final i in targets) {
       if (failOn.contains(i)) {
         failures[i] = '合成超时';
@@ -172,9 +174,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final saved = await repo.findById('v-1');
-    expect(saved!.voices.assignedUnits, [0, 1],
+    expect(saved!.voices.assignedUnits, {'u0', 'u1'},
         reason: '面板里勾了两句，就该两句都换');
-    expect(saved.voices.voiceOf(0)!.name, 'vivi 2.0');
+    expect(saved.voices.voiceOf('u0')!.name, 'vivi 2.0');
     expect(find.textContaining('vivi 2.0'), findsWidgets,
         reason: '检查器上要立刻反映出来');
     expect(find.text('vivi 2.0（待生成）'), findsOneWidget,
@@ -183,7 +185,7 @@ void main() {
 
   testWidgets('改回原声后卡片写回「保持原片配音」', (tester) async {
     const vivi = VoiceRef(id: 'zh_female_vv_uranus_bigtts', name: 'vivi 2.0');
-    final repo = await _open(tester, voices: VoicePlan.empty.assign([0], vivi));
+    final repo = await _open(tester, voices: VoicePlan.empty.assign(['u0'], vivi));
 
     await tester.tap(find.byKey(const Key('unit-row-0')));
     await tester.pumpAndSettle();
@@ -193,7 +195,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final saved = await repo.findById('v-1');
-    expect(saved!.voices.voiceOf(0), isNull);
+    expect(saved!.voices.voiceOf('u0'), isNull);
     expect(find.text('保持原片配音'), findsOneWidget);
   });
 
@@ -203,10 +205,10 @@ void main() {
     /// 打开一个已经选好音色的工作台，注入假服务与假试听
     Future<(_FakeSwap, _FakePreview, Directory)> openWithSwap(
       WidgetTester tester, {
-      Set<int> failOn = const {},
+      Set<String> failOn = const {},
     }) async {
       final repo = _Repo();
-      final task = _task(voices: VoicePlan.empty.assign([0], vivi));
+      final task = _task(voices: VoicePlan.empty.assign(['u0'], vivi));
       await repo.save(task);
       final dir = Directory.systemTemp.createTempSync('ishkafel_voice_');
       addTearDown(() => dir.deleteSync(recursive: true));
@@ -245,7 +247,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(swap.progress, isNotEmpty, reason: '按钮要真的把服务跑起来');
-      final file = File('${dir.path}/unit_0.mp3');
+      // 产物按单元的**身份**命名（见 VoiceSwapJob.audioFor）：写下标的话，
+      // 人挪一次单元，取到的就是别人的配音
+      final file = File('${dir.path}/unit_u0.mp3');
       expect(file.existsSync(), isTrue,
           reason: '只留在内存里的话，关掉页面这一轮几十秒就白跑了');
       expect(file.readAsBytesSync(), [1, 2, 3]);
@@ -271,7 +275,7 @@ void main() {
     });
 
     testWidgets('失败的那几句要点名，用户才知道去补哪几句', (tester) async {
-      await openWithSwap(tester, failOn: {0});
+      await openWithSwap(tester, failOn: {'u0'});
 
       await tester.tap(find.byKey(const Key('workbench-generate-voices-btn')));
       await tester.pumpAndSettle();

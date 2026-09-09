@@ -51,7 +51,7 @@ class TrackPlanBuilder {
     /// 没垫上时照旧留洞：位置会错，但至少还能播，且 Edl 会打警告
     Map<int, String> gapClips = const {},
     String? vocalsPath,
-    Map<int, String> voiceAudio = const {},
+    Map<String, String> voiceAudio = const {},
     BgmPlan bgm = BgmPlan.empty,
 
     /// 配乐在本地的文件（曲子 id → 路径）。取不到的那一段直接不铺，
@@ -184,7 +184,8 @@ class TrackPlanBuilder {
       }
 
       // 声音：换过音色的整段用配音，否则按镜头取原混音/纯人声
-      final generated = voiceAudio[unit.index];
+      // 按单元的**身份**取：按位置取的话，人挪过顺序之后念的是别人那段
+      final generated = voiceAudio[unit.uid];
       if (generated != null) {
         voice.add(TrackSegment(
             atMs: start, durationMs: at - start, source: generated));

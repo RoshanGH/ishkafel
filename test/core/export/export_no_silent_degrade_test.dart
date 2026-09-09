@@ -14,6 +14,7 @@ const _bgm = BgmMaterial(
 
 List<SemanticUnit> _units() => [
       SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 4000,
@@ -97,7 +98,7 @@ void main() {
       replacements: const [],
       outputDir: Directory('${temp.path}/out'),
       voices: VoicePlan.empty
-          .assign([0], const VoiceRef(id: 'v1', name: '音色甲')),
+          .assign(['u0'], const VoiceRef(id: 'v1', name: '音色甲')),
       voiceAudio: const {},
     );
 
@@ -119,8 +120,8 @@ void main() {
           .assign(startUnit: 0, endUnit: 1, materials: [_bgm], rangeMs: 4000),
       vocalsPath: vocals.path,
       voices: VoicePlan.empty
-          .assign([0], const VoiceRef(id: 'v1', name: '音色甲')),
-      voiceAudio: {0: voice.path},
+          .assign(['u0'], const VoiceRef(id: 'v1', name: '音色甲')),
+      voiceAudio: {'u0': voice.path},
     );
 
     expect(results.every((r) => r.failure == null), isTrue,
@@ -153,8 +154,8 @@ void main() {
       outputDir: Directory('${temp.path}/out'),
       vocalsPath: vocals.path,
       voices: VoicePlan.empty
-          .assign([0], const VoiceRef(id: 'v1', name: '音色甲')),
-      voiceAudio: {0: voice.path},
+          .assign(['u0'], const VoiceRef(id: 'v1', name: '音色甲')),
+      voiceAudio: {'u0': voice.path},
     );
 
     expect(results.every((r) => r.failure != null), isTrue,
@@ -173,6 +174,7 @@ void main() {
       units: [
         _units().first,
         SemanticUnit(
+          uid: 'u1',
           index: 1,
           startMs: 4000,
           endMs: 8000,
@@ -184,8 +186,8 @@ void main() {
       outputDir: Directory('${temp.path}/out'),
       vocalsPath: vocals.path,
       voices: VoicePlan.empty
-          .assign([1], const VoiceRef(id: 'v1', name: '音色甲')),
-      voiceAudio: {1: voice.path},
+          .assign(['u1'], const VoiceRef(id: 'v1', name: '音色甲')),
+      voiceAudio: {'u1': voice.path},
     );
 
     expect(results.every((r) => r.failure == null), isTrue);

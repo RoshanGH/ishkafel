@@ -9,6 +9,7 @@ import 'package:ishkafel/core/models/shot.dart';
 /// U1 = 0~4000（S1 0~2000、S2 2000~4000），U2 = 4000~6000（S1 整段）
 List<SemanticUnit> _units() => const [
       SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 4000,
@@ -19,6 +20,7 @@ List<SemanticUnit> _units() => const [
         ],
       ),
       SemanticUnit(
+        uid: 'u1',
         index: 1,
         startMs: 4000,
         endMs: 6000,
@@ -141,7 +143,7 @@ void main() {
       await b.builder.build(
         sourcePath: '/v/a.mp4',
         units: _units(),
-        voiceAudio: {0: voice.path},
+        voiceAudio: {'u0': voice.path},
       );
 
       final inputs = _inputsOf(b.calls);
@@ -156,7 +158,7 @@ void main() {
       await b.builder.build(
         sourcePath: '/v/a.mp4',
         units: _units(),
-        voiceAudio: const {0: '/不存在/u0.mp3'},
+        voiceAudio: const {'u0': '/不存在/u0.mp3'},
       );
 
       expect(_inputsOf(b.calls).where((i) => i == '/v/a.mp4'), hasLength(3));
