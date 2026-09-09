@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -5,7 +7,7 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/subtitle/subtitle_style.dart';
 
-/// 字幕样式面板（位置 / 字号 / 六色 / 遮罩）。
+/// 字幕样式面板（位置 / 字号 / 六色 / 衬底）。
 /// 样式粒度是**句**：全局一套基调，个别句子需要时行级覆盖。
 /// [allowApplyAll] 打开时多一个「应用到整片」——调好一句觉得整片都
 /// 该这样，一键提升为全局默认。返回 (样式, 是否应用到整片)
@@ -17,17 +19,104 @@ import '../../core/subtitle/subtitle_style.dart';
 ///
 /// 调用方拿到 [onPreview] 之后应当**只改内存、不落盘**，并且在拿到 null
 /// （取消）时把样式退回原样——人点了取消就是不要，不能留在半路上。
+///
+/// **它是一块浮层，不是模态弹窗**（2026-09-09 真机，用户原话：「是我点
+/// 字幕之后，你有一层遮罩，不是字幕的衬底」）。`showDialog` 会给整屏蒙一层
+/// black54 并拦掉所有点击，而这套参数恰恰是照着画面判断的：
+///
+/// - 压暗了，挑颜色、看衬底盖没盖住原素材的字，全都不准；
+/// - 拦住了，就没法把播放头挪到被替换的那一镜——而字幕只画在那儿，
+///   人只能「关面板 → 拖时间线 → 再开面板」，正是他嫌烦的那个循环。
+///
+/// 代价是生命周期得自己管：面板还开着时页面被销毁的话，浮层会留在
+/// Overlay 上。所以调用方要留住 [SubtitleStylePanel]，在 dispose 里
+/// [SubtitleStylePanel.close] 兜一下。
+SubtitleStylePanel showSubtitleStylePanel(BuildContext context,
+    {required SubtitleStyle initial,
+    bool allowApplyAll = false,
+    ValueChanged<SubtitleStyle>? onPreview}) {
+  final done = Completer<(SubtitleStyle, bool)?>();
+  final overlay = Overlay.of(context);
+  late OverlayEntry entry;
+  var removed = false;
+  void finish((SubtitleStyle, bool)? result) {
+    if (removed) return;
+    removed = true;
+    entry.remove();
+    if (!done.isCompleted) done.complete(result);
+  }
+
+  entry = OverlayEntry(
+    builder: (_) => _SubtitleStylePanelLayer(
+      initial: initial,
+      allowApplyAll: allowApplyAll,
+      onPreview: onPreview,
+      onDone: finish,
+    ),
+  );
+  overlay.insert(entry);
+  return SubtitleStylePanel._(done.future, finish);
+}
+
+/// 开着的那块浮层。[done] 是人点了「就这样」/「取消」之后的结果，
+/// [close] 是调用方销毁时的兜底（当作取消）
+class SubtitleStylePanel {
+  final Future<(SubtitleStyle, bool)?> done;
+  final void Function((SubtitleStyle, bool)?) _finish;
+
+  const SubtitleStylePanel._(this.done, this._finish);
+
+  void close() => _finish(null);
+}
+
+/// 兼容旧调用与测试：等它关掉再返回
 Future<(SubtitleStyle, bool)?> showSubtitleStyleSheet(BuildContext context,
         {required SubtitleStyle initial,
         bool allowApplyAll = false,
         ValueChanged<SubtitleStyle>? onPreview}) =>
-    showDialog<(SubtitleStyle, bool)>(
-      context: context,
-      builder: (_) => _SubtitleStyleDialog(
-          initial: initial,
-          allowApplyAll: allowApplyAll,
-          onPreview: onPreview),
-    );
+    showSubtitleStylePanel(context,
+            initial: initial,
+            allowApplyAll: allowApplyAll,
+            onPreview: onPreview)
+        .done;
+
+/// 浮层本体：**只有面板那一块拦点击**，其余地方原样透下去
+class _SubtitleStylePanelLayer extends StatelessWidget {
+  final SubtitleStyle initial;
+  final bool allowApplyAll;
+  final ValueChanged<SubtitleStyle>? onPreview;
+  final void Function((SubtitleStyle, bool)?) onDone;
+
+  const _SubtitleStylePanelLayer({
+    required this.initial,
+    required this.allowApplyAll,
+    required this.onPreview,
+    required this.onDone,
+  });
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+        // 靠右居中摆一块卡片，画面在左边照常看得见。
+        //
+        // **不能套 Positioned.fill + IgnorePointer**：IgnorePointer 一挡，
+        // 整棵子树都不参与命中测试，里面再套一个 `ignoring: false` 也救不回来
+        // （面板自己就点不动了）。这里只给右边界和上下界，卡片有多宽就占多宽，
+        // 而 [Center] 空白处本来就不命中——点击自然穿到底下的时间线上
+        right: AppSpacing.xl,
+        top: AppSpacing.lg,
+        bottom: AppSpacing.lg,
+        child: Center(
+          child: Material(
+            color: Colors.transparent,
+            child: _SubtitleStyleDialog(
+                initial: initial,
+                allowApplyAll: allowApplyAll,
+                onPreview: onPreview,
+                onDone: onDone),
+          ),
+        ),
+      );
+}
 
 /// 六色（白/黄/橙/绿/蓝/粉），hex 不带 #
 const subtitleColors = <(String, String)>[
@@ -43,8 +132,12 @@ class _SubtitleStyleDialog extends StatefulWidget {
   final SubtitleStyle initial;
   final bool allowApplyAll;
   final ValueChanged<SubtitleStyle>? onPreview;
+  final void Function((SubtitleStyle, bool)?) onDone;
   const _SubtitleStyleDialog(
-      {required this.initial, this.allowApplyAll = false, this.onPreview});
+      {required this.initial,
+      this.allowApplyAll = false,
+      this.onPreview,
+      required this.onDone});
 
   @override
   State<_SubtitleStyleDialog> createState() => _SubtitleStyleDialogState();
@@ -76,23 +169,23 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      // **靠右摆，别压在播放器上**：调字号、位置、颜色全靠看预览判断，
-      // 而居中的对话框正好把画面盖住——人调完只能关掉弹窗才看得见，
-      // 关掉又没法再微调（2026-09-08 真机：「弹窗刚好挡住预览窗口了」）。
-      // 右侧是属性栏，盖住它不影响这件事。
-      //
-      // 用 AlertDialog 自己的 alignment，**不能在外面套 Align**：
-      // Dialog 内部自带一层 Center，会把外层给的空间撑满，套了没有任何效果
-      // （第一版就是这么写的，真机上一看还是居中）。
-      alignment: Alignment.centerRight,
-      insetPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.xl, vertical: AppSpacing.lg),
-      backgroundColor: AppColors.surfaceRaised,
-      title: const Text('字幕样式', style: TextStyle(fontSize: AppFontSize.title)),
-      content: SizedBox(
-        width: 360,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+    // 一块靠右摆的卡片（**不是对话框**，见 [showSubtitleStylePanel]）：
+    // 调字号、位置、颜色全靠看预览判断，居中的弹窗正好把画面盖住，
+    // 而模态遮罩连画面的亮度都改了。右侧是属性栏，盖住它不影响这件事
+    return Container(
+      width: 360,
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8)),
+        ],
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('字幕样式', style: TextStyle(fontSize: AppFontSize.title)),
+          const SizedBox(height: AppSpacing.sm),
           const Text('整片的字幕基调（没有单独调过的句子都按这套画）',
               style: TextStyle(
                   fontSize: AppFontSize.caption,
@@ -145,7 +238,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                   ),
               ])),
           _row(
-              '遮罩',
+              '衬底',
               Row(children: [
                 for (final (preset, label) in const [
                   (SubtitlePreset.whiteOutline, '无'),
@@ -170,24 +263,25 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                 SubtitlePreset.whiteBox => '半透明黑底',
                 _ => '描边无底',
               }),
-        ]),
-      ),
-      actions: [
-        if (widget.allowApplyAll)
-          TextButton(
-            key: const ValueKey('subtitle-apply-all'),
-            onPressed: () => Navigator.of(context).pop((_style, true)),
-            child: const Text('应用到整片'),
-          ),
-        TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('取消')),
-        FilledButton(
-          key: const ValueKey('subtitle-confirm'),
-          onPressed: () => Navigator.of(context).pop((_style, false)),
-          child: const Text('就这样'),
-        ),
-      ],
+          const SizedBox(height: AppSpacing.sm),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            if (widget.allowApplyAll)
+              TextButton(
+                key: const ValueKey('subtitle-apply-all'),
+                onPressed: () => widget.onDone((_style, true)),
+                child: const Text('应用到整片'),
+              ),
+            TextButton(
+                onPressed: () => widget.onDone(null),
+                child: const Text('取消')),
+            const SizedBox(width: AppSpacing.sm),
+            FilledButton(
+              key: const ValueKey('subtitle-confirm'),
+              onPressed: () => widget.onDone((_style, false)),
+              child: const Text('就这样'),
+            ),
+          ]),
+      ]),
     );
   }
 

@@ -20,21 +20,33 @@ void main() {
   /// 那儿（第一版就是这么写的，跑了七分钟没动静）。
   late Future<(SubtitleStyle, bool)?> result;
 
+  /// 面板底下那个「时间线」：面板开着还点不点得到它，就是「能不能一边
+  /// 挪播放头一边调」的最小检验
+  var behindTaps = 0;
+
   Future<void> open(
     WidgetTester tester,
     List<SubtitleStyle> previews,
   ) async {
+    behindTaps = 0;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: Builder(
-          builder: (context) => ElevatedButton(
-            key: const ValueKey('open'),
-            onPressed: () {
-              result = showSubtitleStyleSheet(context,
-                  initial: SubtitleStyle.standard, onPreview: previews.add);
-            },
-            child: const Text('open'),
-          ),
+          builder: (context) => Column(children: [
+            ElevatedButton(
+              key: const ValueKey('open'),
+              onPressed: () {
+                result = showSubtitleStyleSheet(context,
+                    initial: SubtitleStyle.standard, onPreview: previews.add);
+              },
+              child: const Text('open'),
+            ),
+            ElevatedButton(
+              key: const ValueKey('behind'),
+              onPressed: () => behindTaps++,
+              child: const Text('时间线'),
+            ),
+          ]),
         ),
       ),
     ));
@@ -49,6 +61,32 @@ void main() {
     tester.widget<Slider>(find.byKey(ValueKey(key))).onChanged!(value);
     await tester.pump();
   }
+
+  testWidgets('面板不许在画面上压一层灰——压暗了颜色和衬底就看不准', (tester) async {
+    // 2026-09-09 真机，用户原话：「是我点字幕之后，你有一层遮罩，
+    // 不是字幕的衬底」。showDialog 默认给整屏蒙 black54，而这套参数
+    // 恰恰是**照着画面判断**的：画面被压暗，挑颜色、看毛玻璃盖没盖住
+    // 全都不准。
+    await open(tester, []);
+
+    final dimming = tester
+        .widgetList<ModalBarrier>(find.byType(ModalBarrier))
+        .where((b) => (b.color?.a ?? 0) > 0);
+
+    expect(dimming, isEmpty, reason: '面板给整屏蒙了一层，边调边看又打了折');
+  });
+
+  testWidgets('面板开着照样能挪播放头——不然调一次就得关一次', (tester) async {
+    // 字幕只画在被替换的镜头上，要看效果就得先把播放头挪到那一段。
+    // 模态面板拦住一切点击的话，人只能「关面板 → 拖时间线 → 再开面板」，
+    // 正是他嫌烦的那个循环
+    await open(tester, []);
+
+    await tester.tap(find.byKey(const ValueKey('behind')));
+    await tester.pump();
+
+    expect(behindTaps, 1, reason: '面板把底下的操作全拦住了');
+  });
 
   testWidgets('拖位置：每动一下都推出去，不是等点确定', (tester) async {
     final previews = <SubtitleStyle>[];

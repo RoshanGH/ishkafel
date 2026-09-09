@@ -802,6 +802,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _agentPoll?.cancel();
     _releaseLock();
     _consequenceTimer?.cancel();
+    // 浮层挂在 Overlay 上，页面 pop 不会带走它
+    _subtitleStylePanel?.close();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
@@ -2031,8 +2033,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 原字幕会从描边缝里透出来；切成底条或毛玻璃才能盖住。
   Future<void> _editSubtitleStyle() async {
     final before = _task.subtitle;
-    final picked = await showSubtitleStyleSheet(context,
+    // 浮层不是模态弹窗，页面被销毁它不会自己走——留住句柄，dispose 里兜底
+    final panel = _subtitleStylePanel = showSubtitleStylePanel(context,
         initial: before, onPreview: _previewSubtitleStyle);
+    final picked = await panel.done;
+    if (identical(_subtitleStylePanel, panel)) _subtitleStylePanel = null;
     if (!mounted) return;
     if (picked == null) {
       // 取消 = 不要这套。调的过程中已经把预览改成半路那一套了，退回去
@@ -2046,6 +2051,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _task = next);
     await ref.read(taskRepositoryProvider).save(next);
   }
+
+  /// 开着的字幕样式浮层（见 [showSubtitleStylePanel]）
+  SubtitleStylePanel? _subtitleStylePanel;
 
   /// 边调边看：样式改一下画面上的字就跟着变。
   ///
