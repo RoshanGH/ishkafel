@@ -100,15 +100,23 @@ class _TagTraceSectionState extends State<TagTraceSection> {
   /// 一个镜头可能同时有场景/镜头类别/动作/外壳四个维度的标签，堆成一排
   /// chips 就看不出「场景判成了什么、动作判成了什么」——而这恰恰是用户
   /// 判断标签对不对时要看的。拿不到维度信息（旧数据）时退回一排。
+  ///
+  /// **人手改过就不分维度了**：分维度是为了核对模型判得对不对，而人已经
+  /// 自己判过一遍，模型那份维度描述的也不再是眼前这几个标签。硬套上去的
+  /// 结果是：人加进来的标签在模型那份里查无此人，只能被丢进「其他」——
+  /// 而它明明就在植源分子库里。用户原话：「点开选标签才能看到确实改了的
+  /// 内容，外面要联动展示。」所以手改过之后，属性栏就原样摆他挑的那几个，
+  /// 和选标签弹窗里勾着的一模一样。
   Widget _tags() {
     if (widget.tags.isEmpty) {
       return const Text('未打标',
           style: TextStyle(
               color: AppColors.textTertiary, fontSize: AppFontSize.caption));
     }
+    if (widget.handpicked) return inspectorTagChips(widget.tags);
     // 拿 trace 里的维度当分组依据，内容以**当前**标签为准：那份分维度的
-    // 结果是打标那一刻的原始回答，手改一个字都不会动它（见
-    // [tagsByDimensionView]）
+    // 结果是打标那一刻的原始回答，重新打标时词表变了也不会跟着动
+    // （见 [tagsByDimensionView]）
     final byDimension = tagsByDimensionView(
         widget.tags, widget.trace?.tagsByDimension ?? const {});
     if (byDimension.isEmpty) return inspectorTagChips(widget.tags);

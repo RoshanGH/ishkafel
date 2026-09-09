@@ -9,6 +9,7 @@ Future<void> _pump(
   bool stale = false,
   String? description,
   TagTrace? trace,
+  bool handpicked = false,
 }) async {
   await tester.pumpWidget(MaterialApp(
     home: Scaffold(
@@ -22,6 +23,7 @@ Future<void> _pump(
             tagsStale: stale,
             description: description,
             trace: trace,
+            handpicked: handpicked,
           ),
         ),
       ),
@@ -207,6 +209,84 @@ void _byDimension() {
       expect(find.text('植源场景'), findsNothing);
       expect(find.text('—'), findsNothing);
     });
+  });
+
+  /// 2026-09-09 真机，用户原话：「手动改了标签，属性展示只显示『手改过』，
+  /// 下面的内容没有联动。点开选标签才能看到确实改了的内容，外面要联动展示。」
+  ///
+  /// 分维度那份是模型打标那一刻的回答。人自己挑过之后，拿它去套眼前这几个
+  /// 标签就不成立了：人加进来的那些在模型那份里查无此人，只能落到「其他」，
+  /// 而它明明就在植源分子库里。所以手改过之后原样平铺，跟选标签弹窗里勾着
+  /// 的完全一致。
+  group('手改过：原样摆他挑的那几个，不再套模型的维度', () {
+    const trace = TagTrace(
+      tagsByDimension: {
+        '植源分子库': ['信任背书'],
+      },
+    );
+
+    testWidgets('人加进来的标签照样露出来，不掉进「其他」', (tester) async {
+      await _pump(tester,
+          tags: ['信任背书', '痛点', '外壳'], trace: trace, handpicked: true);
+
+      expect(find.text('信任背书'), findsOneWidget);
+      expect(find.text('痛点'), findsOneWidget);
+      expect(find.text('外壳'), findsOneWidget);
+      expect(find.text('其他'), findsNothing,
+          reason: '「痛点」就在植源分子库里，标成「其他」是在骗人');
+      expect(find.text('植源分子库'), findsNothing,
+          reason: '模型那份维度已经描述不了眼前这几个标签了');
+    });
+
+    testWidgets('删剩一个也照样只摆那一个', (tester) async {
+      await _pump(tester, tags: ['信任背书'], trace: trace, handpicked: true);
+
+      expect(find.text('信任背书'), findsOneWidget);
+      expect(find.text('—'), findsNothing);
+    });
+
+    testWidgets('没手改过的照旧分维度——那时分维度才是用来核对模型的',
+        (tester) async {
+      await _pump(tester, tags: ['信任背书'], trace: trace);
+
+      expect(find.text('植源分子库'), findsOneWidget);
+    });
+  });
+
+  /// 「联动」这件事本身也要有条线钉着：属性栏不许把标签拷一份留在自己身上，
+  /// 否则改完标签得切走再切回来才看得到
+  testWidgets('外面把标签换掉，属性栏当场跟着变', (tester) async {
+    var tags = const ['信任背书'];
+    late StateSetter setOuter;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 300,
+          height: 800,
+          child: SingleChildScrollView(
+            child: StatefulBuilder(builder: (context, setState) {
+              setOuter = setState;
+              return TagTraceSection(
+                title: '台词语义单元标签',
+                tags: tags,
+                handpicked: true,
+                trace: const TagTrace(tagsByDimension: {
+                  '植源分子库': ['信任背书'],
+                }),
+              );
+            }),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('痛点'), findsNothing);
+
+    setOuter(() => tags = const ['信任背书', '痛点', '外壳']);
+    await tester.pumpAndSettle();
+
+    expect(find.text('痛点'), findsOneWidget);
+    expect(find.text('外壳'), findsOneWidget);
   });
 
   testWidgets('展开过程量能看到这一层的约束', (tester) async {
