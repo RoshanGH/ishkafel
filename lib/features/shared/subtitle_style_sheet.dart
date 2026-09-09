@@ -9,12 +9,24 @@ import '../../core/subtitle/subtitle_style.dart';
 /// 样式粒度是**句**：全局一套基调，个别句子需要时行级覆盖。
 /// [allowApplyAll] 打开时多一个「应用到整片」——调好一句觉得整片都
 /// 该这样，一键提升为全局默认。返回 (样式, 是否应用到整片)
+///
+/// [onPreview] **边调边推**：每动一下就把当下这套样式交出去，让预览跟着变。
+/// 不推的话人只能凭那两个数字（「距底 21%」「23‰」）盲调，点完「就这样」
+/// 才看得见结果，不对再开一次——用户原话：「现在能调整了，但是没法实时
+/// 显示位置，有点在盲调的感觉」（2026-09-09 真机）。
+///
+/// 调用方拿到 [onPreview] 之后应当**只改内存、不落盘**，并且在拿到 null
+/// （取消）时把样式退回原样——人点了取消就是不要，不能留在半路上。
 Future<(SubtitleStyle, bool)?> showSubtitleStyleSheet(BuildContext context,
-        {required SubtitleStyle initial, bool allowApplyAll = false}) =>
+        {required SubtitleStyle initial,
+        bool allowApplyAll = false,
+        ValueChanged<SubtitleStyle>? onPreview}) =>
     showDialog<(SubtitleStyle, bool)>(
       context: context,
-      builder: (_) =>
-          _SubtitleStyleDialog(initial: initial, allowApplyAll: allowApplyAll),
+      builder: (_) => _SubtitleStyleDialog(
+          initial: initial,
+          allowApplyAll: allowApplyAll,
+          onPreview: onPreview),
     );
 
 /// 六色（白/黄/橙/绿/蓝/粉），hex 不带 #
@@ -30,8 +42,9 @@ const subtitleColors = <(String, String)>[
 class _SubtitleStyleDialog extends StatefulWidget {
   final SubtitleStyle initial;
   final bool allowApplyAll;
+  final ValueChanged<SubtitleStyle>? onPreview;
   const _SubtitleStyleDialog(
-      {required this.initial, this.allowApplyAll = false});
+      {required this.initial, this.allowApplyAll = false, this.onPreview});
 
   @override
   State<_SubtitleStyleDialog> createState() => _SubtitleStyleDialogState();
@@ -53,6 +66,13 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
         colorHex: _colorHex == 'FFFFFF' ? null : _colorHex,
         preset: _mask,
       );
+
+  /// 改一下就推一次给预览。**每一次都推**（含拖动途中的每一格）——
+  /// 节流是调用方的事，它才知道重渲一段要多久
+  void _change(VoidCallback apply) {
+    setState(apply);
+    widget.onPreview?.call(_style);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +104,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
             min: 0.05,
             max: 0.5,
             activeColor: AppColors.accentBlue,
-            onChanged: (v) => setState(() => _bottomRatio = v),
+            onChanged: (v) => _change(() => _bottomRatio = v),
           ), trailing: '距底 ${(_bottomRatio * 100).round()}%'),
           // 字号连续可调（用户定的：横轴滑杆，平滑）
           _row('字号', Slider(
@@ -93,7 +113,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
             min: 0.018,
             max: 0.065,
             activeColor: AppColors.accentBlue,
-            onChanged: (v) => setState(() => _fontRatio = v),
+            onChanged: (v) => _change(() => _fontRatio = v),
           ), trailing: '${(_fontRatio * 1000).round()}‰'),
           _row(
               '颜色',
@@ -105,7 +125,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                       message: name,
                       child: InkWell(
                         key: ValueKey('subtitle-color-$hex'),
-                        onTap: () => setState(() => _colorHex = hex),
+                        onTap: () => _change(() => _colorHex = hex),
                         borderRadius: BorderRadius.circular(999),
                         child: Container(
                           width: 22,
@@ -141,7 +161,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                               const TextStyle(fontSize: AppFontSize.caption)),
                       selected: _mask == preset,
                       visualDensity: VisualDensity.compact,
-                      onSelected: (_) => setState(() => _mask = preset),
+                      onSelected: (_) => _change(() => _mask = preset),
                     ),
                   ),
               ]),

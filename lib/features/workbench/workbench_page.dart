@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/subtitle/subtitle_style.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -804,6 +805,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _agentPoll?.cancel();
     _releaseLock();
     _consequenceTimer?.cancel();
+    _subtitleStylePreview?.cancel();
     _flushAutosaveOnDispose();
     _positionSub?.cancel();
     _editor?.removeListener(_onEditorChanged);
@@ -2005,15 +2007,43 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 而且画面描述里一个字都看不出来），默认的白字黑描边盖不住，
   /// 原字幕会从描边缝里透出来；切成底条或毛玻璃才能盖住。
   Future<void> _editSubtitleStyle() async {
-    final picked =
-        await showSubtitleStyleSheet(context, initial: _task.subtitle);
-    if (picked == null || !mounted) return;
+    final before = _task.subtitle;
+    final picked = await showSubtitleStyleSheet(context,
+        initial: before, onPreview: _previewSubtitleStyle);
+    _subtitleStylePreview?.cancel();
+    if (!mounted) return;
+    if (picked == null) {
+      // 取消 = 不要这套。调的过程中已经把预览改成半路那一套了，退回去
+      if (_task.subtitle.fingerprint != before.fingerprint) {
+        setState(() => _task = _task.copyWith(subtitle: before));
+        _syncPreviewAudio();
+      }
+      return;
+    }
     final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
     setState(() => _task = next);
     // 预览里被替换的那几段是**提前烧好字**的切片，样式变了要按新指纹重渲一遍。
     // 不推的话人调完参数看不到任何变化（2026-09-08 真机）
     _syncPreviewAudio();
     await ref.read(taskRepositoryProvider).save(next);
+  }
+
+  /// 拖动途中的节流：预览里那几段字是**烧进切片**的，样式一变就要重跑一次
+  /// ffmpeg。每动一格跑一次会把机器拖死，所以停手一下再跑
+  Timer? _subtitleStylePreview;
+
+  /// 边调边看：样式改一下就把预览重推一遍。
+  ///
+  /// **只改内存、不落盘**——人还没点「就这样」，这套样式随时可能被取消。
+  /// 用户原话：「现在能调整了，但是没法实时显示位置，有点在盲调的感觉」
+  void _previewSubtitleStyle(SubtitleStyle style) {
+    // 比指纹，不比对象：SubtitleStyle 没有值相等，`==` 只会永远为假
+    if (!mounted || _task.subtitle.fingerprint == style.fingerprint) return;
+    setState(() => _task = _task.copyWith(subtitle: style));
+    _subtitleStylePreview?.cancel();
+    _subtitleStylePreview = Timer(const Duration(milliseconds: 220), () {
+      if (mounted) _syncPreviewAudio();
+    });
   }
 
   /// 还有几条素材没落到本地、其中几条是彻底下不下来的。
