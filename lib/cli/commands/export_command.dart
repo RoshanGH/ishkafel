@@ -102,7 +102,7 @@ Future<int> runExportCommand({
   // 对照审核后的现状：人在审核里剔掉的素材绝不能静默导出去。
   // 剔除落在 task.replacements（主流程唯一真相），方案文件只是提案
   final blockedByReview =
-      plansBlockedByReview(validation.plans, task.replacements);
+      plansBlockedByReview(validation.plans, task.replacementsFor(units));
   if (blockedByReview.isNotEmpty) {
     sink.writeln('方案里有素材已被审核剔除，先更新方案再导出：');
     for (final problem in blockedByReview) {
@@ -160,7 +160,7 @@ Future<int> runExportCommand({
       // 字幕样式一起看：白描边盖不住素材自带的字，那是两行字打架
       subtitle: task.subtitle,
       // 整体替换的段落不烧台词字幕——这决定了烧字警告有多严重
-      replacements: task.replacements ?? const [])) {
+      replacements: task.replacementsFor(units))) {
     sink.writeln(warn);
   }
 
@@ -223,7 +223,7 @@ Future<int> runExportCommand({
     spec: spec,
     sourcePath: task.sourcePath,
     units: units,
-    replacements: task.replacements ?? const [],
+    replacements: task.replacementsFor(units),
     outputDir: dest,
     bgm: task.bgm,
     voices: task.voices,

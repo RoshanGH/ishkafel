@@ -49,12 +49,14 @@ void main() {
         updatedAt: DateTime.utc(2026, 8, 17),
         units: const [
           SemanticUnit(
+              uid: 'u0',
               index: 0,
               startMs: 0,
               endMs: 5000,
               transcript: '第一句',
               tags: ['促单', '痛点']),
           SemanticUnit(
+              uid: 'u1',
               index: 1,
               startMs: 5000,
               endMs: 9000,
@@ -63,7 +65,9 @@ void main() {
                 Shot(startMs: 5000, endMs: 9000, tags: ['厨房情景', '实拍'])
               ]),
         ],
-        replacements: replacements,
+        replacementsByUid: {
+          for (var i = 0; i < replacements.length; i++) 'u$i': replacements[i],
+        },
         pickedMaterials: const [
           PickedMaterial(
               id: 101,
@@ -245,7 +249,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 任务：101 被剔掉——主流程即结果，没有回执这层中间产物
-    expect(repo.tasks['rv1']!.replacements![0].wholeCandidateIds, [102]);
+    expect(repo.tasks['rv1']!.replacementsByUid['u0']!.wholeCandidateIds, [102]);
     // 确认后回到来处，带上结果给来处弹条用——审核页不是终点站
     expect(find.byKey(const Key('review-confirm')), findsNothing);
     expect((popped as ReviewOutcome).dropped, 1);
@@ -272,7 +276,7 @@ void main() {
           createdAt: task.createdAt,
           updatedAt: task.updatedAt,
           units: task.units,
-          replacements: task.replacements,
+          replacementsByUid: task.replacementsByUid,
           pickedMaterials: task.pickedMaterials,
         ));
     expect(find.text('原片'), findsNothing);
@@ -366,7 +370,7 @@ void main() {
       expect(find.text('已剔除'), findsOneWidget);
       expect(find.textContaining('保留 1 · 剔除 1'), findsOneWidget);
       // 盘上不能变——人还没按确认
-      expect(repo.tasks['rv1']!.replacements![0].wholeCandidateIds,
+      expect(repo.tasks['rv1']!.replacementsByUid['u0']!.wholeCandidateIds,
           const [101, 102]);
       // 回执要带上做了什么
       final result = await waitForAgentRequest(

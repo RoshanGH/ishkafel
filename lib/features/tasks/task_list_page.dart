@@ -752,7 +752,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
   Future<void> _openCardMenu(BuildContext context, WidgetRef ref,
       RenewTask task, Offset position) async {
     final action = await showTaskCardMenu(context, position,
-        canReview: collectReviewItems(task.replacements ?? const []).isNotEmpty,
+        canReview: collectReviewItems(
+                task.replacementsFor(task.units ?? const []))
+            .isNotEmpty,
         canReanalyze: task.sourcePath != null);
     if (action == null || !context.mounted) return;
     final controller = ref.read(taskListProvider.notifier);

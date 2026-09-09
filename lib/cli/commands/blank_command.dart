@@ -153,12 +153,16 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
     sink.writeln('至少要留 $blankMinUnits 个分子，删不了');
     return exitBadUsage;
   }
-  // 替换方案与配乐区间都按下标记，必须跟着挪——不挪不报错，
-  // 只会让成片悄悄变成另一个样子
+  // 配乐区间还是按下标记的，必须跟着挪。替换方案按单元的身份记，
+  // 只需要把没人认领的那条丢掉
+  final left = BlankUnitOps.removeAt(units, unit);
+  final live = {for (final u in left) u.uid};
   final next = task.copyWith(
-    units: BlankUnitOps.removeAt(units, unit),
-    replacements: shiftReplacementsAfterRemoval(task.replacements ?? const [],
-        removed: unit),
+    units: left,
+    replacementsByUid: {
+      for (final e in task.replacementsByUid.entries)
+        if (live.contains(e.key)) e.key: e.value,
+    },
     bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
     updatedAt: DateTime.now(),
   );

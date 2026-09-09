@@ -28,10 +28,13 @@ void main() {
         createdAt: DateTime.utc(2026, 8, 26),
         updatedAt: DateTime.utc(2026, 8, 26),
         units: const [
-          SemanticUnit(index: 0, startMs: 0, endMs: 5000, transcript: 'A'),
-          SemanticUnit(index: 1, startMs: 5000, endMs: 9000, transcript: 'B'),
+          SemanticUnit(uid: 'u0',index: 0, startMs: 0, endMs: 5000, transcript: 'A'),
+          SemanticUnit(uid: 'u1',index: 1, startMs: 5000, endMs: 9000, transcript: 'B'),
         ],
-        replacements: replacements,
+        // 测试里的单元身份统一用 'u0'/'u1'…，方案按位置铺到它们身上
+        replacementsByUid: {
+          for (var i = 0; i < replacements.length; i++) 'u$i': replacements[i],
+        },
       );
 
   setUp(() async {
@@ -85,9 +88,9 @@ void main() {
     test('剔掉两条：任务里就真的少了这两条，其余不动', () async {
       expect(await run(['drop', 'r1'], items: '0:-:100, 1:1:202'), 0);
       final after = await repo.findById('r1');
-      expect(after!.replacements![0].wholeCandidateIds, const [101]);
-      expect(after.replacements![1].shotCandidateIds[1], const [201]);
-      expect(after.replacements![1].shotCandidateIds[0], const [200]);
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101]);
+      expect(after.replacementsByUid['u1']!.shotCandidateIds[1], const [201]);
+      expect(after.replacementsByUid['u1']!.shotCandidateIds[0], const [200]);
     });
 
     test('编号写错：整批不落盘，一次把问题全报出来', () async {
@@ -99,7 +102,7 @@ void main() {
       expect(err.toString(), contains('888'));
       // 合法的那条也不能落——不然人以为删了三条、实际删了一条
       final after = await repo.findById('r1');
-      expect(after!.replacements![0].wholeCandidateIds, const [100, 101]);
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [100, 101]);
     });
 
     test('干完把在场状态撤掉，界面立刻能动', () async {
@@ -152,7 +155,7 @@ void main() {
       expect(json['delegated'], isTrue);
       // 盘上不能变——人还没按确认
       final after = await repo.findById('r1');
-      expect(after!.replacements![0].wholeCandidateIds, const [100, 101]);
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [100, 101]);
       // 必须说清还没落盘，不然人以为完事了，关掉窗口就白干
       expect(json['next'] as String, contains('确认'));
     });
@@ -190,7 +193,7 @@ void main() {
       final out = StringBuffer();
       expect(await run(['keep', 'r1'], items: '0:-:100', out: out), 0);
       final after = await repo.findById('r1');
-      expect(after!.replacements![0].wholeCandidateIds, const [100, 101]);
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [100, 101]);
       expect(jsonDecode(out.toString())['kept'], 1);
     });
   });

@@ -58,6 +58,7 @@ RenewTask _task() => RenewTask(
       unitTagGroups: const [TagGroupRef(id: 1, name: '台词标签组')],
       units: const [
         SemanticUnit(
+          uid: 'u0',
           index: 0,
           startMs: 0,
           endMs: 10000,
@@ -66,6 +67,7 @@ RenewTask _task() => RenewTask(
           shots: [Shot(startMs: 0, endMs: 10000, tags: ['近景'])],
         ),
         SemanticUnit(
+          uid: 'u1',
           index: 1,
           startMs: 10000,
           endMs: 20000,
@@ -74,6 +76,7 @@ RenewTask _task() => RenewTask(
           shots: [Shot(startMs: 10000, endMs: 20000, tags: ['中景'])],
         ),
         SemanticUnit(
+          uid: 'u2',
           index: 2,
           startMs: 20000,
           endMs: 30000,
@@ -84,11 +87,7 @@ RenewTask _task() => RenewTask(
       ],
       // U1 挑过素材——它现在是钉死的（见 EditLocks），所有改切分的用例都
       // 只能落在 U2/U3 上
-      replacements: [
-        UnitReplacement.whole(const [101, 102]),
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.keepOriginal(),
-      ],
+      replacementsByUid: {'u0': UnitReplacement.whole(const [101, 102])},
       videoInfo: const VideoInfo(
         width: 1080,
         height: 1920,
@@ -219,7 +218,7 @@ void main() {
     expect(saved!.units![1].tagsStale, isTrue,
         reason: '标签标记为过期，而不是抹掉——重打是异步的');
     expect(saved.units![1].tags, ['卖点'], reason: '标记过期不等于把标签删了');
-    expect(saved.replacements![0].wholeCandidateIds, [101, 102],
+    expect(saved.replacementsByUid['u0']!.wholeCandidateIds, [101, 102],
         reason: '钉死的 U1 根本没被这次编辑碰到，它的素材一条都不能少');
   });
 
@@ -233,7 +232,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final saved = await repo.findById('ec-1');
-    expect(saved!.replacements![0].wholeCandidateIds, [101, 102]);
+    expect(saved!.replacementsByUid['u0']!.wholeCandidateIds, [101, 102]);
     expect(saved.units![1].tagsStale, isFalse);
   });
 
@@ -394,6 +393,7 @@ void _blankTaskNeverAsks() {
         units: [
           for (var i = 0; i < 4; i++)
             SemanticUnit(
+              uid: 'ui',
               index: i,
               startMs: i * 10000,
               endMs: (i + 1) * 10000,

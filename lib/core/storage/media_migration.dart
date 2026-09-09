@@ -215,7 +215,7 @@ int _sizeOf(File f) {
 /// 脚本成片走 script.lines[].shots。漏一条就会把在用的素材当孤儿删掉
 Set<int> _materialIdsOf(RenewTask task) {
   final ids = <int>{};
-  for (final r in task.replacements ?? const []) {
+  for (final r in task.replacementsByUid.values) {
     ids.addAll(r.wholeCandidateIds);
     for (final list in r.shotCandidateIds.values) {
       ids.addAll(list);

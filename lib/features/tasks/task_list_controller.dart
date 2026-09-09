@@ -498,10 +498,13 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   ///
   /// 不改变任务状态——状态要等阶段③真正导出后才该流转到 exported，
   /// 提前改会让任务在列表里显示成已导出却拿不到成片。
+  /// [replacements] 按位置排（界面就是这么摆的），落库时翻译成
+  /// 「哪个单元的身份 → 哪份方案」
   Future<void> savePickingPlan(
       RenewTask task, List<UnitReplacement> replacements) async {
+    final units = task.units ?? const <SemanticUnit>[];
     final updated = task.copyWith(
-      replacements: replacements,
+      replacementsByUid: RenewTask.byUid(units, replacements),
       updatedAt: DateTime.now(),
     );
     await ref.read(taskRepositoryProvider).save(updated);

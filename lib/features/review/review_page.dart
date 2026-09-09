@@ -76,7 +76,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   late List<SemanticUnit> _units = [...(widget.task.units ?? const [])];
 
   late final List<ReviewItem> _items =
-      collectReviewItems(widget.task.replacements ?? const []);
+      collectReviewItems(widget.task.replacementsFor(_units));
 
   /// 被剔除的候选。默认空 = 全保留：审核是把不要的挑出来
   final Set<String> _dropped = {};
@@ -357,7 +357,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 标了 ★ 的那些（预览版）：审核的人该知道哪条是 Agent 的首选
   late final Set<String> _previewKeys = () {
     final keys = <String>{};
-    final replacements = widget.task.replacements ?? const [];
+    final replacements = widget.task.replacementsFor(_units);
     for (var u = 0; u < replacements.length; u++) {
       final r = replacements[u];
       if (r.wholeCandidateIds.isNotEmpty) {
@@ -494,10 +494,12 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     try {
       final repo = ref.read(taskRepositoryProvider);
       final current = await repo.findById(widget.task.id) ?? widget.task;
+      final units = current.units ?? const <SemanticUnit>[];
       final pruned =
-          applyReviewDecisions(current.replacements ?? const [], decisions);
-      await repo.save(
-          current.copyWith(replacements: pruned, updatedAt: DateTime.now()));
+          applyReviewDecisions(current.replacementsFor(units), decisions);
+      await repo.save(current.copyWith(
+          replacementsByUid: RenewTask.byUid(units, pruned),
+          updatedAt: DateTime.now()));
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
       // 审核完回到来处——它不是终点站，主流程才是

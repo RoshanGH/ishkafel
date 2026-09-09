@@ -70,7 +70,7 @@ final cachePurgeProvider = Provider<CachePurge>((ref) {
       referencedStems: {
         for (final t in tasks) ...[
           for (final m in t.pickedMaterials) '${m.id}',
-          for (final r in t.replacements ?? const []) ...[
+          for (final r in t.replacementsByUid.values) ...[
             for (final id in r.wholeCandidateIds) '$id',
             for (final ids in r.shotCandidateIds.values) ...[
               for (final id in ids) '$id',

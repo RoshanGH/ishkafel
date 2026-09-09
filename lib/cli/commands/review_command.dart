@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 
 import '../../core/models/renew_task.dart';
@@ -69,7 +70,8 @@ Future<int> runReviewCommand({
     sink.writeln('没有这个任务：$id');
     return exitNotFound;
   }
-  final candidates = collectReviewItems(task.replacements ?? const []);
+  final candidates =
+      collectReviewItems(task.replacementsFor(task.units ?? const []));
 
   if (!isAction) {
     return _openReviewUi(
@@ -264,7 +266,8 @@ Future<int> _changeCandidates({
       sink.writeln('任务在写入前被删了：${task.id}');
       return exitNotFound;
     }
-    final freshItems = collectReviewItems(fresh.replacements ?? const []);
+    final freshUnits = fresh.units ?? const <SemanticUnit>[];
+    final freshItems = collectReviewItems(fresh.replacementsFor(freshUnits));
     final second =
         validateReviewSubmission(items: freshItems, decisions: decisions);
     if (second.isNotEmpty) {
@@ -274,9 +277,10 @@ Future<int> _changeCandidates({
     }
 
     final pruned =
-        applyReviewDecisions(fresh.replacements ?? const [], decisions);
-    await repository
-        .save(fresh.copyWith(replacements: pruned, updatedAt: DateTime.now()));
+        applyReviewDecisions(fresh.replacementsFor(freshUnits), decisions);
+    await repository.save(fresh.copyWith(
+        replacementsByUid: RenewTask.byUid(freshUnits, pruned),
+        updatedAt: DateTime.now()));
     emitJson({
       'ok': true,
       'taskId': task.id,

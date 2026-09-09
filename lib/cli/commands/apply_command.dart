@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 import '../frame_check_wiring.dart';
 
@@ -192,8 +193,8 @@ Future<int> _applyWithLock({
   }
 
   _writePlans(dataDir, id, raw);
-  final replacements =
-      projectPlansToReplacements(validation.plans, task.units ?? const []);
+  final units = task.units ?? const <SemanticUnit>[];
+  final replacements = projectPlansToReplacements(validation.plans, units);
 
   final picked = await gatherPickedMaterials(
     replacements: replacements,
@@ -207,7 +208,9 @@ Future<int> _applyWithLock({
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
   // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
   await repository.save(task.copyWith(
-      replacements: replacements, pickedMaterials: picked));
+      // 按单元的身份落库：这份投影本来就是「哪个单元用哪几条素材」
+      replacementsByUid: RenewTask.byUid(units, replacements),
+      pickedMaterials: picked));
   emitJson({
     'ok': true,
     ...planApplyReport(

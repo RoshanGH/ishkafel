@@ -25,7 +25,8 @@ void main() {
         sourcePath: '/v/src.mp4',
         status: RenewTaskStatus.ready,
         units: units,
-        replacements: replacements,
+        replacementsByUid:
+            RenewTask.byUid(units, replacements ?? const []),
         pickedMaterials: picked,
         createdAt: DateTime(2026),
         updatedAt: DateTime(2026),
@@ -33,12 +34,14 @@ void main() {
 
   final units = [
     const SemanticUnit(
+        uid: 'u0',
         index: 0,
         startMs: 20000,
         endMs: 30000,
         transcript: '',
         hasSource: false),
     const SemanticUnit(
+        uid: 'u1',
         index: 1,
         startMs: 0,
         endMs: 8000,

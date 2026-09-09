@@ -165,8 +165,12 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
     units: task.isBlank
         ? BlankUnitOps.removeAt(units, unit)
         : removeUnitAt(units, unit),
-    replacements:
-        shiftReplacementsAfterRemoval(task.replacements ?? const [], removed: unit),
+    // 替换方案按单元的身份记，只需要把没人认领的那条丢掉
+    replacementsByUid: {
+      for (final e in task.replacementsByUid.entries)
+        if (removeUnitAt(units, unit).any((u) => u.uid == e.key))
+          e.key: e.value,
+    },
     bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
     voices: task.voices
         .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
@@ -198,8 +202,7 @@ Future<int> _move(FileTaskRepository repository, RenewTask task, int? unit,
   final bgm = remapBgmAfterMove(task.bgm, from: unit, to: to);
   final next = task.copyWith(
     units: moved,
-    replacements: remapReplacementsAfterMove(task.replacements ?? const [],
-        from: unit, to: to, unitCount: moved.length),
+    // 替换方案、配音、手改字幕都按身份记，挪顺序一份都不用动
     bgm: bgm.plan,
     updatedAt: DateTime.now(),
   );

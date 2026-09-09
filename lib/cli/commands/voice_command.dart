@@ -100,11 +100,11 @@ Future<int> runVoiceGenerateCommand({
     emitJson({
       'ok': failed.isEmpty,
       'generated': written.length,
-      'audio': {for (final e in written.entries) '${e.key}': e.value},
+      'audio': {for (final e in written.entries) e.key: e.value},
       // 失败的要点名：不点名的话人不知道该重跑哪几句，
       // 而导出会因为「选了音色没生成」被拦下
       if (failed.isNotEmpty)
-        'failed': {for (final e in failed.entries) '${e.key}': e.value},
+        'failed': {for (final e in failed.entries) e.key: e.value},
       'next': failed.isEmpty
           ? '可以导出了'
           : '这几句没合成成功，重跑一次这条命令只会补这几句',

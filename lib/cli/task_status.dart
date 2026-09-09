@@ -169,7 +169,7 @@ TaskStatus scriptStatus(RenewTask task, ScriptDoc doc) {
 /// 替换裂变这条线走到哪了。
 TaskStatus renewStatus(RenewTask task) {
   final units = task.units ?? const [];
-  final planned = (task.replacements ?? const []).length;
+  final planned = task.replacementsByUid.length;
   final steps = <({String step, String state, bool done})>[
     (
       step: '分析切分',

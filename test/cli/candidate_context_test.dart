@@ -23,6 +23,7 @@ void main() {
         updatedAt: DateTime.utc(2026),
         units: [
           SemanticUnit(
+            uid: 'u0',
             index: 0,
             startMs: 0,
             endMs: 6000,
@@ -35,7 +36,11 @@ void main() {
             ],
           ),
         ],
-        replacements: replacements,
+        // 测试里的单元身份统一用 'u0'/'u1'…，方案按位置铺到它们身上
+        replacementsByUid: {
+          for (var i = 0; i < (replacements ?? const []).length; i++)
+            'u$i': replacements![i],
+        },
       );
 
   test('带上本单元的台词与标签——那是这一段在讲什么', () {

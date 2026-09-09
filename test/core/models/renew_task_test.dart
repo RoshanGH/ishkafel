@@ -177,59 +177,120 @@ void main() {
     });
   });
 
-  group('阶段②替换方案（replacements）', () {
+  group('阶段②替换方案：按单元的身份记', () {
+    /// 方案曾经是一个按位置对齐的数组，于是每挪一次、每删一次单元都要人工
+    /// 把它搬一遍——2026-09-08 真机上就是这么错的。现在按单元自己的身份记，
+    /// 怎么挪都还是它。界面和 CLI 照旧按位置说话，在存取这一步翻译。
+    final units = [
+      const SemanticUnit(
+          uid: 'a', index: 0, startMs: 0, endMs: 1000, transcript: '一'),
+      const SemanticUnit(
+          uid: 'b', index: 1, startMs: 1000, endMs: 2000, transcript: '二'),
+      const SemanticUnit(
+          uid: 'c', index: 2, startMs: 2000, endMs: 3000, transcript: '三'),
+    ];
+    final withUnits = task.copyWith(units: units);
+
     test('序列化往返一致且深度相等', () {
-      final picked = task.copyWith(replacements: [
-        UnitReplacement.whole([11, 22]),
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.perShot({
+      // 「保留原片」= 没定过方案，不占一格（存盘时按位置写占位，
+      // 读回来再收掉）
+      final picked = withUnits.copyWith(replacementsByUid: {
+        'a': UnitReplacement.whole([11, 22]),
+        'c': UnitReplacement.perShot({
           1: [33]
         }),
-      ]);
+      });
+
       final parsed =
           RenewTask.fromJson(jsonDecode(jsonEncode(picked.toJson())));
+
       expect(parsed, picked);
-      expect(parsed.replacements!.first.wholeCandidateIds, [11, 22]);
-      expect(parsed.replacements!.last.shotCandidateIds[1], [33]);
+      expect(parsed.replacementsByUid['a']!.wholeCandidateIds, [11, 22]);
+      expect(parsed.replacementsByUid['c']!.shotCandidateIds[1], [33]);
+    });
+
+    test('挪动单元之后，方案还挂在原来那个单元上', () {
+      final picked = withUnits.copyWith(
+          replacementsByUid: RenewTask.byUid(units, [
+        UnitReplacement.whole([11]),
+        UnitReplacement.keepOriginal(),
+        UnitReplacement.keepOriginal(),
+      ]));
+
+      // 把第一个挪到最后（列表顺序就是成片顺序）
+      final moved = [units[1], units[2], units[0]];
+      final after = picked.copyWith(units: moved);
+
+      expect(after.replacementsFor(moved).last.wholeCandidateIds, [11],
+          reason: '按位置记的话，挑给第一句的素材会留在第一格——'
+              '2026-09-08 真机上的原话：「那个替换的镜头没有跟着 U2 走」');
+    });
+
+    test('老存档按位置存的，读出来对到当时那几个单元上', () {
+      final json = withUnits.toJson()
+        ..['replacements'] = [
+          {'mode': 'whole', 'wholeCandidateIds': [1]},
+          {'mode': 'keepOriginal'},
+          {'mode': 'keepOriginal'},
+        ];
+
+      final parsed = RenewTask.fromJson(json);
+
+      expect(parsed.replacementsByUid['a']!.wholeCandidateIds, [1]);
     });
 
     test('旧 JSON（无 replacements 键）照常读出，不让整条任务从列表消失', () {
-      final json = task.toJson()..remove('replacements');
+      final json = withUnits.toJson()..remove('replacements');
+
       final parsed = RenewTask.fromJson(json);
-      expect(parsed.replacements, isNull);
+
+      expect(parsed.replacementsByUid, isEmpty);
       expect(parsed.id, task.id, reason: '其余字段必须完好');
     });
 
-    test('replacements 类型不对（脏数据）时回退为 null，不抛异常', () {
-      final json = task.toJson()..['replacements'] = '整体替换';
+    test('replacements 类型不对（脏数据）时当作没选材，不抛异常', () {
+      final json = withUnits.toJson()..['replacements'] = '整体替换';
+
       final parsed = RenewTask.fromJson(json);
-      expect(parsed.replacements, isNull);
+
+      expect(parsed.replacementsByUid, isEmpty);
       expect(parsed.name, task.name);
     });
 
-    test('单条替换方案畸形时只跳过那一条，其余保持位置对齐', () {
-      final json = task.toJson()
+    test('单条畸形只跳过那一条，其余照旧挂在自己的单元上', () {
+      final json = withUnits.toJson()
         ..['replacements'] = [
           {'mode': 'whole', 'wholeCandidateIds': [1]},
           'not-a-map',
+          {'mode': 'whole', 'wholeCandidateIds': [2]},
         ];
+
       final parsed = RenewTask.fromJson(json);
-      expect(parsed.replacements, hasLength(2));
-      expect(parsed.replacements![0].wholeCandidateIds, [1]);
-      expect(parsed.replacements![1].mode, ReplacementMode.keepOriginal,
-          reason: '按下标对齐单元列表，坏的那条只能降级为保留原片，不能整体错位');
+
+      expect(parsed.replacementsByUid['a']!.wholeCandidateIds, [1]);
+      expect(parsed.replacementsByUid['c']!.wholeCandidateIds, [2],
+          reason: '坏的那条只影响它自己，后面的不能整体错位');
+      expect(parsed.replacementsByUid.containsKey('b'), isFalse);
     });
 
-    test('copyWith 不传 replacements 时沿用原值（不可变，返回新对象）', () {
-      final picked = task.copyWith(replacements: [UnitReplacement.whole([1])]);
-      final renamed = picked.copyWith(name: '改名');
-      expect(renamed.replacements, picked.replacements);
-      expect(task.replacements, isNull, reason: '原对象不得被就地修改');
+    test('按位置铺开时，没定过方案的那格是保留原片', () {
+      final picked = withUnits.copyWith(
+          replacementsByUid: {'b': UnitReplacement.whole([9])});
+
+      final list = picked.replacementsFor(units);
+
+      expect(list, hasLength(3));
+      expect(list[0].mode, ReplacementMode.keepOriginal);
+      expect(list[1].wholeCandidateIds, [9]);
     });
 
-    test('replacements 对外只读', () {
-      final picked = task.copyWith(replacements: [UnitReplacement.keepOriginal()]);
-      expect(() => picked.replacements!.add(UnitReplacement.keepOriginal()),
+    test('对外只读', () {
+      final picked = withUnits
+          .copyWith(replacementsByUid: {'a': UnitReplacement.keepOriginal()});
+
+      expect(() => picked.replacementsFor(units).add(UnitReplacement.keepOriginal()),
+          throwsUnsupportedError);
+      expect(() => picked.replacementsByUid['x'] = UnitReplacement.keepOriginal(),
           throwsUnsupportedError);
     });
   });

@@ -18,7 +18,7 @@ Map<String, dynamic> taskToJson(RenewTask task) {
   // 那些记下来，下面整块不报
   final unknown = <int>[];
   final wholeDurations = <int, int>{};
-  final plans = task.replacements;
+  final plans = units == null ? null : task.replacementsFor(units);
   if (plans != null && units != null) {
     final durationOf = {
       for (final m in task.pickedMaterials)
@@ -90,11 +90,12 @@ Map<String, dynamic> taskToJson(RenewTask task) {
           ],
     // 替换现状（主流程唯一真相）：apply plans 投影进来、审核剔除也落这里。
     // Agent 提交后靠它验证生效、审核后靠它看剔了什么——没有这块就只能盲跑
-    'replacements': task.replacements == null
+    // 对外照旧按 U1/U2 的顺序列——人和 Agent 都按位置说话
+    'replacements': plans == null
         ? null
         : [
-            for (var i = 0; i < task.replacements!.length; i++)
-              _replacementToJson(i, task.replacements![i]),
+            for (var i = 0; i < plans.length; i++)
+              _replacementToJson(i, plans[i]),
           ],
     // 已选素材的时长。**取段靠它**：20 秒的素材塞进 0.5 秒的坑位，
     // 得先知道它是 20 秒才算得出要放 40 倍。
@@ -135,7 +136,7 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     // 成片里哪几段会有台词字幕。**两种替换模式在这件事上不一样**，
     // 而这个差别此前在界面上和命令行里都看不见：镜头替换会把字幕重渲上去，
     // 整体替换原样接上、和原坑位对不齐，那一段就没有台词字幕
-    if (task.replacements case final r? when r.isNotEmpty)
+    if (plans case final r? when r.isNotEmpty)
       'subtitleCoverage': {
         'unitsWith': subtitleCoverage(r).unitsWith,
         'unitsWithout': subtitleCoverage(r).unitsWithout,

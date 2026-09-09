@@ -1,6 +1,5 @@
 import '../audio/bgm_plan.dart';
 import '../models/semantic_unit.dart';
-import '../replacement/replacement_plan.dart';
 
 /// 调整台词语义单元的**成片顺序**：把 U2 拖到 U1 的位置，它就成了 U1。
 ///
@@ -9,11 +8,13 @@ import '../replacement/replacement_plan.dart';
 /// 成片里的先后就跟着变了，单元的 `startMs`/`endMs` 退化成「我取自原片的
 /// 哪一段」——它跟着单元一起搬，不重算。
 ///
-/// **真正的风险不在列表本身，在旁边那三份按下标记的数据**：替换方案、配音、
-/// 配乐。它们不跟着搬不会报错，只会让成片悄悄变成另一个样子——挑给 U2 的
-/// 素材跑到 U1 身上、配音念错段落、配乐盖错地方。这个文件把它们放在一起，
-/// **加第四种按下标记的东西时不会漏**（同 [shiftReplacementsAfterRemoval]
-/// 那一组的用意）。
+/// **挂在单元上的东西一份都不用搬**：替换方案、配音、手改字幕、生成好的
+/// 配音文件都按单元自己的身份记（[SemanticUnit.uid]），单元怎么排都还是它。
+///
+/// 这里曾经放着四个 remap 函数，一份一份地把按位置记的数据挪到新位置——
+/// 半年里漏搬过三次，每次都是「不报错，只有把片子导出来看一遍才发现」。
+/// 现在只剩配乐：它记的是**区间**（哪几段连着铺一首曲子），挪动会改变
+/// 「这一段盖住谁」，那是要跟人说清楚的事，不是搬一下就完的。
 
 /// 挪单元。越界或原地不动都原样返回入参本身（调用方可以 `identical` 判断）
 List<SemanticUnit> moveUnit(
@@ -27,31 +28,6 @@ List<SemanticUnit> moveUnit(
     // 下标必须跟位置一致：所有按下标记的东西都指着它
     for (var i = 0; i < next.length; i++) next[i].copyWith(index: i),
   ];
-}
-
-/// 替换方案按列表下标记，跟着同样挪一次。
-///
-/// [unitCount] 是**单元数**，不是方案数——这两个可以不一样：加一个单元时
-/// 方案列表不会跟着长出一条，于是出现「单元 6 个、方案 5 条」。
-/// 拿方案数去判断 from/to 合不合法的话，把第 6 个单元拖到最前面会因为
-/// `from=5` 超出方案列表长度而**整个跳过重排**，素材就全跟错了单元。
-///
-/// 2026-09-07 真机上就是这么把素材 114799 从 U3 挪到了别人身上——不报错，
-/// 只有把片子导出来看一遍才可能发现。所以这里先按单元数补齐再挪。
-List<UnitReplacement> remapReplacementsAfterMove(
-  List<UnitReplacement> replacements, {
-  required int from,
-  required int to,
-  required int unitCount,
-}) {
-  if (!_movable(unitCount, from, to)) return replacements;
-  // 补齐到单元数：缺的那些是「还没挑素材」，等同于保留原片
-  final padded = [
-    ...replacements,
-    for (var i = replacements.length; i < unitCount; i++)
-      UnitReplacement.keepOriginal(),
-  ];
-  return List.unmodifiable(moveIndexed(padded, from: from, to: to));
 }
 
 /// 配乐挪动的结果：新方案 + **被打断的那几段**。

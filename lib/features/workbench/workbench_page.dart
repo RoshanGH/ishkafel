@@ -347,7 +347,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           '${validation.plans.length} 条方案通过校验，正在投影到时间线',
           focus: const AgentFocus(module: 'workbench'));
       setState(() => _replacements = replacements);
-      _task = _task.copyWith(replacements: replacements);
+      _task = _task.copyWith(replacementsByUid: _byUid(replacements));
       await _tasks!.savePickingPlan(_task, replacements);
       await voice?.sayAndHold(
           '投影完了：${replacements.length} 个单元的替换已经落在时间线上',
@@ -570,7 +570,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     editor.addListener(_onEditorChanged);
     _editor = editor;
-    _replacements = task.replacements;
+    _replacements = task.replacementsFor(units);
     _syncEditLocks();
     _pinMaterials();
     _consequenceBaseline = units;
@@ -877,6 +877,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 走 [SegmentationEditorController.replaceUnitsForBlankTask] 而不是切分
   /// 那套操作——那套要保证「无缝覆盖固定的原片时长」，而这里总长本来就是
   /// 加出来的。
+  /// 把界面上那份**按位置排**的方案翻译成「单元身份 → 方案」。
+  ///
+  /// 界面天然按位置走（人说的是 U1/U2），而存的是身份——挪动、删除都不会
+  /// 让它错位。翻译只在写进 [_task] 的这一步做
+  Map<String, UnitReplacement> _byUid(List<UnitReplacement>? list) {
+    final units = _editor?.units ?? const <SemanticUnit>[];
+    final plans = list ?? const <UnitReplacement>[];
+    return RenewTask.byUid(units, plans);
+  }
+
   /// 把某个单元拖到另一个位置——**列表顺序就是成片顺序**。
   ///
   /// 挪列表本身很简单，风险全在旁边那三份按下标记的数据上：替换方案、配音、
@@ -898,22 +908,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               '请回配乐轨确认一下')));
     }
 
-    final movedReplacements = remapReplacementsAfterMove(
-        _replacements ?? const [],
-        from: from,
-        to: to,
-        unitCount: next.length);
+    // **一份都不用搬**：方案、配音、手改字幕都按单元的身份记，挪的只是
+    // 列表顺序。内存里那份是按位置排的视图，照新顺序重新铺一遍就是了
+    final movedReplacements = _task.replacementsFor(next);
     setState(() {
       _replacements = movedReplacements;
       _task = _task.copyWith(
           bgm: bgm.plan,
           // **也要写进 _task 并落盘**：只改内存的话，重开任务时素材会退回
-          // 挪动之前那一格——挑给这个单元的素材跑到别人身上，不报任何错
-          // （2026-09-08 真机）。挑素材、剔候选那几条路一直是三步一起做的，
-          // 唯独重排和删单元漏了后两步
-          // 配音和手改字幕**什么都不用做**：它们按单元的身份记，
-          // 单元怎么排都还是它
-          replacements: movedReplacements);
+          // 挪动之前那一格（2026-09-08 真机）。身份没变，这里写的是同一份，
+          // 但 replacementsByUid 仍要显式带上——否则 units 换了、方案没跟着
+          // 存，下次读档按位置兜底会错位
+          replacementsByUid: RenewTask.byUid(next, movedReplacements));
     });
     await _savePickingPlanQuietly(movedReplacements);
     // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
@@ -1331,15 +1337,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final units = _task.isBlank
         ? BlankUnitOps.removeAt(editor.units, unitIndex)
         : removeUnitAt(editor.units, unitIndex);
-    final shifted = shiftReplacementsAfterRemoval(_replacements ?? const [],
-        removed: unitIndex);
+    // 删掉之后按新的单元列表重新铺一遍——方案按身份记，没被删的那些
+    // 一个都不会跑位
+    final shifted = _task.replacementsFor(units);
     setState(() {
       _replacements = shifted;
       _task = _task.copyWith(
           bgm: shiftBgmAfterRemoval(_task.bgm, removed: unitIndex),
-          // 和重排同理：内存、_task、盘上三处都要改
-          replacements: shifted,
-          // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
+          // 和重排同理：内存、_task、盘上三处都要改。方案按身份记，
+          // 删掉的那个单元连同它的方案一起没了，剩下的一份都不动
+          replacementsByUid: RenewTask.byUid(units, shifted),
           // 配音和字幕只需要把没人认领的那几条丢掉——剩下的一份都不用动
           voices: _task.voices.keepingOnly({for (final u in units) u.uid}),
           subtitleTrack: _task.subtitleTrack
@@ -1967,7 +1974,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       MaterialPageRoute(
         builder: (_) => ReviewPage(
           task: _task.copyWith(
-              replacements: _replacements, units: _editor?.units),
+              replacementsByUid: _byUid(_replacements),
+              units: _editor?.units),
           onApply: (decisions) {
             final pruned = applyReviewDecisions(
                 _replacements ?? const [], decisions);
@@ -2292,7 +2300,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _pinMaterials();
     try {
       await _tasks!.savePickingPlan(_task, next);
-      _task = _task.copyWith(replacements: next);
+      _task = _task.copyWith(replacementsByUid: _byUid(next));
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('替换方案');

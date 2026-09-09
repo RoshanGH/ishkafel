@@ -24,9 +24,13 @@ void main() {
         createdAt: DateTime.utc(2026, 8, 17),
         updatedAt: DateTime.utc(2026, 8, 17),
         units: const [
-          SemanticUnit(index: 0, startMs: 0, endMs: 5000, transcript: 'A'),
+          SemanticUnit(uid: 'u0',index: 0, startMs: 0, endMs: 5000, transcript: 'A'),
         ],
-        replacements: replacements,
+        // 测试里的单元身份统一用 'u0'/'u1'…，方案按位置铺到它们身上
+        replacementsByUid: {
+          for (var i = 0; i < (replacements ?? const []).length; i++)
+            'u$i': replacements![i],
+        },
       );
 
   setUp(() async {

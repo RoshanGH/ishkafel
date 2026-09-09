@@ -1,28 +1,15 @@
 import '../audio/bgm_plan.dart';
-import '../replacement/replacement_plan.dart';
 
-/// 删掉一个分子之后，把**所有按分子下标记的东西**跟着挪。
+/// 删掉一个单元之后，配乐区间跟着收缩。
 ///
-/// 为什么单独一个文件：删分子这件事本身很简单（列表里去掉一项），真正的
-/// 风险在于旁边还有**三份**数据也是按下标记的：替换方案、配乐、配音。
-/// 它们不挪不会报错，只会让成片悄悄变成另一个样子——原本挑给 U2 的素材跑到
-/// U1 身上、配乐盖错段落、配音念错地方。
+/// 这个文件曾经管着四份「按下标记」的数据（替换方案、配乐、配音、手改
+/// 字幕），删一个单元就要一份一份地搬——半年里漏搬过三次，每次都是
+/// 「不报错，只有把片子导出来看一遍才发现」。
 ///
-/// 这句话原本写的是「两份」，配音是后来补的第三种，手改字幕是 2026-09-09
-/// 清点时才发现从头到尾没搬过的第四种。
-///
-/// **这个文件正在退休**：单元有了自己的身份（[SemanticUnit.uid]）之后，
-/// 挂在它下面的东西按身份记，删一个单元只是「这个身份没了」，剩下的一份都
-/// 不用动。剩在这里的是还没改完的那几份。
-
-/// 替换方案按下标记，删了一个就整体前移
-List<UnitReplacement> shiftReplacementsAfterRemoval(
-  List<UnitReplacement> replacements, {
-  required int removed,
-}) {
-  if (removed < 0 || removed >= replacements.length) return replacements;
-  return List.unmodifiable([...replacements]..removeAt(removed));
-}
+/// 现在只剩配乐：别的都按单元自己的身份记（[SemanticUnit.uid]），
+/// 删一个单元只是「这个身份没了」，剩下的一份都不用动。配乐记的是**区间**
+/// （哪几段连着铺一首曲子），删掉中间一段会改变「这一段盖住谁」，
+/// 那是要重新算的。
 
 /// 配乐按分子区间记（[BgmSegment.startUnit] ~ [BgmSegment.endUnit]），
 /// 删了一个分子之后区间要跟着收缩或前移。

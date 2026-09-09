@@ -34,10 +34,10 @@ void main() {
         createdAt: DateTime.utc(2026, 8, 18),
         updatedAt: DateTime.utc(2026, 8, 18),
         units: const [
-          SemanticUnit(index: 0, startMs: 0, endMs: 3000, transcript: 'A', shots: [
+          SemanticUnit(uid: 'u0',index: 0, startMs: 0, endMs: 3000, transcript: 'A', shots: [
             Shot(startMs: 0, endMs: 3000),
           ]),
-          SemanticUnit(index: 1, startMs: 3000, endMs: 6000, transcript: 'B', shots: [
+          SemanticUnit(uid: 'u1',index: 1, startMs: 3000, endMs: 6000, transcript: 'B', shots: [
             Shot(startMs: 3000, endMs: 4500),
             Shot(startMs: 4500, endMs: 6000),
           ]),
@@ -83,7 +83,8 @@ void main() {
     expect(await apply(), 0);
 
     final saved = (await repo.findById('t1'))!;
-    final r = saved.replacements!;
+    final units = saved.units!;
+    final r = saved.replacementsFor(units);
     expect(r[0].wholeCandidateIds, [101, 102], reason: '两条方案的候选并集');
     expect(r[1].shotCandidateIds[0], [201]);
     // 投影后 review 命令可达（曾经必然 exit 2）
@@ -105,10 +106,12 @@ void main() {
 
     // 人在审核里剔掉了 102（方案乙用的那条）
     final saved = (await repo.findById('t1'))!;
-    final pruned = applyReviewDecisions(saved.replacements!, const [
+    final pruned =
+        applyReviewDecisions(saved.replacementsFor(saved.units!), const [
       ReviewDecision(unit: 0, shot: null, material: 102, keep: false),
     ]);
-    await repo.save(saved.copyWith(replacements: pruned));
+    await repo.save(saved.copyWith(
+        replacementsByUid: RenewTask.byUid(saved.units!, pruned)));
 
     final err = StringBuffer();
     final code = await runExportCommand(

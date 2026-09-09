@@ -151,7 +151,12 @@ class UnitReplacement {
 
   /// 落盘形态。镜头下标用字符串键——JSON 对象的键只能是字符串，
   /// 直接塞 int 键的 Map 在 `jsonEncode` 时会抛。
-  Map<String, dynamic> toJson() => {
+  ///
+  /// [unitUid] 是这条方案挂在哪个单元上（[SemanticUnit.uid]）。**数组仍然
+  /// 按单元顺序写**：本项目按「打包好的 .app 发给同事」分发，新旧版本会并存，
+  /// 旧版本只认位置——顺序写对，它读出来也还是对的。
+  Map<String, dynamic> toJson({String unitUid = ''}) => {
+        if (unitUid.isNotEmpty) 'unitUid': unitUid,
         'mode': mode.name,
         'wholeCandidateIds': wholeCandidateIds,
         'wholePreviewId': wholePreviewId,

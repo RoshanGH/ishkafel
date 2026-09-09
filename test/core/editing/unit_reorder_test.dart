@@ -1,9 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
-import 'package:ishkafel/core/editing/blank_unit_removal.dart';
 import 'package:ishkafel/core/editing/unit_reorder.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
-import 'package:ishkafel/core/replacement/replacement_plan.dart';
 
 SemanticUnit _u(int index, {String? text}) => SemanticUnit(
       index: index,
@@ -43,42 +41,7 @@ void main() {
   });
 
   group('按下标记的东西要跟着搬', () {
-    test('替换方案跟着走——不然挑给 U2 的素材会跑到别人身上', () {
-      final plans = [
-        UnitReplacement.whole(const [101]),
-        UnitReplacement.whole(const [202]),
-        UnitReplacement.whole(const [303]),
-      ];
 
-      final moved = remapReplacementsAfterMove(plans, from: 1, to: 0, unitCount: 3);
-
-      expect(moved[0].wholeCandidateIds, [202]);
-      expect(moved[1].wholeCandidateIds, [101]);
-      expect(moved[2].wholeCandidateIds, [303]);
-    });
-
-    test('替换方案比单元少时也要重排——真机就栽在这儿', () {
-      // 加一个单元时替换方案不会跟着长出一条，于是「单元 6 条、方案 5 条」。
-      // 把第 6 个单元（下标 5）拖到最前面，from=5 超出了方案列表的长度，
-      // 老实现直接原样返回——整个重排被跳过，素材全跟错了单元。
-      // 2026-09-07 真机上就是这么把 114799 从 U3 挪到了别人身上
-      final plans = [
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.whole(const [114799]),
-        UnitReplacement.keepOriginal(),
-        UnitReplacement.keepOriginal(),
-      ];
-
-      final moved =
-          remapReplacementsAfterMove(plans, from: 5, to: 0, unitCount: 6);
-
-      expect(moved.length, 6, reason: '补齐到单元数，不然下标永远对不齐');
-      expect(moved[0].mode, ReplacementMode.keepOriginal,
-          reason: '挪到最前面的是新加的那个，它还没挑素材');
-      expect(moved[3].wholeCandidateIds, [114799],
-          reason: '原来在下标 2 的素材，整体后移一格到 3');
-    });
 
 
   });

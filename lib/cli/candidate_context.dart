@@ -51,7 +51,7 @@ Map<String, dynamic> _neighbour(RenewTask task, int unitIndex, int shotIndex) {
 
 /// 没挑过就是空列表，不是 null——调用方不必为此做两种判断
 List<int> _pickedFor(RenewTask task, int unitIndex, int shotIndex) {
-  final replacements = task.replacements;
-  if (replacements == null || unitIndex >= replacements.length) return const [];
+  final replacements = task.replacementsFor(task.units ?? const []);
+  if (unitIndex < 0 || unitIndex >= replacements.length) return const [];
   return replacements[unitIndex].shotCandidateIds[shotIndex] ?? const [];
 }

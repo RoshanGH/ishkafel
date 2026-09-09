@@ -122,7 +122,14 @@ class RenewTask {
   /// 长度未必与 [units] 相等：切分被改动后单元数会变，读取方（阶段②页面）
   /// 负责按当前单元数补位/截断，模型层不擅自纠正——擅自补位会把「用户到底
   /// 选过没有」这个事实抹掉。
-  final List<UnitReplacement>? replacements;
+  /// 替换方案，**按单元的身份记**（[SemanticUnit.uid]）。
+  ///
+  /// 曾经是一个按位置对齐的数组，于是每挪一次、每删一次单元都要人工把它
+  /// 搬一遍——2026-09-08 真机上就是这么错的：「我给这个自定义台词语义单元
+  /// 选了一个镜头，然后又把它拉到后面，那个替换的镜头没有跟着走」。
+  ///
+  /// 要按位置拿（画时间线、导出）时用 [replacementsFor]。
+  final Map<String, UnitReplacement> replacementsByUid;
 
   /// 每一次导出的记录（时间倒序由读取方决定，这里按发生顺序追加）。
   /// 项目没有终态，**导出才是那件有始有终的事**——见 [ExportRecord]
@@ -197,7 +204,7 @@ class RenewTask {
     this.unitTagPrompt = '',
     this.shotTagPrompt = '',
     this.analysisError,
-    List<UnitReplacement>? replacements,
+    Map<String, UnitReplacement> replacementsByUid = const {},
     List<PickedMaterial> pickedMaterials = const [],
     List<ExportRecord> exports = const [],
     this.bgm = BgmPlan.empty,
@@ -211,8 +218,7 @@ class RenewTask {
         shotTagGroups = List.unmodifiable(shotTagGroups),
         pickedMaterials = List.unmodifiable(pickedMaterials),
         exports = List.unmodifiable(exports),
-        replacements =
-            replacements == null ? null : List.unmodifiable(replacements);
+        replacementsByUid = Map.unmodifiable(replacementsByUid);
 
   /// 标签组列表的宽松解析：先认新的数组字段，没有再退回旧的单个字段。
   ///
@@ -281,7 +287,7 @@ class RenewTask {
     String? shotTagPrompt,
     String? analysisError,
     bool clearAnalysisError = false,
-    List<UnitReplacement>? replacements,
+    Map<String, UnitReplacement>? replacementsByUid,
     List<PickedMaterial>? pickedMaterials,
     List<ExportRecord>? exports,
     BgmPlan? bgm,
@@ -326,7 +332,7 @@ class RenewTask {
                         this.status == RenewTaskStatus.analyzing
                     ? null
                     : this.analysisError),
-        replacements: replacements ?? this.replacements,
+        replacementsByUid: replacementsByUid ?? this.replacementsByUid,
         pickedMaterials: pickedMaterials ?? this.pickedMaterials,
         exports: exports ?? this.exports,
         bgm: bgm ?? this.bgm,
@@ -364,7 +370,22 @@ class RenewTask {
         'unitTagPrompt': unitTagPrompt,
         'shotTagPrompt': shotTagPrompt,
         'analysisError': analysisError,
-        'replacements': replacements?.map((r) => r.toJson()).toList(),
+        // **按单元顺序写数组**：本项目按「打包好的 .app 发给同事」分发，
+        // 新旧版本并存，旧版本只认位置——顺序写对，它读出来也还是对的；
+        // 新版本认每条里的 unitUid，怎么挪都不会错位。
+        // 没定过方案的那格写成「保留原片」占位，位置才对得上
+        'replacements': units == null
+            ? (replacementsByUid.isEmpty
+                ? null
+                : [
+                    for (final e in replacementsByUid.entries)
+                      e.value.toJson(unitUid: e.key),
+                  ])
+            : [
+                for (final u in units!)
+                  (replacementsByUid[u.uid] ?? UnitReplacement.keepOriginal())
+                      .toJson(unitUid: u.uid),
+              ],
         'pickedMaterials': pickedMaterials.map((m) => m.toJson()).toList(),
         'exports': exports.map((e) => e.toJson()).toList(),
         'bgm': bgm.toJson(),
@@ -418,7 +439,7 @@ class RenewTask {
         shotTagPrompt:
             parsePrompt(json['shotTagPrompt'], json['shotTagGroups']),
         analysisError: json['analysisError'] as String?,
-        replacements: parseReplacements(json['replacements']),
+        replacementsByUid: parseReplacements(json['replacements'], units),
         pickedMaterials: PickedMaterial.parseList(json['pickedMaterials']),
         exports: ExportRecord.parseList(json['exports']),
         // 老存档里配乐是按**镜头**记区间的，读出来后按单元换算一次
@@ -452,17 +473,56 @@ class RenewTask {
   /// 替换方案的宽松解析：整体畸形按「没进过阶段②」（null）处理，
   /// 单条畸形降级为保留原片但**保留位置**——列表下标就是台词语义单元下标，
   /// 少一条会让后面所有单元的方案整体错位到别的单元上。
-  static List<UnitReplacement>? parseReplacements(Object? raw) {
-    if (raw == null) return null;
+  /// 替换方案：新存档每条自带 `unitUid`，老存档按位置对齐 [units]。
+  ///
+  /// 认不出归属的（老存档里比单元还多出来的几条）直接丢——挂到别人身上
+  /// 比丢掉更糟，那会让成片里出现一段谁也没挑过的画面。
+  static Map<String, UnitReplacement> parseReplacements(
+      Object? raw, List<SemanticUnit>? units) {
+    if (raw == null) return const {};
     if (raw is! List) {
       AppLog.warn('任务替换方案字段不是数组（${raw.runtimeType}），按未选材处理');
-      return null;
+      return const {};
     }
-    return List.unmodifiable([
-      for (final entry in raw)
-        UnitReplacement.tryFromJson(entry) ?? UnitReplacement.keepOriginal(),
-    ]);
+    final out = <String, UnitReplacement>{};
+    for (var i = 0; i < raw.length; i++) {
+      final entry = raw[i];
+      final parsed = UnitReplacement.tryFromJson(entry);
+      if (parsed == null) continue;
+      // 「保留原片」= 没定过方案，不占一格：[replacementsFor] 本来就把
+      // 查不到的那格当保留原片。占着会让存盘再读回来的对象和原来不相等，
+      // 而界面靠相等判断要不要重画
+      if (parsed.mode == ReplacementMode.keepOriginal) continue;
+      final declared = entry is Map ? entry['unitUid'] : null;
+      final uid = declared is String && declared.isNotEmpty
+          ? declared
+          : (units != null && i < units.length ? units[i].uid : null);
+      if (uid == null || uid.isEmpty) continue;
+      out[uid] = parsed;
+    }
+    return Map.unmodifiable(out);
   }
+
+  /// 反过来：把**按位置排**的一排方案对到单元的身份上。
+  ///
+  /// 界面、CLI、导出都按位置说话（人说的是 U1/U2），存的是身份——
+  /// 落库前在这里翻译一次，全项目只有这一处做这件事。
+  static Map<String, UnitReplacement> byUid(
+          List<SemanticUnit> units, List<UnitReplacement> plans) =>
+      {
+        for (var i = 0; i < units.length && i < plans.length; i++)
+          units[i].uid: plans[i],
+      };
+
+  /// 按**位置**把方案铺成一排，和 [units] 一一对齐。
+  ///
+  /// 画时间线、算导出组合这些地方天然按位置走（界面上说的是 U1/U2），
+  /// 而存的是身份——在这里翻译一次。没定过方案的那格是「保留原片」。
+  List<UnitReplacement> replacementsFor(List<SemanticUnit> forUnits) =>
+      List.unmodifiable([
+        for (final u in forUnits)
+          replacementsByUid[u.uid] ?? UnitReplacement.keepOriginal(),
+      ]);
 
   /// 未知/缺失状态一律回退到 [fallbackStatus]，绝不抛异常。
   ///
@@ -502,7 +562,8 @@ class RenewTask {
       other.analysisError == analysisError &&
       const DeepCollectionEquality().equals(other.units, units) &&
       const DeepCollectionEquality().equals(other.asrSentences, asrSentences) &&
-      const DeepCollectionEquality().equals(other.replacements, replacements) &&
+      const DeepCollectionEquality()
+          .equals(other.replacementsByUid, replacementsByUid) &&
       const DeepCollectionEquality()
           .equals(other.pickedMaterials, pickedMaterials);
 
@@ -525,6 +586,6 @@ class RenewTask {
       analysisError,
       units == null ? null : Object.hashAll(units!),
       asrSentences == null ? null : Object.hashAll(asrSentences!),
-      replacements == null ? null : Object.hashAll(replacements!),
+      Object.hashAll(replacementsByUid.entries.map((e) => Object.hash(e.key, e.value))),
       Object.hashAll(pickedMaterials));
 }

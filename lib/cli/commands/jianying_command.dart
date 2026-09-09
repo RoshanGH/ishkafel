@@ -65,7 +65,7 @@ Future<int> runJianyingCommand({
       // 字幕样式一起看：白描边盖不住素材自带的字，那是两行字打架
       subtitle: task.subtitle,
       // 整体替换的段落不烧台词字幕——这决定了烧字警告有多严重
-      replacements: task.replacements ?? const [])) {
+      replacements: task.replacementsFor(task.units ?? const []))) {
     sink.writeln(warn);
   }
 
@@ -90,7 +90,8 @@ Future<int> runJianyingCommand({
       content: MiaoaContentService(),
       cacheDir: media.materialsDir,
     );
-    final wanted = _neededMaterials(task.replacements ?? const []);
+    final wanted =
+        _neededMaterials(task.replacementsFor(task.units ?? const []));
     var fetched = 0;
     for (final id in wanted) {
       if (media.localMaterial(id) == null) {
@@ -107,7 +108,7 @@ Future<int> runJianyingCommand({
     };
     final plan = buildRenewJianyingPlan(
       units: units,
-      replacements: task.replacements ?? const [],
+      replacements: task.replacementsFor(units),
       sourcePath: task.sourcePath ?? '',
       sourceTotalMs: task.videoInfo?.duration.inMilliseconds ?? 0,
       materialOf: media.localMaterial,
