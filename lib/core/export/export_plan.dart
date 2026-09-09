@@ -28,9 +28,10 @@ class ExportSegment {
   /// 变速对齐原坑位，时长不变）。
   final int? composedMs;
 
-  /// 从候选素材的第几毫秒开始截。null = 整条压缩进坑位（老行为）。
+  /// 从候选素材的第几毫秒开始用。null = 从头用。
   ///
-  /// 短坑位配长素材时，整条压缩就是十几二十倍的快放；截一段用倍速才回到 1.0
+  /// 只用来跳过开头的转场/黑帧。跳过之后剩下的整条变速铺满坑位——
+  /// 视觉镜头替换不自动截断（见 [trimFor]）
   final int? trimStartMs;
 
   const ExportSegment({
@@ -300,11 +301,10 @@ class ExportPlanner {
     return out;
   }
 
-  /// 造一个镜头位的段，**顺手算好取段**。
+  /// 造一个镜头位的段，**顺手算好起点**。
   ///
-  /// 短坑位是这条线最疼的地方：原片快切镜头 0.4~1 秒，素材库里的分镜普遍
-  /// 4~30 秒，整条压缩就是十几二十倍快放。这里按 [trimFor] 截一段——
-  /// 人调过起点就听人的，没调过取素材中段。
+  /// 视觉镜头替换一律「整条变速铺满原镜头时长」（见 [trimFor]）：没人调过
+  /// 起点就是从 0 起整条用，调过就跳过开头那一截、剩下的照旧铺满。
   static ExportSegment _shotSegment({
     required SemanticUnit unit,
     required int shotIndex,
@@ -334,8 +334,9 @@ class ExportPlanner {
       unitIndex: unit.index,
       shotIndex: shotIndex,
       candidateId: candidateId,
-      // 量不到素材时长时 trimFor 会退回整条压缩，那时不带起点
-      trimStartMs: materialMs > 0 ? cut.startMs : null,
+      // 起点 0 就不写：写成 0 和不写是同一件事，而 null 让下游的命令里
+      // 干脆不出现 -ss
+      trimStartMs: materialMs > 0 && cut.startMs > 0 ? cut.startMs : null,
     );
   }
 }

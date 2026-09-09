@@ -4,6 +4,17 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/replacement/replacement_plan.dart';
+import 'picking_messages.dart';
+
+/// 倍速徽标的颜色：越离谱越红。
+///
+/// 视觉镜头替换不截素材，长素材配短坑位就是十几二十倍快放——这个数必须
+/// 一眼看出严重程度，否则人挑完才发现整条片子在闪。
+Color speedBadgeColor(SpeedSeverity severity) => switch (severity) {
+      SpeedSeverity.fine => AppColors.green,
+      SpeedSeverity.noticeable => AppColors.orange,
+      SpeedSeverity.severe => AppColors.red,
+    };
 
 /// 分段控件的一段
 class SegmentOption {

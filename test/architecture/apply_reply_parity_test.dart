@@ -40,7 +40,7 @@ void main() {
       'burnedTextNotice': '素材画面上烧着字——成片两层字幕',
       'brandConflictNotice': '品牌错位——台词说的和画面里摆的对不上',
       'brandMismatchNotice': '候选一致但整条跑到别家去了',
-      'trimUnavailableNotice': '量不到时长，取段退回快进',
+      'trimUnavailableNotice': '量不到时长，倍速算不出来',
       "'materials'": 'Agent 靠它确认素材时长收到没有',
     }.entries) {
       expect(report, contains(entry.key),

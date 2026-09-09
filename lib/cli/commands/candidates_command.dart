@@ -356,15 +356,16 @@ Future<int> runCandidatesCommand({
           'previewUrl': c.previewUrl,
           if (specs[c.id] case final ms?) ...{
             'durationMs': ms,
-            // 选它之后画面会怎么放。**取段之后多数是 1.0**：素材比坑位长时
-            // 从中间截一段用，而不是整条压缩成快进
+            // 选它之后画面会怎么放。**视觉镜头替换一律整条变速铺满坑位**，
+            // 所以素材比坑位长多少，这里就是几倍快放——挑之前就该看见这个代价
             'speedIfPicked': slotMs <= 0
                 ? null
                 : (trimFor(materialMs: ms, slotMs: slotMs).speed * 100)
                         .round() /
                     100,
-            // 截哪一段可以自己定：这是能挪的范围（毫秒）。
-            // 提交方案时用 trimStarts 指定；不指定就自动取中段
+            // 开头那截转场/黑帧可以跳过：这是起点能挪的范围（毫秒）。
+            // 提交方案时用 trimStarts 指定；不指定就从 0 起整条用。
+            // 起点越往后剩下的越少，倍速越接近 1.0（挪到最右端正好 1.0）
             if (trimRange(materialMs: ms, slotMs: slotMs) case final r
                 when r.canAdjust)
               'trimRange': {'minStartMs': r.minStartMs, 'maxStartMs': r.maxStartMs},

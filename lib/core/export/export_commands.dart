@@ -106,12 +106,11 @@ class ExportCommands {
     required String out,
     int? candidateDurationMs,
 
-    /// 从素材的第几毫秒开始截。
+    /// 从素材的第几毫秒开始用。
     ///
-    /// **不给 = 整条压缩**（老行为）：20 秒的素材塞进 0.5 秒的坑位就是 40 倍
-    /// 快放。真机上将近四成的坑位不到 1.5 秒，而素材库里的分镜普遍 4~30 秒，
-    /// 那些镜头必然是一串快进。给了起点就只截坑位那么长的一段，倍速回到 1.0
-    /// ——人拿剪辑软件做这件事就是这么做的。
+    /// **只跳过开头那一截**（转场、黑帧），剩下的照旧整条变速铺满坑位——
+    /// 视觉镜头替换一律走「自动变速充满原镜头时长」，不自动截断
+    /// （见 [trimFor] 与 [SpeedFit.effectiveFactor]）。
     int? trimStartMs,
 
     /// 要叠在这段切片上的字幕图（镜头替换保留台词字幕用，见
@@ -132,16 +131,16 @@ class ExportCommands {
     /// 与 [target] 互斥：预览传 target、导出传 spec；都传时以 target 为准
     ExportSpec? spec,
   }) {
-    // 截了一段等长的就不再变速——截完还变速等于白截。
-    // **判定走 [SpeedFit.effectiveFactor]**：保留素材原声时声音要用同一个
+    // 倍率**只问 [SpeedFit.effectiveFactor]**：保留素材原声时声音要用同一个
     // 倍率，两边各算一份迟早分叉，而分叉的结果是声音和画面越走越偏、不报错
-    final trimmed = trimStartMs != null &&
+    final skipHead = trimStartMs != null &&
+        trimStartMs > 0 &&
         candidateDurationMs != null &&
-        candidateDurationMs - trimStartMs >= durationMs;
+        trimStartMs < candidateDurationMs;
     final factor = SpeedFit.effectiveFactor(
         candidateMs: candidateDurationMs,
         slotMs: durationMs,
-        trimStartMs: trimStartMs);
+        trimStartMs: skipHead ? trimStartMs : null);
     // 一样长时不插滤镜：白走一道只会掉画质
     final speed = (factor - 1).abs() < 1e-6
         ? ''
@@ -152,9 +151,8 @@ class ExportCommands {
     final outFps = target?.fps ?? effectiveSpec?.fps.toDouble();
     return [
       '-y', '-v', 'error',
-      // -ss 摆在 -i 前面：放后面是解码完再丢，从 20 秒素材里取 0.5 秒
-      // 要白解 19.5 秒
-      if (trimmed) ...['-ss', _seconds(trimStartMs)],
+      // -ss 摆在 -i 前面：放后面是解码完再丢，跳过开头 5 秒要白解 5 秒
+      if (skipHead) ...['-ss', _seconds(trimStartMs)],
       '-i', input,
       for (final o in subtitleOverlays) ...['-i', o.pngPath],
       '-an',

@@ -1,3 +1,4 @@
+import '../../core/export/speed_fit.dart';
 import '../../core/ffmpeg/process_runner.dart' show FfmpegException;
 import '../../core/log/app_log.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
@@ -168,6 +169,40 @@ String? durationDeltaText({required int? candidateMs, required int targetMs}) {
   final sign = deltaSec > 0 ? '+' : '−'; // U+2212 真减号，与连字符区分
   return '$sign${deltaSec.abs().toStringAsFixed(1)}';
 }
+
+/// 选中这条素材之后，这一镜会放多快。
+///
+/// **视觉镜头替换一律整条变速铺满原镜头时长**：素材比坑位长多少倍，成片里
+/// 就快放多少倍。这个代价要在挑的时候看得见——真机上一条 34 镜的片子里，
+/// 102 条候选有 74 条比坑位长 3 倍以上，不标出来人挑完根本不知道自己选了
+/// 一串快进。
+///
+/// 探不到时长（[candidateMs] 为 null）或坑位非法时返回 null——不拿一个
+/// 猜的倍率冒充。几乎不变速（±2%）时也返回 null：「1.01×」只是噪音。
+String? candidateSpeedText({required int? candidateMs, required int slotMs}) {
+  if (candidateMs == null || candidateMs <= 0 || slotMs <= 0) return null;
+  final factor = SpeedFit.factorFor(candidateMs: candidateMs, slotMs: slotMs);
+  if ((factor - 1).abs() <= 0.02) return null;
+  return '${factor.toStringAsFixed(factor >= 10 ? 0 : 1)}×';
+}
+
+/// 这个倍率算不算过分——决定倍速徽标画成什么颜色。
+///
+/// 1.25 倍以内人眼看不出来；到 2 倍已经是明显的快进/慢放；再往上就是
+/// 一道闪光了，得红着标出来。
+SpeedSeverity candidateSpeedSeverity(
+    {required int? candidateMs, required int slotMs}) {
+  if (candidateMs == null || candidateMs <= 0 || slotMs <= 0) {
+    return SpeedSeverity.fine;
+  }
+  final factor = SpeedFit.factorFor(candidateMs: candidateMs, slotMs: slotMs);
+  final away = factor >= 1 ? factor : 1 / factor;
+  if (away <= 1.25) return SpeedSeverity.fine;
+  if (away <= 2) return SpeedSeverity.noticeable;
+  return SpeedSeverity.severe;
+}
+
+enum SpeedSeverity { fine, noticeable, severe }
 
 /// 候选规格还在探测时的占位（不能留空白，用户会以为卡住了）
 const String probingSpecLabel = '探测中';

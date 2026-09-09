@@ -23,18 +23,25 @@ abstract final class SpeedFit {
 
   /// 这一段**实际**用多少倍率——画面和声音都问它，保证两边一致。
   ///
-  /// 规则只有一条特例：**截过一段等长的就不再变速**（截完还变速等于白截）。
-  /// 这条判断原本写在 `ExportCommands.fitCandidateVideo` 里面，只有画面用得到；
-  /// 保留素材原声之后声音也要按同一个倍率走，两边各算一份迟早会分叉——
-  /// 分叉的后果是声音和画面越走越偏，而且不报错。
+  /// 规则只有一条：**从 [trimStartMs] 起剩下的整条，全部变速铺满坑位**
+  /// （见 [trimFor]）。跳过开头那截转场/黑帧之后剩多少，就把多少压进坑位，
+  /// 不会只取坑位那么长——这正是产品要的「自动变速充满原镜头时长」。
+  ///
+  /// 这里曾经有一条「截过一段等长的就不再变速」的特例，那是上一版「从长
+  /// 素材里截一段」的配套；现在自动截段没有了，特例跟着退休。留着它的话
+  /// `trimStartMs = 0` 一样满足「剩下的够长」，于是倍率被判成 1.0，
+  /// 画面又变回被剪掉一大截——真机上看到的就是这个。
+  ///
+  /// 画面和声音各算一份迟早会分叉，而分叉的后果是声音和画面越走越偏、
+  /// 且哪儿都不报错，所以两边都只问这一个函数。
   static double effectiveFactor({
     required int? candidateMs,
     required int slotMs,
     required int? trimStartMs,
   }) {
     if (candidateMs == null) return 1.0;
-    final trimmed = trimStartMs != null && candidateMs - trimStartMs >= slotMs;
-    if (trimmed) return 1.0;
-    return factorFor(candidateMs: candidateMs, slotMs: slotMs);
+    final usable = candidateMs - (trimStartMs ?? 0);
+    if (usable <= 0) return 1.0;
+    return factorFor(candidateMs: usable, slotMs: slotMs);
   }
 }

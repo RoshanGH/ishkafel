@@ -124,7 +124,8 @@ class SpeedFitter extends ChangeNotifier {
       int unitIndex,
       int shotIndex,
       int slotStartMs,
-      int slotEndMs
+      int slotEndMs,
+      int? trimStartMs
     })>{};
     for (var u = 0; u < units.length && u < replacements.length; u++) {
       final replacement = replacements[u];
@@ -139,6 +140,11 @@ class SpeedFitter extends ChangeNotifier {
           shotIndex: s,
           slotStartMs: shots[s].startMs,
           slotEndMs: shots[s].endMs,
+          // 人/Agent 调过的起点也要带上：预览不认它的话，软件里看到的
+          // 是从头开始的那一段、导出来却是跳过开头的——「我看到的和导出来
+          // 的不一样」正是这条线最难查的错
+          trimStartMs:
+              replacement.trimStartOf(shotIndex: s, candidateId: pick),
         );
       }
     }
@@ -164,6 +170,7 @@ class SpeedFitter extends ChangeNotifier {
         shotIndex: entry.value.shotIndex,
         slotStartMs: entry.value.slotStartMs,
         slotEndMs: entry.value.slotEndMs,
+        trimStartMs: entry.value.trimStartMs,
       ));
     }
   }
@@ -175,6 +182,7 @@ class SpeedFitter extends ChangeNotifier {
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
+    int? trimStartMs,
   }) async {
     // 已经就绪且入参没变：什么都不做。**这一条是死循环的闸**，见 [_fittedFrom]
     //
@@ -186,7 +194,8 @@ class SpeedFitter extends ChangeNotifier {
         unitIndex: unitIndex,
         shotIndex: shotIndex,
         slotStartMs: slotStartMs,
-        slotEndMs: slotEndMs);
+        slotEndMs: slotEndMs,
+        trimStartMs: trimStartMs);
     final ready = _fitted[key];
     if (_fittedFrom[key] == from &&
         ready != null &&
@@ -207,7 +216,8 @@ class SpeedFitter extends ChangeNotifier {
           unitIndex: unitIndex,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
-          slotEndMs: slotEndMs);
+          slotEndMs: slotEndMs,
+          trimStartMs: trimStartMs);
     } finally {
       _running.remove(key);
       _notify();
@@ -221,8 +231,9 @@ class SpeedFitter extends ChangeNotifier {
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
+    int? trimStartMs,
   }) =>
-      '$candidatePath|$slotStartMs-$slotEndMs|'
+      '$candidatePath|$slotStartMs-$slotEndMs|t${trimStartMs ?? 0}|'
       '${subtitleFingerprint(_linesFor(unitIndex: unitIndex, shotIndex: shotIndex, slotStartMs: slotStartMs, slotEndMs: slotEndMs))}|'
       '${_style.fingerprint}';
 
@@ -249,6 +260,7 @@ class SpeedFitter extends ChangeNotifier {
     required int shotIndex,
     required int slotStartMs,
     required int slotEndMs,
+    int? trimStartMs,
   }) async {
     final slotMs = slotEndMs - slotStartMs;
     final candidateMs = await probeDurationMs(candidatePath);
@@ -266,13 +278,13 @@ class SpeedFitter extends ChangeNotifier {
     final subKey = subFingerprint.isEmpty
         ? ''
         : '|sub$subFingerprint|${_style.fingerprint}';
-    // **和导出、剪映走同一个函数**：那两条路都改成「从素材里截一段」了，
-    // 预览要是还整条压缩，人在软件里看到的是快进、导出来却不是——
-    // 比两边都快进更糟，因为人会照着预览下判断
-    final cut = trimFor(materialMs: candidateMs ?? 0, slotMs: slotMs);
+    // **和导出、剪映走同一个函数**：三条路必须给出同一个答案，
+    // 否则人会照着预览下判断、拿到一条不一样的成片
+    final cut = trimFor(
+        materialMs: candidateMs ?? 0, slotMs: slotMs, startMs: trimStartMs);
     // 取段起点进指纹：换了截哪一段却复用旧切片，人看到的是「调了没反应」
     final cacheKey =
-        'fit|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target$subKey';
+        'fit|v2|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target$subKey';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -286,7 +298,8 @@ class SpeedFitter extends ChangeNotifier {
           unitIndex: unitIndex,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
-          slotEndMs: slotEndMs);
+          slotEndMs: slotEndMs,
+          trimStartMs: trimStartMs);
       return;
     }
 
@@ -310,7 +323,8 @@ class SpeedFitter extends ChangeNotifier {
           input: candidatePath,
           durationMs: slotMs,
           candidateDurationMs: candidateMs,
-          trimStartMs: (candidateMs ?? 0) > 0 ? cut.startMs : null,
+          trimStartMs:
+              (candidateMs ?? 0) > 0 && cut.startMs > 0 ? cut.startMs : null,
           out: dest,
           // 和原片一个规格，播放器换段时才不用重建解码器
           target: target,
@@ -324,7 +338,8 @@ class SpeedFitter extends ChangeNotifier {
           unitIndex: unitIndex,
           shotIndex: shotIndex,
           slotStartMs: slotStartMs,
-          slotEndMs: slotEndMs);
+          slotEndMs: slotEndMs,
+          trimStartMs: trimStartMs);
     } catch (e) {
       // 变速失败只影响这一段：它退回播原片，其余照旧
       AppLog.warn('镜头替换变速失败（$key）：$e');

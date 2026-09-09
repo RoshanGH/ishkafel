@@ -172,7 +172,7 @@ void main() {
       expect(r.single.speedFactor, closeTo(2.0, 1e-9));
     });
 
-    test('截过一段等长的就不变速', () async {
+    test('跳过开头那一截：剩下的整条铺满，声音跟着同一个倍率', () async {
       const seg = ExportSegment(
           startMs: 0,
           endMs: 1000,
@@ -185,8 +185,10 @@ void main() {
           taskDefault: const MaterialAudioSetting(mode: MaterialAudioMode.original),
           segments: const [seg]);
 
-      expect(r.single.speedFactor, 1.0);
-      expect(r.single.trimStartMs, 500, reason: '截取起点也要跟画面一致');
+      expect(r.single.speedFactor, closeTo(1.5, 1e-9),
+          reason: '候选 2000ms、从 500ms 起还剩 1500ms，铺满 1000ms 的坑位就是 1.5×'
+              '——画面那边算的也是这个数');
+      expect(r.single.trimStartMs, 500, reason: '起点也要跟画面一致');
     });
 
     test('探不到候选时长就不变速，不拿猜的倍率去改速度', () async {

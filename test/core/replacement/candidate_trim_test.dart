@@ -1,27 +1,33 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/replacement/candidate_trim.dart';
 
-/// 替换裂变一直是「**整条素材压缩进坑位**」：不管素材多长，拉伸到坑位长度。
+/// 视觉镜头替换怎么把候选放进坑位，来回改过两版：
 ///
-/// 原片的快切镜头是 0.4~1 秒，而素材库里的分镜普遍 4~30 秒——真机上一条
-/// 34 镜的片子里，坑位不到 1.5 秒的有 13 个，将近四成。验收 Agent 探完
-/// 全页 50 条候选，最短那一镜（433ms）**倍速最接近 1 的是 9.44**：
-/// 库里根本没有那么短的素材。
+/// 一版是「**整条素材压缩进坑位**」。原片的快切镜头是 0.4~1 秒，而素材库
+/// 里的分镜普遍 4~30 秒——真机上一条 34 镜的片子里，坑位不到 1.5 秒的有
+/// 13 个，将近四成；最短那一镜（433ms）整页 50 条候选里倍速最接近 1 的是
+/// 9.44。于是改成了第二版：**从长素材里截一段**，倍速回到 1.0。
 ///
-/// 这跟挑得好不好无关，是模型本身的问题。人拿剪辑软件做这件事的方式是
-/// **从长素材里截一段**，不是把 20 秒拉成 0.5 秒。
+/// 截段的代价是画面被剪掉大半，真机上看到的就是「本该变速的镜头被剪切
+/// 了」。2026-09-09 产品负责人定回第一版：「替换裂变这个模块下的视觉镜头
+/// 替换，全部走自动变速充满原镜头时长的方案。」倍速的代价改为**如实报给
+/// 挑素材的人**（候选卡上的倍速徽标、`speedIfPicked`），而不是替他剪掉。
+///
+/// 剪映工程里的**整体替换**不归这条规则管（`fillBySpeed: false`）：
+/// 那一层的时长本来就跟着候选走。
 void main() {
-  group('从素材里截一段，而不是整条压缩', () {
-    test('素材比坑位长：截中段，倍速就是 1.0', () {
+  group('整条变速铺满坑位，不自动截断', () {
+    test('素材比坑位长：整条都用，倍速就是长出来的那个倍数', () {
       final cut = trimFor(materialMs: 20000, slotMs: 500);
 
-      expect(cut.durationMs, 500);
-      expect(cut.speed, 1.0);
-      // 开头常有转场和黑帧，中段画面最稳
-      expect(cut.startMs, (20000 - 500) ~/ 2);
+      expect(cut.startMs, 0, reason: '从头用，一帧都不丢');
+      expect(cut.durationMs, 20000);
+      expect(cut.speed, 40.0,
+          reason: '20 秒压进 0.5 秒就是 40 倍——这个代价要如实报出去，'
+              '而不是替人把画面剪掉');
     });
 
-    test('素材比坑位短：截不出来，只能放慢——如实给出倍速', () {
+    test('素材比坑位短：整条用，放慢撑满——如实给出倍速', () {
       final cut = trimFor(materialMs: 800, slotMs: 17335);
 
       expect(cut.startMs, 0);
@@ -31,30 +37,31 @@ void main() {
               '该拦的是提交那一步，不是在这儿假装没事');
     });
 
-    test('刚好一样长：不截也不变速', () {
+    test('刚好一样长：不变速', () {
       final cut = trimFor(materialMs: 3000, slotMs: 3000);
 
       expect(cut.startMs, 0);
+      expect(cut.durationMs, 3000);
       expect(cut.speed, 1.0);
     });
 
-    test('人指定了起点就听人的，别自作主张挪到中间', () {
+    test('人指定了起点：跳过开头那一截，剩下的照旧整条铺满', () {
       final cut = trimFor(materialMs: 20000, slotMs: 500, startMs: 12000);
 
       expect(cut.startMs, 12000);
-      expect(cut.durationMs, 500);
-      expect(cut.speed, 1.0);
+      expect(cut.durationMs, 8000, reason: '从 12 秒到结尾全都要，不是只取 500ms');
+      expect(cut.speed, 16.0);
     });
 
-    test('指定的起点太靠后、后面不够一个坑位：贴着尾巴截，不越界', () {
+    test('起点挪到最靠后：剩下的正好一个坑位，倍速回到 1.0', () {
       final cut = trimFor(materialMs: 20000, slotMs: 500, startMs: 19900);
 
-      expect(cut.startMs, 19500);
+      expect(cut.startMs, 19500, reason: '再往后剩的就不够铺满坑位了');
       expect(cut.durationMs, 500);
       expect(cut.speed, 1.0);
     });
 
-    test('量不到素材时长时不硬猜：退回整条压缩的老路', () {
+    test('量不到素材时长时不硬猜：给坑位长、倍速 1.0，交给导出那头现算', () {
       final cut = trimFor(materialMs: 0, slotMs: 500);
 
       expect(cut.startMs, 0);
@@ -63,9 +70,35 @@ void main() {
     });
   });
 
+  /// 剪映工程里的整体替换还走老的截段规则——那一层不归「铺满原镜头时长」
+  /// 管，改它是另一件事
+  group('fillBySpeed: false 时仍然截一段', () {
+    test('素材比坑位长：截中段，倍速 1.0', () {
+      final cut =
+          trimFor(materialMs: 20000, slotMs: 500, fillBySpeed: false);
+
+      expect(cut.startMs, (20000 - 500) ~/ 2);
+      expect(cut.durationMs, 500);
+      expect(cut.speed, 1.0);
+    });
+
+    test('素材比坑位短：整条用，放慢撑满', () {
+      final cut =
+          trimFor(materialMs: 800, slotMs: 17335, fillBySpeed: false);
+
+      expect(cut.durationMs, 800);
+      expect(cut.speed, closeTo(800 / 17335, 0.0001));
+    });
+  });
+
   group('这条素材配这个坑位合不合适', () {
-    test('截得出等长的一段就是合适的', () {
-      expect(trimFor(materialMs: 20000, slotMs: 500).isNatural, isTrue);
+    test('长素材配短坑位不合适——整条铺满就是几十倍快放', () {
+      expect(trimFor(materialMs: 20000, slotMs: 500).isNatural, isFalse);
+    });
+
+    test('长度对得上的才合适', () {
+      expect(trimFor(materialMs: 3200, slotMs: 3000).isNatural, isTrue);
+      expect(trimFor(materialMs: 6000, slotMs: 3000).isNatural, isFalse);
     });
 
     test('素材太短、只能拉慢的不合适', () {
@@ -79,8 +112,8 @@ void main() {
   });
 
   /// 真机数据：102 条候选里 74 条素材比坑位长 3 倍以上，最夸张的 24 倍
-  /// （19 秒素材配 0.8 秒坑位）。「截哪一段」的选择空间非常大，
-  /// 自动取中段只是一个赌注——人必须能自己挪，界面要知道能挪到哪儿。
+  /// （19 秒素材配 0.8 秒坑位）。默认整条铺满就是 24 倍快放；素材开头是
+  /// 转场或黑帧时人要能把起点往后挪，界面得知道能挪到哪儿。
   group('能挪到哪儿', () {
     test('素材比坑位长：起点能从 0 挪到「再往后就不够一个坑位」为止', () {
       final r = trimRange(materialMs: 20000, slotMs: 500);

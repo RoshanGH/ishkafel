@@ -35,6 +35,14 @@ class PickingScope {
   /// 搜的是「话术像不像」，而库里那一栏写的是「画面里有什么」，本就对不上。
   final bool descriptionSupported;
 
+  /// 这一层的候选会不会**整条变速铺满坑位**。
+  ///
+  /// 只有视觉镜头替换是：换的是画面、口播照旧走原片，所以候选必须变速对齐
+  /// 原镜头时长（产品负责人 2026-09-09 定的方案）。素材比坑位长多少倍，
+  /// 成片里就快放多少倍——这个代价要在**挑的时候**看得见，而不是导出来
+  /// 才发现。整体替换的时长跟着候选走，不变速。
+  final bool speedFitToSlot;
+
   /// 标签检索不可用的原因；可用时为 null
   final String? tagUnavailableText;
 
@@ -49,6 +57,7 @@ class PickingScope {
     required this.targetDurationMs,
     required this.descriptionKeyword,
     this.descriptionSupported = false,
+    this.speedFitToSlot = false,
     required this.tagUnavailableText,
     this.tagPending = false,
   });
@@ -101,6 +110,7 @@ class PickingScope {
           perShot ? unit.shots[shotIndex].durationMs : unit.durationMs,
       descriptionKeyword: perShot ? unit.shots[shotIndex].description ?? '' : '',
       descriptionSupported: perShot,
+      speedFitToSlot: perShot,
       tagUnavailableText: _tagUnavailable(
         resolver: resolver,
         groups: groups,

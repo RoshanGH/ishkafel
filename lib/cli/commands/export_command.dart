@@ -115,8 +115,8 @@ Future<int> runExportCommand({
   final dest = Directory(outputDir ??
       p.join(Platform.environment['HOME'] ?? '.', 'Desktop',
           'ishkafel-${task.id}'));
-  // 素材时长：镜头层取段要靠它。任务里存过的直接用，
-  // 没存过的这一步不去探（探一遍要几分钟），那些镜头退回整条压缩
+  // 素材时长：镜头层算倍速要靠它。任务里存过的直接用，没存过的这一步
+  // 不去探（探一遍要几分钟）——导出那头会就地探本地文件，照样算得出
   final materialDurations = {
     for (final m in task.pickedMaterials)
       if (m.durationMs case final ms? when ms > 0) m.id: ms,

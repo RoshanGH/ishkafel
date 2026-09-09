@@ -420,6 +420,7 @@ class CandidateTabState extends State<CandidateTab> {
           material: _picked[id],
           isPreview: id == preview,
           targetMs: _scope.targetDurationMs,
+          speedFitToSlot: _scope.speedFitToSlot,
           media: widget.mediaCache?.statusOf(id) ?? PickedMediaStatus.ready,
           mediaFailure: widget.mediaCache?.failureOf(id),
         ),

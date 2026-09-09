@@ -37,10 +37,10 @@ class PlanUnit {
   /// 镜头下标 → 候选 id
   final Map<int, int> shots;
 
-  /// 镜头下标 → 从素材第几毫秒起截。不给就自动（素材比坑位长时取中段）。
+  /// 镜头下标 → 从素材第几毫秒起用。不给就从 0 起，整条变速铺满坑位。
   ///
-  /// **短坑位必须能截**：原片快切镜头 0.4~1 秒，素材库里的分镜普遍 4~30 秒，
-  /// 整条压缩就是十几二十倍快放
+  /// 只用来跳过素材开头的转场/黑帧；跳过之后剩下的照旧整条铺满坑位，
+  /// 不会只取坑位那么长
   final Map<int, int> trimStarts;
 
   const PlanUnit({
@@ -203,7 +203,8 @@ String? _parseUnit(
         }
         picked[shotIndex] = entry.value as int;
       }
-      // 可选：这一镜从素材的哪儿开始截。不给就自动取中段
+      // 可选：这一镜从素材的哪儿开始用（跳过开头的转场/黑帧）。
+      // 不给就从头用
       final trims = <int, int>{};
       if (raw['trimStarts'] case final Map raw?) {
         for (final entry in raw.entries) {
@@ -236,8 +237,8 @@ String? _parseUnit(
 ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
     {required int index,
 
-    /// 候选素材各有多长。**镜头层取段要靠它**——短坑位配长素材时，
-    /// 整条压缩就是十几二十倍快放，截一段用倍速才回到 1.0
+    /// 候选素材各有多长。**镜头层的倍速要靠它**——整条素材铺满坑位，
+    /// 长多少倍就放多快
     Map<int, int> materialDurations = const {}}) {
   final segments = <ExportSegment>[];
   for (final unit in units) {
@@ -274,7 +275,7 @@ ExportCombination toCombination(SubmittedPlan plan, List<SemanticUnit> units,
         startMs: shot.startMs,
         endMs: shot.endMs,
         candidateId: id,
-        trimStartMs: materialMs > 0 ? cut.startMs : null,
+        trimStartMs: materialMs > 0 && cut.startMs > 0 ? cut.startMs : null,
       ));
     }
   }
@@ -360,10 +361,10 @@ List<String> plansBlockedByReview(
 
 /// 把方案里用到的素材连同**时长**一起收下来。
 ///
-/// **取段全靠这个数**：20 秒的素材塞进 0.5 秒的坑位，得先知道它是 20 秒，
-/// 才知道该截一段而不是压缩成 40 倍快放。而这个数只存在
-/// `task.pickedMaterials` 里——界面挑素材时会写，Agent 提交方案时一直不写，
-/// 于是 Agent 交出来的方案取段全部失效，短镜头照样是一串快进。
+/// **倍速全靠这个数**：20 秒的素材塞进 0.5 秒的坑位，得先知道它是 20 秒，
+/// 才知道要放 40 倍。而这个数只存在 `task.pickedMaterials` 里——界面挑素材
+/// 时会写，Agent 提交方案时一直不写，于是 Agent 交出来的方案算不出倍速，
+/// 导进剪映时那几段会被切掉超出坑位的部分。
 ///
 /// 同时对每条素材做一次**画面自查**（[checkFrame]）：烧没烧字、露的是谁家
 /// 产品。两样都是只有看图才知道、而且能毁掉整片的事，素材库给的画面描述里
@@ -446,8 +447,10 @@ String? burnedTextNotice(List<PickedMaterial> picked) {
 
 /// 有素材量不到时长时，说清后果。全都量到、或压根没有短坑位时返回 null。
 ///
-/// **不静默降级**：取段要靠素材时长，量不到就退回「整条压缩」——短镜头
-/// 又变回十几二十倍快进。这是影响成片的降级，不能等人拿到片子才发现。
+/// **不静默降级**：视觉镜头替换靠素材时长算倍速（整条铺满坑位）。量不到
+/// 的那几条，剪映工程里只能按 1.0 倍摆进去、超出坑位的部分被切掉——
+/// 画面缺一截，而且哪儿都不报错。这是影响成片的降级，不能等人拿到片子
+/// 才发现。
 String? trimUnavailableNotice({
   required int total,
   required int withDuration,
@@ -457,6 +460,6 @@ String? trimUnavailableNotice({
   if (missing <= 0 || shortSlots <= 0) return null;
   return '有 $missing 条素材量不出时长（可能已被删或地址失效）。'
       '这条片子有 $shortSlots 个不到 1.5 秒的坑位——'
-      '碰上这些素材时只能整条压缩进去，画面会明显快放。'
+      '这几条算不出该放多快，导进剪映时会被切掉超出坑位的部分。'
       '用 ishkafel task 看 pickedMaterials 里哪几条缺时长，换掉它们';
 }

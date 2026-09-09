@@ -7,6 +7,7 @@ import '../../app/theme/app_typography.dart';
 import 'candidate_ranking.dart';
 import 'candidate_search_controller.dart';
 import 'picking_messages.dart';
+import 'picking_widgets.dart';
 
 /// 台词视图里的一条候选。
 ///
@@ -22,8 +23,12 @@ class CandidateRow extends StatelessWidget {
   final CandidateEntry entry;
   final bool selected;
 
-  /// 目标片段时长，用于时长差
+  /// 目标片段时长，用于时长差与倍速
   final int targetMs;
+
+  /// 这一层的候选会不会整条变速铺满坑位（视觉镜头替换）。
+  /// 为真时标倍速而不是时长差——软件不截素材，长多少倍就快放多少倍
+  final bool speedFitToSlot;
 
   final VoidCallback onTap;
   final VoidCallback onPlay;
@@ -43,6 +48,7 @@ class CandidateRow extends StatelessWidget {
     required this.entry,
     required this.selected,
     required this.targetMs,
+    this.speedFitToSlot = false,
     required this.onTap,
     required this.onPlay,
     this.queryTags = const [],
@@ -204,8 +210,9 @@ class CandidateRow extends StatelessWidget {
     }
     final spec = entry.spec;
     if (spec == null) return const SizedBox.shrink();
-    final delta =
-        durationDeltaText(candidateMs: spec.durationMs, targetMs: targetMs);
+    final delta = speedFitToSlot
+        ? candidateSpeedText(candidateMs: spec.durationMs, slotMs: targetMs)
+        : durationDeltaText(candidateMs: spec.durationMs, targetMs: targetMs);
     return Row(
       children: [
         Text(candidateDurationText(spec.durationMs),
@@ -217,7 +224,12 @@ class CandidateRow extends StatelessWidget {
             delta,
             key: Key('picking-duration-delta-${entry.material.id}'),
             style: TextStyle(
-              color: delta.startsWith('+') ? AppColors.orange : AppColors.green,
+              color: speedFitToSlot
+                  ? speedBadgeColor(candidateSpeedSeverity(
+                      candidateMs: spec.durationMs, slotMs: targetMs))
+                  : (delta.startsWith('+')
+                      ? AppColors.orange
+                      : AppColors.green),
               fontSize: AppFontSize.micro,
             ),
           ),

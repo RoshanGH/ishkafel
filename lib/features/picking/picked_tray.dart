@@ -10,6 +10,7 @@ import '../../core/replacement/brand_consistency.dart';
 import 'burned_text_warning.dart';
 import 'picked_media_cache.dart';
 import 'picking_messages.dart';
+import 'picking_widgets.dart';
 
 /// 托盘里的一条：已经勾选的候选。
 ///
@@ -23,8 +24,12 @@ class PickedItem {
   /// 是不是这一段的预览版（播放时放的就是它）
   final bool isPreview;
 
-  /// 这一段的目标时长，用来算时长差；为 0 表示不显示
+  /// 这一段的目标时长，用来算时长差与倍速；为 0 表示不显示
   final int targetMs;
+
+  /// 这一层的候选会不会整条变速铺满坑位（视觉镜头替换）。
+  /// 为真时标倍速——托盘是「我到底选了些什么」的最后一眼
+  final bool speedFitToSlot;
 
   /// 素材本体在本地的状态。用户要能一眼看出「这条已经拿到手了」——
   /// 后台默默下载但状态不可见，只会在导出那一刻被打脸
@@ -38,6 +43,7 @@ class PickedItem {
     this.material,
     this.isPreview = false,
     this.targetMs = 0,
+    this.speedFitToSlot = false,
     this.media = PickedMediaStatus.absent,
     this.mediaFailure,
   });
@@ -286,14 +292,16 @@ class PickedTray extends StatelessWidget {
     return label.isEmpty ? '素材 #${item.candidateId}' : label;
   }
 
-  /// 时长差：这一条比原坑位长了还是短了。探不出时长就不显示——
+  /// 变速那一层标倍速，不变速那一层标时长差。探不出时长就只给时长——
   /// 显示 0 会变成一个假徽标
   Widget _duration(PickedItem item) {
     final ms = item.material?.durationMs;
     if (ms == null || ms <= 0) return const SizedBox.shrink();
     final delta = item.targetMs <= 0
         ? null
-        : durationDeltaText(candidateMs: ms, targetMs: item.targetMs);
+        : item.speedFitToSlot
+            ? candidateSpeedText(candidateMs: ms, slotMs: item.targetMs)
+            : durationDeltaText(candidateMs: ms, targetMs: item.targetMs);
     return Padding(
       padding: const EdgeInsets.only(left: 4),
       child: Text(
@@ -301,7 +309,12 @@ class PickedTray extends StatelessWidget {
         style: TextStyle(
           color: delta == null
               ? AppColors.textTertiary
-              : (delta.startsWith('+') ? AppColors.orange : AppColors.green),
+              : item.speedFitToSlot
+                  ? speedBadgeColor(candidateSpeedSeverity(
+                      candidateMs: ms, slotMs: item.targetMs))
+                  : (delta.startsWith('+')
+                      ? AppColors.orange
+                      : AppColors.green),
           fontSize: AppFontSize.micro,
         ),
       ),

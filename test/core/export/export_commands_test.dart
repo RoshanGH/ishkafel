@@ -203,13 +203,13 @@ void main() {
     });
   });
 
-  /// 替换裂变原本是「整条素材压缩进坑位」：20 秒的素材塞进 0.5 秒的坑位
-  /// 就是 40 倍快放。真机上一条 34 镜的片子里，将近四成的坑位不到 1.5 秒，
-  /// 而素材库里的分镜普遍 4~30 秒——这些镜头必然是一串快进。
+  /// 视觉镜头替换一律「整条变速铺满原镜头时长」：20 秒的素材塞进 0.5 秒的
+  /// 坑位就是 40 倍快放，代价如实报给挑素材的人，软件不替他把画面剪掉。
+  /// 产品负责人 2026-09-09 定的。
   ///
-  /// 人拿剪辑软件做这件事的方式是**从长素材里截一段**。
-  group('从素材里截一段用，而不是整条压缩', () {
-    test('给了起点就从那儿开始读，长度就是坑位长度', () {
+  /// 起点只用来跳过开头那截转场/黑帧，跳完剩下的照旧整条铺满。
+  group('整条变速铺满坑位', () {
+    test('给了起点就从那儿开始读', () {
       final args = ExportCommands.fitCandidateVideo(
         input: '/tmp/素材.mp4',
         durationMs: 500,
@@ -219,14 +219,14 @@ void main() {
         spec: ExportSpec.standard,
       );
 
-      // -ss 必须在 -i 之前：放后面是解码完再丢，20 秒素材要白解 19.75 秒
+      // -ss 必须在 -i 之前：放后面是解码完再丢，20 秒素材要白解 9.75 秒
       final ss = args.indexOf('-ss');
-      expect(ss, isNot(-1), reason: '没有 -ss 就还是从头读，取段等于没做');
+      expect(ss, isNot(-1), reason: '没有 -ss 就还是从头读，跳过开头等于没做');
       expect(double.parse(args[ss + 1]), closeTo(9.75, 0.001));
       expect(ss, lessThan(args.indexOf('-i')));
     });
 
-    test('截出来的那一段和坑位等长，就不该再变速', () {
+    test('给了起点也照样变速——剩下的那 10.25 秒要铺满 0.5 秒', () {
       final args = ExportCommands.fitCandidateVideo(
         input: '/tmp/素材.mp4',
         durationMs: 500,
@@ -236,11 +236,13 @@ void main() {
         spec: ExportSpec.standard,
       );
 
-      expect(args.join(' '), isNot(contains('setpts')),
-          reason: '截了一段等长的还变速，等于白截');
+      final vf = valueAfter(args, '-vf')!;
+      expect(vf, contains('setpts=PTS/20.5'),
+          reason: '这里曾经判成「截过就不变速」，于是剩下的 10 秒被剪成 0.5 秒'
+              '——真机上看到的「本该变速的镜头被剪切了」就是这个');
     });
 
-    test('不给起点时照旧：整条压缩（老行为不变）', () {
+    test('不给起点：从头整条压进坑位', () {
       final args = ExportCommands.fitCandidateVideo(
         input: '/tmp/素材.mp4',
         durationMs: 500,
@@ -250,7 +252,33 @@ void main() {
       );
 
       expect(args, isNot(contains('-ss')));
-      expect(args.join(' '), contains('setpts'));
+      expect(valueAfter(args, '-vf')!, contains('setpts=PTS/40'));
+    });
+
+    test('起点写 0 跟不写一样，不插一个多余的 -ss', () {
+      final args = ExportCommands.fitCandidateVideo(
+        input: '/tmp/素材.mp4',
+        durationMs: 500,
+        candidateDurationMs: 20000,
+        trimStartMs: 0,
+        out: '/tmp/out.mp4',
+        spec: ExportSpec.standard,
+      );
+
+      expect(args, isNot(contains('-ss')));
+      expect(valueAfter(args, '-vf')!, contains('setpts=PTS/40'));
+    });
+
+    test('素材比坑位短：放慢撑满，一样只有一条路', () {
+      final args = ExportCommands.fitCandidateVideo(
+        input: '/tmp/素材.mp4',
+        durationMs: 2000,
+        candidateDurationMs: 1000,
+        out: '/tmp/out.mp4',
+        spec: ExportSpec.standard,
+      );
+
+      expect(valueAfter(args, '-vf')!, contains('setpts=PTS/0.5'));
     });
   });
 

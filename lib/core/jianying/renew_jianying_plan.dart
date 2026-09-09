@@ -100,7 +100,7 @@ JianyingPlan buildRenewJianyingPlan({
     switch (r.mode) {
       case ReplacementMode.whole:
         _collect(picks, r.wholeCandidateIds, u.startMs, u.endMs,
-            trimStarts: r.wholeTrimStarts);
+            trimStarts: r.wholeTrimStarts, fillBySpeed: false);
       case ReplacementMode.perShot:
         for (final entry in r.shotCandidateIds.entries) {
           final shot = _shotAt(u.shots, entry.key);
@@ -132,13 +132,13 @@ JianyingPlan buildRenewJianyingPlan({
       }
       final slot = p.endMs - p.startMs;
       final total = materialDurationOf(p.candidateId);
-      // **和导出 mp4 走同一个函数**：那边早就改成「从素材里截一段」了，
-      // 这边要是还整条压缩，同一条片子导 mp4 是 1.0 倍、拖进剪映却是
-      // 三十几倍快进，人会以为软件坏了
+      // **和导出 mp4、和预览走同一个函数**：三条路的答案必须一样，
+      // 否则人会发现「我看到的和导出来的不一样」，比三条都错还难查
       final cut = trimFor(
         materialMs: total,
         slotMs: slot,
         startMs: p.trimStartMs,
+        fillBySpeed: p.fillBySpeed,
       );
       segs.add(JyVideoSegment(
         path: path,
@@ -194,7 +194,7 @@ JianyingPlan buildRenewJianyingPlan({
 }
 
 void _collect(List<_Pick> out, List<int> ids, int startMs, int endMs,
-    {Map<int, int> trimStarts = const {}}) {
+    {Map<int, int> trimStarts = const {}, bool fillBySpeed = true}) {
   for (var i = 0; i < ids.length; i++) {
     out.add(_Pick(
       candidateId: ids[i],
@@ -202,6 +202,7 @@ void _collect(List<_Pick> out, List<int> ids, int startMs, int endMs,
       startMs: startMs,
       endMs: endMs,
       trimStartMs: trimStarts[ids[i]],
+      fillBySpeed: fillBySpeed,
     ));
   }
 }
@@ -224,8 +225,12 @@ class _Pick {
   final int startMs;
   final int endMs;
 
-  /// 人调过的取段起点；null = 自动（取素材中段）
+  /// 人调过的起点；null = 从头用
   final int? trimStartMs;
+
+  /// 整条变速铺满坑位。视觉镜头替换恒为真；**整体替换为假**——那一层的
+  /// 时长本来就跟着候选走，不归「铺满原镜头时长」这条规则管
+  final bool fillBySpeed;
 
   const _Pick({
     required this.candidateId,
@@ -233,5 +238,6 @@ class _Pick {
     required this.startMs,
     required this.endMs,
     this.trimStartMs,
+    this.fillBySpeed = true,
   });
 }
