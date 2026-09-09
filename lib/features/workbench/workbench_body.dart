@@ -624,7 +624,19 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             ),
           ),
           Expanded(
-            child: LayoutBuilder(
+            // **必须跟着编辑器重建**：换轴那一步就写在下面的 builder 里，
+            // 而 LayoutBuilder 只在**尺寸变了**才重跑。切分改了（合并两镜、
+            // 拆一镜、拖边界）尺寸一个像素都不变，于是那一步永远不跑——
+            // 时间线继续用着改动之前那条轴，镜头位置全是旧的，单元尾部空出
+            // 一截；退回任务列表再进来（整棵树重建）就又好了。
+            // 用户原话：「连续合并两次就又是这个样子，返回首页再进去就显示
+            // 正常了」（2026-09-09 真机）。
+            //
+            // 属性栏那边早就栽过同一件事，结论一样：**轴要在自己的重建里
+            // 现算**（见 test/features/workbench/axis_refreshes_on_edit_test.dart）
+            child: AnimatedBuilder(
+              animation: editor,
+              builder: (context, _) => LayoutBuilder(
               builder: (context, constraints) {
                 final width = constraints.maxWidth;
                 // 时间线画的是**成片**：整体替换之后那一格按新长度画，
@@ -695,6 +707,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   readOnly: widget.readOnly,
                 );
               },
+            ),
             ),
           ),
         ],
