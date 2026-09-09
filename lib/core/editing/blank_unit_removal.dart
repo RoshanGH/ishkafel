@@ -1,6 +1,7 @@
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../replacement/replacement_plan.dart';
+import '../subtitle/subtitle_track.dart';
 
 /// 删掉一个分子之后，把**所有按分子下标记的东西**跟着挪。
 ///
@@ -10,7 +11,8 @@ import '../replacement/replacement_plan.dart';
 /// U1 身上、配乐盖错段落、配音念错地方。
 ///
 /// 这句话原本写的是「两份」，而配音是后来加的第三种，就这么漏在了外面
-/// （2026-09-07 补上）。**加第四种时把它也放进这个文件**，别再散出去。
+/// （2026-09-07 补上）。手改字幕是第四种，2026-09-09 清点时才发现它从头到尾
+/// 就没搬过。**加第五种时把它也放进这个文件**，别再散出去。
 /// 挪顺序那一组对应的是 `unit_reorder.dart`。
 
 /// 替换方案按下标记，删了一个就整体前移
@@ -60,3 +62,12 @@ VoicePlan shiftVoicesAfterRemoval(VoicePlan plan, {required int removed}) =>
                   a.unitIndex > removed ? a.unitIndex - 1 : a.unitIndex,
               voice: a.voice),
     ]);
+
+/// 手改过的字幕按 `(单元下标, 镜头下标)` 记，删了一个单元之后：它自己那几句
+/// 丢掉，后面的整体前移。
+///
+/// **这一条是补的**：删除原本只搬了替换方案、配乐、配音三份，字幕漏在外面
+/// ——删掉 U2 之后，人给 U3 改好的那句字幕会烧到 U2 的画面上，不报错。
+SubtitleTrack shiftSubtitlesAfterRemoval(SubtitleTrack track,
+        {required int removed}) =>
+    track.afterRemoval(removed);

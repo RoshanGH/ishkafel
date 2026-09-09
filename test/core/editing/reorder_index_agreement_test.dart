@@ -4,8 +4,10 @@ import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/editing/unit_reorder.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 
-/// **挪一个单元，四份按下标记的数据必须落到同一个位置。**
+/// **挪一个单元，五份按下标记的数据必须落到同一个位置。**
 ///
 /// 2026-09-08 真机，用户原话：「我给这个自定义台词语义单元选了一个镜头，
 /// 然后我又把这个台词语义单元拉到后面……那个替换的镜头没有跟着 U2 走，
@@ -70,7 +72,7 @@ void main() {
     });
   });
 
-  group('四份数据落到同一个位置', () {
+  group('五份数据落到同一个位置', () {
     /// 给第 [mark] 个单元挂上「可辨认的东西」，挪完之后看它们在不在同一格
     void check(int n, int from, int to, int mark) {
       final replacements = [
@@ -87,6 +89,9 @@ void main() {
         BgmSegment(
             startUnit: mark, endUnit: mark, materials: const [], fit: BgmFit.loop),
       ]);
+      final subtitles = const SubtitleTrack.empty().withLines(
+          SubtitleSlot(unitIndex: mark, shotIndex: 1),
+          const [SubtitleLine(startMs: 0, endMs: 800, text: '手改过的')]);
 
       final movedUnits = moveUnit(unitsOf(n), from: from, to: to);
       final where = movedUnits.indexWhere((u) => u.transcript == 'U${mark + 1}');
@@ -103,6 +108,14 @@ void main() {
       final b = remapBgmAfterMove(bgm, from: from, to: to);
       expect(b.plan.segments.single.startUnit, where,
           reason: '配乐没跟着走：n=$n from=$from to=$to mark=$mark');
+
+      // 第五份：手改过的字幕。2026-09-09 清点时才发现它从头到尾没搬过——
+      // 人给 U3 改好的那句会烧到 U2 的画面上，不报错，导出来看一遍才知道
+      final t = remapSubtitlesAfterMove(subtitles, from: from, to: to);
+      expect(t.editedSlots.single.unitIndex, where,
+          reason: '手改字幕没跟着走：n=$n from=$from to=$to mark=$mark');
+      expect(t.editedSlots.single.shotIndex, 1,
+          reason: '镜头下标不动——镜头是跟着单元整体搬家的');
     }
 
     test('穷举：任意规模、任意挪法、任意被标记的单元', () {

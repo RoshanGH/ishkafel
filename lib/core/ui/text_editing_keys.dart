@@ -45,6 +45,18 @@ const Map<ShortcutActivator, Intent> textEditingPassthrough =
       DoNothingAndStopPropagationIntent(),
 };
 
+/// **点到别处就交出焦点。**
+///
+/// 用在输入框的 `onTapOutside` 上。macOS 上 Flutter 的 TextField 默认不会
+/// 因为点了别处就失焦——人在台词框里打完字，去时间线上点一下播放头，焦点
+/// 还留在框里，于是 [isEditableTextFocused] 照旧为真，空格被当成「在输入框
+/// 里打空格」放行掉，播放/暂停就此失灵。用户原话：「你改了打字输入中文之后
+/// 空格就不能正常暂停播放了。」
+///
+/// 交出焦点顺带把输入法未上屏的组合提交掉，这正是「我打完了」该有的行为。
+void releaseFocusOnTapOutside(PointerDownEvent _) =>
+    FocusManager.instance.primaryFocus?.unfocus();
+
 /// 把一个输入框（或一片输入区）包起来，让上面那些键归它自己。
 class TextEditingKeys extends StatelessWidget {
   final Widget child;

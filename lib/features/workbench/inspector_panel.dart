@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/ui/text_editing_keys.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
@@ -585,6 +586,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
         border: InputBorder.none,
       ),
       onChanged: (text) => widget.controller.updateTranscript(unitIndex, text),
+      // 点到别处就交出焦点，否则空格一直被当成「在框里打空格」，
+      // 播放/暂停就此失灵（见 [releaseFocusOnTapOutside]）
+      onTapOutside: releaseFocusOnTapOutside,
     );
   }
 }

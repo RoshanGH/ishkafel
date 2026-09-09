@@ -912,7 +912,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           // （2026-09-08 真机）。挑素材、剔候选那几条路一直是三步一起做的，
           // 唯独重排和删单元漏了后两步
           replacements: movedReplacements,
-          voices: remapVoicesAfterMove(_task.voices, from: from, to: to));
+          voices: remapVoicesAfterMove(_task.voices, from: from, to: to),
+          // 手改过的字幕也是按单元下标记的——不搬的话，给 U3 改好的那句
+          // 会烧到 U2 的画面上
+          subtitleTrack:
+              remapSubtitlesAfterMove(_task.subtitleTrack, from: from, to: to));
     });
     await _savePickingPlanQuietly(movedReplacements);
     // **有原片的任务：原片时长一帧没多。** 加一段进来变长的是成片，
@@ -1330,7 +1334,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           // 和重排同理：内存、_task、盘上三处都要改
           replacements: shifted,
           // 配音也是按下标记的——不搬的话，本该念 U3 的配音会跑到 U2 身上
-          voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex));
+          voices: shiftVoicesAfterRemoval(_task.voices, removed: unitIndex),
+          // 手改过的字幕同理
+          subtitleTrack: shiftSubtitlesAfterRemoval(_task.subtitleTrack,
+              removed: unitIndex));
     });
     await _savePickingPlanQuietly(shifted);
     editor.replaceUnitsForBlankTask(

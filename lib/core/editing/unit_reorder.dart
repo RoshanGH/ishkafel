@@ -1,6 +1,7 @@
 import '../audio/bgm_plan.dart';
 import '../audio/voice_plan.dart';
 import '../models/semantic_unit.dart';
+import '../subtitle/subtitle_track.dart';
 import '../replacement/replacement_plan.dart';
 
 /// 调整台词语义单元的**成片顺序**：把 U2 拖到 U1 的位置，它就成了 U1。
@@ -155,6 +156,15 @@ int _mapIndex(int index, {required int from, required int to}) {
   // 往前挪：夹在中间的整体后移一格
   return (index >= to && index < from) ? index + 1 : index;
 }
+
+/// 挪动之后，手改过的字幕跟着走。
+///
+/// 走的是和替换方案、配音、配乐**同一个** [_mapIndex]——2026-09-09 清点时
+/// 才发现这一份从来没搬过：人给 U3 改好的那句字幕会烧到 U2 的画面上，
+/// 不报错，只有把片子导出来看一遍才发现。
+SubtitleTrack remapSubtitlesAfterMove(SubtitleTrack track,
+        {required int from, required int to}) =>
+    track.remapped((i) => _mapIndex(i, from: from, to: to));
 
 /// 从列表里去掉第 [index] 个单元，**只重排下标，一个单元的起止都不动**。
 ///

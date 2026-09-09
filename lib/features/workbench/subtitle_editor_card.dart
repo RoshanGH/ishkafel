@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/ui/text_editing_keys.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -210,6 +211,8 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
               // **不在这里提交**：敲字的过程中每次提交都要重烧一遍字幕。
               // 光标离开这一格时才交（见 [_commitIfLeft]）；回车也算改完
               onSubmitted: (_) => _commitIfLeft(i),
+              // 点到别处就交出焦点：既把这一格提交掉，也把空格还给播放/暂停
+              onTapOutside: releaseFocusOnTapOutside,
             ),
           ),
           IconButton(

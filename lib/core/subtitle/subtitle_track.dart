@@ -64,6 +64,35 @@ class SubtitleTrack {
   SubtitleTrack cleared(SubtitleSlot slot) =>
       SubtitleTrack._({..._edited}..remove(slot));
 
+  /// 把所有坑位按 [move] 重新映射一遍——**挪动单元顺序时必须调**。
+  ///
+  /// 手改的字幕是按 `(单元下标, 镜头下标)` 记的，而单元下标就是列表位置。
+  /// 挪了单元不搬它，人给 U3 改好的那句字幕会烧到 U2 的画面上——不报错，
+  /// 只有把片子导出来看一遍才发现（2026-09-09 清点时查出来的，这条从来
+  /// 没搬过）。镜头下标不动：镜头跟着单元整体搬家。
+  SubtitleTrack remapped(int Function(int unitIndex) move) {
+    if (_edited.isEmpty) return this;
+    return SubtitleTrack._({
+      for (final e in _edited.entries)
+        SubtitleSlot(
+            unitIndex: move(e.key.unitIndex), shotIndex: e.key.shotIndex): e.value,
+    });
+  }
+
+  /// 删掉第 [removed] 个单元之后：它自己那几句丢掉，后面的整体前移
+  SubtitleTrack afterRemoval(int removed) {
+    if (_edited.isEmpty) return this;
+    return SubtitleTrack._({
+      for (final e in _edited.entries)
+        if (e.key.unitIndex != removed)
+          SubtitleSlot(
+              unitIndex: e.key.unitIndex > removed
+                  ? e.key.unitIndex - 1
+                  : e.key.unitIndex,
+              shotIndex: e.key.shotIndex): e.value,
+    });
+  }
+
   List<Map<String, dynamic>> toJson() => [
         for (final e in _edited.entries)
           {
