@@ -89,6 +89,15 @@ class ComposedTimeline {
   ///
   /// 比的是「每一格从哪儿开始、多长、取自原片的哪一段」——顺序一变，
   /// 后两样至少有一个跟着变。
+  ///
+  /// **镜头也要比**：镜头在成片上的位置是从这条轴里的那份镜头列表算出来的
+  /// （见 [composedShotStart]）。合并/拆分/拖边界只动单元**内部**，上面那
+  /// 四样一个都不变——只比它们的话会判成「轴没变」，时间线继续用着改动
+  /// 之前那条轴：画的时候拿新列表的下标去问旧列表，位置全是旧的。
+  ///
+  /// 2026-09-09 真机，用户原话：「合并为什么还是这样子」——合并完两镜，
+  /// 那个单元的镜头轨尾部空出一截（旧列表比新列表多两格，多出来的地盘
+  /// 没人画），点下去命中的还是另一格。
   bool sameLayoutAs(ComposedTimeline other) {
     if (units.length != other.units.length) return false;
     for (var i = 0; i < units.length; i++) {
@@ -97,6 +106,13 @@ class ComposedTimeline {
       // 长度和起点都一样、但换的是另一段原片：画面内容变了，也得重画
       if (units[i].startMs != other.units[i].startMs) return false;
       if (units[i].endMs != other.units[i].endMs) return false;
+      final shots = units[i].shots;
+      final otherShots = other.units[i].shots;
+      if (shots.length != otherShots.length) return false;
+      for (var s = 0; s < shots.length; s++) {
+        if (shots[s].startMs != otherShots[s].startMs) return false;
+        if (shots[s].endMs != otherShots[s].endMs) return false;
+      }
     }
     return true;
   }
