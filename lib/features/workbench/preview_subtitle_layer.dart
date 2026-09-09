@@ -70,8 +70,13 @@ class _PreviewSubtitleLayerState extends State<PreviewSubtitleLayer> {
           onDragEnd: widget.onDragEnd == null
               ? null
               : (r) {
+                  // 落盘用**自己记的**那个值，不是回调带回来的：回调带的是
+                  // [PreviewSubtitle] 上一帧的 dragRatio，一口气拖完松手
+                  // （update 与 end 落在同一帧）时它还停在拖动之前，
+                  // 这一拖就白拖了
+                  final ratio = _dragRatio ?? r;
                   setState(() => _dragRatio = null);
-                  widget.onDragEnd!(r);
+                  widget.onDragEnd!(ratio);
                 },
         );
       },
