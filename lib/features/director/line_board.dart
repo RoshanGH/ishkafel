@@ -525,6 +525,9 @@ class _ScreenTextFieldState extends State<_ScreenTextField> {
   Widget build(BuildContext context) => TextEditingKeys(
     // 打中文字幕的地方，空格必须归输入法
     child: TextField(
+          // 点到别处就交出焦点，否则空格一直被判成「在框里打空格」，
+          // 播放/暂停就此失灵
+          onTapOutside: releaseFocusOnTapOutside,
           controller: _c,
           focusNode: _focus,
           style: const TextStyle(fontSize: AppFontSize.caption, height: 1.3),
