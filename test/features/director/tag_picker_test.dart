@@ -28,6 +28,9 @@ String _groupsJson() => jsonEncode([
         'tags': [
           {'tagName': '厨房'},
           {'tagName': '高铁'},
+          // 真机上「痛点」同时挂在植源分子库和植源动作两个组里——
+          // 同名标签跨组是常态，不是脏数据
+          {'tagName': '痛点'},
         ],
       },
     ]);
@@ -40,6 +43,7 @@ String _tagsJson(int groupId) => jsonEncode(groupId == 10
     : [
         {'id': 201, 'tagName': '厨房'},
         {'id': 202, 'tagName': '高铁'},
+        {'id': 203, 'tagName': '痛点'},
       ]);
 
 MiaoaTagService _fakeTags(List<List<String>> calls) =>
@@ -106,6 +110,26 @@ void main() {
     final picked = await resultFuture;
     expect(picked, isNotNull);
     expect({for (final t in picked!) t.name: t.id}, {'促单': 101, '厨房': 201});
+  });
+
+  /// 2026-09-09 真机：U1·S7 的标签原本 4 个，进「改标签」原样确定一遍之后
+  /// 变成 5 个——「痛点」写了两遍。原因是返回值按「组序 + 组内序」铺开，
+  /// 而同一个标签名同时挂在两个组里，就被铺了两次。
+  ///
+  /// 后果不只是难看：这份 tags 是检索键，也是界面上展示的那一排，
+  /// 每过一次「改标签」就多一份，改几次就是一串重复。
+  testWidgets('同名标签挂在两个组里：只返回一次，不重复', (tester) async {
+    final resultFuture = await pump(tester);
+
+    // 「痛点」在话术结构和画面场景两个组里各有一个格子，点其中一个即可
+    await tester.tap(find.text('痛点').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('tag-picker-ok')));
+    await tester.pumpAndSettle();
+
+    final picked = await resultFuture;
+    expect(picked!.map((t) => t.name).toList(), ['痛点'],
+        reason: '同一个名字铺两遍的话，标签会一次比一次多');
   });
 
   testWidgets('搜索过滤标签；已选的先带勾、可取消（替换 = 取消旧的选新的）',

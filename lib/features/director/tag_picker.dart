@@ -117,11 +117,16 @@ class _TagPickerDialogState extends State<_TagPickerDialog> {
       }
     }
     if (!mounted) return;
-    // 保持词表顺序（组序 + 组内序），词表外的已选项（历史遗留）排最后
+    // 保持词表顺序（组序 + 组内序），词表外的已选项（历史遗留）排最后。
+    //
+    // **同名标签跨组只出一次**：真机上「痛点」同时挂在植源分子库和植源动作
+    // 两个组里，按组铺开就会铺两遍——原样确定一次，4 个标签变 5 个，改几次
+    // 就是一串重复。而这份 tags 既是检索键也是界面上那一排
+    final seen = <String>{};
     final ordered = <String>[
       for (final g in groups)
         for (final name in g.tags)
-          if (_selected.contains(name)) name,
+          if (_selected.contains(name) && seen.add(name)) name,
     ];
     final leftover = _selected.difference(ordered.toSet());
     Navigator.of(context).pop([
