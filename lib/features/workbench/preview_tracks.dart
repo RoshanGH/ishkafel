@@ -14,7 +14,9 @@ import '../../core/playback/track_plan.dart';
 import '../../core/script/skipped_lines_summary.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/audio/source_audio.dart';
 import '../../core/playback/gap_clip.dart';
+import '../../core/playback/silent_clip.dart';
 import '../../core/ffmpeg/media_spec.dart';
 import '../picking/picked_media_cache.dart';
 import 'speed_fitter.dart';
@@ -40,6 +42,13 @@ class PreviewTracks extends ChangeNotifier {
   /// 已经垫好的：单元下标 → 黑场文件
   final Map<int, String> _gaps = {};
 
+  /// 给「原片这一镜的声音 = 不播放」的那几镜垫静音。为 null（测试环境没有
+  /// 数据目录）时退回原声——预览里位置对不上比多一层声音更糟
+  final SilentClip? silentClip;
+
+  /// 已经垫好的：`单元下标/镜头下标` → 静音文件
+  final Map<String, String> _silences = {};
+
   /// 把一条素材分离成纯人声。为 null 表示这台机器上分不了——那时配乐会和
   /// 素材原声叠在一起，由界面如实提示
   final Future<String?> Function(String materialPath)? separateMaterial;
@@ -54,6 +63,7 @@ class PreviewTracks extends ChangeNotifier {
     this.bgmMedia,
     this.speedFitter,
     this.gapClip,
+    this.silentClip,
     this.separateMaterial,
   }) {
     speedFitter?.addListener(_onFitterChanged);
@@ -69,6 +79,13 @@ class PreviewTracks extends ChangeNotifier {
       return '正在准备 $pending 段替换镜头的变速画面，其余部分已经能播';
     }
     if (_plan.bgmMissing.isNotEmpty) return _plan.bgmMissing.join('；');
+    // 「原片这一镜的声音」要的分离轨不在：预览先放原混音，但不能不说——
+    // 人正照着预览挑组合，听到的和导出的不是一回事最坑
+    if (_plan.sourceStemMissing.isNotEmpty) {
+      return '${_plan.sourceStemMissing.join('、')} 的原片声音选了要分离的'
+          '那一档，但这条任务还没有分离轨——预览先放原混音。'
+          '点「重新分离」补一份';
+    }
     // 还没挑素材的那几段：**不等人播到那儿才说**。它们在成片里占着位置却
     // 没有画面，人一按播放就会在那儿停住——先把话说在前面，并点名是哪几段
     if (_plan.unplayable.isNotEmpty) {
@@ -89,7 +106,7 @@ class PreviewTracks extends ChangeNotifier {
   /// 能重试的只有「取不到配乐」这类外部抖动。
   bool get noticeRetryable {
     if ((speedFitter?.pending ?? 0) > 0) return false;
-    return _plan.bgmMissing.isNotEmpty;
+    return _plan.bgmMissing.isNotEmpty || _plan.sourceStemMissing.isNotEmpty;
   }
 
   /// 成片时刻 → 原片时刻。时间线画的是原片切分，播放头要靠它换算回去
@@ -140,12 +157,65 @@ class PreviewTracks extends ChangeNotifier {
         replacements: replacements,
       );
     }
+    // 选了「不放原片声音」的那几镜同理：EDL 表达不了音量为 0，也不能留洞
+    if (await _ensureSilences(
+        task: task, units: units, replacements: replacements)) {
+      plan = _build(
+        task: task,
+        units: units,
+        voiceAudio: voiceAudio,
+        replacements: replacements,
+      );
+    }
     final key = _keyOf(plan);
     if (key == _lastKey) return;
     _lastKey = key;
     _plan = plan;
     await playback.setPlan(plan);
     _notify();
+  }
+
+  /// 给选了「不放原片声音」的那几镜补静音。**同步能拿到的当轮就用**
+  /// （盘上已有），缺的丢后台渲，渲完重推一次。返回 true 表示方案要重算
+  Future<bool> _ensureSilences({
+    required RenewTask task,
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+  }) async {
+    final filler = silentClip;
+    if (filler == null) return false;
+    var changed = false;
+    for (var u = 0; u < units.length; u++) {
+      final replacement = u < replacements.length
+          ? replacements[u]
+          : UnitReplacement.keepOriginal();
+      for (var sh = 0; sh < units[u].shots.length; sh++) {
+        final picked = resolveSourceAudio(
+          replaced: replacement.mode == ReplacementMode.perShot &&
+              (replacement.shotCandidateIds[sh]?.isNotEmpty ?? false),
+          taskDefault: task.sourceAudio,
+          shotMode: units[u].shots[sh].sourceAudioMode,
+          shotVolume: units[u].shots[sh].sourceAudioVolume,
+        );
+        if (picked == null || picked.mode!.audible) continue;
+        final key = TrackPlanBuilder.shotKey(units[u].index, sh);
+        if (_silences.containsKey(key)) continue;
+        final ms = units[u].shots[sh].durationMs;
+        final ready = filler.existing(durationMs: ms);
+        if (ready != null) {
+          _silences[key] = ready;
+          changed = true;
+          continue;
+        }
+        unawaited(filler.render(durationMs: ms).then((path) {
+          if (path == null) return;
+          _silences[key] = path;
+          _lastKey = null; // 强制下一轮重推
+          _notify();
+        }));
+      }
+    }
+    return changed;
   }
 
   /// 给放不了的那几段补黑场。**同步能拿到的当轮就用**（盘上已有），
@@ -260,6 +330,9 @@ class PreviewTracks extends ChangeNotifier {
       bgmPaths: bgmPaths,
       materialVocals: materialVocals,
       gapClips: _gaps,
+      backgroundPath: task.backgroundPath,
+      sourceAudio: task.sourceAudio,
+      silentClips: _silences,
     );
   }
 
@@ -268,6 +341,8 @@ class PreviewTracks extends ChangeNotifier {
   static String _keyOf(TrackPlan plan) => [
         for (final s in plan.video) '${s.atMs}:${s.durationMs}:${s.source}:${s.inMs}',
         '|',
+        // 口播轨这一段读哪个文件会随「原片这一镜的声音」变——档位改了
+        // 指纹必须跟着变，否则换了设置却不换源，人听到的还是上一版
         for (final s in plan.voice) '${s.atMs}:${s.durationMs}:${s.source}:${s.inMs}',
         '|',
         for (final s in plan.bgm)

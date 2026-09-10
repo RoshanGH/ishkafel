@@ -28,6 +28,15 @@ enum MaterialAudioMode {
   /// 一句补充，说清这一档到底放的是什么
   final String hint;
 
+  /// 同一档用在**原片这一镜**上时的说明。四个档位是同一套，
+  /// 但说的是两条不同的声音，文案不能共用一份
+  String get sourceHint => switch (this) {
+        MaterialAudioMode.none => '这一镜不放原片的声音',
+        MaterialAudioMode.vocals => '原片这一段说话的那一路，现场音被分掉',
+        MaterialAudioMode.background => '原片这一段的现场音，说话声被分掉',
+        MaterialAudioMode.original => '原片这一段原样的整条声音，不分离',
+      };
+
   /// 这一档要不要先跑分离（一条素材十几秒，见 [MaterialVocalCache]）
   bool get needsSeparation =>
       this == MaterialAudioMode.vocals || this == MaterialAudioMode.background;
@@ -97,6 +106,14 @@ class MaterialAudioSetting {
   @override
   int get hashCode => Object.hash(mode, volume);
 }
+
+/// **新建任务**的「替换分镜的声音」默认档：原声。
+///
+/// 和 [MaterialAudioSetting.off] 的分工：那个是**存量任务**的缺省，
+/// 不能动——升级一版不该让旧任务导出来的片子突然多一层声音
+/// （用户 2026-09-10 定的：「默认改成原声，只对所有新任务有效……旧任务不管」）。
+const MaterialAudioSetting newTaskMaterialAudio =
+    MaterialAudioSetting(mode: MaterialAudioMode.original);
 
 /// 任务级打底 + 镜头级覆盖 → 这一镜最终放哪一路声音。
 ///

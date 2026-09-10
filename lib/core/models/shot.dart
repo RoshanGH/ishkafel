@@ -47,6 +47,20 @@ class Shot {
   /// 保留素材原声时压到几成（0~1）。null = 跟任务级走
   final double? materialAudioVolume;
 
+  /// 这一镜被替换时，**原片这一段自己放哪一路声音**
+  /// （不播 / 人声 / 背景声 / 原声，与 [materialAudioMode] 同一套档位）。
+  ///
+  /// null = 跟任务级走；任务级也没设（自动）就是这个功能出现之前的行为：
+  /// 原混音照播，被配乐盖住时自动换成纯人声。
+  ///
+  /// **只对换过素材的镜头有意义**：没换素材的镜头照旧走自动那条路，
+  /// 界面上连控件都不出现（用户原话：「如果没替换分镜，那连原片这一分镜的
+  /// 声音该怎么操作都不应该有」）。
+  final MaterialAudioMode? sourceAudioMode;
+
+  /// 原片这一段压到几成（0~1）。null = 跟任务级走
+  final double? sourceAudioVolume;
+
   const Shot({
     required this.startMs,
     required this.endMs,
@@ -55,6 +69,8 @@ class Shot {
     this.productBrand,
     this.materialAudioMode,
     this.materialAudioVolume,
+    this.sourceAudioMode,
+    this.sourceAudioVolume,
     this.tagsStale = false,
     this.tagsHandpicked = false,
     this.trace,
@@ -75,6 +91,8 @@ class Shot {
     BoundaryTrace? boundaryTrace,
     MaterialAudioMode? materialAudioMode,
     double? materialAudioVolume,
+    MaterialAudioMode? sourceAudioMode,
+    double? sourceAudioVolume,
   }) =>
       Shot(
         startMs: startMs ?? this.startMs,
@@ -88,6 +106,8 @@ class Shot {
         boundaryTrace: boundaryTrace ?? this.boundaryTrace,
         materialAudioMode: materialAudioMode ?? this.materialAudioMode,
         materialAudioVolume: materialAudioVolume ?? this.materialAudioVolume,
+        sourceAudioMode: sourceAudioMode ?? this.sourceAudioMode,
+        sourceAudioVolume: sourceAudioVolume ?? this.sourceAudioVolume,
       );
 
   /// 改这一镜「保留素材原声」的覆盖。**传 null 表示清掉覆盖、回到跟随任务**
@@ -108,6 +128,29 @@ class Shot {
         boundaryTrace: boundaryTrace,
         materialAudioMode: mode,
         materialAudioVolume: volume,
+        sourceAudioMode: sourceAudioMode,
+        sourceAudioVolume: sourceAudioVolume,
+      );
+
+  /// 改这一镜「原片这一镜的声音」的覆盖。**传 null 表示清掉覆盖、回到跟随任务**
+  Shot withSourceAudioOverride({
+    required MaterialAudioMode? mode,
+    required double? volume,
+  }) =>
+      Shot(
+        startMs: startMs,
+        endMs: endMs,
+        tags: tags,
+        description: description,
+        productBrand: productBrand,
+        tagsStale: tagsStale,
+        tagsHandpicked: tagsHandpicked,
+        trace: trace,
+        boundaryTrace: boundaryTrace,
+        materialAudioMode: materialAudioMode,
+        materialAudioVolume: materialAudioVolume,
+        sourceAudioMode: mode,
+        sourceAudioVolume: volume,
       );
 
   Map<String, dynamic> toJson() => {
@@ -126,6 +169,8 @@ class Shot {
           'materialAudioMode': materialAudioMode!.name,
         if (materialAudioVolume != null)
           'materialAudioVolume': materialAudioVolume,
+        if (sourceAudioMode != null) 'sourceAudioMode': sourceAudioMode!.name,
+        if (sourceAudioVolume != null) 'sourceAudioVolume': sourceAudioVolume,
       };
 
   factory Shot.fromJson(Map<String, dynamic> json) => Shot(
@@ -147,6 +192,9 @@ class Shot {
                     ? MaterialAudioMode.none
                     : null),
         materialAudioVolume: (json['materialAudioVolume'] as num?)?.toDouble(),
+        sourceAudioMode:
+            MaterialAudioMode.byName(json['sourceAudioMode'] as String?),
+        sourceAudioVolume: (json['sourceAudioVolume'] as num?)?.toDouble(),
       );
 
   @override
@@ -159,6 +207,8 @@ class Shot {
       other.tagsStale == tagsStale &&
       other.materialAudioMode == materialAudioMode &&
       other.materialAudioVolume == materialAudioVolume &&
+      other.sourceAudioMode == sourceAudioMode &&
+      other.sourceAudioVolume == sourceAudioVolume &&
       const ListEquality<String>().equals(other.tags, tags);
 
   @override

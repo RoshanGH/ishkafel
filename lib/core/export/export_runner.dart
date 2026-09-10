@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../analysis/providers.dart' show AsrSentence;
 import '../audio/bgm_plan.dart';
 import '../audio/material_audio.dart';
+import '../audio/source_audio.dart';
 import '../audio/voice_plan.dart';
 import '../ffmpeg/process_runner.dart';
 import '../log/app_log.dart';
@@ -108,6 +109,8 @@ class ExportRunner {
     required List<SemanticUnit> units,
     String? sourcePath,
     List<UnitReplacement> replacements = const [],
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
+    String? backgroundPath,
   }) {
     // 整体替换用的是候选素材自己的口播，换音色用的是 TTS 合成的口播——
     // 同一个单元两者矛盾，静默取其一正是用户反对的
@@ -137,6 +140,22 @@ class ExportRunner {
           '叠在原片背景音上（两首曲子一起响）。请先装好分离工具并重新分析';
     }
 
+    // 「原片这一镜的声音」选了人声/背景声，却没有对应的分离轨：
+    // 走到导出中途才抛，人已经等了几分钟。该拦的在进门口拦
+    final needsStem = _shotsNeedingStem(
+      units: units,
+      replacements: replacements,
+      sourceAudio: sourceAudio,
+      vocalsPath: vocalsPath,
+      backgroundPath: backgroundPath,
+    );
+    if (needsStem.isNotEmpty) {
+      return '${needsStem.join('、')} 的原片声音选了要分离的那一档，'
+          '但这条任务还没有对应的分离轨。在工作台上点「重新分离」，'
+          '或者跑 ishkafel analyze <任务> 重跑一遍分析；'
+          '也可以把它们改回「原声」';
+    }
+
     // 选了音色却没生成配音：那一段会静默用回原声
     final missing = <String>[];
     for (var i = 0; i < units.length; i++) {
@@ -155,6 +174,45 @@ class ExportRunner {
     }
     return null;
   }
+
+  /// 哪几镜的「原片这一镜的声音」选了要分离的档位、而分离轨还不在。
+  /// 返回 `U2·S3` 这种人话标签
+  static List<String> _shotsNeedingStem({
+    required List<SemanticUnit> units,
+    required List<UnitReplacement> replacements,
+    required SourceAudioSetting sourceAudio,
+    required String? vocalsPath,
+    required String? backgroundPath,
+  }) {
+    bool has(String? path) => path != null && File(path).existsSync();
+    final out = <String>[];
+    for (var u = 0; u < units.length; u++) {
+      final replacement = u < replacements.length ? replacements[u] : null;
+      if (replacement?.mode != ReplacementMode.perShot) continue;
+      for (var sh = 0; sh < units[u].shots.length; sh++) {
+        final picked = resolveSourceAudio(
+          replaced: replacement!.shotCandidateIds[sh]?.isNotEmpty ?? false,
+          taskDefault: sourceAudio,
+          shotMode: units[u].shots[sh].sourceAudioMode,
+          shotVolume: units[u].shots[sh].sourceAudioVolume,
+        );
+        final mode = picked?.mode;
+        if (mode == null || !mode.needsSeparation) continue;
+        final ready = mode == MaterialAudioMode.vocals
+            ? has(vocalsPath)
+            : has(backgroundPath);
+        if (!ready) out.add('U${u + 1}·S${sh + 1}');
+      }
+    }
+    return out;
+  }
+
+  /// 这一条成片里哪几镜换过素材。「原片这一镜的声音」只对它们生效
+  static Set<(int, int)> _replacedShotsOf(ExportCombination combo) => {
+        for (final segment in combo.segments)
+          if (segment.shotIndex != null && segment.candidateId != null)
+            (segment.unitIndex, segment.shotIndex!),
+      };
 
   /// 导出全部组合到 [outputDir]。
   ///
@@ -182,6 +240,13 @@ class ExportRunner {
     /// （见 [Shot.keepMaterialAudio]）。默认关：存量任务导出来的声音不变
     MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
 
+    /// 「原片这一镜的声音」的全片打底。默认「自动」= 老行为
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
+
+    /// 分离出来的纯背景音轨（与 [vocalsPath] 同一次分离的两条产物）。
+    /// 「原片这一镜的声音」选「背景声」时用它
+    String? backgroundPath,
+
     /// **手改过的**字幕。没改过的坑位照 ASR 现算（见 [SubtitleTrack]）
     SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
     ExportProgress? onProgress,
@@ -204,6 +269,8 @@ class ExportRunner {
       spec: spec,
       subtitleSentences: subtitleSentences,
       materialAudio: materialAudio,
+      sourceAudio: sourceAudio,
+      backgroundPath: backgroundPath,
       subtitleTrack: subtitleTrack,
       onProgress: onProgress,
     );
@@ -237,6 +304,13 @@ class ExportRunner {
     /// 「保留素材原声」的全片打底设置。单个视觉镜头可以覆盖它
     /// （见 [Shot.keepMaterialAudio]）。默认关：存量任务导出来的声音不变
     MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
+
+    /// 「原片这一镜的声音」的全片打底。默认「自动」= 老行为
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
+
+    /// 分离出来的纯背景音轨（与 [vocalsPath] 同一次分离的两条产物）。
+    /// 「原片这一镜的声音」选「背景声」时用它
+    String? backgroundPath,
 
     /// **手改过的**字幕。没改过的坑位照 ASR 现算（见 [SubtitleTrack]）
     SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
@@ -275,6 +349,8 @@ class ExportRunner {
           units: units,
           sourcePath: sourcePath,
           replacements: replacements,
+          sourceAudio: sourceAudio,
+          backgroundPath: backgroundPath,
         );
     if (blocker != null) {
       AppLog.warn('导出前置检查未通过：$blocker');
@@ -334,6 +410,10 @@ class ExportRunner {
               sourcePath: sourcePath,
               units: units,
               vocalsPath: vocalsPath,
+              backgroundPath: backgroundPath,
+              // 「原片这一镜的声音」只对换过素材的那几镜生效
+              replacedShots: _replacedShotsOf(combos[i]),
+              sourceAudio: sourceAudio,
               bgm: bgm,
               voiceAudio: voiceAudio,
               variantIndex: i,

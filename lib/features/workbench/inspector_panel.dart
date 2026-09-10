@@ -7,6 +7,7 @@ import '../shared/scroll_fade.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/audio/material_audio.dart';
+import '../../core/audio/source_audio.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/export/composed_timeline.dart';
@@ -14,6 +15,7 @@ import '../../core/time/timecode.dart';
 import 'inspector_widgets.dart';
 import 'inserted_unit_label.dart';
 import 'material_audio_card.dart';
+import 'source_audio_card.dart';
 import 'subtitle_editor_card.dart';
 import '../../core/audio/voice_plan.dart';
 import 'tag_trace_section.dart';
@@ -91,6 +93,20 @@ class InspectorPanel extends StatefulWidget {
   final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
       double? volume)? onShotMaterialAudioChanged;
 
+  /// 「原片这一镜的声音」的全片打底设置（单个镜头可覆盖）
+  final SourceAudioSetting sourceAudioDefault;
+
+  /// 改这一镜「原片这一镜的声音」。mode 传 null = 改回跟随全片
+  final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
+      double? volume)? onShotSourceAudioChanged;
+
+  /// 这个单元换过音色没有。换过的话原片那一路已经被生成的配音顶掉了
+  final bool Function(int unitIndex)? unitVoiceSwapped;
+
+  /// 这条任务有没有分离好的人声轨 / 背景音轨
+  final bool hasVocals;
+  final bool hasBackground;
+
   /// 空白任务：整条片子都没有原片。**注意这只是「全都没有」的那种情况**——
   /// 有原片的任务里也可能有个别单元没有原片来源（用户手加的），
   /// 判断某一个单元有没有台词要看 [SemanticUnit.hasSource]，不是看这个 flag
@@ -126,6 +142,11 @@ class InspectorPanel extends StatefulWidget {
     this.shotReplaced,
     this.shotMaterialVoiceover,
     this.onShotMaterialAudioChanged,
+    this.sourceAudioDefault = SourceAudioSetting.auto,
+    this.onShotSourceAudioChanged,
+    this.unitVoiceSwapped,
+    this.hasVocals = false,
+    this.hasBackground = false,
     this.readOnly = false,
   });
 
@@ -668,6 +689,21 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 widget.onSubtitleReset?.call(unitIndex, shotIndex),
           ),
           const SizedBox(height: 10),
+          // 成片的声音是两层。**原片那一层摆在前面**：它是主体，
+          // 替换素材那一层是叠在它上面的
+          SourceAudioCard(
+            taskDefault: widget.sourceAudioDefault,
+            shotMode: shot.sourceAudioMode,
+            shotVolume: shot.sourceAudioVolume,
+            replaced: widget.shotReplaced?.call(unitIndex, shotIndex) ?? false,
+            voiceSwapped: widget.unitVoiceSwapped?.call(unitIndex) ?? false,
+            unreplacedSiblings: _unreplacedSiblings(unitIndex, shotIndex),
+            hasVocals: widget.hasVocals,
+            hasBackground: widget.hasBackground,
+            onChanged: (mode, volume) => widget.onShotSourceAudioChanged
+                ?.call(unitIndex, shotIndex, mode, volume),
+          ),
+          const SizedBox(height: 10),
           // 这一镜换过素材才有「素材的声音」可言
           MaterialAudioCard(
             taskDefault: widget.materialAudioDefault,
@@ -682,6 +718,21 @@ class _InspectorPanelState extends State<InspectorPanel> {
         ],
       ),
     );
+  }
+
+  /// 这一句里还有哪几镜没换素材。
+  ///
+  /// 一句台词常常跨好几镜：这一镜剥掉了原片现场音、旁边那一镜还是原混音，
+  /// 同一句话说到一半背景音突然出现。人听得出别扭却找不到原因，得点名说
+  List<String> _unreplacedSiblings(int unitIndex, int shotIndex) {
+    final replaced = widget.shotReplaced;
+    if (replaced == null) return const [];
+    final units = widget.controller.units;
+    if (unitIndex < 0 || unitIndex >= units.length) return const [];
+    return [
+      for (var s = 0; s < units[unitIndex].shots.length; s++)
+        if (s != shotIndex && !replaced(unitIndex, s)) 'S${s + 1}',
+    ];
   }
 
   Widget _transcriptField(int unitIndex) {

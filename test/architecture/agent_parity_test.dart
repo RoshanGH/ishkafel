@@ -37,6 +37,7 @@ void main() {
       'unit move': '调单元顺序（列表顺序就是成片顺序）',
       'unit tags': '给手加的单元手填标签',
       'unit audio': '这一镜保留素材原声、调音量',
+      'unit source-audio': '这一镜的**原片**声音放哪一路、多大声',
       'unit subtitle': '改这一镜要烧的字幕',
     };
     for (final e in knobs.entries) {

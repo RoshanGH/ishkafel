@@ -162,6 +162,13 @@ class TrackPlan {
   /// 预览可以少一段垫乐——人还在编辑、听得出来——但必须说出来
   final List<String> bgmMissing;
 
+  /// 「原片这一镜的声音」选了人声/背景声，但那条分离轨这一刻不在——
+  /// 预览只能先放原混音。人话标签（`U2·S3`），可直接展示。
+  ///
+  /// **预览可以退回原混音，但必须说出来**：不说的话人听到的和导出的
+  /// 不是一回事，而他正是照着预览在挑组合
+  final List<String> sourceStemMissing;
+
   /// 空白任务里还没挑素材、这一轮预览**跳过**了的分子（下标，从 0 起）。
   ///
   /// 没有原片可以垫底，跳过是唯一的选择——但跳过必须说出来，否则用户看到
@@ -190,6 +197,7 @@ class TrackPlan {
     this.voice = const [],
     this.bgm = const [],
     this.bgmMissing = const [],
+    this.sourceStemMissing = const [],
     this.skippedEmptyUnits = const [],
     this.unplayable = const [],
     this.composedTotalMs = 0,

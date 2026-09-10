@@ -203,6 +203,11 @@ class ExportCommands {
     required int endMs,
     required String out,
     double? atFps,
+
+    /// 压到原始音量的几成。1.0 = 原样（默认，也是这个参数出现之前的行为）。
+    /// **1.0 时一道滤镜都不插**：原混音那条路是「一个字节都不改」，
+    /// 白走一道只会掉音质
+    double volume = 1.0,
   }) =>
       [
         '-y', '-v', 'error',
@@ -210,8 +215,32 @@ class ExportCommands {
         '-ss', _seconds(startMs),
         '-vn',
         // 声音按画面的帧数对齐（不足补静音）：两边各走各的，片尾必然错位
-        '-af', 'apad',
+        '-af',
+        [
+          if ((volume - 1).abs() > 1e-6) 'volume=$volume',
+          'apad',
+        ].join(','),
         '-t', exactSeconds(endMs - startMs, atFps: atFps).toStringAsFixed(6),
+        ..._audioNormalize(),
+        out,
+      ];
+
+  /// 一段**等长静音**。
+  ///
+  /// 「这一镜不放原片的声音」不能靠少拼一段来实现——主轨是逐段首尾相接拼
+  /// 起来的，少一段后面所有内容整体提前，画面和声音就此错开，而且哪儿都
+  /// 不报错。规格跟别的段一致（同采样率、同声道、同编码），否则 concat
+  /// 会在接缝处出问题。
+  static List<String> silentAudio({
+    required int durationMs,
+    required String out,
+    double? atFps,
+  }) =>
+      [
+        '-y', '-v', 'error',
+        '-f', 'lavfi',
+        '-i', 'anullsrc=channel_layout=stereo:sample_rate=$audioSampleRate',
+        '-t', exactSeconds(durationMs, atFps: atFps).toStringAsFixed(6),
         ..._audioNormalize(),
         out,
       ];

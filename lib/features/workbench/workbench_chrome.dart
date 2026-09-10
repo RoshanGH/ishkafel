@@ -337,13 +337,15 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
                     foregroundColor: AppColors.textSecondary),
               ),
             ),
-          // 「素材原声」的全片打底开关。摆在这一排是因为它和字幕、标签组
-          // 一样是**整条片子**的设定，不属于某一个单元
+          // 被替换那一镜的声音（原片那一层 + 素材那一层）的全片打底。
+          // 摆在这一排是因为它和字幕、标签组一样是**整条片子**的设定
           if (onEditMaterialAudio != null)
             Tooltip(
               message: materialAudioOn
-                  ? '换上去的素材会带着它自己的声音一起播（现在是开的）。'
-                  : '换上去的素材只用画面，声音一律不要（现在是关的）。',
+                  ? '被换掉的那一镜，原片和素材两层声音各放哪一路'
+                      '（素材那一层现在是开的）。'
+                  : '被换掉的那一镜，原片和素材两层声音各放哪一路'
+                      '（素材那一层现在是关的）。',
               child: TextButton.icon(
                 key: const Key('workbench-material-audio-btn'),
                 onPressed: onEditMaterialAudio,
@@ -352,7 +354,7 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
                         ? Icons.volume_up_outlined
                         : Icons.volume_off_outlined,
                     size: 15),
-                label: Text('素材原声${materialAudioOn ? '·开' : ''}'),
+                label: Text('镜头声音${materialAudioOn ? '·开' : ''}'),
                 style: TextButton.styleFrom(
                     foregroundColor: materialAudioOn
                         ? AppColors.accentBlue

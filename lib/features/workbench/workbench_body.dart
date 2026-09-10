@@ -3,6 +3,7 @@ import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/material.dart';
 import '../../core/audio/material_audio.dart';
+import '../../core/audio/source_audio.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../core/models/semantic_unit.dart';
@@ -102,6 +103,16 @@ class WorkbenchBody extends StatefulWidget {
   final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
       double? volume)? onShotMaterialAudioChanged;
 
+  /// 「原片这一镜的声音」的全片打底 + 镜头级改动
+  final SourceAudioSetting sourceAudioDefault;
+  final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
+      double? volume)? onShotSourceAudioChanged;
+
+  /// 这个单元换过音色没有；以及这条任务有没有分离好的人声/背景轨
+  final bool Function(int unitIndex)? unitVoiceSwapped;
+  final bool hasVocals;
+  final bool hasBackground;
+
   /// 整条任务都没有原片（空白任务）。**别拿它判断某一个单元有没有台词**——
   /// 有原片的任务里也会有手加的、没有原片来源的单元，那要看 unit.hasSource
   final bool blankTask;
@@ -192,6 +203,11 @@ class WorkbenchBody extends StatefulWidget {
     this.onSubtitleChanged,
     this.onSubtitleReset,
     this.onShotMaterialAudioChanged,
+    this.sourceAudioDefault = SourceAudioSetting.auto,
+    this.onShotSourceAudioChanged,
+    this.unitVoiceSwapped,
+    this.hasVocals = false,
+    this.hasBackground = false,
     this.onDeleteUnit,
     this.canDeleteUnit,
     required this.playback,
@@ -607,6 +623,12 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 onSubtitleReset: widget.onSubtitleReset,
                                 onShotMaterialAudioChanged:
                                     widget.onShotMaterialAudioChanged,
+                                sourceAudioDefault: widget.sourceAudioDefault,
+                                onShotSourceAudioChanged:
+                                    widget.onShotSourceAudioChanged,
+                                unitVoiceSwapped: widget.unitVoiceSwapped,
+                                hasVocals: widget.hasVocals,
+                                hasBackground: widget.hasBackground,
                               ),
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),

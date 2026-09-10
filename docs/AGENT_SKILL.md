@@ -842,6 +842,38 @@ ishkafel unit audio <task> --unit 2 --shot 3 --audio follow       # 改回跟随
 **`follow`（跟随全片）和 `none`（这一镜不播）不是一回事**：全片放原声时，
 跟随等于放，而 `none` 是要这一镜真的闭嘴。
 
+**新建的任务全片打底是 `original`（原声）**；2026-09-10 之前建的任务仍是
+`none`，那是有意的——升级一版不该让旧任务导出来的片子突然多一层声音。
+
+### 同一镜的另一层：原片这一段自己放哪一路
+
+被替换掉的那一镜，声音有**两层**：上面那层是顶上来的素材，这一层是**原片
+这一段自己的**。两层各选各的，最后混在一起——「原片的口播 + 素材的现场音」
+这种组合就是这么搭出来的。
+
+档位同一套（`none` / `vocals` / `background` / `original`），外加两个状态词：
+
+| 值 | 意思 |
+|---|---|
+| `auto` | 全片这一层的默认：原混音照播，这一格铺了配乐就自动换成纯人声 |
+| `follow` | 镜头这一层：跟随全片 |
+
+```bash
+ishkafel unit source-audio <task> --audio vocals                  # 全片打底
+ishkafel unit source-audio <task> --unit 2 --shot 3 --audio none  # 这一镜不放原片声音
+ishkafel unit source-audio <task> --unit 2 --shot 3 --audio follow # 改回跟随全片
+ishkafel unit source-audio <task> --audio auto                    # 全片改回自动
+```
+
+三件要留神的：
+
+- **只对换过素材的镜头生效**。没换素材的镜头照旧走自动那条路，在那种镜头上
+  设了也不起作用（界面上连控件都不出现）。
+- **`vocals` / `background` 用的是原片那一次分离的产物**。没有的话导出会在
+  进门口被拦下，跑 `ishkafel analyze <task>` 补一份。
+- **你选了什么就是什么**。手选过之后，「铺了配乐就换纯人声」那条自动规则
+  不再插手——哪怕两层背景音叠在一起，那也是你的决定。
+
 **默认全片 `none`**。挑档之前先看一眼素材的 `voiceover` 字段：非空说明它自己
 有话说，这时选 `original` 或 `vocals` 会和你的台词打架，多半该选 `background`。
 

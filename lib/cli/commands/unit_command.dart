@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../../core/audio/material_audio.dart';
+import '../../core/audio/source_audio.dart';
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
@@ -87,11 +88,14 @@ Future<int> runUnitCommand({
       'tags' => await _tags(repository, task, unit, tags, sink, o),
       'audio' =>
         await _audio(repository, task, unit, shot, audio, volume, sink, o),
+      'source-audio' => await _sourceAudio(
+          repository, task, unit, shot, audio, volume, sink, o),
       'subtitle' =>
         await _subtitle(repository, task, unit, shot, text, auto, sink, o),
       _ => () {
           sink.writeln('认不出「$what」。'
-              '可用：add / remove / move / tags / audio / subtitle');
+              '可用：add / remove / move / tags / audio / '
+              'source-audio / subtitle');
           return exitBadUsage;
         }(),
     };
@@ -108,6 +112,7 @@ String _stageWord(String what) => switch (what) {
       'move' => '正在调整台词语义单元的顺序',
       'tags' => '正在给台词语义单元填标签',
       'audio' => '正在设置替换分镜的声音',
+      'source-audio' => '正在设置原片这一镜的声音',
       'subtitle' => '正在改这一镜的字幕',
       _ => '正在改台词语义单元',
     };
@@ -120,6 +125,9 @@ const String _usage = '用法：\n'
     '  ishkafel unit audio <任务 id> [--unit N --shot M] \\\n'
     '      --audio none|vocals|background|original|follow \\\n'
     '      [--volume 0.25]                                 替换分镜放哪一路声音\n'
+    '  ishkafel unit source-audio <任务 id> [--unit N --shot M] \\\n'
+    '      --audio none|vocals|background|original|follow|auto \\\n'
+    '      [--volume 1.0]                                  原片这一镜放哪一路声音\n'
     '  ishkafel unit subtitle <任务 id> --unit N --shot M \\\n'
     '      --text "第一句|第二句" | --auto                   改这一镜要烧的字幕';
 
@@ -325,6 +333,95 @@ Future<int> _audio(
                 // 正是 null
                 shots[j]
                     .withMaterialAudioOverride(mode: mode, volume: volume),
+          ]),
+    ],
+    updatedAt: DateTime.now(),
+  );
+  await repository.save(next);
+  emitJson(taskToJson(next), out: out);
+  return 0;
+}
+
+/// 「原片这一镜的声音」：不给 --unit/--shot 就是设**全片打底**，
+/// 给了就是设**那一镜的覆盖**。
+///
+/// 档位和替换分镜那条是同一套（none / vocals / background / original），
+/// 外加两个状态词：全片这一层的 `auto`（还没选过，走老行为——原混音，
+/// 被配乐盖住时换纯人声），镜头那一层的 `follow`（跟随全片）。
+///
+/// **只对换过素材的镜头有效**：没换素材的镜头照旧走自动那条路，
+/// 这里设了也不起作用（和界面同一条规则）。
+Future<int> _sourceAudio(
+  FileTaskRepository repository,
+  RenewTask task,
+  int? unit,
+  int? shot,
+  String? audio,
+  double? volume,
+  StringSink sink,
+  StringSink out,
+) async {
+  final names = MaterialAudioMode.values.map((m) => m.name).join(' / ');
+  if (audio == null) {
+    sink.writeln('要给 --audio（$names / follow / auto）');
+    return exitBadUsage;
+  }
+  final mode = MaterialAudioMode.byName(audio);
+  if (mode == null && audio != 'follow' && audio != 'auto') {
+    sink.writeln('认不出「$audio」。--audio 要是：$names / follow / auto');
+    return exitBadUsage;
+  }
+  if (volume != null && (volume < 0 || volume > 1)) {
+    sink.writeln('--volume 要在 0~1 之间');
+    return exitBadUsage;
+  }
+
+  // 没指定镜头 = 设全片打底
+  if (unit == null && shot == null) {
+    if (audio == 'follow') {
+      sink.writeln('全片这一层没有「跟随」可跟——要回到默认请用 auto');
+      return exitBadUsage;
+    }
+    final next = task.copyWith(
+      sourceAudio: SourceAudioSetting(
+          mode: audio == 'auto' ? null : mode,
+          volume: volume ?? task.sourceAudio.volume),
+      updatedAt: DateTime.now(),
+    );
+    await repository.save(next);
+    emitJson(taskToJson(next), out: out);
+    return 0;
+  }
+
+  final units = task.units ?? const [];
+  if (unit == null || unit < 0 || unit >= units.length) {
+    sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
+    return exitBadUsage;
+  }
+  final shots = units[unit].shots;
+  if (shot == null || shot < 0 || shot >= shots.length) {
+    sink.writeln('要给 --shot <下标>（0 起，U${unit + 1} 有 ${shots.length} 个镜头）');
+    return exitBadUsage;
+  }
+  if (audio == 'auto') {
+    sink.writeln('镜头这一层没有「自动」——auto 是全片那一层的状态。'
+        '要回到跟随全片请用 follow');
+    return exitBadUsage;
+  }
+  final next = task.copyWith(
+    units: [
+      for (var i = 0; i < units.length; i++)
+        if (i != unit)
+          units[i]
+        else
+          units[i].copyWith(shots: [
+            for (var j = 0; j < shots.length; j++)
+              if (j != shot)
+                shots[j]
+              else
+                // 走 withSourceAudioOverride：copyWith 的 `??` 传 null 等于
+                // 「不改」，而 follow（跟随全片）正是 null
+                shots[j].withSourceAudioOverride(mode: mode, volume: volume),
           ]),
     ],
     updatedAt: DateTime.now(),

@@ -13,6 +13,7 @@ import '../../app/theme/app_colors.dart';
 import '../../core/analysis/audio_extractor.dart';
 import '../../core/analysis/tag_merge.dart';
 import '../../core/audio/material_audio.dart';
+import '../../core/audio/source_audio.dart';
 import '../director/tag_picker.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../../core/analysis/handpicked_tags.dart';
@@ -43,6 +44,7 @@ import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/playback/gap_clip.dart';
+import '../../core/playback/silent_clip.dart';
 import '../../core/playback/media_kit_playback.dart';
 import '../../core/playback/noop_playback_controller.dart';
 import '../../core/playback/playback_controller.dart';
@@ -623,6 +625,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         bgmMedia: _bgmMediaCache,
         speedFitter: _speedFitter = _buildSpeedFitter(),
         gapClip: _buildGapClip(),
+        silentClip: _buildSilentClip(),
       )
         ..addListener(_onTracksChanged)
         ..onNeedsRebuild = _syncPreviewAudio;
@@ -641,6 +644,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (dataDir == null) return null;
     return GapClip(RenderedCache(
       dir: Directory(p.join(dataDir.path, 'gap_clip', widget.task.id)),
+      run: const ResolvingProcessRunner().call,
+    ));
+  }
+
+  /// 给「原片这一镜的声音 = 不播放」的那几镜垫静音的渲染器。
+  /// 没有数据目录（测试环境）就不垫，那时预览退回原声
+  SilentClip? _buildSilentClip() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return SilentClip(RenderedCache(
+      dir: Directory(p.join(dataDir.path, 'silent_clip', widget.task.id)),
       run: const ResolvingProcessRunner().call,
     ));
   }
@@ -933,61 +947,64 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _scheduleAutosave();
   }
 
-  /// 全片打底：替换分镜放哪一路声音。单个镜头可以覆盖它（见镜头属性栏）
+  /// 全片打底：**两条轨各放哪一路声音**。单个镜头可以覆盖它（见镜头属性栏）。
+  ///
+  /// 一个对话框管两条：成片的声音本来就是两层，分成两个按钮的话人得开两次、
+  /// 还看不出它们是一组的（用户 2026-09-10 要的正是「排列组合由我自己选」）
   Future<void> _editMaterialAudio() async {
     final current = _task.materialAudio;
     var mode = current.mode;
     var volume = current.volume;
+    final currentSource = _task.sourceAudio;
+    var sourceMode = currentSource.mode;
+    var sourceVolume = currentSource.volume;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocal) => AlertDialog(
-          title: const Text('替换分镜的声音（全片）'),
+          title: const Text('这一镜的声音（全片）'),
           content: SizedBox(
-            width: 420,
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              const Text(
-                '视觉镜头替换换的是画面，那一段的口播照旧来自原片。'
-                '素材自己的声音可以作为额外一层叠回来——'
-                '口播、这一路声音、配乐同时响。',
-                style: TextStyle(fontSize: AppFontSize.caption, height: 1.6),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              RadioGroup<MaterialAudioMode>(
-                groupValue: mode,
-                onChanged: (v) => setLocal(() => mode = v ?? mode),
-                child: Column(mainAxisSize: MainAxisSize.min, children: [
-                  for (final m in MaterialAudioMode.values)
-                    RadioListTile<MaterialAudioMode>(
-                      value: m,
-                      title: Text(m.label),
-                      subtitle: Text(m.hint,
-                          style:
-                              const TextStyle(fontSize: AppFontSize.caption)),
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                    ),
-                ]),
-              ),
-              if (mode.audible)
-                Row(children: [
-                  Text('音量 ${(volume * 100).round()}%',
-                      style: const TextStyle(fontSize: AppFontSize.caption)),
-                  Expanded(
-                    child: Slider(
-                      value: volume,
-                      onChanged: (v) => setLocal(() => volume = v),
-                    ),
-                  ),
-                ]),
-              if (mode.needsSeparation)
-                const Text('人声和背景声要先把素材分成两路，'
-                    '每条素材十几秒，选中后会当场开始',
-                    style: TextStyle(
-                        fontSize: AppFontSize.caption,
-                        height: 1.5,
-                        color: AppColors.textTertiary)),
-            ]),
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Text(
+                  '被替换掉的那一镜，声音有两层：原片这一段自己的，'
+                  '和顶上来那条素材自己的。两层各选各的，最后混在一起。',
+                  style: TextStyle(fontSize: AppFontSize.caption, height: 1.6),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _audioSection(
+                  title: '原片这一镜的声音',
+                  keyPrefix: 'task-source-audio',
+                  hintOf: (m) => m.sourceHint,
+                  // 没选过 = 自动：原混音照播，被配乐盖住时换成纯人声。
+                  // 直接写死「原声」的话，人什么都没动、铺了配乐的段落反而变差
+                  selected: sourceMode,
+                  onSelected: (m) => setLocal(() => sourceMode = m),
+                  volume: sourceVolume,
+                  onVolume: (v) => setLocal(() => sourceVolume = v),
+                  autoNote: '自动：原片这一段原样播；这一格铺了配乐就换成纯人声',
+                  onAuto: () => setLocal(() => sourceMode = null),
+                ),
+                const Divider(height: AppSpacing.xl),
+                _audioSection(
+                  title: '替换分镜的声音',
+                  keyPrefix: 'task-material-audio',
+                  hintOf: (m) => m.hint,
+                  selected: mode,
+                  onSelected: (m) => setLocal(() => mode = m),
+                  volume: volume,
+                  onVolume: (v) => setLocal(() => volume = v),
+                ),
+                if (mode.needsSeparation)
+                  const Text('人声和背景声要先把素材分成两路，'
+                      '每条素材十几秒，选中后会当场开始',
+                      style: TextStyle(
+                          fontSize: AppFontSize.caption,
+                          height: 1.5,
+                          color: AppColors.textTertiary)),
+              ]),
+            ),
           ),
           actions: [
             TextButton(
@@ -1002,9 +1019,75 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     if (ok != true || !mounted) return;
     setState(() => _task = _task.copyWith(
-        materialAudio: MaterialAudioSetting(mode: mode, volume: volume)));
+          materialAudio: MaterialAudioSetting(mode: mode, volume: volume),
+          sourceAudio:
+              SourceAudioSetting(mode: sourceMode, volume: sourceVolume),
+        ));
+    // 改了全片打底，预览要跟着换源
+    _syncPreviewAudio();
     await _tasks?.saveMaterialAudio(_task);
   }
+
+  /// 对话框里的一栏：四个档位 + 音量。[onAuto] 非空表示这一栏还有
+  /// 「自动」这个态（原片那一栏有，素材那一栏没有——它的默认就是一个档位）
+  Widget _audioSection({
+    required String title,
+    required String keyPrefix,
+    required String Function(MaterialAudioMode) hintOf,
+    required MaterialAudioMode? selected,
+    required ValueChanged<MaterialAudioMode> onSelected,
+    required double volume,
+    required ValueChanged<double> onVolume,
+    String? autoNote,
+    VoidCallback? onAuto,
+  }) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title,
+            style: const TextStyle(
+                fontSize: AppFontSize.body, fontWeight: FontWeight.w600)),
+        const SizedBox(height: AppSpacing.xs),
+        RadioGroup<MaterialAudioMode>(
+          groupValue: selected,
+          onChanged: (v) => onSelected(v ?? MaterialAudioMode.original),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            for (final m in MaterialAudioMode.values)
+              RadioListTile<MaterialAudioMode>(
+                key: Key('$keyPrefix-${m.name}'),
+                value: m,
+                title: Text(m.label),
+                subtitle: Text(hintOf(m),
+                    style: const TextStyle(fontSize: AppFontSize.caption)),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
+          ]),
+        ),
+        if (onAuto != null)
+          Row(children: [
+            Expanded(
+              child: Text(
+                  selected == null ? autoNote ?? '' : '现在按你选的那一档放',
+                  key: Key('$keyPrefix-auto-note'),
+                  style: const TextStyle(
+                      fontSize: AppFontSize.caption,
+                      height: 1.5,
+                      color: AppColors.textTertiary)),
+            ),
+            if (selected != null)
+              TextButton(
+                  key: Key('$keyPrefix-auto'),
+                  onPressed: onAuto,
+                  child: const Text('改回自动')),
+          ]),
+        if (selected?.audible ?? false)
+          Row(children: [
+            Text('音量 ${(volume * 100).round()}%',
+                style: const TextStyle(fontSize: AppFontSize.caption)),
+            Expanded(
+              child: Slider(value: volume, onChanged: onVolume),
+            ),
+          ]),
+      ]);
 
   /// 手改台词语义单元的标签。
   ///
@@ -1216,6 +1299,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
   }
 
+  /// 分离轨在不在盘上。存量任务可能只分过人声、或者产物被清理掉了
+  static bool _hasStem(String? path) =>
+      path != null && File(path).existsSync();
+
   /// 这一镜换上来那条素材的本地路径（还没落地就返回 null）
   String? _shotMaterialPath(int unitIndex, int shotIndex) {
     final plans = _replacements ?? const [];
@@ -1223,6 +1310,35 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final ids = plans[unitIndex].shotCandidateIds[shotIndex];
     if (ids == null || ids.isEmpty) return null;
     return _mediaCache?.localPathOf(ids.first);
+  }
+
+  /// 改这一镜「原片这一镜的声音」。mode 传 null = 清掉覆盖、回到跟随全片
+  void _setShotSourceAudio(int unitIndex, int shotIndex,
+      MaterialAudioMode? mode, double? volume) {
+    final editor = _editor;
+    if (editor == null || !_isEditable || _lock != null) return;
+    final units = editor.units;
+    if (unitIndex >= units.length) return;
+    final shots = units[unitIndex].shots;
+    if (shotIndex >= shots.length) return;
+    editor.replaceUnits([
+      for (var i = 0; i < units.length; i++)
+        if (i != unitIndex)
+          units[i]
+        else
+          units[i].copyWith(shots: [
+            for (var j = 0; j < shots.length; j++)
+              if (j != shotIndex)
+                shots[j]
+              else
+                // 走 withSourceAudioOverride：copyWith 传 null 等于「不改」，
+                // 而「跟随全片」正是 null
+                shots[j].withSourceAudioOverride(mode: mode, volume: volume),
+          ]),
+    ]);
+    _scheduleAutosave();
+    // 预览要跟着换源——不然人改了档位却听不出变化
+    _syncPreviewAudio();
   }
 
   void _setShotMaterialAudio(int unitIndex, int shotIndex,
@@ -2754,6 +2870,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                     _isEditable && _lock == null ? _resetSubtitle : null,
                 onShotMaterialAudioChanged:
                     _isEditable && _lock == null ? _setShotMaterialAudio : null,
+                sourceAudioDefault: _task.sourceAudio,
+                onShotSourceAudioChanged:
+                    _isEditable && _lock == null ? _setShotSourceAudio : null,
+                unitVoiceSwapped: (i) {
+                  final units = editor.units;
+                  return i < units.length &&
+                      _task.voices.assignedUnits.contains(units[i].uid);
+                },
+                hasVocals: _hasStem(_task.vocalsPath),
+                hasBackground: _hasStem(_task.backgroundPath),
                 // 标签手填：空白任务的分子全都手加，有原片的任务里只有手加的
                 // 那些。手加的单元没有台词，模型没东西可以据以打标，而标签是
                 // 搜素材的检索键——不给它手填就等于让它永远搜不出东西

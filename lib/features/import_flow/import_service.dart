@@ -7,6 +7,7 @@ import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/log/app_log.dart';
+import '../../core/audio/material_audio.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/models/tag_group_ref.dart';
@@ -143,6 +144,9 @@ class ImportService {
       status: RenewTaskStatus.analyzing,
       createdAt: now,
       updatedAt: now,
+      // 新任务的「替换分镜的声音」默认放原声。存量任务不动——
+      // 那条默认写在 [RenewTask.materialAudio] 的缺省值上
+      materialAudio: newTaskMaterialAudio,
       unitTagGroups: unitTagGroups,
       shotTagGroups: shotTagGroups,
       unitTagPrompt: unitTagPrompt,

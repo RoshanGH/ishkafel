@@ -75,6 +75,9 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     'analysisError': task.analysisError,
     // 替换分镜放哪一路声音的**全片打底**（镜头可以各自覆盖，见 shots）
     'materialAudio': task.materialAudio.toJson(),
+    // 「原片这一镜的声音」的全片打底。**存了就要报**：Agent 查到的空
+    // 看起来正好像「没问题」
+    'sourceAudio': task.sourceAudio.toJson(),
     // **成片位置**：界面上显示的是这一套，Agent 也得拿同一套——它据此判断
     // 「这一镜够不够铺满这句话」「前后连不连得上」，基准错了判断就跟着错。
     //
@@ -204,6 +207,10 @@ Map<String, dynamic> _unitToJson(
               'materialAudioMode': unit.shots[i].materialAudioMode!.name,
             if (unit.shots[i].materialAudioVolume != null)
               'materialAudioVolume': unit.shots[i].materialAudioVolume,
+            if (unit.shots[i].sourceAudioMode != null)
+              'sourceAudioMode': unit.shots[i].sourceAudioMode!.name,
+            if (unit.shots[i].sourceAudioVolume != null)
+              'sourceAudioVolume': unit.shots[i].sourceAudioVolume,
           },
       ],
     };

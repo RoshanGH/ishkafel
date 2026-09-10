@@ -1,5 +1,7 @@
 import '../audio/audio_track_builder.dart';
 import '../audio/bgm_plan.dart';
+import '../audio/material_audio.dart';
+import '../audio/source_audio.dart';
 import '../ffmpeg/proxy_spec.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
@@ -64,10 +66,23 @@ class TrackPlanBuilder {
     /// 就是两首曲子一起响。**预览与导出走同一条规则**：听到的就是要交付的。
     /// 取不到就用素材原声，那时配乐会叠，由界面如实提示
     Map<String, String> materialVocals = const {},
+
+    /// 原片分离出来的纯背景音轨（与 [vocalsPath] 是同一次分离的两条产物）。
+    /// 「原片这一镜的声音」选「背景声」时用它
+    String? backgroundPath,
+
+    /// 「原片这一镜的声音」的全片打底。默认「自动」= 老行为
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
+
+    /// 选了「不播放」的那几镜要垫的静音（`单元下标/镜头下标` → 文件）。
+    /// **EDL 表达不了音量为 0，也不能留洞**——留洞后面全体提前
+    Map<String, String> silentClips = const {},
   }) {
 
     final video = <TrackSegment>[];
     final voice = <TrackSegment>[];
+    /// 「原片这一镜的声音」要的分离轨这一刻不在的那几镜
+    final stemMissing = <String>[];
     final skipped = <int>[];
     /// 放不了的那几段在成片上的区间——播放头走到这儿要停下来点名
     final unplayable = <UnplayableSpan>[];
@@ -191,16 +206,48 @@ class TrackPlanBuilder {
             atMs: start, durationMs: at - start, source: generated));
       } else {
         var cursor = start;
-        for (final (shotStart, shotEnd, _) in shots) {
+        for (final (shotStart, shotEnd, shotIndex) in shots) {
           final slotMs = shotEnd - shotStart;
-          // 被配乐盖住的段落必须用纯人声，否则新配乐与原背景两首曲子一起响
-          final clean = vocalsPath != null &&
-              coveredUnits.contains(u);
+          // 人**明确选过**这一镜放哪一路原片声音吗（只有换过素材的镜头才可能）。
+          // 与导出同一条规则：听到的就是要交付的
+          final picked = shotIndex < 0
+              ? null
+              : resolveSourceAudio(
+                  replaced: _hasCandidates(replacement, shotIndex),
+                  taskDefault: sourceAudio,
+                  shotMode: unit.shots[shotIndex].sourceAudioMode,
+                  shotVolume: unit.shots[shotIndex].sourceAudioVolume,
+                );
+          // 被配乐盖住的段落必须用纯人声，否则新配乐与原背景两首曲子一起响。
+          // **人选过就以人选的为准**——冲突只提示，不替他改
+          final clean =
+              picked == null && vocalsPath != null && coveredUnits.contains(u);
+          final silent = shotIndex < 0
+              ? null
+              : silentClips[shotKey(unit.index, shotIndex)];
+          final stem = picked?.mode == MaterialAudioMode.vocals
+              ? vocalsPath
+              : picked?.mode == MaterialAudioMode.background
+                  ? backgroundPath
+                  : '';
+          if (stem == null) {
+            // 分离轨不在：预览先放原混音，但要说出来
+            stemMissing.add('U${unit.index + 1}·S${shotIndex + 1}');
+          }
+          final (source, inMs) = _voiceSourceFor(
+            picked: picked,
+            clean: clean,
+            audioSource: audioSource,
+            vocalsPath: vocalsPath,
+            backgroundPath: backgroundPath,
+            silent: silent,
+            shotStart: shotStart,
+          );
           voice.add(TrackSegment(
             atMs: cursor,
             durationMs: slotMs,
-            source: clean ? vocalsPath : audioSource,
-            inMs: shotStart,
+            source: source,
+            inMs: inMs,
           ));
           cursor += slotMs;
         }
@@ -217,11 +264,47 @@ class TrackPlanBuilder {
       bgm: List.unmodifiable(
           _bgmTrack(bgm, unitRanges, bgmPaths, missing)),
       bgmMissing: List.unmodifiable(missing),
+      sourceStemMissing: List.unmodifiable(stemMissing),
       skippedEmptyUnits: List.unmodifiable(skipped),
       unitRanges: Map.unmodifiable(unitRanges),
       unplayable: List.unmodifiable(unplayable),
       composedTotalMs: at,
     );
+  }
+
+  /// 这一镜挑过候选没有。挑过 = 导出时它一定会被替换掉，
+  /// 「原片这一镜的声音」才谈得上
+  static bool _hasCandidates(UnitReplacement replacement, int shotIndex) =>
+      replacement.mode == ReplacementMode.perShot &&
+      (replacement.shotCandidateIds[shotIndex]?.isNotEmpty ?? false);
+
+  /// 口播轨这一段读哪个文件、从文件的第几毫秒起。
+  ///
+  /// 静音那一档读的是**单独造的一段静音**（从 0 起），别的档读原片系的文件
+  /// （从这一镜在原片上的位置起）。垫不出静音时退回原声——这是预览，
+  /// 位置对不上比多一层声音更糟；导出那条路不走这里，它一定是真静音
+  static (String, int) _voiceSourceFor({
+    required SourceAudioSetting? picked,
+    required bool clean,
+    required String audioSource,
+    required String? vocalsPath,
+    required String? backgroundPath,
+    required String? silent,
+    required int shotStart,
+  }) {
+    if (picked == null) {
+      return (clean ? vocalsPath! : audioSource, shotStart);
+    }
+    switch (picked.mode!) {
+      case MaterialAudioMode.none:
+        return silent != null ? (silent, 0) : (audioSource, shotStart);
+      case MaterialAudioMode.vocals:
+        return (vocalsPath ?? audioSource, shotStart);
+      case MaterialAudioMode.background:
+        return (backgroundPath ?? audioSource, shotStart);
+      case MaterialAudioMode.original:
+        return (audioSource, shotStart);
+    }
   }
 
   /// 镜头替换的变速切片按这个 key 索引

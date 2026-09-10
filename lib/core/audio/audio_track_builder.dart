@@ -9,6 +9,7 @@ import '../models/semantic_unit.dart';
 import 'bgm_cache.dart';
 import 'bgm_plan.dart';
 import 'material_audio.dart';
+import 'source_audio.dart';
 import 'vocal_separator.dart';
 
 /// 成片声音的合成器：口播 + 配音 + 配乐，合成一条完整音轨。
@@ -78,6 +79,41 @@ class AudioTrackBuilder {
     this.resolveBgm,
   });
 
+  /// 「原片这一镜的声音」选了某一档，该读哪个文件。
+  ///
+  /// **分不出来就直接失败，绝不悄悄退回原混音**：人是特意选了「人声」的
+  /// （要那句话、不要现场音）。悄悄换一路声音进成片，他得把片子导出来
+  /// 听一遍才可能发现，而那时已经交付出去了。
+  static String? _sourceTrackFor({
+    required MaterialAudioMode mode,
+    required String? sourcePath,
+    required String? vocalsPath,
+    required String? backgroundPath,
+    required String where,
+  }) {
+    switch (mode) {
+      case MaterialAudioMode.none:
+      case MaterialAudioMode.original:
+        return sourcePath;
+      case MaterialAudioMode.vocals:
+        if (vocalsPath != null && File(vocalsPath).existsSync()) {
+          return vocalsPath;
+        }
+        throw StateError('$where 的原片声音选了「人声」，但这条任务还没有'
+            '分离好的人声轨。在工作台上点「重新分离」，'
+            '或者跑 ishkafel analyze <任务> 重跑一遍分析；'
+            '也可以把它改回「原声」');
+      case MaterialAudioMode.background:
+        if (backgroundPath != null && File(backgroundPath).existsSync()) {
+          return backgroundPath;
+        }
+        throw StateError('$where 的原片声音选了「背景声」，但这条任务还没有'
+            '分离好的背景音轨。在工作台上点「重新分离」，'
+            '或者跑 ishkafel analyze <任务> 重跑一遍分析；'
+            '也可以把它改回「原声」');
+    }
+  }
+
   /// 每一件产物按**内容指纹**命名并复用。没有它的时候，每进一次工作台就要
   /// 把 51 段人声、配乐、拼接、混音整套重跑一遍（真机实测 56 次 ffmpeg），
   /// 而方案一个字都没改
@@ -112,6 +148,19 @@ class AudioTrackBuilder {
     /// 变速倍率、截取起点和它在成片里的位置——那些参数必须和画面那一段
     /// 用的完全一致，否则声音和画面对不上
     List<ShotMaterialAudio> shotAudio = const [],
+
+    /// 分离出来的纯背景音轨（和 [vocalsPath] 是同一次分离的两条产物）。
+    /// 「原片这一镜的声音」选「背景声」时用它；没有就直接失败，
+    /// 不许拿原混音顶上
+    String? backgroundPath,
+
+    /// 这一条成片里，哪几镜换过素材。「原片这一镜的声音」只对它们生效
+    /// （用户原话：「如果没替换分镜，那连原片这一分镜的声音该怎么操作
+    /// 都不应该有」）
+    Set<(int unitIndex, int shotIndex)> replacedShots = const {},
+
+    /// 「原片这一镜的声音」的全片打底。默认「自动」= 老行为
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
   }) async {
     workDir.createSync(recursive: true);
     // 整体替换会改变单元时长，后面所有单元跟着挪——配乐的位置必须按
@@ -131,9 +180,12 @@ class AudioTrackBuilder {
         listIndex: i,
         sourcePath: sourcePath,
         vocalsPath: vocalsPath,
+        backgroundPath: backgroundPath,
         covered: covered,
         voiceAudio: voiceAudio,
         wholeAudio: wholeAudio[unit.index],
+        replacedShots: replacedShots,
+        sourceAudio: sourceAudio,
       ));
     }
 
@@ -275,11 +327,16 @@ class AudioTrackBuilder {
     required int listIndex,
     required String? sourcePath,
     required String? vocalsPath,
+    required String? backgroundPath,
     required Set<int> covered,
     required Map<String, String> voiceAudio,
 
     /// 这个单元被整体替换了：口播来自这条候选素材，整段取用不裁不补
     String? wholeAudio,
+
+    /// 这条成片里换过素材的那几镜，和「原片这一镜的声音」的全片打底
+    Set<(int unitIndex, int shotIndex)> replacedShots = const {},
+    SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
   }) async {
     // 整体替换优先于换音色——同一个单元两者都设时导出前置检查已经拦下了
     if (wholeAudio != null && File(wholeAudio).existsSync()) {
@@ -342,22 +399,60 @@ class AudioTrackBuilder {
         : [for (final s in unit.shots) (s.startMs, s.endMs)];
     for (var i = 0; i < ranges.length; i++) {
       final (start, end) = ranges[i];
+      final shotIndex = unit.shots.isEmpty ? -1 : i;
+      // 人**明确选过**这一镜放哪一路原片声音吗（只有换过素材的镜头才可能）
+      final picked = resolveSourceAudio(
+        replaced: replacedShots.contains((unit.index, shotIndex)),
+        taskDefault: sourceAudio,
+        shotMode: shotIndex < 0 ? null : unit.shots[shotIndex].sourceAudioMode,
+        shotVolume:
+            shotIndex < 0 ? null : unit.shots[shotIndex].sourceAudioVolume,
+      );
+
+      // 明确要求这一镜不放原片的声音：**垫等长静音**，不能少拼一段——
+      // 主轨是首尾相接拼起来的，少一段后面全体提前
+      if (picked != null && !picked.mode!.audible) {
+        pieces.add(await _cache.render(
+          key: 'silent|${end - start}|$exportFps',
+          prefix: 'mix_u${unit.index}_${i}_mute',
+          extension: 'wav',
+          args: (dest) => ExportCommands.silentAudio(
+              durationMs: end - start, out: dest, atFps: exportFps),
+          what: 'U${unit.index + 1} 的静音段',
+        ));
+        continue;
+      }
+
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
-      // 配乐按整格单元铺，所以这一格里每一镜的答案都一样
-      final needsClean = covered.contains(listIndex) && vocalsPath != null;
+      // 配乐按整格单元铺，所以这一格里每一镜的答案都一样。
+      // **人选过就以人选的为准**——冲突只提示，不替他改（那是静默降级）
+      final needsClean =
+          picked == null && covered.contains(listIndex) && vocalsPath != null;
       // **手动加的单元不许去原片上剪**：它的 startMs~endMs 只是时间线上的
       // 占位，原片里没有这一段。不挡住的话会剪出一段别的声音接进成片，
       // 而且哪儿都不报错——人只有听出来才知道
-      final source =
-          !unit.hasSource ? null : (needsClean ? vocalsPath : sourcePath);
+      final source = !unit.hasSource
+          ? null
+          : picked != null
+              ? _sourceTrackFor(
+                  mode: picked.mode!,
+                  sourcePath: sourcePath,
+                  vocalsPath: vocalsPath,
+                  backgroundPath: backgroundPath,
+                  where: 'U${unit.index + 1}'
+                      '${shotIndex < 0 ? '' : ' 的 S${shotIndex + 1}'}',
+                )
+              : (needsClean ? vocalsPath : sourcePath);
       if (source == null) {
         // 空白任务里每个单元都是整体替换，走不到这儿。走到了就是有一段
         // 既没有素材也没有原片——不许拿静音顶上，那会让成片少一段声音
         throw StateError('U${unit.index + 1} 这一段既没有素材也没有原片，'
             '合不出声音。请给它挑一条素材，或者删掉它');
       }
+      final volume = picked?.volume ?? 1.0;
       pieces.add(await _cache.render(
-        key: 'trim|$source|$start|$end|$exportFps',
+        // 音量进指纹：改了音量要重渲，不能命中上一次那份
+        key: 'trim|$source|$start|$end|$exportFps|$volume',
         prefix: 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}',
         extension: 'wav',
         args: (dest) => ExportCommands.trimOriginalAudio(
@@ -366,6 +461,7 @@ class AudioTrackBuilder {
           endMs: end,
           out: dest,
           atFps: exportFps,
+          volume: volume,
         ),
         what: 'U${unit.index + 1} 的声音',
       ));
