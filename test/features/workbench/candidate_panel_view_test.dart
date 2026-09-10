@@ -361,13 +361,29 @@ void main() {
       await _pump(tester,
           project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
 
-      expect(find.text('限定项目组 · 滴露植源喷雾'), findsOneWidget);
+      // 标签本身要短到放得下（原来那句「限定项目组 · 滴露植源喷雾」
+      // 在这一行里会被截成「…滴露植...」），完整解释在 tooltip 里
+      expect(find.text('项目组 滴露植源喷雾'), findsOneWidget);
+      expect(
+          tester
+              .widget<Tooltip>(find.ancestor(
+                  of: find.text('项目组 滴露植源喷雾'),
+                  matching: find.byType(Tooltip)))
+              .message,
+          contains('滴露植源喷雾'));
     });
 
-    testWidgets('没设项目组时明确说搜的是全部项目', (tester) async {
+    testWidgets('没设项目组时明确说，并说清后果', (tester) async {
       await _pump(tester);
 
-      expect(find.text('未设项目组 · 搜的是我的全部项目'), findsOneWidget);
+      expect(find.text('未限定项目组'), findsOneWidget);
+      expect(
+          tester
+              .widget<Tooltip>(find.ancestor(
+                  of: find.text('未限定项目组'), matching: find.byType(Tooltip)))
+              .message,
+          contains('全部项目'),
+          reason: '光说「未限定」不够，要说清那会搜出什么');
     });
 
     testWidgets('换到镜头替换照样在——两层用的是同一个项目组', (tester) async {
@@ -375,7 +391,7 @@ void main() {
           project: const ProjectRef(id: 104, name: '滴露植源喷雾'));
       await _perShot(tester);
 
-      expect(find.text('限定项目组 · 滴露植源喷雾'), findsOneWidget);
+      expect(find.text('项目组 滴露植源喷雾'), findsOneWidget);
     });
   });
 

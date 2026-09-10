@@ -116,6 +116,7 @@ Future<void> _open(
 }
 
 void main() {
+  _elapsedShown();
   _subtitleGapTests();
   _brandConflictTests();
   _burnedTextTests();
@@ -583,5 +584,26 @@ void _subtitleGapTests() {
       UnitReplacement.keepOriginal(),
     ]);
     expect(find.byKey(const Key('export-subtitle-gap')), findsNothing);
+  });
+}
+
+/// **合成一条要二十几秒，进度不能只在「条」这个粒度跳。**
+///
+/// 2026-09-10 真机走查：导 2 条 75 秒的片子用了 45 秒，而屏幕上
+/// 「0/2 · 第 1 条」二十几秒纹丝不动——人分不清是在跑还是卡死了。
+/// ffmpeg 的逐帧进度要改子进程执行器才拿得到，而「这条跑了多久 /
+/// 上一条跑了多久」零成本就能说。
+void _elapsedShown() {
+  testWidgets('导出中显示这一条已经跑了多久', (tester) async {
+    final src = File('lib/features/export/export_dialog.dart').readAsStringSync();
+
+    // 这条用例守的是「界面把用时说出来」这件事本身：真跑一次导出要
+    // 拉起 ffmpeg，不适合放进单测
+    expect(src, contains('已用 \$secs 秒'),
+        reason: '进度只报「第几条」，人看不出它在动');
+    expect(src, contains('上一条用了'),
+        reason: '第二条起该给得出预期——上一条花了多久');
+    expect(src, contains('Timer.periodic'),
+        reason: '不定时重绘的话，「已用 N 秒」会一直停在 0 秒');
   });
 }

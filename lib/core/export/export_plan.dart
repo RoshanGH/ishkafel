@@ -201,6 +201,79 @@ class ExportPlanner {
     return List.unmodifiable(out);
   }
 
+  /// 哪几条素材被挑在了**多个位置**上——一条成片都排不出来时的元凶。
+  ///
+  /// 同一条素材在一条成片里出现两次，[_hasDuplicateMaterial] 会把那种组合
+  /// 丢掉；两个位置都只挑了同一条时，**每一种**排法都会被丢掉，结果就是
+  /// 「共 0 条成片」，而界面上一个字都不说（2026-09-09 设计走查真机：
+  /// U1·S7 和 U3·S1 都用了素材 116719，导出对话框显示 0 条、导出按钮灰着，
+  /// 没有任何原因）。
+  ///
+  /// 返回 素材 id → 它占了哪几个位置（`U1·S7` 这种人话标签）。
+  static Map<int, List<String>> materialsUsedTwice(
+      List<UnitReplacement> replacements) {
+    final places = <int, List<String>>{};
+    void note(int id, String label) => (places[id] ??= []).add(label);
+
+    for (var u = 0; u < replacements.length; u++) {
+      final replacement = replacements[u];
+      switch (replacement.mode) {
+        case ReplacementMode.keepOriginal:
+          break;
+        case ReplacementMode.whole:
+          for (final id in replacement.wholeCandidateIds) {
+            note(id, 'U${u + 1}');
+          }
+        case ReplacementMode.perShot:
+          for (final entry in replacement.shotCandidateIds.entries) {
+            for (final id in entry.value) {
+              note(id, 'U${u + 1}·S${entry.key + 1}');
+            }
+          }
+      }
+    }
+    places.removeWhere((_, where) => where.length < 2);
+    return places;
+  }
+
+  /// **每一种排法都躲不开的撞车**：某条素材是至少两个位置的**唯一**候选。
+  ///
+  /// 那种情况下笛卡尔积里每一条都含这条素材两次，会被
+  /// [_hasDuplicateMaterial] 全部丢掉，结果是一条都排不出来。
+  /// 界面据此在**入口**就拦下来（见 `exportBlockedReason`），
+  /// 而不是让人点进导出对话框、看着一个「共 0 条」发愣
+  /// （2026-09-10 真机走查：底部状态栏说 2 条、对话框说 0 条、
+  /// 按钮照样可以点，三个地方各说各的）。
+  ///
+  /// 位置上还有别的候选时不算——那就换一个，躲得开。
+  /// 更绕的必撞（三个位置共用两条素材那种鸽笼）不在这儿判，
+  /// 留给对话框里的 [materialsUsedTwice] 兜底。
+  static Map<int, List<String>> unavoidableClashes(
+      List<UnitReplacement> replacements) {
+    final soleOwner = <int, List<String>>{};
+    void note(int id, String label) => (soleOwner[id] ??= []).add(label);
+
+    for (var u = 0; u < replacements.length; u++) {
+      final replacement = replacements[u];
+      switch (replacement.mode) {
+        case ReplacementMode.keepOriginal:
+          break;
+        case ReplacementMode.whole:
+          if (replacement.wholeCandidateIds.length == 1) {
+            note(replacement.wholeCandidateIds.single, 'U${u + 1}');
+          }
+        case ReplacementMode.perShot:
+          for (final entry in replacement.shotCandidateIds.entries) {
+            if (entry.value.length == 1) {
+              note(entry.value.single, 'U${u + 1}·S${entry.key + 1}');
+            }
+          }
+      }
+    }
+    soleOwner.removeWhere((_, where) => where.length < 2);
+    return soleOwner;
+  }
+
   /// 一条成片里同一条素材出现了两次
   static bool _hasDuplicateMaterial(List<ExportSegment> segments) {
     final seen = <int>{};

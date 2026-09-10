@@ -782,18 +782,55 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
     }
   }
 
+  /// 分析失败要摆成对话框，不能用一闪而过的 SnackBar。
+  ///
+  /// 2026-09-09 设计走查：失败原因里常带着 ffmpeg / 模型接口的原文，人得
+  /// 把它贴给我们才说得清出了什么事。SnackBar 的文字**选不中**、几秒后
+  /// 自己消失——等于让人对着屏幕手抄一段英文报错。
   void _showAnalysisFailedSnackBar(
       BuildContext context, WidgetRef ref, RenewTask task) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('分析失败：${task.analysisError}'),
-        action: SnackBarAction(
-          label: '重试',
-          // 不能丢弃 Future：异常无人接收，用户也看不到任何反馈
-          onPressed: () => unawaited(_retryAnalysis(context, ref, task)),
+    unawaited(showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppColors.surfaceRaised,
+        title: const Text('分析失败'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('「${task.name}」没能分析完。',
+                  style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: AppFontSize.body)),
+              const SizedBox(height: AppSpacing.sm),
+              // 可以选中复制——反馈问题时贴的就是这一段
+              SelectableText('${task.analysisError}',
+                  key: const Key('analysis-failure-detail'),
+                  style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: AppFontSize.caption,
+                      height: 1.5)),
+            ],
+          ),
         ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('知道了')),
+          FilledButton(
+            key: const Key('analysis-failure-retry'),
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              // 不能丢弃 Future：异常无人接收，用户也看不到任何反馈
+              unawaited(_retryAnalysis(context, ref, task));
+            },
+            child: const Text('重新分析'),
+          ),
+        ],
       ),
-    );
+    ));
   }
 
   /// 触发重试并把结果翻译成用户看得懂的一句话（静默 return 会让用户以为点击无效）
@@ -842,7 +879,7 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
                   horizontal: AppSpacing.sm, vertical: 2),
               decoration: BoxDecoration(
                 color: AppColors.orange.withValues(alpha: 0.18),
-                borderRadius: BorderRadius.circular(4),
+                borderRadius: BorderRadius.circular(AppRadius.xs),
               ),
               child: const Text('开发调试版',
                   style: TextStyle(

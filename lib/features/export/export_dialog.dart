@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -212,7 +213,47 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
 
   /// 这个项目导过哪几次。跑完会把这一次追加进来，用户当场就能看到
   late List<ExportRecord> _exports = List.of(widget.exports);
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
   (int done, int total, String what)? _progress;
+
+  /// 当前这一条是什么时候开始的、上一条花了多久。
+  ///
+  /// 2026-09-10 真机走查：合成一条 75 秒的片子要二十几秒，而进度只在
+  /// 「条」这个粒度跳——屏幕上「0/2 · 第 1 条」二十几秒纹丝不动，
+  /// 人分不清是在跑还是卡死了。ffmpeg 的逐帧进度要改子进程执行器才拿得到，
+  /// 而「这条已经跑了多久 / 上一条跑了多久」零成本就能说，
+  /// 足够让人看出它在动、也大致知道还要等多久。
+  DateTime? _stepStartedAt;
+  Duration? _lastStepTook;
+  int? _lastStepIndex;
+  Timer? _tick;
+
+  /// 把 done 的变化翻译成「上一条用了多久、这一条从什么时候开始」
+  void _markStep(int done) {
+    if (_lastStepIndex == done) return;
+    final now = DateTime.now();
+    if (_lastStepIndex != null && _stepStartedAt != null) {
+      _lastStepTook = now.difference(_stepStartedAt!);
+    }
+    _lastStepIndex = done;
+    _stepStartedAt = now;
+  }
+
+  /// 这一条已经跑了多久（跑完了就不再计时）
+  String? get _elapsedText {
+    final at = _stepStartedAt;
+    if (at == null || !_running) return null;
+    final secs = DateTime.now().difference(at).inSeconds;
+    final tail = _lastStepTook == null
+        ? ''
+        : '（上一条用了 ${_lastStepTook!.inSeconds} 秒）';
+    return '已用 $secs 秒$tail';
+  }
   List<ExportOutcome>? _results;
   String? _failure;
 
@@ -251,6 +292,12 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     }
     setState(() {
       _running = true;
+      _markStep(0);
+      // 秒级重绘，让「已用 N 秒」真的走起来
+      _tick?.cancel();
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted && _running) setState(() {});
+      });
       _failure = null;
       _progress = (0, _selected.length, '准备中');
     });
@@ -273,7 +320,12 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         materialAudio: widget.materialAudio,
         subtitleTrack: widget.subtitleTrack,
         onProgress: (d, t, w) {
-          if (mounted) setState(() => _progress = (d, t, w));
+          if (mounted) {
+            setState(() {
+              _markStep(d);
+              _progress = (d, t, w);
+            });
+          }
         },
       )
           : await runner.exportCombinations(
@@ -291,7 +343,12 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               materialAudio: widget.materialAudio,
               subtitleTrack: widget.subtitleTrack,
               onProgress: (d, t, w) {
-                if (mounted) setState(() => _progress = (d, t, w));
+                if (mounted) {
+            setState(() {
+              _markStep(d);
+              _progress = (d, t, w);
+            });
+          }
               },
             );
       if (!mounted) return;
@@ -308,6 +365,8 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     } catch (e) {
       if (mounted) setState(() => _failure = '导出失败：$e');
     } finally {
+      _tick?.cancel();
+      _tick = null;
       if (mounted) setState(() => _running = false);
     }
   }
@@ -356,7 +415,10 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                 ),
                 if (_failure case final f?) ...[
                   const SizedBox(height: AppSpacing.md),
-                  Text(f,
+                  // **可以选中复制**：导出失败时这段话里带着 ffmpeg 的原文，
+                  // 人要把它贴给我们才说得清出了什么事。不能选的错误信息
+                  // 等于让人对着屏幕手抄（2026-09-09 设计走查）
+                  SelectableText(f,
                       style: const TextStyle(
                           color: AppColors.red, fontSize: AppFontSize.body)),
                 ],
@@ -367,7 +429,11 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                       color: AppColors.accentBlue,
                       backgroundColor: AppColors.surface),
                   const SizedBox(height: AppSpacing.xs),
-                  Text('${p.$1}/${p.$2} · ${p.$3}',
+                  Text(
+                      [
+                        '${p.$1}/${p.$2} · ${p.$3}',
+                        ?_elapsedText,
+                      ].join(' · '),
                       key: const Key('export-progress'),
                       style: const TextStyle(
                           color: AppColors.textSecondary,
@@ -439,10 +505,50 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         '剩 ${_combos.length} 条（$who；有几个位置挑了相同的素材）';
   }
 
+  /// 一条都排不出来时说清为什么。
+  ///
+  /// 「共 0 条成片」+ 一个灰掉的导出按钮，是这个对话框最糟的一种状态：
+  /// 人不知道自己做错了什么，也不知道回去改哪儿（2026-09-09 设计走查真机）。
+  String? get _nothingToExportReason {
+    if (_combos.isNotEmpty) return null;
+    final clashes =
+        ExportPlanner.materialsUsedTwice(widget.replacements);
+    if (clashes.isEmpty) return null;
+    final lines = [
+      for (final entry in clashes.entries)
+        '素材 ${entry.key} 同时用在 ${entry.value.join('、')}',
+    ];
+    return '排不出成片：一条成片里不能出现同一条素材两次，'
+        '而现在每一种排法都会撞上。\n${lines.join('\n')}\n'
+        '在其中一处换一条素材就好了。';
+  }
+
   Widget _summary() {
     final replaced = _combos.where((c) => c.replacedCount > 0).length;
     final seconds =
         (_combos.isEmpty ? 0 : _combos.first.durationMs) / 1000;
+    if (_nothingToExportReason case final reason?) {
+      return Container(
+        key: const Key('export-nothing-reason'),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.orange.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.orange.withValues(alpha: 0.4)),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Icon(Icons.error_outline, color: AppColors.orange, size: 16),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(reason,
+                style: const TextStyle(
+                    color: AppColors.orange,
+                    fontSize: AppFontSize.body,
+                    height: 1.5)),
+          ),
+        ]),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -669,7 +775,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
           InkWell(
             key: Key('export-history-open-${record.at.toIso8601String()}'),
             onTap: () => _revealPath(record.outputDir),
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(AppRadius.xs),
             child: const Padding(
               padding: EdgeInsets.all(3),
               child: Icon(Icons.folder_open,

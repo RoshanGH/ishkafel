@@ -1,4 +1,5 @@
 import '../script/script_doc.dart';
+import '../script/skipped_lines_summary.dart';
 import '../script/shot_coverage.dart';
 
 /// 把方案翻译成「剪映视角」的轨道计划——纯数据，不碰文件、不碰 JSON。
@@ -149,19 +150,19 @@ JianyingPlan buildJianyingPlan(
   final lineStarts = <int, int>{};
   var cursorMs = 0;
 
+  // **先把「缺镜头 / 缺时长」一次说清**，再往下逐镜细看。
+  //
+  // 原来是遇到第一行有问题就抛，于是四行都没挑镜头时只报「第 2 行」——
+  // 人补完第 2 行再点，又说第 3 行，来回试（2026-09-10 真机走查）。
+  // 这一类问题一眼能看全，就该一次报全。
+  if (jianyingBlockingReason(doc) case final blocked?) {
+    throw JianyingPlanException(blocked);
+  }
+
   for (var i = 0; i < doc.lines.length; i++) {
     final line = doc.lines[i];
     // 纯空行（既没台词也没镜头）不占时间，也不值得点名
     if (line.text.trim().isEmpty && line.shots.isEmpty) continue;
-
-    if (line.shots.isEmpty) {
-      throw JianyingPlanException('第 ${i + 1} 行还没挑镜头，先补齐再生成剪映草稿');
-    }
-    for (var j = 0; j < line.shots.length; j++) {
-      if (line.shots[j].allocMs == null) {
-        throw JianyingPlanException('第 ${i + 1} 行第 ${j + 1} 镜还没分时长');
-      }
-    }
     // 铺不满一律阻断——与预览/成片同一把尺（lineShotGaps），不在这儿另立规矩。
     // 绝不能自己算个倍率填上：那是把「数据有问题」偷偷变成「画面被拉慢了」，
     // 用户在剪映里看到的就不再是他的方案
@@ -279,3 +280,34 @@ int _lineEnd(
 }
 
 String _sec(int ms) => (ms / 1000).toStringAsFixed(1);
+
+/// 生成剪映草稿前的整体预检：**一次说清所有缺镜头 / 缺时长的行**。
+///
+/// 返回 null 表示这一关过了（逐镜的细节问题——铺不满、素材没下完——
+/// 在 [buildJianyingPlan] 里继续逐个拦，那些是少数情况）。
+///
+/// 界面也该在点「剪映」之前先问一句，别等人等完素材归集才说不行。
+String? jianyingBlockingReason(ScriptDoc doc) {
+  final problems = <int, String>{};
+  for (var i = 0; i < doc.lines.length; i++) {
+    final line = doc.lines[i];
+    if (line.text.trim().isEmpty && line.shots.isEmpty) continue;
+    if (line.shots.isEmpty) {
+      problems[i] = '还没挑镜头';
+      continue;
+    }
+    if (line.shots.any((s) => s.allocMs == null)) {
+      problems[i] = '有镜头还没分时长';
+    }
+  }
+  if (problems.isEmpty) return null;
+
+  final byReason = <String, List<int>>{};
+  for (final e in problems.entries) {
+    (byReason[e.value] ??= []).add(e.key + 1);
+  }
+  final lines = [
+    for (final e in byReason.entries) '${lineNumberRanges(e.value)}${e.key}',
+  ];
+  return '${lines.join('\n')}\n补齐这些再生成剪映草稿。';
+}

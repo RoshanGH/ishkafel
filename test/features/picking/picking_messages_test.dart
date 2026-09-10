@@ -6,8 +6,9 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/features/picking/picking_messages.dart';
 
 void main() {
+  _statusBarTellsTruth();
   group('组合数状态栏', () {
-    test('把各单元因子摊开显示，用户能看出是哪一层把数撑起来的', () {
+    test('点名是哪几个单元把数撑起来的——没挑的单元不出现', () {
       final plan = ReplacementPlan([
         UnitReplacement.whole([1, 2]),
         UnitReplacement.keepOriginal(),
@@ -16,13 +17,24 @@ void main() {
           1: [3, 4, 5],
         }),
       ]);
-      expect(combinationSummaryText(plan), '当前组合 2 × 1 × 6 = 12 条，全部导出');
+      // U2 保留原片，不该在这一行里占一个「× 1」
+      expect(combinationSummaryText(plan),
+          '当前组合 12 条，全部导出 · U1 2 种 × U3 6 种');
     });
 
-    test('单元很多时不摊开因子（状态栏一行放不下，摊开等于什么都没说清）', () {
+    test('一个都没挑时直说，不摆一串没信息的 1', () {
       final plan = ReplacementPlan(
           List.generate(20, (_) => UnitReplacement.keepOriginal()));
-      expect(combinationSummaryText(plan), '当前组合 1 条，全部导出');
+
+      expect(combinationSummaryText(plan), '还没挑替换素材，现在就原片这 1 条');
+    });
+
+    test('挑过素材的单元太多时就不点名了，一行放不下', () {
+      final plan = ReplacementPlan(
+          List.generate(9, (i) => UnitReplacement.whole([i, i + 100])));
+
+      expect(combinationSummaryText(plan), isNot(contains('U1')));
+      expect(combinationSummaryText(plan), contains('条'));
     });
 
     test('超限时状态栏如实显示条数而不是显示饱和哨兵值', () {
@@ -194,8 +206,8 @@ void main() {
     });
   });
 
-  group('因子小结（右栏底部那一行）', () {
-    test('镜头级：报当前镜头的选中数与整单元的因子算式', () {
+  group('右栏底部那一行小结', () {
+    test('镜头级：说这一段能排出几种，以及是哪几镜凑出来的', () {
       final text = selectionSummaryText(
         unitIndex: 2,
         shotIndex: 1,
@@ -207,13 +219,12 @@ void main() {
         }),
         shotCount: 3,
       );
-      // 算式按镜头顺序排（S1 × S2 × S3），未选的镜头计 1。设计稿示例里写的是
-      // 「2×1×3」而镜头条上是 S1 ×2 / S2 ×3 / S3 原片——设计稿本身把顺序写反了，
-      // 这里以镜头顺序为准，否则用户对不上是哪个镜头贡献了哪个数。
-      expect(text, 'S2 已选 3 / 18 条 · U3 因子 = 2 × 3 × 1 = 6');
+      // 按镜头顺序排，人才对得上是哪一镜贡献了哪个数。没挑的镜头不出现——
+      // 「× 1」不带任何信息
+      expect(text, 'S2 已选 3 / 18 条 · U3 能排出 6 种（S1 挑 2 条 × S2 挑 3 条）');
     });
 
-    test('整体替换：报单元自己的选中数与因子', () {
+    test('整体替换：报单元自己的选中数与种数', () {
       final text = selectionSummaryText(
         unitIndex: 0,
         shotIndex: null,
@@ -222,7 +233,7 @@ void main() {
         replacement: UnitReplacement.whole([1, 2]),
         shotCount: 3,
       );
-      expect(text, 'U1 已选 2 / 18 条 · U1 因子 = 2');
+      expect(text, 'U1 已选 2 / 18 条 · U1 能排出 2 种');
     });
 
     test('保留原片：不报选中数，只说明这一单元不参与替换', () {
@@ -234,7 +245,37 @@ void main() {
         replacement: UnitReplacement.keepOriginal(),
         shotCount: 3,
       );
-      expect(text, 'U1 保留原片 · 因子 = 1');
+      expect(text, 'U1 保留原片，这一段不参与组合');
+    });
+
+    test('一个镜头都没挑时不摊开一串 1——那一行占满了却什么都没说', () {
+      final text = selectionSummaryText(
+        unitIndex: 0,
+        shotIndex: 0,
+        selectedCount: 0,
+        totalCount: 18,
+        replacement: UnitReplacement.perShot(const {}),
+        shotCount: 13,
+      );
+
+      expect(text, 'S1 已选 0 / 18 条 · U1 还没挑素材，这一段照原片播');
+      expect(text.contains('×'), isFalse,
+          reason: '13 个镜头一个都没挑，原来会写成「1 × 1 × 1 …= 1」');
+    });
+
+    test('只有一镜有贡献时不画蛇添足加括号', () {
+      final text = selectionSummaryText(
+        unitIndex: 0,
+        shotIndex: 0,
+        selectedCount: 2,
+        totalCount: 18,
+        replacement: UnitReplacement.perShot({
+          0: [1, 2],
+        }),
+        shotCount: 3,
+      );
+
+      expect(text, 'S1 已选 2 / 18 条 · U1 能排出 2 种');
     });
   });
 
@@ -260,5 +301,42 @@ void main() {
     test('素材齐了就不拦——组合数没超上限时可以导', () {
       expect(exportBlockedReason(ReplacementPlan(const [])), isNull);
     });
+  });
+}
+
+/// **状态栏不许报一个排不出来的数。**
+///
+/// 2026-09-10 真机走查：底部说「当前组合 2 条，全部导出」、导出对话框说
+/// 「共 0 条成片」——两个地方各算各的。根子是状态栏只算笛卡尔积，
+/// 不知道「同一条素材在一条成片里不能出现两次」会把它们全丢掉。
+void _statusBarTellsTruth() {
+  test('每种排法都撞车时，状态栏直说排不出来', () {
+    final plan = ReplacementPlan([
+      UnitReplacement.perShot({
+        1: [116719],
+      }),
+      UnitReplacement.perShot({
+        0: [116719],
+      }),
+    ]);
+
+    final text = combinationSummaryText(plan);
+
+    expect(text, contains('排不出成片'));
+    expect(text, isNot(contains('条，全部导出')),
+        reason: '报一个一条都排不出来的数，比不报更糟');
+  });
+
+  test('躲得开的时候照常报数', () {
+    final plan = ReplacementPlan([
+      UnitReplacement.perShot({
+        1: [116719],
+      }),
+      UnitReplacement.perShot({
+        0: [116719, 200],
+      }),
+    ]);
+
+    expect(combinationSummaryText(plan), contains('当前组合'));
   });
 }

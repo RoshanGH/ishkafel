@@ -3,6 +3,7 @@ import '../../core/ffmpeg/process_runner.dart' show FfmpegException;
 import '../../core/log/app_log.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/miaoa/miaoa_tag_service.dart' show MiaoaException;
+import '../../core/export/export_plan.dart';
 import '../../core/replacement/replacement_plan.dart';
 
 /// 阶段②「替换选材」的全部用户可见文案（纯函数，无 Flutter 依赖）。
@@ -14,24 +15,40 @@ import '../../core/replacement/replacement_plan.dart';
 /// 口径遵循 `docs/术语表.md`：台词语义单元 / 视觉镜头 / 标签组 / 候选素材 /
 /// 矩阵导出。
 
-/// 状态栏摊开因子算式的单元数上限：再多一行放不下，摊开等于什么都没说清
-const int _maxFactorsInline = 10;
+/// 状态栏最多点名几个单元：再多一行放不下，摊开等于什么都没说清
+const int _maxFactorsInline = 6;
 
-/// 组合数状态栏：`当前组合 2 × 1 × 6 = 12 条，全部导出`
+/// 组合数状态栏：`当前组合 12 条，全部导出 · U1 2 种 × U3 6 种`
 /// 或 `当前组合 121 条，导出其中 100 条`
+///
+/// **只点名真的挑了素材的那几个单元**。原来是把每个单元的数一字排开，
+/// 于是四个单元里挑了一个就写成「当前组合 1 × 2 × 1 × 1 = 2 条」——
+/// 那三个 1 不带任何信息，还让人以为软件在说什么算式（2026-09-09 设计走查）。
 ///
 /// **候选选多了不是错误**——人本来就该随便挑，挑完由软件挑出 100 条来导。
 /// 这里只负责如实说清「导出来的是不是全部」。
 String combinationSummaryText(ReplacementPlan plan) {
+  // 每一种排法都撞同一条素材时，「当前组合 2 条」是个假数——
+  // 那 2 条一条都排不出来（2026-09-10 真机走查：状态栏说 2 条、
+  // 导出对话框说 0 条）
+  if (ExportPlanner.unavoidableClashes(plan.units).isNotEmpty) {
+    return '排不出成片：有素材同时用在两个位置上，换掉其中一处才导得出来';
+  }
   final over = plan.exceedsLimit;
   final count =
       plan.overflowsPreciseCount ? '很多' : '${plan.preciseCombinationCount} 条';
   final tail = over ? '导出其中 ${ReplacementPlan.maxCombinations} 条' : '全部导出';
-  if (plan.units.isEmpty || plan.units.length > _maxFactorsInline) {
+  final contributors = [
+    for (var i = 0; i < plan.units.length; i++)
+      if (plan.units[i].factor > 1) 'U${i + 1} ${plan.units[i].factor} 种',
+  ];
+  if (contributors.isEmpty) {
+    return '还没挑替换素材，现在就原片这 1 条';
+  }
+  if (contributors.length > _maxFactorsInline) {
     return '当前组合 $count，$tail';
   }
-  final factors = plan.units.map((u) => '${u.factor}').join(' × ');
-  return '当前组合 $factors = $count，$tail';
+  return '当前组合 $count，$tail · ${contributors.join(' × ')}';
 }
 
 /// 「进入矩阵导出」被禁用的原因；可以导出时返回 null。
@@ -49,6 +66,20 @@ String? exportBlockedReason(
   int pendingMedia = 0,
   int failedMedia = 0,
 }) {
+  // **一条都排不出来时，别让人点进去才发现。**
+  //
+  // 一条成片里不允许同一条素材出现两次；两个位置都只挑了同一条时，
+  // 每一种排法都会被丢掉，结果是 0 条。2026-09-10 真机走查里三个地方
+  // 各说各的：底部状态栏说「2 条」、导出对话框说「0 条」、
+  // 而「进入矩阵导出」照样可以点。
+  final clashes = ExportPlanner.unavoidableClashes(plan.units);
+  if (clashes.isNotEmpty) {
+    final where = [
+      for (final e in clashes.entries) '素材 ${e.key} 同时用在 ${e.value.join('、')}',
+    ];
+    return '排不出成片：一条成片里不能出现同一条素材两次，而现在每一种排法'
+        '都会撞上。${where.join('；')}。在其中一处换一条素材就好了';
+  }
   if (failedMedia > 0) {
     return '有 $failedMedia 条已选素材没能存到本地，导出会缺画面。'
         '请在「替换素材」的已选托盘上点 ↻ 重试，或换一条素材';
@@ -207,7 +238,12 @@ enum SpeedSeverity { fine, noticeable, severe }
 /// 候选规格还在探测时的占位（不能留空白，用户会以为卡住了）
 const String probingSpecLabel = '探测中';
 
-/// 右栏底部的因子小结：`S2 已选 3 / 18 条 · U3 因子 = 2 × 1 × 3 = 6`
+/// 右栏底部这一行：`S2 已选 3 / 18 条 · U3 能排出 6 种（S1 挑 2 条 × S2 挑 3 条）`
+///
+/// **不说「因子」**：那是算组合数时的内部说法，界面上人要知道的是
+/// 「这一段能排出几种画面」。也**不摊开全是 1 的算式**——13 个镜头一个都
+/// 没挑时，原来会写成「因子 = 1 × 1 × 1 × 1 × 1 × 1 × 1 × 1 × 1 × 1 × 1 ×
+/// 1 × 1 = 1」，占满一行却一个字的信息都没有（2026-09-09 设计走查）。
 String selectionSummaryText({
   required int unitIndex,
   required int? shotIndex,
@@ -219,20 +255,25 @@ String selectionSummaryText({
   final unitLabel = 'U${unitIndex + 1}';
   switch (replacement.mode) {
     case ReplacementMode.keepOriginal:
-      return '$unitLabel 保留原片 · 因子 = 1';
+      return '$unitLabel 保留原片，这一段不参与组合';
     case ReplacementMode.whole:
       return '$unitLabel 已选 $selectedCount / $totalCount 条 · '
-          '$unitLabel 因子 = ${replacement.factor}';
+          '$unitLabel 能排出 ${replacement.factor} 种';
     case ReplacementMode.perShot:
       final scope = shotIndex == null ? unitLabel : 'S${shotIndex + 1}';
-      // 算式按镜头顺序排，未替换的镜头计 1——顺序打乱的话用户对不上
-      // 是哪个视觉镜头贡献了哪个数
-      final perShot = List.generate(shotCount, (i) {
-        final picked = replacement.shotCandidateIds[i] ?? const <int>[];
-        return '${picked.isEmpty ? 1 : picked.length}';
-      });
-      final formula = perShot.isEmpty ? '1' : perShot.join(' × ');
-      return '$scope 已选 $selectedCount / $totalCount 条 · '
-          '$unitLabel 因子 = $formula = ${replacement.factor}';
+      final head = '$scope 已选 $selectedCount / $totalCount 条';
+      // 只列**真的挑了素材**的那几镜。按镜头顺序排，人才对得上是哪一镜
+      // 贡献了哪个数
+      final contributors = [
+        for (var i = 0; i < shotCount; i++)
+          if ((replacement.shotCandidateIds[i] ?? const <int>[]).isNotEmpty)
+            'S${i + 1} 挑 ${replacement.shotCandidateIds[i]!.length} 条',
+      ];
+      if (contributors.isEmpty) {
+        return '$head · $unitLabel 还没挑素材，这一段照原片播';
+      }
+      final detail =
+          contributors.length == 1 ? '' : '（${contributors.join(' × ')}）';
+      return '$head · $unitLabel 能排出 ${replacement.factor} 种$detail';
   }
 }
