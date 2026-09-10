@@ -413,6 +413,10 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                   durationMs: _combos.isEmpty ? 0 : _combos.first.durationMs,
                   enabled: !_running,
                 ),
+                if (_pickCount != null) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  _pickBreakdown(),
+                ],
                 if (_failure case final f?) ...[
                   const SizedBox(height: AppSpacing.md),
                   // **可以选中复制**：导出失败时这段话里带着 ffmpeg 的原文，
@@ -825,11 +829,21 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                     fontSize: AppFontSize.micro,
                     height: 1.4)),
           ),
-        // 挑过的话，逐条写清它用了哪些素材。挑得对不对只有人能判断，
-        // 只报一个条数等于让用户自己去比对四个文件
-        if (_pickCount != null) ...[
-          const SizedBox(height: AppSpacing.sm),
-          const Text('每条用了什么',
+      ],
+    );
+  }
+
+  /// 挑出来的这几条各用了什么。
+  ///
+  /// **摆在导出之前**：挑得对不对只有人能判断，等导完再列等于让人对着
+  /// 十个文件自己比对。「挑差异最大的」到底有没有把每个位置的候选都摊开，
+  /// 在这一栏一眼就能数出来（2026-09-10 用户真机：一个镜头挑了 5 条素材，
+  /// 导出来的十条全用其中同一条）
+  Widget _pickBreakdown() => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('这几条各用什么',
+              key: Key('export-pick-breakdown'),
               style: TextStyle(
                   fontSize: AppFontSize.caption,
                   fontWeight: FontWeight.w600,
@@ -844,9 +858,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                       height: 1.5)),
             ),
         ],
-      ],
-    );
-  }
+      );
 
   /// 导出来的文件名。多了就只列前几个——把确认页撑长反而看不清
   static String _fileNames(List<ExportOutcome> results) {
@@ -874,7 +886,11 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
       final label = material?.name ?? '素材 $id';
       // 名字往往很长（滴露_植源喷雾_姚瑶_20260702_80791142539264），
       // 尾号才是区分同一批里那几条的关键，所以留尾不留头
-      names.add('U${segment.unitIndex + 1} ${_tail(label)}');
+      // 位置标到镜头：一个单元里好几镜各换各的，只说 U2 分不清是哪一镜
+      final where = segment.shotIndex == null
+          ? 'U${segment.unitIndex + 1}'
+          : 'U${segment.unitIndex + 1}·S${segment.shotIndex! + 1}';
+      names.add('$where ${_tail(label)}');
     }
     return names.isEmpty ? '全部用原片' : names.join(' · ');
   }

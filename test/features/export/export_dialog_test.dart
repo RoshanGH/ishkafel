@@ -157,6 +157,35 @@ void main() {
         reason: '跑完了就没有「再开始一次」这回事，避免重复导出');
   });
 
+  testWidgets('挑差异最大的：导出之前就摆出这几条各用什么', (tester) async {
+    await _open(
+      tester,
+      replacements: [
+        UnitReplacement.whole(const [11, 12, 13]),
+        UnitReplacement.whole(const [21, 22]),
+      ],
+      pickedMaterials: const [
+        PickedMaterial(id: 11, name: 'A线_001'),
+        PickedMaterial(id: 12, name: 'A线_002'),
+        PickedMaterial(id: 13, name: 'A线_003'),
+        PickedMaterial(id: 21, name: 'B线_001'),
+        PickedMaterial(id: 22, name: 'B线_002'),
+      ],
+    );
+
+    // 没挑之前不摆——全部导出时逐条列没有意义
+    expect(find.byKey(const Key('export-pick-breakdown')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('export-mode-pick')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('export-pick-3')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('export-pick-breakdown')), findsOneWidget,
+        reason: '挑得对不对只有人能判断，得在点导出之前看得到');
+    expect(find.textContaining('第 1 条 · '), findsOneWidget);
+  });
+
   testWidgets('导完把文件名摆出来——同名不覆盖会改名，人要照着这个去目录里找',
       (tester) async {
     await _open(tester, replacements: [

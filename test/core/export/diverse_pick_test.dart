@@ -131,4 +131,105 @@ void main() {
       expect(ids.containsAll({1, 2}), isFalse);
     });
   });
+
+  /// 用户 2026-09-10 真机：「一个镜头选了5个替换，但是导出10条全是选用的
+  /// 其中同一个镜头……既然我选择了挑差异最大的，那最终产生成片时，重复度
+  /// 肯定越小越好。任何一个替换的位置都尽量不重复。比如我选了5个，
+  /// 然后挑了10个，那么这个地方只能重复一次，不能10条全部用其中一个，
+  /// 应该是5个各出现两个。」
+  group('每个位置上的候选都要摊开', () {
+    /// 位置 0 有 5 个候选、位置 1 有 20 个，全排 100 条
+    List<ExportCombination> pool() {
+      final out = <ExportCombination>[];
+      for (var a = 0; a < 5; a++) {
+        for (var b = 0; b < 20; b++) {
+          out.add(comboOf(out.length + 1, [101 + a, 200 + b]));
+        }
+      }
+      return out;
+    }
+
+    Map<int?, int> countsAt(List<ExportCombination> list, int position) {
+      final m = <int?, int>{};
+      for (final c in list) {
+        final id = c.segments[position].candidateId;
+        m[id] = (m[id] ?? 0) + 1;
+      }
+      return m;
+    }
+
+    test('5 个候选挑 10 条：各出现两次，不是一条用十遍', () {
+      final picked = pickDiverse(pool(), count: 10, materials: const []);
+      expect(countsAt(picked, 0), {101: 2, 102: 2, 103: 2, 104: 2, 105: 2});
+    });
+
+    test('同一批拍摄也照样轮着用——看着像不是重复用同一条的理由', () {
+      // 5 个候选名字同前缀、id 相邻，相似度算出来接近 1。
+      // 「差异最大」在这种位置上退化成「随便挑」，但绝不能退化成「只用一条」
+      final mats = [
+        for (var a = 0; a < 5; a++)
+          material(101 + a, name: '滴露_植源_姚瑶_20260702_00${a + 1}'),
+        for (var b = 0; b < 20; b++)
+          material(200 + b, name: '另一批_厨房_${b + 1}'),
+      ];
+      final picked = pickDiverse(pool(), count: 10, materials: mats);
+      expect(countsAt(picked, 0), {101: 2, 102: 2, 103: 2, 104: 2, 105: 2});
+    });
+
+    test('挑得比候选少时一条不重复', () {
+      final picked = pickDiverse(pool(), count: 3, materials: const []);
+      expect(countsAt(picked, 0).values, everyElement(1));
+    });
+
+    test('两个位置各 5 个候选、挑 10 条：两边都各出现两次，搭配不重样', () {
+      // 「同时也要避免多环节之间的重复」——两位都摊开还不够，
+      // 搭配也不能是那几对来回用
+      final all = <ExportCombination>[];
+      for (var a = 0; a < 5; a++) {
+        for (var b = 0; b < 5; b++) {
+          all.add(comboOf(all.length + 1, [101 + a, 201 + b]));
+        }
+      }
+      final picked = pickDiverse(all, count: 10, materials: const []);
+      expect(countsAt(picked, 0).values, everyElement(2));
+      expect(countsAt(picked, 1).values, everyElement(2));
+      final pairs = {
+        for (final c in picked)
+          '${c.segments[0].candidateId}+${c.segments[1].candidateId}',
+      };
+      expect(pairs, hasLength(10), reason: '十条里出现了重样的搭配');
+    });
+
+    test('一个单元里的两镜各自都要摊开——不能只看最后一镜', () {
+      // 同一个单元的两个镜头位。原来特征把一个单元塌成一条素材（只留最后
+      // 一镜），前面那一镜换没换完全看不见
+      final out = <ExportCombination>[];
+      for (var a = 0; a < 4; a++) {
+        for (var b = 0; b < 4; b++) {
+          out.add(ExportCombination(
+            index: out.length + 1,
+            segments: [
+              ExportSegment(
+                  startMs: 0,
+                  endMs: 1000,
+                  unitIndex: 0,
+                  shotIndex: 0,
+                  candidateId: 101 + a),
+              ExportSegment(
+                  startMs: 1000,
+                  endMs: 2000,
+                  unitIndex: 0,
+                  shotIndex: 1,
+                  candidateId: 201 + b),
+            ],
+          ));
+        }
+      }
+      final picked = pickDiverse(out, count: 4, materials: const []);
+      expect(countsAt(picked, 0).values, everyElement(1),
+          reason: '第一镜的 4 个候选该各出现一次');
+      expect(countsAt(picked, 1).values, everyElement(1),
+          reason: '第二镜同理');
+    });
+  });
 }

@@ -1,6 +1,7 @@
 import '../models/semantic_unit.dart';
 import '../replacement/candidate_trim.dart';
 import '../replacement/replacement_plan.dart';
+import 'balanced_sample.dart';
 
 /// 成片里的一段。要么用原片这一段，要么用一条候选素材顶上去。
 class ExportSegment {
@@ -135,9 +136,31 @@ bool _hasAnyCandidate(UnitReplacement? plan) {
 
 class ExportPlanner {
   ExportPlanner._();
-
-  /// 枚举全部组合。[limit] 是硬上限（产品已定 100 条），超出部分不生成——
-  /// 上层负责在这之前就拦住并让用户减，这里只是最后一道闸。
+  /// 枚举要导出的组合，最多 [limit] 条（产品已定 100 条）。
+  ///
+  /// ## 全排下来装得下：里程表顺序，一条不漏
+  ///
+  /// 进位顺序是**候选最多的位当最低位**（变化最快）。里程表默认从最后一位
+  /// 开始进位，而候选最多的那个位往往夹在中间——那样导出来的一百条里它
+  /// 一动不动，等于白挑。
+  ///
+  /// ## 装不下：按位均衡取样，而不是掐前 N 条
+  ///
+  /// 掐前 N 条等于「最低位转个不停，别的位一动不动」。真机上就是这个结果：
+  /// 一个镜头挑了 5 条素材，导出来的十条全用其中同一条，另外四条一次都没
+  /// 露过面（2026-09-10 用户原话：「一个镜头选了5个替换，但是导出10条全是
+  /// 选用的其中同一个镜头……既然我选择了挑差异最大的，那最终产生成片时，
+  /// 重复度肯定越小越好。任何一个替换的位置都尽量不重复」）。
+  ///
+  /// 所以超出名额时改走 [balancedVectors]：每一位上的候选轮着来，各自出现
+  /// 的次数最多差一次，位与位之间也不齐步走。
+  ///
+  /// ## 位是**镜头**级的，不是单元级的
+  ///
+  /// 原来先把一个单元内各镜头的候选做成完整笛卡尔积、再拿单元当一位。
+  /// 那样有两个后果：一是 13 个镜头各挑几条就是天文数字，还没开始挑名额
+  /// 就先把内存吃了；二是均衡取样想管到「某一镜」也管不着。现在每个挑了
+  /// 候选的镜头各算一位，全程按需生成，不铺开。
   static List<ExportCombination> enumerate({
     required List<SemanticUnit> units,
     required List<UnitReplacement> replacements,
@@ -150,55 +173,179 @@ class ExportPlanner {
   }) {
     if (units.isEmpty || limit <= 0) return const [];
 
-    // 每个单元的「可选项」列表：每一项是这个单元的一种排法
-    final choicesPerUnit = <List<List<ExportSegment>>>[
-      for (var i = 0; i < units.length; i++)
-        _choicesFor(units[i], i < replacements.length ? replacements[i] : null,
-            materialDurations),
-    ];
+    final slots = _slotsOf(units, replacements);
+    final counts = [for (final slot in slots) slot.options.length];
+    final total = _productCapped(counts, limit);
 
-    // 进位顺序：**候选最多的单元当最低位**（变化最快）。
-    //
-    // 里程表默认从最后一个单元开始进位，而候选最多的那个单元往往夹在中间——
-    // 真机上 U2 选了几百个候选、后面还有 U3/U4，导出来的一百条里 U2 一动不动，
-    // 等于白挑。名额有限，就该花在差异最大的那一维上。
-    // 候选数相同时保持「后面的单元先变」——那是原本的里程表顺序，
-    // 用户对着导出目录看到的规律（前几条只有片尾不同）不该无缘无故改掉
-    final carryOrder = [for (var i = 0; i < units.length; i++) i]
-      ..sort((a, b) {
-        final byCount =
-            choicesPerUnit[b].length.compareTo(choicesPerUnit[a].length);
-        return byCount != 0 ? byCount : b.compareTo(a);
-      });
+    final vectors = total <= limit
+        ? _odometerVectors(slots, units.length, counts)
+        // 装不下就按位均衡取样。多要一些：同一条素材在一条成片里出现两次的
+        // 组合会被滤掉，滤掉的不能占名额
+        : balancedVectors(counts, limit * 4 + 20);
 
     final out = <ExportCombination>[];
-    final cursor = List<int>.filled(units.length, 0);
-    // 里程表最多能走多少格。作废的组合不占 out 的名额，光靠 out.length
-    // 收不住循环
-    var steps = 0;
-    final maxSteps = _stepBudget(choicesPerUnit, limit);
-    while (out.length < limit && steps++ < maxSteps) {
-      final segments = <ExportSegment>[
-        for (var i = 0; i < units.length; i++) ...choicesPerUnit[i][cursor[i]],
-      ];
+    final seen = <String>{};
+    for (final vector in vectors) {
+      if (out.length >= limit) break;
+      // 取样是按位独立轮转的，同一个组合可能被抽到两次
+      if (!seen.add(vector.join(','))) continue;
+      final segments =
+          _segmentsFor(units, replacements, slots, vector, materialDurations);
       // 同一条素材在一条成片里出现两次，一眼就能看出来——那不是用户想要的。
       // 笛卡尔积会自然产出这种组合（U1 选 [A,B]、U2 选 [A,C] 里就有 A+A），
       // 在这儿滤掉，编号按**留下来的**顺延，不在编号上留洞
-      if (!_hasDuplicateMaterial(segments)) {
-        out.add(ExportCombination(index: out.length + 1, segments: segments));
-      }
-      // 里程表进位：从候选最多的单元开始加
-      var k = 0;
-      while (k < carryOrder.length) {
-        final i = carryOrder[k];
-        cursor[i]++;
-        if (cursor[i] < choicesPerUnit[i].length) break;
-        cursor[i] = 0;
-        k++;
-      }
-      if (k >= carryOrder.length) break; // 全部进位完毕 = 枚举结束
+      if (_hasDuplicateMaterial(segments)) continue;
+      out.add(ExportCombination(index: out.length + 1, segments: segments));
     }
     return List.unmodifiable(out);
+  }
+
+  /// 全排装得下时的顺序：里程表，候选最多的位变化最快
+  static List<List<int>> _odometerVectors(
+      List<_Slot> slots, int unitCount, List<int> counts) {
+    if (slots.isEmpty) return const [[]];
+    final order = _carryOrder(slots, unitCount);
+    final cursor = List<int>.filled(slots.length, 0);
+    final out = <List<int>>[];
+    while (true) {
+      out.add(List<int>.unmodifiable(cursor));
+      var k = 0;
+      while (k < order.length) {
+        final j = order[k];
+        cursor[j]++;
+        if (cursor[j] < counts[j]) break;
+        cursor[j] = 0;
+        k++;
+      }
+      if (k >= order.length) break; // 全部进位完毕 = 枚举结束
+    }
+    return out;
+  }
+
+  /// 进位顺序（最快的位排在前）：先按单元的排法总数从多到少，
+  /// 同一个单元内靠后的镜头更快。
+  ///
+  /// 排法数相同时保持「后面的单元先变」——那是原本的里程表顺序，
+  /// 用户对着导出目录看到的规律（前几条只有片尾不同）不该无缘无故改掉
+  static List<int> _carryOrder(List<_Slot> slots, int unitCount) {
+    final perUnit = List<int>.filled(unitCount, 1);
+    for (final slot in slots) {
+      final grown = perUnit[slot.unitIndex] * slot.options.length;
+      // 乘积只用来排序，封顶就够，别让它溢出
+      perUnit[slot.unitIndex] = grown > _sortCeiling ? _sortCeiling : grown;
+    }
+    final unitOrder = [for (var i = 0; i < unitCount; i++) i]
+      ..sort((a, b) {
+        final byCount = perUnit[b].compareTo(perUnit[a]);
+        return byCount != 0 ? byCount : b.compareTo(a);
+      });
+    return [
+      for (final u in unitOrder)
+        ...[
+          for (var j = 0; j < slots.length; j++)
+            if (slots[j].unitIndex == u) j,
+        ].reversed,
+    ];
+  }
+
+  static const int _sortCeiling = 1 << 40;
+
+  /// 各位乘积，超过 [limit] 就不再往下乘（只需要知道「装不装得下」）
+  static int _productCapped(List<int> counts, int limit) {
+    var total = 1;
+    for (final n in counts) {
+      total *= n;
+      if (total > limit) return limit + 1;
+    }
+    return total;
+  }
+
+  /// 哪些位置可选：整体替换按单元算一位，镜头替换按**每个挑了候选的镜头**
+  /// 各算一位。没挑候选的镜头恒用原画面，不占位
+  static List<_Slot> _slotsOf(
+      List<SemanticUnit> units, List<UnitReplacement> replacements) {
+    final slots = <_Slot>[];
+    for (var i = 0; i < units.length; i++) {
+      final replacement = i < replacements.length ? replacements[i] : null;
+      if (replacement == null) continue;
+      switch (replacement.mode) {
+        case ReplacementMode.keepOriginal:
+          break;
+        case ReplacementMode.whole:
+          if (replacement.wholeCandidateIds.isNotEmpty) {
+            slots.add(_Slot(i, null, [...replacement.wholeCandidateIds]));
+          }
+        case ReplacementMode.perShot:
+          for (var s = 0; s < units[i].shots.length; s++) {
+            final ids = replacement.shotCandidateIds[s];
+            if (ids != null && ids.isNotEmpty) {
+              slots.add(_Slot(i, s, [...ids]));
+            }
+          }
+      }
+    }
+    return slots;
+  }
+
+  /// 把「每一位选了第几个候选」摊成这一条成片的全部段落
+  static List<ExportSegment> _segmentsFor(
+    List<SemanticUnit> units,
+    List<UnitReplacement> replacements,
+    List<_Slot> slots,
+    List<int> vector,
+    Map<int, int> materialDurations,
+  ) {
+    final whole = <int, int>{}; // 单元 → 整体替换选中的候选
+    final perShot = <int, Map<int, int>>{}; // 单元 → 镜头 → 选中的候选
+    for (var j = 0; j < slots.length; j++) {
+      final slot = slots[j];
+      final id = slot.options[vector[j]];
+      if (slot.shotIndex == null) {
+        whole[slot.unitIndex] = id;
+      } else {
+        (perShot[slot.unitIndex] ??= {})[slot.shotIndex!] = id;
+      }
+    }
+
+    final out = <ExportSegment>[];
+    for (var i = 0; i < units.length; i++) {
+      final unit = units[i];
+      final replacement = i < replacements.length ? replacements[i] : null;
+      final wholeId = whole[i];
+      if (wholeId != null) {
+        // 整体替换：整个单元换成这一条候选，原样接上，成片时长跟候选走。
+        // 探不出来就按原单元算——报得保守好过拿 0 顶（那会把总时长算成一团）
+        out.add(ExportSegment(
+          startMs: unit.startMs,
+          endMs: unit.endMs,
+          unitIndex: unit.index,
+          unitUid: unit.uid,
+          candidateId: wholeId,
+          composedMs: materialDurations[wholeId],
+        ));
+        continue;
+      }
+      if (replacement?.mode == ReplacementMode.perShot &&
+          unit.shots.isNotEmpty) {
+        for (var s = 0; s < unit.shots.length; s++) {
+          out.add(_shotSegment(
+            unit: unit,
+            shotIndex: s,
+            candidateId: perShot[i]?[s],
+            replacement: replacement!,
+            materialDurations: materialDurations,
+          ));
+        }
+        continue;
+      }
+      out.add(ExportSegment(
+        startMs: unit.startMs,
+        endMs: unit.endMs,
+        unitIndex: unit.index,
+        unitUid: unit.uid,
+      ));
+    }
+    return out;
   }
 
   /// 哪几条素材被挑在了**多个位置**上——一条成片都排不出来时的元凶。
@@ -284,107 +431,8 @@ class ExportPlanner {
     return false;
   }
 
-  /// 里程表最多走多少格：所有排法的乘积，但不超过一个跟上限同量级的天花板。
-  /// 去重会让「有效组合」少于总排法数，不设步数预算的话循环收不住
-  static int _stepBudget(List<List<List<ExportSegment>>> choices, int limit) {
-    var total = 1;
-    final ceiling = limit * 10 + 100;
-    for (final unitChoices in choices) {
-      total *= unitChoices.isEmpty ? 1 : unitChoices.length;
-      if (total >= ceiling) return ceiling;
-    }
-    return total;
-  }
 
-  /// 这个单元有几种排法，每种排法由哪些段组成
-  static List<List<ExportSegment>> _choicesFor(SemanticUnit unit,
-      UnitReplacement? replacement, Map<int, int> materialDurations) {
-    final original = [
-      ExportSegment(
-          startMs: unit.startMs,
-          endMs: unit.endMs,
-          unitIndex: unit.index,
-          unitUid: unit.uid),
-    ];
-    if (replacement == null) return [original];
 
-    switch (replacement.mode) {
-      case ReplacementMode.keepOriginal:
-        return [original];
-
-      case ReplacementMode.whole:
-        if (replacement.wholeCandidateIds.isEmpty) return [original];
-        // 整体替换：整个单元换成这一条候选，一条候选一种排法
-        return [
-          for (final id in replacement.wholeCandidateIds)
-            [
-              ExportSegment(
-                startMs: unit.startMs,
-                endMs: unit.endMs,
-                unitIndex: unit.index,
-                unitUid: unit.uid,
-                candidateId: id,
-                // 整体替换是原样接上，成片时长跟候选走。探不出来就按原单元
-                // 算——报得保守好过拿 0 顶（那会把总时长算成一团）
-                composedMs: materialDurations[id],
-              ),
-            ],
-        ];
-
-      case ReplacementMode.perShot:
-        return _perShotChoices(unit, replacement, materialDurations);
-    }
-  }
-
-  /// 镜头层：单元内各镜头的候选做笛卡尔积；没选候选的镜头恒用原画面。
-  ///
-  /// 同样是里程表顺序（最后一个镜头变化最快），与单元层保持一致——两层用
-  /// 不同的顺序，导出目录里的规律就没法用一句话说清了。
-  static List<List<ExportSegment>> _perShotChoices(SemanticUnit unit,
-      UnitReplacement replacement, Map<int, int> materialDurations) {
-    // 每个镜头的候选（没选的用 [null] 表示「就用原画面」）
-    final perShot = <List<int?>>[
-      for (var s = 0; s < unit.shots.length; s++)
-        (replacement.shotCandidateIds[s]?.isNotEmpty ?? false)
-            ? [...replacement.shotCandidateIds[s]!]
-            : <int?>[null],
-    ];
-    if (perShot.isEmpty) {
-      return [
-        [
-          ExportSegment(
-              startMs: unit.startMs,
-              endMs: unit.endMs,
-              unitIndex: unit.index,
-              unitUid: unit.uid),
-        ],
-      ];
-    }
-
-    final out = <List<ExportSegment>>[];
-    final cursor = List<int>.filled(perShot.length, 0);
-    while (true) {
-      out.add([
-        for (var s = 0; s < unit.shots.length; s++)
-          _shotSegment(
-            unit: unit,
-            shotIndex: s,
-            candidateId: perShot[s][cursor[s]],
-            replacement: replacement,
-            materialDurations: materialDurations,
-          ),
-      ]);
-      var s = perShot.length - 1;
-      while (s >= 0) {
-        cursor[s]++;
-        if (cursor[s] < perShot[s].length) break;
-        cursor[s] = 0;
-        s--;
-      }
-      if (s < 0) break;
-    }
-    return out;
-  }
 
   /// 造一个镜头位的段，**顺手算好起点**。
   ///
@@ -426,4 +474,16 @@ class ExportPlanner {
       trimStartMs: materialMs > 0 && cut.startMs > 0 ? cut.startMs : null,
     );
   }
+}
+
+/// 一个「可变位」：某个单元（整体替换）或某个视觉镜头（镜头替换）上，
+/// 用户挑出来的那几条候选。挑差异最大的、均衡取样，管的都是这个粒度
+class _Slot {
+  final int unitIndex;
+
+  /// null = 整体替换（整个单元一段）
+  final int? shotIndex;
+  final List<int> options;
+
+  const _Slot(this.unitIndex, this.shotIndex, this.options);
 }

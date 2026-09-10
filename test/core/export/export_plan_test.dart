@@ -36,6 +36,7 @@ List<int?> _fingerprint(ExportCombination c) =>
 
 void main() {
   _duplicateMaterialTests();
+  _balancedSamplingTests();
   group('一条都没换', () {
     test('也要产出一条：原片本身就是一种排法', () {
       final combos = _enumerate([
@@ -381,4 +382,98 @@ void _duplicateMaterialTests() {
     });
   });
 
+}
+
+/// 名额不够时怎么取。
+///
+/// 2026-09-10 用户真机：「一个镜头选了5个替换，但是导出10条全是选用的其中
+/// 同一个镜头……任何一个替换的位置都尽量不重复。」根因之一在这儿：原来
+/// 超出名额就掐里程表的前 N 条，等于「最低位转个不停，别的位一动不动」，
+/// 慢的那一位的候选连进都进不了池子。
+void _balancedSamplingTests() {
+  SemanticUnit unit(int i, int shots) => SemanticUnit(
+        index: i,
+        startMs: i * 10000,
+        endMs: (i + 1) * 10000,
+        transcript: 'U${i + 1}',
+        uid: 'u$i',
+        shots: [
+          for (var s = 0; s < shots; s++)
+            Shot(
+                startMs: i * 10000 + s * 1000,
+                endMs: i * 10000 + (s + 1) * 1000),
+        ],
+      );
+
+  Map<int?, int> countsAt(List<ExportCombination> list, int shot) {
+    final m = <int?, int>{};
+    for (final c in list) {
+      for (final s in c.segments) {
+        if (s.shotIndex == shot) m[s.candidateId] = (m[s.candidateId] ?? 0) + 1;
+      }
+    }
+    return m;
+  }
+
+  group('装不下时按位均衡取样', () {
+    test('慢的那一位也要摊开——5 个候选不能只出现头两个', () {
+      // 5 × 40 = 200 种，名额 100
+      final combos = ExportPlanner.enumerate(
+        units: [unit(0, 3)],
+        replacements: [
+          UnitReplacement.perShot({
+            0: [101, 102, 103, 104, 105],
+            2: [for (var i = 0; i < 40; i++) 200 + i],
+          }),
+        ],
+      );
+
+      expect(combos, hasLength(100));
+      final counts = countsAt(combos, 0);
+      expect(counts.keys.toSet(), {101, 102, 103, 104, 105},
+          reason: '有候选一次都没露面');
+      // 100 条摊到 5 条候选上，各 20 次上下
+      for (final n in counts.values) {
+        expect(n, greaterThanOrEqualTo(15));
+        expect(n, lessThanOrEqualTo(25));
+      }
+    });
+
+    test('单元之间也一样：候选少的那个单元不能被钉死', () {
+      final combos = ExportPlanner.enumerate(
+        units: [unit(0, 1), unit(1, 1)],
+        replacements: [
+          UnitReplacement.perShot({0: [for (var i = 0; i < 30; i++) 300 + i]}),
+          UnitReplacement.perShot({0: [101, 102, 103, 104, 105]}),
+        ],
+      );
+
+      final counts = <int?, int>{};
+      for (final c in combos) {
+        for (final s in c.segments) {
+          if (s.unitIndex == 1) counts[s.candidateId] = (counts[s.candidateId] ?? 0) + 1;
+        }
+      }
+      expect(counts.keys.toSet(), {101, 102, 103, 104, 105});
+    });
+
+    test('十几个镜头各挑几条也不会先把内存吃掉', () {
+      // 5^13 ≈ 12 亿种排法。原来的实现会先把单元内的笛卡尔积整个铺成一个
+      // List（[_perShotChoices]），跟名额没关系；现在按需生成，只造那 100 条
+      final combos = ExportPlanner.enumerate(
+        units: [unit(0, 13)],
+        replacements: [
+          UnitReplacement.perShot({
+            for (var s = 0; s < 13; s++) s: [for (var i = 0; i < 5; i++) s * 100 + i],
+          }),
+        ],
+      );
+      expect(combos, hasLength(100));
+      // 每一镜的 5 条候选都得露面，一镜都不能被钉死
+      for (var s = 0; s < 13; s++) {
+        expect(countsAt(combos, s).keys.toSet(), hasLength(5),
+            reason: '第 ${s + 1} 镜有候选没露面');
+      }
+    }, timeout: const Timeout(Duration(seconds: 30)));
+  });
 }
