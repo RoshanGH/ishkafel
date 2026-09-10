@@ -100,6 +100,14 @@ class ExportOptionsPanel extends StatelessWidget {
           style: TextStyle(
               fontSize: AppFontSize.caption, color: AppColors.textTertiary));
     }
+    // 一档都放不下（2~3 条组合）时同理：原来会摆出「挑 ▢ 条」——中间空着
+    // 一个档位都没有，选了也还是那几条（2026-09-10 真机走查）
+    if (_pickOptions.isEmpty) {
+      return Text('共 $totalCombos 条，全部导出',
+          key: const Key('export-mode-all-only'),
+          style: const TextStyle(
+              fontSize: AppFontSize.caption, color: AppColors.textTertiary));
+    }
     final picking = pickCount != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

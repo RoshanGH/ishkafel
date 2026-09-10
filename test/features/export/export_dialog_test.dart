@@ -157,6 +157,17 @@ void main() {
         reason: '跑完了就没有「再开始一次」这回事，避免重复导出');
   });
 
+  testWidgets('组合少到一个档位都放不下时，不摆空的「挑 ▢ 条」', (tester) async {
+    // 2 条组合：3/5/10/20 一个都放不下，原来会摆出一行空档位
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+      UnitReplacement.keepOriginal(),
+    ]);
+
+    expect(find.byKey(const Key('export-mode-all-only')), findsOneWidget);
+    expect(find.byKey(const Key('export-mode-pick')), findsNothing);
+  });
+
   testWidgets('挑差异最大的：导出之前就摆出这几条各用什么', (tester) async {
     await _open(
       tester,
