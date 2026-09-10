@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../analysis/providers.dart' show AsrSentence;
 import '../export/export_commands.dart';
 import '../export/export_spec.dart';
+import '../export/unique_export_path.dart';
 import '../ffmpeg/process_runner.dart';
 import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_rasterizer.dart';
@@ -295,12 +296,17 @@ class ScriptExportRunner {
       }
     }
 
-    await File(outPath).parent.create(recursive: true);
+    final outFile = File(outPath);
+    await outFile.parent.create(recursive: true);
+    // 名字撞上就往后排。这条线的名字带到分钟（`#12_0910_1432.mp4`），
+    // 同一分钟内导第二次照样重名——ffmpeg 的 `-y` 会把上一条盖掉
+    final finalOut = uniqueExportPath(outFile.parent.path, p.basename(outPath));
     await _exec(
-        ExportCommands.mux(video: videoConcat, audio: finalAudio, out: outPath),
+        ExportCommands.mux(
+            video: videoConcat, audio: finalAudio, out: finalOut),
         what: '合成成片');
     tick('合成成片');
-    return outPath;
+    return finalOut;
   }
 
   /// 交付拦截：一行行验，问题点名到行。空行（无字无镜头）跳过。

@@ -802,6 +802,19 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               fontSize: AppFontSize.body,
               fontWeight: FontWeight.w600),
         ),
+        // 成的那几条叫什么，直接摆出来：同名不覆盖会把文件排成
+        // 「变体1(2).mp4」，人到目录里找的是刚导的这几个，不说清就得自己猜
+        if (results.any((r) => r.ok)) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            _fileNames(results),
+            key: const Key('export-result-files'),
+            style: const TextStyle(
+                color: AppColors.textTertiary,
+                fontSize: AppFontSize.micro,
+                height: 1.5),
+          ),
+        ],
         // 失败的要逐条点名并带原因，否则用户只能一条条自己找
         for (final f in failed)
           Padding(
@@ -833,6 +846,17 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         ],
       ],
     );
+  }
+
+  /// 导出来的文件名。多了就只列前几个——把确认页撑长反而看不清
+  static String _fileNames(List<ExportOutcome> results) {
+    final names = [
+      for (final r in results)
+        if (r.path case final path?) p.basename(path),
+    ];
+    const shown = 6;
+    if (names.length <= shown) return names.join('、');
+    return '${names.take(shown).join('、')}，另有 ${names.length - shown} 条';
   }
 
   /// 一条成片用了哪些素材，按 U 顺序写出来。

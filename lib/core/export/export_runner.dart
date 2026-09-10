@@ -22,6 +22,7 @@ import 'export_commands.dart';
 import 'export_file_name.dart';
 import 'export_plan.dart';
 import 'export_spec.dart';
+import 'unique_export_path.dart';
 
 /// 一条成片的导出结果
 class ExportOutcome {
@@ -479,8 +480,10 @@ class ExportRunner {
     );
 
     // 扩展名跟着格式走。选了 mov 却导出 .mp4，双击能开但拖进剪辑软件
-    // 会被当成另一种东西
-    final out = p.join(
+    // 会被当成另一种东西。
+    // 名字撞上就往后排：同一个目录导第二批时文件名一模一样，ffmpeg 的 `-y`
+    // 会把上一批悄悄盖掉（见 [uniqueExportPath]）
+    final out = uniqueExportPath(
       outputDir.path,
       exportFileName(
         name: combo.name,

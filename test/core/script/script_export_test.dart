@@ -56,6 +56,22 @@ void main() {
     expect(steps.last, '合成成片');
   });
 
+  /// 编导台的文件名带到分钟，同一分钟内导第二次照样重名。
+  /// 上一条成片被 ffmpeg 的 `-y` 悄悄盖掉，用户不会收到任何提示
+  test('同名不覆盖：第二次导出往后排，上一条还在', () async {
+    final target = '${dir.path}/out/成片.mp4';
+    final first = await runner().export(
+        doc: readyDoc(), outPath: target, burnSubtitles: false);
+    File(first).writeAsStringSync('第一条');
+
+    final second = await runner().export(
+        doc: readyDoc(), outPath: target, burnSubtitles: false);
+
+    expect(second, isNot(first));
+    expect(second.split('/').last, '成片(2).mp4');
+    expect(File(first).readAsStringSync(), '第一条', reason: '上一条被顶掉了');
+  });
+
   /// **同一个原因不抄好几遍。**
   ///
   /// 2026-09-10 真机走查：脚本四句只挑了第一句的镜头，点导出弹出的是

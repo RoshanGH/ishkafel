@@ -157,6 +157,23 @@ void main() {
         reason: '跑完了就没有「再开始一次」这回事，避免重复导出');
   });
 
+  testWidgets('导完把文件名摆出来——同名不覆盖会改名，人要照着这个去目录里找',
+      (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+      UnitReplacement.keepOriginal(),
+    ]);
+
+    await tester.tap(find.byKey(const Key('export-start')));
+    await tester.pumpAndSettle();
+
+    expect(
+        tester
+            .widget<Text>(find.byKey(const Key('export-result-files')))
+            .data,
+        '变体1.mp4、变体2.mp4');
+  });
+
   testWidgets('失败的逐条点名带原因，不让用户自己找', (tester) async {
     final work = Directory.systemTemp.createTempSync('ishkafel_ed_fail_');
     addTearDown(() {
