@@ -14,6 +14,25 @@ ThemeData buildAppTheme() {
   );
   return base.copyWith(
     cardTheme: const CardThemeData(color: AppColors.surfaceRaised),
+    // 主按钮托一层**自己颜色的辉光**。
+    //
+    // 2026-09-10 走查：「进入矩阵导出」「新建任务」这些主动作原来就是一块
+    // 扁平的纯蓝，跟旁边的描边按钮放在一起，主次全靠颜色撑——按钮不像
+    // 「可以按下去的东西」（产品负责人：「现在太不好看了」）。
+    // 蓝色阴影而不是黑色：深色界面里黑影看不见，同色辉光才托得起来。
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        elevation: 3,
+        shadowColor: AppColors.accentBlue.withValues(alpha: 0.45),
+      ),
+    ),
+    // 次要按钮：描边比原来实一点，别虚到看不见是个按钮
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        side: const BorderSide(color: AppColors.border),
+        foregroundColor: AppColors.textPrimary,
+      ),
+    ),
     dividerTheme: const DividerThemeData(color: AppColors.border, thickness: 1),
     // 页面转场统一用淡入，不用平台默认。
     //

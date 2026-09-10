@@ -156,7 +156,7 @@ class ReplacementBadge extends StatelessWidget {
           horizontal: AppSpacing.sm, vertical: AppSpacing.xs / 2),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.16),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Text(
         labelOf(replacement),

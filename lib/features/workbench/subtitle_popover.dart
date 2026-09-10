@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_spacing.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import 'subtitle_editor_card.dart';
@@ -40,7 +42,7 @@ Future<void> showSubtitlePopover(
       final card = Material(
         color: AppColors.surfaceRaised,
         elevation: 12,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         child: ConstrainedBox(
           // **不定死高度**：内容有几行是这里才知道的，估小了会把「加一段」
           // 挤到可视区外，点下去落到遮罩上、浮层直接关掉

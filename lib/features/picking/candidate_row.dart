@@ -94,7 +94,7 @@ class CandidateRow extends StatelessWidget {
   /// 竖屏素材的小图：32×56，够认出「是不是这段画面」，又不挤掉台词。
   /// 高度是行高减去上下内边距（72 - 8×2）——再高就把行撑破了
   Widget _thumb(String? url) => ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: BorderRadius.circular(AppRadius.xs),
         child: SizedBox(
           width: 32,
           height: 56,
@@ -186,7 +186,7 @@ class CandidateRow extends StatelessWidget {
                         const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppColors.purple.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius: BorderRadius.circular(AppRadius.xs),
                     ),
                     child: Text(tag,
                         style: const TextStyle(
@@ -283,7 +283,7 @@ class CandidateRow extends StatelessWidget {
         child: InkWell(
           key: key,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.xs),
           child: Padding(
             padding: const EdgeInsets.all(3),
             child: Icon(icon, size: 15, color: color ?? AppColors.textSecondary),

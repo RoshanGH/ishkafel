@@ -177,7 +177,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
       padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: AppColors.border),
         boxShadow: const [
           BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 8)),
@@ -219,7 +219,7 @@ class _SubtitleStyleDialogState extends State<_SubtitleStyleDialog> {
                       child: InkWell(
                         key: ValueKey('subtitle-color-$hex'),
                         onTap: () => _change(() => _colorHex = hex),
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(AppRadius.pill),
                         child: Container(
                           width: 22,
                           height: 22,

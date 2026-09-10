@@ -40,7 +40,7 @@ class StartGuide extends StatelessWidget {
                   AppColors.accentBlue.withValues(alpha: 0.06),
                 ],
               ),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
               border: Border.all(
                   color: AppColors.accentBlue.withValues(alpha: 0.25)),
             ),
@@ -191,7 +191,7 @@ class _GuideCardState extends State<_GuideCard> {
                       const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                   decoration: BoxDecoration(
                     color: AppColors.accentBlue.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
                   ),
                   child: Text(widget.badge!,
                       style: const TextStyle(
@@ -220,7 +220,7 @@ class _GuideCardState extends State<_GuideCard> {
                         ? AppColors.accentBlue
                         : AppColors.accentBlue.withValues(alpha: 0.85))
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
                 border: widget.accent && live
                     ? null
                     : Border.all(

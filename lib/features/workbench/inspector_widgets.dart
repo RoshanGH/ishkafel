@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_spacing.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 
@@ -26,8 +28,9 @@ Widget inspectorCard(List<Widget> children) => Container(
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.surfaceCard,
-        borderRadius: BorderRadius.circular(10),
+        // 上沿一线高光：卡片是浮在面板上的一层，得看得出来它浮着
+        gradient: topLit(AppColors.surfaceCard),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         for (var i = 0; i < children.length; i++) ...[
@@ -88,7 +91,7 @@ Widget inspectorTimeRow({
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
           color: AppColors.surface,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -188,10 +191,10 @@ Widget inspectorTagChips(List<String> tags) {
     runSpacing: 6,
     children: tags
         .map((t) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 3),
               decoration: BoxDecoration(
                 color: AppColors.accentBlue.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
               child: Text(t,
                   style: const TextStyle(
@@ -239,13 +242,13 @@ Widget _actionButton({
   return InkWell(
     key: key,
     onTap: onTap,
-    borderRadius: BorderRadius.circular(8),
+    borderRadius: BorderRadius.circular(AppRadius.md),
     child: Container(
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
         color: AppColors.surfaceCard,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
       child: Text(label,
           style: TextStyle(
