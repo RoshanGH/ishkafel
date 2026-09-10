@@ -240,9 +240,14 @@ class WizardFooter extends StatelessWidget {
     super.key,
     required this.missing,
     this.startLabel = '开始分析',
+    this.analyses = true,
     required this.onCancel,
     required this.onStart,
   });
+
+  /// 点下去要不要跑分析。脚本成片和拼片都是「建出来直接进工作台」，
+  /// 一次云端调用都没有——那时候不该摆耗时和额度的说明
+  final bool analyses;
 
   /// 耗时说明。
   ///
@@ -250,8 +255,13 @@ class WizardFooter extends StatelessWidget {
   /// 单个镜头约 18 秒、4 路并发），而镜头数在分析完成前无从知晓。原来写
   /// 的「1~2 分钟（96 秒素材实测）」是并发改造前的旧口径，同样长度的素材
   /// 实测要几分钟——界面上写一个做不到的数字，比不给预期更伤信任。
-  static const durationNote = '预计耗时数分钟，镜头越多越久（为每个视觉镜头打标签是最慢的一步）'
-      '· 消耗云端 API 额度\n分析过程中任务卡上会显示当前进行到哪一步；完成后进入「切分确认」';
+  static const durationNote = '预计耗时数分钟，消耗云端 API 额度';
+
+  /// 展开说的那几句。放 tooltip：它们是「读一次就够」的话，
+  /// 常驻两行小字会把上面的表单挤掉半个输入框（2026-09-09 设计走查）
+  static const durationDetail = '耗时几乎全看镜头数——为每个视觉镜头打标签是最慢的'
+      '一步，而镜头数要分析完才知道。\n'
+      '分析过程中任务卡上会显示当前进行到哪一步；完成后进入「切分确认」。';
 
   @override
   Widget build(BuildContext context) {
@@ -262,12 +272,28 @@ class WizardFooter extends StatelessWidget {
         if (!ready) _blockedReason(),
         Row(
           children: [
-            const Expanded(
-              child: Text(durationNote,
-                  style: TextStyle(
-                      color: AppColors.textTertiary,
-                      fontSize: AppFontSize.micro,
-                      height: 1.5)),
+            Expanded(
+              child: analyses
+                  ? const Tooltip(
+                      message: durationDetail,
+                      child: Row(children: [
+                        Icon(Icons.schedule,
+                            size: 11, color: AppColors.textTertiary),
+                        SizedBox(width: 4),
+                        Flexible(
+                          child: Text(durationNote,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: AppColors.textTertiary,
+                                  fontSize: AppFontSize.micro)),
+                        ),
+                      ]),
+                    )
+                  : const Text('建出来直接进工作台，不跑分析',
+                      style: TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: AppFontSize.micro)),
             ),
             TextButton(onPressed: onCancel, child: const Text('取消')),
             const SizedBox(width: AppSpacing.sm),

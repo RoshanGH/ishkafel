@@ -57,7 +57,13 @@ class ExportOptionsPanel extends StatelessWidget {
         ],
       );
 
-  /// 剪映式的一行：左边标签定宽，右边控件
+  /// 剪映式的一行：左边标签定宽，右边控件。
+  ///
+  /// 控件**有宽度上限**：「1080P」「30fps」这种两三个字的选择器铺满一整行
+  /// （真机上是 940px）看起来廉价，眼睛还要从最左的标签一路扫到最右的
+  /// 下拉箭头（2026-09-09 设计走查）。给它一个够用的宽度就停。
+  static const double _controlMaxWidth = 260;
+
   Widget _row(String name, Widget child) => Padding(
         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
         child: Row(children: [
@@ -68,7 +74,16 @@ class ExportOptionsPanel extends StatelessWidget {
                     fontSize: AppFontSize.caption,
                     color: AppColors.textSecondary)),
           ),
-          Expanded(child: child),
+          Flexible(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: _controlMaxWidth),
+                child: child,
+              ),
+            ),
+          ),
         ]),
       );
 

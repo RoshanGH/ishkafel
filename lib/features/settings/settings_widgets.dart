@@ -17,6 +17,10 @@ class SettingsCard extends StatelessWidget {
     // 外面必须包一层 Align：ListView 给的是**紧**的横向约束，
     // Container 自己的 maxWidth 会被 enforce 掉，卡片照样铺满整屏。
     // Align 把约束放松成 loose，maxWidth 才真正生效。
+    //
+    // 卡片自己**靠左**：居中的话，它和同一页里的说明文字、按钮
+    // （那些是靠左的）会错开半截。整页内容作为一个整体居中，
+    // 这件事在 [SettingsPage] 那一层做。
     return Align(
       alignment: Alignment.topLeft,
       child: _card(heading),

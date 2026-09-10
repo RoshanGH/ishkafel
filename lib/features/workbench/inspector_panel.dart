@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../core/ui/text_editing_keys.dart';
 
+import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_colors.dart';
+import '../shared/scroll_fade.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/audio/material_audio.dart';
@@ -258,17 +260,34 @@ class _InspectorPanelState extends State<InspectorPanel> {
   Widget build(BuildContext context) {
     final selection = widget.controller.selection;
     final Widget body;
+    Widget? actions;
     if (selection == null) {
       body = _buildPlaceholder();
     } else if (selection.shotIndex == null) {
       body = _buildUnitInspector(selection.unitIndex);
+      actions = _unitActions(selection.unitIndex);
     } else {
       body = _buildShotInspector(selection.unitIndex, selection.shotIndex!);
+      actions = _shotActions(selection.unitIndex, selection.shotIndex!);
     }
     return Container(
       color: AppColors.surfaceRaised,
-      padding: const EdgeInsets.all(14),
-      child: body,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // 内容没到底时下沿压一层淡出：macOS 的滚动条不动鼠标就不出现，
+          // 没有它人根本不知道下面还有东西（见 [ScrollFade]）
+          Expanded(
+            child:
+                ScrollFade(background: AppColors.surfaceRaised, child: body),
+          ),
+          if (actions != null) ...[
+            const SizedBox(height: 10),
+            actions,
+          ],
+        ],
+      ),
     );
   }
 
@@ -292,40 +311,114 @@ class _InspectorPanelState extends State<InspectorPanel> {
       if (shots.isEmpty) return null;
       detail = '这个单元里的 ${shots.map((s) => 'S${s + 1}').join('、')} 已选替换素材。';
     }
+    // **一行说完，原因放 tooltip**。原来是一段四行的解释常驻在这儿，
+    // 把它下面的「单元台词（可编辑）」和「拆分 / 并入」整个挤出了可视区——
+    // 人看不到那两样东西，等于这个面板少了一半功能
+    // （2026-09-09 设计走查真机截图）
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
-      child: inspectorCard([
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.lock_outline_rounded,
-                size: 14, color: AppColors.purple),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                '$detail切分已锁定：改边界会让已经按原时长做好的素材对不上，'
-                '拆分或合并会让替换方案错位到别的镜头上。'
-                '要调整切分，请先移除它的替换素材。',
-                style: const TextStyle(
-                  fontSize: AppFontSize.caption,
-                  height: 1.5,
-                  color: AppColors.textSecondary,
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: Tooltip(
+        message: '改边界会让已经按原时长做好的素材对不上；'
+            '拆分或合并会让替换方案错位到别的镜头上。\n'
+            '要调整切分，请先移除它的替换素材。',
+        child: inspectorCard([
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(Icons.lock_outline_rounded,
+                  size: 14, color: AppColors.purple),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$detail切分已锁定',
+                  style: const TextStyle(
+                    fontSize: AppFontSize.caption,
+                    height: 1.4,
+                    color: AppColors.textSecondary,
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ]),
+            ],
+          ),
+        ]),
+      ),
     );
   }
 
+  /// 什么都没选中时，这一栏说「整片现在是什么样」。
+  ///
+  /// 2026-09-09 设计走查：原来这里只有一句「未选中任何单元或镜头」，
+  /// 480px 宽的一整栏空着，而人真正想知道的那几个数（换了几个镜头、
+  /// 改了几处字幕、片子多长）挤在窗口最下面一行 10px 的灰字里。
+  /// 空状态不是「没东西可说」，是「还没聚焦到某一处」——那就说整体。
   Widget _buildPlaceholder() {
-    return const Center(
-      child: Text(
-        '未选中任何单元或镜头\n点击左侧列表或时间线查看详情',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.textTertiary, fontSize: AppFontSize.body),
-      ),
+    final units = widget.controller.units;
+    if (units.isEmpty) {
+      return const Center(
+        child: Text(
+          '还没有台词语义单元',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+              color: AppColors.textTertiary, fontSize: AppFontSize.body),
+        ),
+      );
+    }
+
+    var shots = 0;
+    var replaced = 0;
+    var subtitleEdited = 0;
+    var revoiced = 0;
+    // 拼片的一个「分子」整段挑一条素材，没有镜头层——它的进度是
+    // 「几个分子填上了」
+    var filledUnits = 0;
+    for (var u = 0; u < units.length; u++) {
+      final list = units[u].shots;
+      shots += list.length;
+      var unitReplaced = false;
+      for (var i = 0; i < list.length; i++) {
+        if (widget.shotReplaced?.call(u, i) ?? false) {
+          replaced++;
+          unitReplaced = true;
+        }
+        if (widget.subtitleEdited?.call(u, i) ?? false) subtitleEdited++;
+      }
+      if (unitReplaced || (widget.composedDurationOf?.call(u) ?? 0) > 0) {
+        filledUnits++;
+      }
+      if (widget.voiceOf?.call(u) != null) revoiced++;
+    }
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      children: [
+        inspectorTitle(widget.blankTask ? '整片（拼片）' : '整片'),
+        const SizedBox(height: AppSpacing.md),
+        inspectorCard([
+          inspectorInfoRow('时长', formatTimecode(_axis.totalMs, widget.fps)),
+          inspectorInfoRow(
+              widget.blankTask ? '分子' : '台词语义单元', '${units.length}'),
+          if (!widget.blankTask) inspectorInfoRow('视觉镜头', '$shots'),
+        ]),
+        const SizedBox(height: AppSpacing.md),
+        // 「改了多少」比「有多少」更值得一眼看到——它回答的是
+        // 「这条片子翻新到哪一步了」。
+        // 拼片没有镜头层（分子整段挑一条素材），「换过画面的镜头 0 / 0」
+        // 是一行没有意义的数（2026-09-09 设计走查）
+        inspectorCard([
+          if (!widget.blankTask)
+            inspectorInfoRow('换过画面的镜头', '$replaced / $shots'),
+          if (widget.blankTask)
+            inspectorInfoRow('已挑到素材的分子', '$filledUnits / ${units.length}'),
+          inspectorInfoRow('手改过的字幕', '$subtitleEdited'),
+          inspectorInfoRow('换过音色的单元', '$revoiced'),
+        ]),
+        const SizedBox(height: AppSpacing.md),
+        const Text(
+          '点左侧列表、或时间线上任意一块，这里就变成它的属性。',
+          style: TextStyle(
+              color: AppColors.textTertiary, fontSize: AppFontSize.caption),
+        ),
+      ],
     );
   }
 
@@ -339,7 +432,6 @@ class _InspectorPanelState extends State<InspectorPanel> {
     // 的素材全对不上；拆分/合并更会让替换方案的下标整体错位
     final locks = widget.controller.locks;
     final lockedNote = _lockNoteFor(locks, unitIndex, null);
-    final structureLocked = locks.unitHasAnyLock(unitIndex);
     final canNudgeStart = unitIndex > 0 &&
         !widget.readOnly &&
         !locks.isUnitLocked(unitIndex) &&
@@ -432,23 +524,57 @@ class _InspectorPanelState extends State<InspectorPanel> {
               _transcriptField(unitIndex),
             ]),
           ],
-          // 拆分/并入是「在一条固定的原片时间轴上换个切法」。手加的单元
-          // 是加出来的，没有台词可拆、也没有原片区间可并
-          if (unit.hasSource) ...[
-            const SizedBox(height: 10),
-            inspectorActionsRow(
-              splitLabel: '✂ 在游标处拆分单元',
-              mergeLabel: '⇧ 并入上一单元',
-              onSplit: widget.readOnly || structureLocked
-                  ? null
-                  : () => widget.onSplitAtPlayhead?.call(),
-              onMerge: widget.readOnly || structureLocked
-                  ? null
-                  : widget.controller.mergeSelectedWithPrevious,
-            ),
-          ],
         ],
       ),
+    );
+  }
+
+  /// 镜头的动作行。同样钉在底部，理由见 [_unitActions]
+  Widget? _shotActions(int unitIndex, int shotIndex) {
+    final units = widget.controller.units;
+    if (unitIndex < 0 || unitIndex >= units.length) return null;
+    if (shotIndex < 0 || shotIndex >= units[unitIndex].shots.length) {
+      return null;
+    }
+    final locks = widget.controller.locks;
+    final selfLocked = locks.isShotLocked(unitIndex, shotIndex);
+    return inspectorActionsRow(
+      splitLabel: '✂ 在游标处拆分镜头',
+      mergeLabel: '⇧ 并入前一镜头',
+      onSplit: widget.readOnly || selfLocked
+          ? null
+          : () => widget.onSplitAtPlayhead?.call(),
+      // 并入前一镜头会让前一个消失：自己或前一个被钉都不行
+      onMerge: widget.readOnly ||
+              selfLocked ||
+              locks.isShotLocked(unitIndex, shotIndex - 1)
+          ? null
+          : widget.controller.mergeSelectedWithPrevious,
+    );
+  }
+
+  /// 单元的动作行。**钉在面板底部，不跟着滚**——它上面的内容
+  /// （时间、锁定说明、标签、音色、台词框）加起来早就超过一屏，
+  /// 这两个按钮跟着滚就永远落在可视区外，人根本不知道有它们
+  /// （2026-09-09 设计走查真机：属性栏底下什么都看不到）。
+  Widget? _unitActions(int unitIndex) {
+    final units = widget.controller.units;
+    if (unitIndex < 0 || unitIndex >= units.length) return null;
+    final unit = units[unitIndex];
+    // 拆分/并入是「在一条固定的原片时间轴上换个切法」。手加的单元
+    // 是加出来的，没有台词可拆、也没有原片区间可并
+    if (!unit.hasSource) return null;
+    final locks = widget.controller.locks;
+    final structureLocked = locks.unitHasAnyLock(unitIndex);
+    return inspectorActionsRow(
+      splitLabel: '✂ 在游标处拆分单元',
+      mergeLabel: '⇧ 并入上一单元',
+      onSplit: widget.readOnly || structureLocked
+          ? null
+          : () => widget.onSplitAtPlayhead?.call(),
+      onMerge: widget.readOnly || structureLocked
+          ? null
+          : widget.controller.mergeSelectedWithPrevious,
     );
   }
 
@@ -552,20 +678,6 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 widget.shotMaterialVoiceover?.call(unitIndex, shotIndex),
             onChanged: (mode, volume) => widget.onShotMaterialAudioChanged
                 ?.call(unitIndex, shotIndex, mode, volume),
-          ),
-          const SizedBox(height: 10),
-          inspectorActionsRow(
-            splitLabel: '✂ 在游标处拆分镜头',
-            mergeLabel: '⇧ 并入前一镜头',
-            onSplit: widget.readOnly || selfLocked
-                ? null
-                : () => widget.onSplitAtPlayhead?.call(),
-            // 并入前一镜头会让前一个消失：自己或前一个被钉都不行
-            onMerge: widget.readOnly ||
-                    selfLocked ||
-                    locks.isShotLocked(unitIndex, shotIndex - 1)
-                ? null
-                : widget.controller.mergeSelectedWithPrevious,
           ),
         ],
       ),

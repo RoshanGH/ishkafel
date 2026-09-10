@@ -12,9 +12,11 @@ class MainFlutterWindow: NSWindow {
 
   /// 最小窗口尺寸。
   ///
-  /// 高度由时间线反推：四条轨（含标题条）248px + 工具条约 50px = 298px，
-  /// 而时间线区占 body 的 2/5，body = 高度 − 顶栏 52 − 底栏 60 − 分隔线 1，
-  /// 于是最低 298×5/2 + 113 ≈ 858。取 880 留一点余量。
+  /// 高度由时间线反推：六条轨（含标题条）330px + 工具条 40px = 370px。
+  /// 时间线区按内容要多少给多少，上限是 body 的 55%（见 workbench_body.dart），
+  /// 于是 body 至少要 370 ÷ 0.55 ≈ 673；body = 高度 − 顶栏 52 − 底栏 60 −
+  /// 分隔线 1，所以窗口至少 786。取 880 留一档余量——那样六条轨在**任何**
+  /// 允许的窗口尺寸下都完整可见，不用滚。
   /// 见 test/features/workbench/timeline/timeline_tracks_layout_test.dart。
   private static let minSize = NSSize(width: 1100, height: 880)
 

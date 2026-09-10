@@ -23,12 +23,33 @@ const double _playerChromeHeight = 96;
 /// 播放器最窄能到多少：再窄控制条上的逐帧按钮就点不中了（改造时踩过）
 const double _minPlayerWidth = 280;
 
+/// 右栏（检查器）能有多宽。它是表单：再宽只会让眼睛从最左的标签扫到
+/// 最右的值走更远的路，所以涨得慢、也封得住
+double _maxPanelWidth(double totalWidth) =>
+    (totalWidth * 0.28).clamp(480, 620);
+
+/// 左栏（单元列表）能有多宽。**比右栏宽**：那一栏是台词，宽一点就能多显示
+/// 半句，而这个软件的活儿正是照着台词挑画面。
+///
+/// 1440 窗口下两个上限都还没被比例追上，于是这么分：
+/// 左 560 + 中 400 + 右 480——中栏里 9:16 的画面约 180 宽，两侧各剩百来
+/// 像素的呼吸（原来是 302px 的死黑）。窗口再拉宽，两侧才跟着涨；
+/// 竖屏素材在宽屏上留一点余量是固有的，不必追着消灭
+double _maxListWidth(double totalWidth) =>
+    (totalWidth * 0.34).clamp(560, 760);
+
 /// [stageHeight] 是上半区的可用高度。给了它就能算出播放器**真正需要**多宽
 /// ——素材是 9:16 竖屏，1600 宽的窗口里它只要三百出头，剩下六百多全是死黑。
 ///
-/// [candidatesActive] 为真时把那片死黑还给候选面板：网格的宽度直接换成
+/// **属性面板一样吃这片死黑**（2026-09-09 设计走查）：1440 窗口下中栏
+/// 775px 里画面只占 211px，两侧 560px 是纯黑，而左栏的台词被截断、右栏的
+/// 表单挤成一团。原来只在挑素材时才还回去，理由是「检查器是表单，行太长
+/// 反而难读」——那只说明它该有上限（[_maxPanelWidth]），不说明多出来的
+/// 半屏就只能是黑的。
+///
+/// [candidatesActive] 为真时候选面板**不受那个上限**：网格的宽度直接换成
 /// 「一屏能看到几条」，实测右栏封顶 480 时一屏只有六个格子，挑素材根本
-/// 扫不动。检查器不这么撑——它是表单，行太长反而难读。
+/// 扫不动。
 WorkbenchPanelWidths workbenchPanelWidths(
   double totalWidth, {
   double? stageHeight,
@@ -39,15 +60,30 @@ WorkbenchPanelWidths workbenchPanelWidths(
 
   // 下限 320 不是拍脑袋：单元列表行里「U3 00:27.14–00:30.08  2 镜头」这一行
   // 在 306px 以下就会溢出（实测 280 时溢出 14px）
-  final left = band(0.18, 320, 400);
-  var right = band(0.24, 300, 480);
+  final maxList = _maxListWidth(totalWidth);
+  final maxPanel = _maxPanelWidth(totalWidth);
+  var left = band(0.18, 320, maxList);
+  var right = band(0.24, 300, maxPanel);
 
-  if (candidatesActive && stageHeight != null) {
+  if (stageHeight != null) {
     // 9:16 画面在这个高度下要多宽，播放器就给多宽，一分不多
     final videoHeight = math.max(0.0, stageHeight - _playerChromeHeight);
     final playerWidth = math.max(_minPlayerWidth, videoHeight * 9 / 16);
-    final spare = totalWidth - left - playerWidth;
-    if (spare > right) right = spare;
+    if (candidatesActive) {
+      // 挑素材：中间只留播放器要的，剩下全是候选网格的
+      final spare = totalWidth - left - playerWidth;
+      if (spare > right) right = spare;
+    } else {
+      // 看属性：余量先把右栏喂到上限，再喂左栏（列表宽一点就能多显示
+      // 半句台词，比表单更吃宽度）；两边都满了才留给中栏
+      var spare = totalWidth - left - right - playerWidth;
+      if (spare > 0) {
+        final toRight = math.min(spare, maxPanel - right);
+        right += toRight;
+        spare -= toRight;
+      }
+      if (spare > 0) left += math.min(spare, maxList - left);
+    }
   }
   // 极窄窗口的兜底：两侧之和不能吃掉整行。0.8 而不是更小——800px（测试与
   // 小窗常见尺寸）下两侧正好是 320+300=620，占 0.775，必须让下限赢过这条

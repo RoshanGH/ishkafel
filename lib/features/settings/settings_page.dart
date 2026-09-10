@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shared/scroll_fade.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -31,6 +33,9 @@ const _sections = <_Section>[
 ];
 
 /// 设置页：左侧分区导航 + 右侧内容（设计稿 `外围页面` 第 3 屏）
+/// 设置页内容区最宽多少：卡片 640 + 两侧 24 的页边距
+const double _contentMaxWidth = 688;
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -57,7 +62,25 @@ class _SettingsPageState extends State<SettingsPage> {
               selected: _selected,
               onSelect: (i) => setState(() => _selected = i),
             ),
-            Expanded(child: _sections[_selected].build()),
+            // **内容整块居中**：1440 宽的窗口里，内容只有 640 宽，
+            // 贴着左边导航栏摆的话右手边空出 580px 什么都没有，
+            // 看起来像页面没做完（2026-09-09 设计走查）。
+            // 整块居中、块内仍然靠左——卡片、说明、按钮就都对得齐
+            Expanded(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints:
+                      const BoxConstraints(maxWidth: _contentMaxWidth),
+                  // 「运行环境」这一页一屏放不下（最底下的「Agent 说明书」
+                  // 被截断），而 macOS 的滚动条不动鼠标不出现
+                  child: ScrollFade(
+                    background: AppColors.background,
+                    child: _sections[_selected].build(),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       );
