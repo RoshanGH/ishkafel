@@ -24,6 +24,7 @@ import '../../core/audio/voice_plan.dart';
 import '../../core/analysis/providers.dart' show AsrSentence;
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/material_audio.dart';
+import '../../core/audio/source_audio.dart';
 import '../../core/export/export_plan.dart';
 import '../../core/export/export_runner.dart';
 import '../../core/subtitle/subtitle_style.dart';
@@ -85,6 +86,11 @@ Future<void> showExportDialog(
   /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
   MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
 
+  /// 「原片这一镜的声音」的全片打底 + 分离出来的背景音轨。
+  /// 少传任何一个，人在属性面板里设的那一档就只在预览里生效、导出时消失
+  SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
+  String? backgroundPath,
+
   /// **手改过的**字幕。不传下去的话，人在属性面板改完，导出烧的还是按 ASR
   /// 现算的那一份——而这件事只有把片子导出来看一眼才发现（2026-09-08 真机）
   SubtitleTrack subtitleTrack = const SubtitleTrack.empty(),
@@ -99,6 +105,8 @@ Future<void> showExportDialog(
         subtitleSentences: subtitleSentences,
         subtitleStyle: subtitleStyle,
         materialAudio: materialAudio,
+        sourceAudio: sourceAudio,
+        backgroundPath: backgroundPath,
         subtitleTrack: subtitleTrack,
         units: units,
         replacements: replacements,
@@ -157,6 +165,8 @@ class _ExportDialog extends ConsumerStatefulWidget {
 
   /// 「保留素材原声」的全片打底设置——不带进来的话，界面上改了导出还是老样子
   final MaterialAudioSetting materialAudio;
+  final SourceAudioSetting sourceAudio;
+  final String? backgroundPath;
 
   /// **手改过的**字幕（见 [SubtitleTrack]）
   final SubtitleTrack subtitleTrack;
@@ -189,6 +199,8 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.vocalsPath,
     this.subtitleSentences = const [],
     this.materialAudio = MaterialAudioSetting.off,
+    this.sourceAudio = SourceAudioSetting.auto,
+    this.backgroundPath,
     this.subtitleTrack = const SubtitleTrack.empty(),
     this.subtitleStyle = SubtitleStyle.standard,
     required this.outputDir,
@@ -318,6 +330,8 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
         vocalsPath: widget.vocalsPath,
         subtitleSentences: widget.subtitleSentences,
         materialAudio: widget.materialAudio,
+        sourceAudio: widget.sourceAudio,
+        backgroundPath: widget.backgroundPath,
         subtitleTrack: widget.subtitleTrack,
         onProgress: (d, t, w) {
           if (mounted) {
@@ -341,6 +355,8 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
               vocalsPath: widget.vocalsPath,
               subtitleSentences: widget.subtitleSentences,
               materialAudio: widget.materialAudio,
+              sourceAudio: widget.sourceAudio,
+              backgroundPath: widget.backgroundPath,
               subtitleTrack: widget.subtitleTrack,
               onProgress: (d, t, w) {
                 if (mounted) {

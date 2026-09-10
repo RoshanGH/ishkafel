@@ -229,6 +229,11 @@ Future<int> runExportCommand({
     voices: task.voices,
     voiceAudio: voiceAudio,
     vocalsPath: task.vocalsPath,
+    backgroundPath: task.backgroundPath,
+    // 两层镜头声音**都要带上**：这条路一度只传了 vocalsPath，于是命令行
+    // 导出来的片子里替换素材那一层从来没响过，和界面导出的不是同一条片子
+    materialAudio: task.materialAudio,
+    sourceAudio: task.sourceAudio,
     // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
     subtitleSentences: task.asrSentences ?? const [],
     // 手改过的字幕以人改的为准——Agent 走的是同一条导出路

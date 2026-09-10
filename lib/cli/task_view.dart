@@ -1,3 +1,4 @@
+import 'dart:io';
 import '../core/export/subtitle_coverage.dart';
 import '../core/export/composed_timeline.dart';
 import '../core/models/renew_task.dart';
@@ -78,6 +79,13 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     // 「原片这一镜的声音」的全片打底。**存了就要报**：Agent 查到的空
     // 看起来正好像「没问题」
     'sourceAudio': task.sourceAudio.toJson(),
+    // 分离轨在不在盘上。选「人声」「背景声」之前得能查到——查不到就只能
+    // 先设上再撞导出拦截，那是一次白跑（报的是有没有，不是路径：
+    // 路径对调用方没用，还会把一堆机器噪音塞进这份 JSON）
+    'stems': {
+      'vocals': _onDisk(task.vocalsPath),
+      'background': _onDisk(task.backgroundPath),
+    },
     // **成片位置**：界面上显示的是这一套，Agent 也得拿同一套——它据此判断
     // 「这一镜够不够铺满这句话」「前后连不连得上」，基准错了判断就跟着错。
     //
@@ -224,3 +232,7 @@ Map<String, dynamic> _replacementToJson(int index, UnitReplacement r) => {
           for (final e in r.shotCandidateIds.entries) '${e.key}': e.value,
         },
     };
+
+/// 这条分离轨在不在盘上。存了路径不等于文件还在——任务被清理过、
+/// 换过机器都可能只剩一条记录
+bool _onDisk(String? path) => path != null && File(path).existsSync();

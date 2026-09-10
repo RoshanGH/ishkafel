@@ -2366,6 +2366,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       subtitleSentences: _task.asrSentences ?? const [],
       subtitleStyle: _task.subtitle,
       materialAudio: _task.materialAudio,
+      // 「原片这一镜的声音」也要带上——只传素材那一层的话，人在属性面板里
+      // 设的档位只在预览里生效，导出来的片子还是老样子
+      sourceAudio: _task.sourceAudio,
+      backgroundPath: _task.backgroundPath,
       // 人手改过的那几镜的字幕，以他改的为准
       subtitleTrack: _task.subtitleTrack,
       // 上次导到哪儿就默认还导到哪儿——同一个项目往往一直往同一个位置出片。
