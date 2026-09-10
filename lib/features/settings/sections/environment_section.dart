@@ -104,7 +104,10 @@ class _ToolRow extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 84,
+              // 108 而不是 84：`audio-separator` 在 84 里会折成两行
+              // 「audio-」「separator」，和上面几行的基线全错开
+              // （2026-09-09 设计走查）
+              width: 108,
               child: Text(tool.name,
                   style: const TextStyle(
                       fontSize: AppFontSize.body,

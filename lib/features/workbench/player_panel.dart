@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/playback/playback_controller.dart';
@@ -156,7 +157,10 @@ class PlayerPanelState extends State<PlayerPanel> {
           focusNode: _focusNode,
           autofocus: true,
           child: Container(
-            color: AppColors.background,
+            // 中栏是「剧场」：比两侧工作栏再沉一级，预览从背景里凹出来。
+            // 用全局背景色的话，画面和它周围那片黑是同一个平面，
+            // 9:16 素材两侧的留白就读成「没做完」而不是「舞台」
+            color: AppColors.stageWell,
             child: Column(
               children: [
                 Expanded(child: _buildStage()),
@@ -171,19 +175,34 @@ class PlayerPanelState extends State<PlayerPanel> {
 
   Widget _buildStage() {
     return Center(
-      child: AspectRatio(
-        aspectRatio: 9 / 16,
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.stageBackground,
-            borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        // 画面不贴着上下边缘：舞台要有天地，紧贴着会读成「被裁掉了」
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        child: AspectRatio(
+          aspectRatio: 9 / 16,
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.stageBackground,
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              // 一圈边 + 一层落影：把画面从舞台底色里托起来。
+              // 少了这两样，深色画面（夜景、黑场）和背景连成一片，
+              // 人看不出画幅到哪儿为止。用 [AppColors.stageEdge] 而不是
+              // 普通 border——后者在「黑画面压黑舞台」上根本看不见
+              border: Border.all(color: AppColors.stageEdge),
+              boxShadow: const [
+                BoxShadow(
+                    color: Color(0x99000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 6)),
+              ],
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: widget.videoWidget ??
+                const Center(
+                  child: Icon(Icons.movie_outlined,
+                      color: AppColors.textTertiary, size: 40),
+                ),
           ),
-          clipBehavior: Clip.antiAlias,
-          child: widget.videoWidget ??
-              const Center(
-                child: Icon(Icons.movie_outlined,
-                    color: AppColors.textTertiary, size: 40),
-              ),
         ),
       ),
     );
@@ -191,29 +210,74 @@ class PlayerPanelState extends State<PlayerPanel> {
 
   Widget _buildTransport() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      color: AppColors.surfaceRaised,
-      // 窄栏（如三栏挤压后的播放器列）下 transport 内容可能超出可视宽度，
-      // 用水平滚动兜底，避免 RenderFlex 溢出报错，不裁掉任何控件
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          _transportButton(
-            key: const Key('player-seek-start'),
-            icon: Icons.skip_previous,
-            onTap: _seekToStart,
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
+      // **控制条属于剧场，不是又一块面板**。原来用 surfaceRaised，
+      // 在几乎全黑的舞台底上是一条突兀的亮横条（2026-09-10 走查）。
+      // 现在贴着舞台底色，只用一条细线把它和画面分开
+      decoration: const BoxDecoration(
+        color: AppColors.stageWell,
+        border: Border(top: BorderSide(color: AppColors.topHighlight)),
+      ),
+      // 窄栏（挑素材时中栏会被压到 280）下按钮和时间码并排放不下。
+      // **不能靠横向滚动兜底**：滚动只是把时间码推到可视区外，人看到的是
+      // 「00:00.00 / 01:1」——一个被咬掉一半的数字，而且没有任何东西告诉他
+      // 还能滚（2026-09-09 设计走查真机截图）。挤不下就换行，时间码永远完整
+      child: LayoutBuilder(builder: (context, box) {
+        final clock = ValueListenableBuilder<int>(
+          valueListenable: _positionMs,
+          builder: (context, posMs, _) => Text(
+            '${formatTimecode(posMs, widget.fps)} / '
+            '${formatTimecode(widget.durationMs, widget.fps)}',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: AppFontSize.body,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
           ),
+        );
+        // 五个键并排要 ~250px。再窄就先舍「跳到片头/片尾」——那两个
+        // 有快捷键也有时间线可以点，而逐帧和播放没有别的入口
+        final buttons = Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: _transportButtons(compact: box.maxWidth < 260),
+        );
+        // **用 Wrap 而不是一个宽度阈值**：按钮组的真实宽度取决于 IconButton
+        // 的最小命中区和时间码的位数，写死一个阈值总会在某个宽度上判错——
+        // 判小了这一行就溢出（测试里 422px 溢出 31px）。Wrap 自己量，
+        // 放得下并排、放不下换行，两种情况都不会把时间码咬掉
+        return Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.xs,
+          children: [buttons, clock],
+        );
+      }),
+    );
+  }
+
+  List<Widget> _transportButtons({bool compact = false}) {
+    return [
+          if (!compact)
+            _transportButton(
+              key: const Key('player-seek-start'),
+              icon: Icons.skip_previous,
+              tooltip: '回到片头　Home',
+              onTap: _seekToStart,
+            ),
           _transportButton(
             key: const Key('player-step-back'),
             icon: Icons.chevron_left,
+            tooltip: '后退一帧　←（⇧← 一次 10 帧）',
             onTap: () => _stepFrame(-1),
           ),
           const SizedBox(width: 4),
           _transportButton(
             key: const Key('player-toggle-play'),
             icon: _isPlaying ? Icons.pause_circle_filled : Icons.play_circle_fill,
+            tooltip: _isPlaying ? '暂停　空格' : '播放　空格',
             size: 30,
             onTap: _togglePlay,
           ),
@@ -221,40 +285,31 @@ class PlayerPanelState extends State<PlayerPanel> {
           _transportButton(
             key: const Key('player-step-forward'),
             icon: Icons.chevron_right,
+            tooltip: '前进一帧　→（⇧→ 一次 10 帧）',
             onTap: () => _stepFrame(1),
           ),
-          _transportButton(
-            key: const Key('player-seek-end'),
-            icon: Icons.skip_next,
-            onTap: _seekToEnd,
-          ),
-          const SizedBox(width: 12),
-          // 只让这行时间码随播放位置重建，面板其余部分（含视频区域）不动
-          ValueListenableBuilder<int>(
-            valueListenable: _positionMs,
-            builder: (context, posMs, _) => Text(
-              '${formatTimecode(posMs, widget.fps)} / ${formatTimecode(widget.durationMs, widget.fps)}',
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: AppFontSize.body,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
+          if (!compact)
+            _transportButton(
+              key: const Key('player-seek-end'),
+              icon: Icons.skip_next,
+              tooltip: '跳到片尾　End',
+              onTap: _seekToEnd,
             ),
-          ),
-        ],
-        ),
-      ),
-    );
+    ];
   }
 
   Widget _transportButton({
     required Key key,
     required IconData icon,
     required VoidCallback onTap,
+    required String tooltip,
     double size = 22,
   }) {
     return IconButton(
       key: key,
+      // **tooltip 里带上快捷键**：这五个键全是纯图标，人既猜不出
+      // 「⏮」是回片头还是上一镜，也无从知道有键盘可用
+      tooltip: tooltip,
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
       padding: const EdgeInsets.symmetric(horizontal: 4),

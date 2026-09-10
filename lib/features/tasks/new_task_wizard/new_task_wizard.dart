@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+
+import '../../shared/scroll_fade.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_colors.dart';
@@ -267,7 +271,14 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadius.lg)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 680, maxHeight: 640),
+        // 高度**跟着屏幕走**，别写死 640：1440×900 的窗口里这个表单一屏
+        // 放不下，最后一个输入框被底部说明压掉一半（2026-09-09 设计走查）。
+        // 留一成给对话框外的余白，再封个顶——屏幕再高也不该拉成一长条
+        constraints: BoxConstraints(
+          maxWidth: 680,
+          maxHeight: math.min(
+              820, MediaQuery.sizeOf(context).height * 0.86),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.xl),
           child: Column(
@@ -277,7 +288,13 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
               _WizardHeader(_line),
               const SizedBox(height: AppSpacing.lg),
               Flexible(
-                child: SingleChildScrollView(
+                // 内容比对话框高时下沿压一层淡出：这里的表单一屏放不下
+                // （真机上「视觉镜头的打标约束」那个输入框被底部说明压住了
+                // 一半），而 macOS 的滚动条不动鼠标根本不出现
+                // ——人不知道下面还有东西（2026-09-09 设计走查）
+                child: ScrollFade(
+                  background: AppColors.surfaceRaised,
+                  child: SingleChildScrollView(
                   child: WizardBody(
                     filePath: _filePath,
                     line: _line,
@@ -304,6 +321,7 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     project: _project,
                     onProjectChanged: (p) => setState(() => _project = p),
                   ),
+                  ),
                 ),
               ),
               const SizedBox(height: AppSpacing.lg),
@@ -315,6 +333,10 @@ class _NewTaskWizardState extends ConsumerState<NewTaskWizard> {
                     : _blank
                         ? '创建拼片任务'
                         : '开始分析',
+                // **只有替换裂变要跑分析**。脚本成片和拼片建出来直接进工作台，
+                // 一次云端调用都没有——底下却写着「预计耗时数分钟，消耗云端
+                // API 额度」，等于凭空吓人一跳（2026-09-09 设计走查）
+                analyses: !_script && !_blank,
                 onCancel: () => Navigator.of(context).pop(),
                 onStart: _start,
               ),

@@ -28,24 +28,54 @@ void main() {
           reason: '字幕轨在镜头轨和配乐轨中间，恒定占位');
     });
 
-    test('最小窗口下放不满六条轨——所以时间线区必须能纵向滚', () {
-      // 与 macos/Runner/MainFlutterWindow.swift 的 minSize 保持一致
-      const windowHeight = 880.0;
-      const topBar = 52.0; // WorkbenchTopBar.preferredSize
-      const bottomBar = 60.0; // WorkbenchBottomBar 固定高
-      const divider = 1.0;
-      const toolbarHeight = 50.0; // 时间线工具条（含 Material Slider）实测量级
+    /// 时间线区的高度不再是死比例，而是「六条轨 + 工具条要多少就给多少」，
+    /// 上下用 35% / 55% 夹住（见 workbench_body.dart 的 LayoutBuilder）。
+    ///
+    /// 2026-09-09 设计走查真机：写死 5:4 时，**默认的 1440×900 窗口下第六条
+    /// 轨（音频波形）整条落在可视区外**——人不滚动就永远看不到波形，
+    /// 而波形正是定位切点的主要依据。
+    const toolbarHeight = 40.0;
+    const topBar = 52.0; // WorkbenchTopBar.preferredSize
+    const bottomBar = 60.0; // WorkbenchBottomBar 固定高
+    const divider = 1.0;
 
-      final bodyHeight = windowHeight - topBar - bottomBar - divider;
-      final timelineArea = bodyHeight * 4 / 9; // 三栏区 : 时间线区 = 5 : 4
-      final drawable = timelineArea - toolbarHeight;
+    double timelineHeightFor(double windowHeight) {
+      final body = windowHeight - topBar - bottomBar - divider;
+      final wanted = TimelineTracks.totalHeight + toolbarHeight;
+      return wanted.clamp(body * 0.35, body * 0.55);
+    }
 
-      expect(drawable, lessThan(TimelineTracks.totalHeight),
-          reason: '这是有意的：抬窗口最小高度会让 1440×900 的笔记本装不下整个'
-              '窗口。差的这几十像素靠滚动兜底');
-      // 兜底成立的前提：画布高取 max(视口高, 总高)，总高更大时才滚得动
-      expect(TimelineTracks.totalHeight - drawable, lessThan(60),
-          reason: '要滚的距离得小到一眼能看出「下面还有」，否则等于藏了一条轨');
+    test('默认窗口（1440×900）下六条轨全部看得见，不用滚', () {
+      final drawable = timelineHeightFor(900) - toolbarHeight;
+
+      expect(drawable, greaterThanOrEqualTo(TimelineTracks.totalHeight),
+          reason: '差一点点就是「最后一条轨永远看不到」——而人不会想到去滚它');
+    });
+
+    test('从最小窗口到大屏，六条轨都看得见——一条都不许藏起来', () {
+      // 窗口最小 880 高（MainFlutterWindow.swift），那时 body 是 767，
+      // 上限 55% 给得出 422 > 370，够。再往上只会更宽裕
+      for (final windowHeight in [880.0, 900.0, 1080.0, 1440.0, 2000.0]) {
+        final drawable = timelineHeightFor(windowHeight) - toolbarHeight;
+
+        expect(drawable, greaterThanOrEqualTo(TimelineTracks.totalHeight),
+            reason: '$windowHeight 高的窗口下最后一条轨还是要滚才看得到，'
+                '而人不会想到去滚它');
+      }
+    });
+
+    test('屏幕再高，时间线也不会退化成一条缝', () {
+      final body = 2000 - topBar - bottomBar - divider;
+
+      expect(timelineHeightFor(2000), greaterThanOrEqualTo(body * 0.35 - 0.5),
+          reason: 'CLAUDE.md 要「时间线占比要充足（参考剪映约 40%）」');
+    });
+
+    test('屏幕再矮，预览也不会被时间线挤没', () {
+      final body = 880 - topBar - bottomBar - divider;
+
+      expect(timelineHeightFor(880), lessThanOrEqualTo(body * 0.55 + 0.5),
+          reason: '这里毕竟是「看画面」的地方');
     });
   });
 }

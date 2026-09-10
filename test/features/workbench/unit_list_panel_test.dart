@@ -66,7 +66,11 @@ void main() {
     expect(tapped?.index, 1);
   });
 
-  testWidgets('选中行使用 accentBlue 高亮底色', (tester) async {
+  /// 选中的那一行要比别的行**明显**——不只是「有底色」。
+  ///
+  /// 2026-09-10 起未选中的行也有底了（原来全透明，一列下来只有文字飘着，
+  /// 看不出一行到哪儿为止），所以这条用例改成比对两者的差别。
+  testWidgets('选中行比未选中行更亮、更蓝，还带一圈发光', (tester) async {
     final controller = SegmentationEditorController(
       initialUnits: _fixtureUnits(),
       durationMs: 4000,
@@ -78,9 +82,21 @@ void main() {
     await tester.pumpWidget(MaterialApp(
       home: Material(child: UnitListPanel(controller: controller)),
     ));
+    await tester.pumpAndSettle();
 
-    final container = tester.widget<Container>(find.byKey(const Key('unit-row-container-0')));
-    final decoration = container.decoration as BoxDecoration;
-    expect(decoration.color, isNotNull);
+    BoxDecoration decoOf(int i) =>
+        (tester.widget<AnimatedContainer>(
+                find.byKey(Key('unit-row-container-$i'))).decoration
+            as BoxDecoration);
+
+    final selected = decoOf(0);
+    final other = decoOf(1);
+
+    expect(selected.color!.b, greaterThan(other.color!.b),
+        reason: '选中态该是蓝的');
+    expect(selected.boxShadow, isNotNull,
+        reason: '选中的那一行要有一圈发光，扫一眼就能找到自己在哪');
+    expect(other.color!.a, greaterThan(0),
+        reason: '未选中的行也要有底——全透明的话看不出「一行」到哪儿为止');
   });
 }

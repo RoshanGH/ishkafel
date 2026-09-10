@@ -166,7 +166,7 @@ class CandidateCard extends StatelessWidget {
         child: InkWell(
           key: Key('picking-copy-name-$id'),
           onTap: () => _copy(context, name),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.xs),
           child: Padding(
             padding: const EdgeInsets.all(2),
             child: Icon(
@@ -281,7 +281,7 @@ class CandidateCard extends StatelessWidget {
               horizontal: AppSpacing.xs, vertical: 2),
           decoration: BoxDecoration(
             color: AppColors.stageBackground.withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
           ),
           child: child,
         ),
@@ -324,7 +324,7 @@ class CandidateCard extends StatelessWidget {
           child: InkWell(
             key: Key('picking-play-${entry.material.id}'),
             onTap: onPlay,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
             child: Container(
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(

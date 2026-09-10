@@ -95,6 +95,7 @@ Future<void> pickGroup(WidgetTester tester, Key fieldKey, String name) async {
 }
 
 void main() {
+  _noAnalysisNote();
   _blankSourceTests();
   _scriptSourceTests();
   testWidgets('向导按设计稿分两步：选一条线 + 两个标签组', (tester) async {
@@ -298,17 +299,22 @@ void main() {
       expect(lastResult, isNull);
     });
 
-    testWidgets('给出耗时预期，并说明它取决于什么', (tester) async {
+    testWidgets('给出耗时预期；「取决于什么」放在停上去看得到的地方', (tester) async {
       await openWizard(tester, wrap());
 
+      // 一行说完，详情进 tooltip——两行小字常驻会把上面的表单挤掉半个
+      // 输入框（2026-09-09 设计走查真机）
       expect(find.textContaining('分钟'), findsOneWidget);
-      expect(find.textContaining('镜头'), findsWidgets,
+      expect(WizardFooter.durationDetail, contains('镜头'),
           reason: '耗时几乎全部取决于镜头数（画面打标是最慢的一步）。'
               '只给一个固定数字，用户按它安排时间必然落空');
+      expect(WizardFooter.durationDetail, contains('切分确认'),
+          reason: '还得说清分析完会去哪儿');
     });
 
     test('耗时预期不写一个已经不成立的实测值', () {
-      expect(WizardFooter.durationNote, isNot(contains('1~2 分钟')),
+      expect('${WizardFooter.durationNote}${WizardFooter.durationDetail}',
+          isNot(contains('1~2 分钟')),
           reason: '「1~2 分钟（96 秒素材实测）」是并发打标改造前的旧口径，'
               '实测同样长度要几分钟；界面上写一个做不到的数字，'
               '比不给预期更伤信任');
@@ -410,5 +416,44 @@ void _scriptSourceTests() {
     await tester.pumpAndSettle();
 
     expect(lastResult!.script, isFalse, reason: '改选拼片后脚本选择必须被清掉');
+  });
+}
+
+/// **不跑分析的那两条线，别摆分析的耗时和额度。**
+///
+/// 2026-09-09 设计走查：选了「脚本成片」，按钮已经变成「创建脚本成片」，
+/// 底下却还写着「预计耗时数分钟，消耗云端 API 额度」——这条线建出来直接
+/// 进编导台，一次云端调用都没有，那句话凭空吓人一跳。
+void _noAnalysisNote() {
+  testWidgets('脚本成片：说「直接进工作台」，不说耗时和额度', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: WizardFooter(
+          missing: const [],
+          startLabel: '创建脚本成片',
+          analyses: false,
+          onCancel: () {},
+          onStart: () {},
+        ),
+      ),
+    ));
+
+    expect(find.textContaining('不跑分析'), findsOneWidget);
+    expect(find.textContaining('API 额度'), findsNothing,
+        reason: '这条线一次云端调用都没有');
+  });
+
+  testWidgets('替换裂变照旧给耗时预期', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: WizardFooter(
+          missing: const [],
+          onCancel: () {},
+          onStart: () {},
+        ),
+      ),
+    ));
+
+    expect(find.textContaining('API 额度'), findsOneWidget);
   });
 }

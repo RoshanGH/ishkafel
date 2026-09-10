@@ -256,6 +256,20 @@ class CandidatePanel extends StatelessWidget {
                     fontSize: AppFontSize.micro),
               ),
             ),
+            // **说清还有几条**：三条提示挤成一行再截断，末尾那个省略号是
+            // 唯一线索——人得先想到去 hover 才知道后面还有话
+            // （2026-09-09 设计走查：一行里塞了「整体替换被锁定」
+            // 「已排除 剧情」「按标签命中 5643 条」三件事）
+            if (notes.length > 1)
+              Padding(
+                padding: const EdgeInsets.only(left: AppSpacing.xs),
+                child: Text('共 ${notes.length} 条',
+                    key: const Key('picking-notes-count'),
+                    style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: AppFontSize.micro,
+                        fontWeight: FontWeight.w600)),
+              ),
             // 标签表拉失败时的**就地重试**出口。此前没有任何路径会再拉一次，
             // 只能退出任务重进（用户原话：「那为什么不直接加个刷新按钮」）
             if (scope.tagUnavailableText != null && onRetryTags != null)
@@ -290,19 +304,30 @@ class CandidatePanel extends StatelessWidget {
     final name = projectName;
     final scoped = name != null && name.isNotEmpty;
     final color = scoped ? AppColors.textSecondary : AppColors.orange;
-    return Container(
-      key: const Key('picking-project-scope'),
-      padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppRadius.sm),
-      ),
-      child: Text(
-        scoped ? '限定项目组 · $name' : '未设项目组 · 搜的是我的全部项目',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: color, fontSize: AppFontSize.caption),
+    // **短到不会被截断**：原来写「未设项目组 · 搜的是我的全部项目」，
+    // 这一行放不下，真机上显示的是「未设项目组 · 搜的是我的...」——
+    // 一个要求刺眼的警示，后半句正好被咬掉（2026-09-09 设计走查）。
+    // 完整的话搬进 tooltip
+    return Tooltip(
+      message: scoped
+          ? '检索候选素材时只在「$name」这个项目组里找。\n'
+              '在「设置 → miaoa 账号 → 当前项目」里换。'
+          : '检索会搜你名下的全部项目，跨项目的素材多半用不上。\n'
+              '在「设置 → miaoa 账号 → 当前项目」里限定一个。',
+      child: Container(
+        key: const Key('picking-project-scope'),
+        padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+        ),
+        child: Text(
+          scoped ? '项目组 $name' : '未限定项目组',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: color, fontSize: AppFontSize.caption),
+        ),
       ),
     );
   }
@@ -570,11 +595,33 @@ class CandidatePanel extends StatelessWidget {
             scope.tagUnavailableText != null) {
           return const SizedBox.shrink();
         }
-        return _hint('选择一种检索方式，为这一段挑选候选素材');
+        // 指名道姓说「点哪儿」。原来只说「选择一种检索方式」——那几个入口
+        // 就在上面一行，可人读完这句还是不知道该点哪个
+        // （2026-09-09 设计走查）
+        return _hint('还没检索。点上面的「标签」按这一镜的标签找，'
+            '或者「画面描述」用一句话描述你要的画面。');
       case CandidateSearchStatus.loading:
-        return const Center(
-            child: SizedBox(
-                width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)));
+        // **转圈要说自己在等什么**：素材检索走的是网络，慢的时候好几秒，
+        // 一个不说话的圈没法让人判断是还在找、还是卡住了
+        return Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              switch (searchMode) {
+                CandidateSearchMode.tag => '正在按标签找候选素材…',
+                CandidateSearchMode.description => '正在按画面描述找候选素材…',
+                CandidateSearchMode.image => '正在用这一帧找相似画面…',
+              },
+              style: const TextStyle(
+                  color: AppColors.textTertiary,
+                  fontSize: AppFontSize.caption),
+            ),
+          ]),
+        );
       case CandidateSearchStatus.failed:
         return _searchFailure();
       case CandidateSearchStatus.ready:

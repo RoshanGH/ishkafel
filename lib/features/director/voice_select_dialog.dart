@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shared/scroll_fade.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -70,7 +72,9 @@ class _VoiceSelectDialogState extends State<_VoiceSelectDialog> {
                         style: TextStyle(
                             color: AppColors.textTertiary,
                             fontSize: AppFontSize.body)))
-                : ListView(children: [
+                : ScrollFade(
+                    background: AppColors.surfaceRaised,
+                    child: ListView(children: [
                     for (final entry in byScene.entries) ...[
                       Padding(
                         padding: const EdgeInsets.symmetric(
@@ -84,6 +88,7 @@ class _VoiceSelectDialogState extends State<_VoiceSelectDialog> {
                       for (final v in entry.value) _row(v),
                     ],
                   ]),
+                  ),
           ),
         ]),
       ),

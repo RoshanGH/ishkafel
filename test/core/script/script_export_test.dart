@@ -56,6 +56,36 @@ void main() {
     expect(steps.last, '合成成片');
   });
 
+  /// **同一个原因不抄好几遍。**
+  ///
+  /// 2026-09-10 真机走查：脚本四句只挑了第一句的镜头，点导出弹出的是
+  /// 「第 2 行还没挑镜头 / 第 3 行还没挑镜头 / 第 4 行还没挑镜头」——
+  /// 三条一模一样，只有行号不同。跟编导台中栏那处是同一个毛病。
+  test('三行同一个原因：并成一句', () async {
+    var doc = ScriptDoc.empty().updateText(0, '第一句');
+    doc = doc.insertAfter(0, text: '第二句');
+    doc = doc.insertAfter(1, text: '第三句');
+    doc = doc.insertAfter(2, text: '第四句');
+    for (var i = 0; i < 4; i++) {
+      // 配音文本要和行文本一致，否则会先被判成「配音过期」
+      doc = doc.setVoiceoverById(
+          doc.lines[i].id, vo(2000, text: doc.lines[i].text));
+    }
+    doc = doc.setShotsById(doc.lines[0].id, [shot(2000)]);
+
+    await expectLater(
+      () => runner().export(doc: doc, outPath: '${dir.path}/out.mp4'),
+      throwsA(isA<ScriptExportException>().having(
+        (e) => e.message,
+        'message',
+        allOf(
+          contains('第 2–4 行还没挑镜头'),
+          isNot(contains('第 3 行还没挑镜头')),
+        ),
+      )),
+    );
+  });
+
   test('没配音 / 配音过期 / 没镜头 / 没分配 → 全部点名拦下', () async {
     var doc = ScriptDoc.empty().updateText(0, '没配音');
     doc = doc.insertAfter(0, text: '配音过期');
@@ -71,11 +101,13 @@ void main() {
       throwsA(isA<ScriptExportException>().having(
           (e) => e.message,
           'message',
+          // 四个不同的原因，各说各的；同一个原因下的行号会并成区间
+          // （四行都没挑镜头时不许摞出四条一模一样的话）
           allOf(
               contains('第 1 行还没生成配音'),
-              contains('第 2 行的台词改过了'),
+              contains('第 2 行台词改过了'),
               contains('第 3 行还没挑镜头'),
-              contains('第 4 行的镜头还没分时长')))),
+              contains('第 4 行镜头还没分时长')))),
     );
   });
 

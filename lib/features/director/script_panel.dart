@@ -256,7 +256,8 @@ class _LineRowState extends State<_LineRow> {
                 color: widget.selected
                     ? AppColors.accentBlue
                     : Colors.transparent,
-                borderRadius: BorderRadius.circular(1),
+                // 2px 宽的选中条，全圆等于把两端磨成半圆
+                borderRadius: BorderRadius.circular(AppRadius.pill),
               ),
             ),
             // 行号；hover 变拖柄（同一位置，不额外占宽）
@@ -282,7 +283,7 @@ class _LineRowState extends State<_LineRow> {
             // 状态点：画面行空心；配音行按配音状态着色——
             // 灰 = 还没生成，绿 = 配音是最新的，橙 = 台词改了配音还是旧的
             Padding(
-              padding: const EdgeInsets.only(top: 15),
+              padding: const EdgeInsets.only(top: AppSpacing.lg),
               child: Tooltip(
                 message: visual
                     ? '画面行'

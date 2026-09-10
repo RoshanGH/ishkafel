@@ -1,5 +1,6 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
+
+import '../shared/thumb_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -55,11 +56,18 @@ class TaskCard extends ConsumerWidget {
             task.analysisError == null
         ? ref.watch(taskProgressOf(task.id))
         : null;
-    return Container(
+    return _HoverCard(
+      child: Container(
       decoration: BoxDecoration(
-        color: AppColors.surfaceRaised,
-        borderRadius: BorderRadius.circular(12),
+        // 卡片从地面浮起来：上沿一线高光 + 一圈边 + 一层浅影。
+        // 纯色块加一圈边只是「一个方块」，这三样加起来才是「一张卡」
+        gradient: topLit(AppColors.surfaceRaised),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x40000000), blurRadius: 10, offset: Offset(0, 3)),
+        ],
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -81,7 +89,7 @@ class TaskCard extends ConsumerWidget {
                         const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
                     decoration: BoxDecoration(
                       color: badge.color,
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(badge.label,
                         style: const TextStyle(
@@ -100,7 +108,7 @@ class TaskCard extends ConsumerWidget {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 4, 8),
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.xs, AppSpacing.sm),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -150,8 +158,54 @@ class TaskCard extends ConsumerWidget {
           ),
         ],
       ),
+    ),
     );
   }
+}
+
+/// 鼠标停上去有反应的一层。
+///
+/// 2026-09-09 设计走查：首页的任务卡是这个 app 的门面、也是最主要的交互
+/// 对象，可鼠标移上去毫无反应，光标也还是箭头——人不知道它能点。
+/// 卡片外面包的是 [GestureDetector]，那个东西不给光标也不给反馈。
+class _HoverCard extends StatefulWidget {
+  final Widget child;
+  const _HoverCard({required this.child});
+
+  @override
+  State<_HoverCard> createState() => _HoverCardState();
+}
+
+class _HoverCardState extends State<_HoverCard> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            // 停上去时描一圈蓝边 + 托起一层影：告诉人「这一张是可以点的」，
+            // 同时把它从一排卡片里拎出来
+            border: Border.all(
+                color: _hovering ? AppColors.accentBlue : Colors.transparent,
+                width: 1.5),
+            boxShadow: _hovering
+                ? const [
+                    BoxShadow(
+                        color: Color(0x66000000),
+                        blurRadius: 16,
+                        offset: Offset(0, 4)),
+                  ]
+                : const [],
+          ),
+          child: widget.child,
+        ),
+      );
 }
 
 /// 这条任务的两个数：人等了多久、到现在花了多少。
@@ -159,6 +213,10 @@ class TaskCard extends ConsumerWidget {
 /// 等待时间是**一次性**的（首次能进编辑那一刻就定了）；花费**一直在涨**
 /// ——每次重打标都往上加。两个数放在一起，用户才看得出「这条片子值不值」。
 class _MetricsRow extends StatelessWidget {
+  /// 这一行的高度：3 顶距 + 11px 图标/文字行。没有数时按这个高度留白，
+  /// 卡与卡才对得齐
+  static const _metricsRowHeight = 17.0;
+
   final RenewTask task;
 
   const _MetricsRow({required this.task});
@@ -167,7 +225,12 @@ class _MetricsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final waited = formatWaited(task.firstReadyMs);
     final spent = task.aiUsage.calls == 0 ? null : formatCost(task.aiUsage);
-    if (waited == null && spent == null) return const SizedBox.shrink();
+    // **没有数也要占住这一行的高度。** 收起来的话这张卡的信息区就比邻居矮
+    // 一截，封面被 Expanded 撑高，标题、说明全部错开一行——一排卡片里
+    // 只有它是歪的（2026-09-09 设计走查：空白任务「拼片」那张卡）
+    if (waited == null && spent == null) {
+      return const SizedBox(height: _metricsRowHeight);
+    }
 
     return Padding(
       padding: const EdgeInsets.only(top: 3),
@@ -325,10 +388,9 @@ class _Cover extends StatelessWidget {
   Widget build(BuildContext context) {
     final path = coverPath;
     if (path == null) return const _CoverPlaceholder();
-    return Image.file(
-      File(path),
-      fit: BoxFit.cover,
-      errorBuilder: (_, _, _) => const _CoverPlaceholder(),
+    return ThumbImage(
+      path: path,
+      errorBuilder: (_) => const _CoverPlaceholder(),
     );
   }
 }

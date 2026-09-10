@@ -11,6 +11,7 @@ import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/playback/multitrack_playback.dart';
 import '../../core/playback/track_plan.dart';
+import '../../core/script/skipped_lines_summary.dart';
 import '../../core/playback/track_plan_builder.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/playback/gap_clip.dart';
@@ -71,12 +72,24 @@ class PreviewTracks extends ChangeNotifier {
     // 还没挑素材的那几段：**不等人播到那儿才说**。它们在成片里占着位置却
     // 没有画面，人一按播放就会在那儿停住——先把话说在前面，并点名是哪几段
     if (_plan.unplayable.isNotEmpty) {
+      // 连号的并成区间：四个还能一个个念，十个就是一串噪音
       final names =
-          _plan.unplayable.map((s) => 'U${s.unitIndex + 1}').join('、');
+          unitRanges([for (final s in _plan.unplayable) s.unitIndex]);
       return '$names 还没选素材，这几段放不了——去「替换素材」给它们挑，'
           '或者把它们删掉';
     }
     return null;
+  }
+
+  /// 这条提示能不能靠「重新合成一次」解决。
+  ///
+  /// 2026-09-09 设计走查：拼片任务里横幅写着「U2、U3、U4、U5 还没选素材，
+  /// 这几段放不了——去『替换素材』给它们挑」，右边却摆着一个「重试」——
+  /// 那件事重试一百次也不会变，人点了只会以为按钮坏了。
+  /// 能重试的只有「取不到配乐」这类外部抖动。
+  bool get noticeRetryable {
+    if ((speedFitter?.pending ?? 0) > 0) return false;
+    return _plan.bgmMissing.isNotEmpty;
   }
 
   /// 成片时刻 → 原片时刻。时间线画的是原片切分，播放头要靠它换算回去

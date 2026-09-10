@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:meta/meta.dart';
+
 import '../core/log/app_log.dart';
 import '../core/storage/agent_broadcast.dart';
 import '../core/storage/agent_presence.dart';
@@ -51,6 +53,11 @@ class AgentStage {
 
   /// 连着几步没人回执了
   int _unanswered = 0;
+
+  /// **为了它等过几次超时**。放弃等待这条规则的效果只能靠「等了几次」来验，
+  /// 拿墙钟量会在机器忙的时候假红（真机全量跑撞到过三次）
+  @visibleForTesting
+  int waitedCount = 0;
 
   final Future<ProcessResult> Function(String, List<String>) _run;
 
@@ -179,6 +186,7 @@ class AgentStage {
     // 一条命令报五步就白耗 25 秒，而人根本不在看
     if (_unanswered >= _giveUpAfter) return;
 
+    waitedCount++;
     final shown = await waitForAck(
       dataDir: dataDir,
       taskId: taskId,

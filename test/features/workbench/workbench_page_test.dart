@@ -15,6 +15,7 @@ import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/inspector_panel.dart';
 import 'package:ishkafel/features/workbench/player_panel.dart';
+import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_view.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/workbench/unit_list_panel.dart';
@@ -584,10 +585,13 @@ void _spaceStopsSegmentPlayback() {
     await tester.tap(find.byKey(const Key('open-workbench')));
     await tester.pumpAndSettle();
 
-    // 双击时间线上的 U1 → 只播这一段
+    // 双击时间线上的 U1 → 只播这一段。
+    // **按轨道位置定位，别按时间线区的中心去猜**：时间线区多高是按内容算
+    // 出来的（六条轨 + 工具条），拿中心加一个固定偏移会随着高度变化点到
+    // 别的轨上
     final timeline = find.byType(TimelineView);
-    final at = tester.getCenter(timeline) +
-        Offset(-tester.getSize(timeline).width / 2 + 40, -20);
+    final at = tester.getTopLeft(timeline) +
+        Offset(40, TimelineTracks.unitsTop + 10);
     await tester.tapAt(at);
     now = now.add(const Duration(milliseconds: 50));
     await tester.pump(const Duration(milliseconds: 50));

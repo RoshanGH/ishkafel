@@ -47,6 +47,8 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
 }
 
 void main() {
+  _pinnedActions();
+  _blankOverview();
   group('formatTimecode', () {
     test('formatTimecode(70033, 30) == 01:10.01', () {
       expect(formatTimecode(70033, 30), '01:10.01');
@@ -58,11 +60,45 @@ void main() {
   });
 
   group('InspectorPanel', () {
-    testWidgets('无选中时显示占位文案', (tester) async {
+    // 2026-09-09 设计走查：这里原来只有一句「未选中任何单元或镜头」，
+    // 480px 宽的一整栏空着，而人真正想知道的几个数挤在窗口最下面那行
+    // 10px 的灰字里。空状态不是「没东西可说」，是「还没聚焦到某一处」。
+    testWidgets('无选中时这一栏说整片：多长、几个单元、几个镜头', (tester) async {
       final controller = _fixtureController();
       await _pump(tester, InspectorPanel(controller: controller, fps: _fps));
 
-      expect(find.textContaining('未选中'), findsOneWidget);
+      expect(find.text('整片'), findsOneWidget);
+      expect(find.text('时长'), findsOneWidget);
+      expect(find.text('台词语义单元'), findsOneWidget);
+      expect(find.text('视觉镜头'), findsOneWidget);
+    });
+
+    testWidgets('无选中时也说「翻新到哪一步了」——换了几个镜头、改了几处字幕', (tester) async {
+      final controller = _fixtureController();
+      await _pump(
+          tester,
+          InspectorPanel(
+            controller: controller,
+            fps: _fps,
+            shotReplaced: (u, s) => u == 0 && s == 0,
+            subtitleEdited: (u, s) => u == 0 && s == 0,
+          ));
+
+      expect(find.text('换过画面的镜头'), findsOneWidget);
+      expect(find.text('手改过的字幕'), findsOneWidget);
+      expect(find.text('1'), findsWidgets, reason: '改过一处字幕就该显示 1');
+    });
+
+    testWidgets('还没有单元时不硬凑数字，直说没有', (tester) async {
+      final controller = SegmentationEditorController(
+        initialUnits: const [],
+        durationMs: 0,
+        fps: _fps,
+        sentences: const [],
+      );
+      await _pump(tester, InspectorPanel(controller: controller, fps: _fps));
+
+      expect(find.text('还没有台词语义单元'), findsOneWidget);
     });
 
     testWidgets('选中单元时显示标题、时间码与台词', (tester) async {
@@ -278,5 +314,115 @@ void main() {
         expect(controller.units[0].transcript, '第一句台词');
       });
     });
+  });
+}
+
+/// **拆分 / 并入必须永远看得见。**
+///
+/// 2026-09-09 设计走查真机：属性栏里时间、锁定说明、标签、音色、台词框
+/// 加起来早就超过一屏，而「拆分 / 并入」排在最后——跟着滚就永远落在
+/// 可视区外，人根本不知道有这两个按钮。现在把它们钉在面板底部。
+void _pinnedActions() {
+  testWidgets('面板矮到装不下时，拆分/并入还在屏幕上', (tester) async {
+    final controller = SegmentationEditorController(
+      initialUnits: [
+        SemanticUnit(
+          uid: 'u0',
+          index: 0,
+          startMs: 0,
+          endMs: 16010,
+          transcript: '早就跟你们说了，我长痘就是全家衣服混洗有细菌，你们总说开水烫烫就好了',
+          tags: const ['促单', '实拍', '口播', '细菌清洁', '品类PK'],
+          shots: [
+            for (var i = 0; i < 13; i++)
+              Shot(startMs: i * 1231, endMs: (i + 1) * 1231),
+          ],
+        ),
+      ],
+      durationMs: 16010,
+      fps: _fps,
+      sentences: const [],
+    );
+    controller.select(const EditorSelection.unit(0));
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: SizedBox(
+            width: 480,
+            // 真机上属性栏就这么高
+            height: 385,
+            child: InspectorPanel(controller: controller, fps: _fps),
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    final split = find.textContaining('拆分单元');
+    expect(split, findsOneWidget);
+
+    // 真的画在可视区里，不是「存在但被裁掉了」
+    final panel = tester.getRect(find.byType(InspectorPanel));
+    final rect = tester.getRect(split);
+    expect(rect.bottom, lessThanOrEqualTo(panel.bottom + 0.5),
+        reason: '按钮被挤出了可视区，人根本看不到它');
+    expect(rect.top, greaterThanOrEqualTo(panel.top - 0.5));
+  });
+}
+
+/// 拼片（空白任务）没有镜头层：一个「分子」整段挑一条素材。
+///
+/// 2026-09-09 设计走查真机：拼片任务的整片概览里写着「换过画面的镜头 0 / 0」
+/// ——一行没有意义的数。它该说的是「几个分子填上了」。
+void _blankOverview() {
+  testWidgets('拼片的整片概览说分子进度，不说镜头', (tester) async {
+    final controller = SegmentationEditorController(
+      initialUnits: const [
+        SemanticUnit(
+            uid: 'b0',
+            index: 0,
+            startMs: 0,
+            endMs: 10000,
+            transcript: '',
+            hasSource: false,
+            shots: []),
+        SemanticUnit(
+            uid: 'b1',
+            index: 1,
+            startMs: 10000,
+            endMs: 20000,
+            transcript: '',
+            hasSource: false,
+            shots: []),
+      ],
+      durationMs: 20000,
+      fps: _fps,
+      sentences: const [],
+    );
+
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SizedBox(
+          width: 480,
+          height: 600,
+          child: InspectorPanel(
+            controller: controller,
+            fps: _fps,
+            blankTask: true,
+            // 第一个分子挑到了素材（有成片时长）
+            composedDurationOf: (i) => i == 0 ? 8000 : null,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('整片（拼片）'), findsOneWidget);
+    expect(find.text('分子'), findsOneWidget);
+    expect(find.text('换过画面的镜头'), findsNothing,
+        reason: '拼片没有镜头层，这一行永远是 0 / 0');
+    expect(find.text('已挑到素材的分子'), findsOneWidget);
+    expect(find.text('1 / 2'), findsOneWidget);
   });
 }

@@ -8,6 +8,7 @@ import '../export/export_spec.dart';
 import '../ffmpeg/process_runner.dart';
 import '../subtitle/subtitle_overlay.dart';
 import '../subtitle/subtitle_rasterizer.dart';
+import 'skipped_lines_summary.dart';
 import '../subtitle/subtitle_style.dart';
 import 'script_doc.dart';
 import 'shot_coverage.dart';
@@ -302,39 +303,71 @@ class ScriptExportRunner {
     return outPath;
   }
 
-  /// 交付拦截：一行行验，问题点名到行。空行（无字无镜头）跳过
+  /// 交付拦截：一行行验，问题点名到行。空行（无字无镜头）跳过。
+  ///
+  /// **同一个原因不抄好几遍**：四行都没挑镜头时，原来会摞出四条一模一样
+  /// 的「第 N 行还没挑镜头」——该省的是重复的那句原因，不是行号
+  /// （2026-09-10 真机走查，与编导台中栏那处同一个毛病）。
   List<({int index, ScriptLine line})> _readyLines(ScriptDoc doc) {
+    final (ready, blocked) = _validateLines(doc);
+    if (blocked != null) throw ScriptExportException(blocked);
+    return ready;
+  }
+
+  /// 交付拦截的**纯函数版**：给界面在打开导出对话框**之前**先问一句。
+  ///
+  /// 2026-09-10 真机走查：脚本四句只挑了一句的镜头，点「导出成片」照样
+  /// 弹出规格面板，人选完分辨率码率点了「开始导出」，才蹦出「没能导出」。
+  /// 白填一遍表单——该拦的地方在进门口，不在出门口。
+  ///
+  /// 返回 null 表示可以导。
+  static String? blockingReason(ScriptDoc doc) => _validateLines(doc).$2;
+
+  static (List<({int index, ScriptLine line})>, String?) _validateLines(
+      ScriptDoc doc) {
     final ready = <({int index, ScriptLine line})>[];
-    final problems = <String>[];
+    final problems = <int, String>{};
     for (var i = 0; i < doc.lines.length; i++) {
       final line = doc.lines[i];
       if (line.text.trim().isEmpty && line.shots.isEmpty) continue;
       final root = ShotAllocation.rootMsOf(line);
       if (root == null) {
-        problems.add(line.type == ScriptLineType.voiced
-            ? '第 ${i + 1} 行还没生成配音'
-            : '第 ${i + 1} 行还没确定时长');
+        problems[i] = line.type == ScriptLineType.voiced
+            ? '还没生成配音'
+            : '还没确定时长';
         continue;
       }
       if (line.type == ScriptLineType.voiced &&
           line.voiceState == LineVoiceState.stale) {
-        problems.add('第 ${i + 1} 行的台词改过了，配音还是旧的（重新生成后再导）');
+        problems[i] = '台词改过了，配音还是旧的（重新生成后再导）';
         continue;
       }
       if (line.shots.isEmpty) {
-        problems.add('第 ${i + 1} 行还没挑镜头');
+        problems[i] = '还没挑镜头';
         continue;
       }
       if (line.shots.any((s) => s.allocMs == null)) {
-        problems.add('第 ${i + 1} 行的镜头还没分时长');
+        problems[i] = '镜头还没分时长';
         continue;
       }
       ready.add((index: i, line: line));
     }
     if (problems.isNotEmpty) {
-      throw ScriptExportException('导出被拦下：\n${problems.join('\n')}');
+      return (ready, '导出被拦下：\n${_groupProblems(problems)}');
     }
-    return ready;
+    return (ready, null);
+  }
+
+  /// 按原因归堆，行号并成区间
+  static String _groupProblems(Map<int, String> problems) {
+    final byReason = <String, List<int>>{};
+    for (final e in problems.entries) {
+      (byReason[e.value] ??= []).add(e.key + 1);
+    }
+    return [
+      for (final e in byReason.entries)
+        '${lineNumberRanges(e.value)}${e.key}',
+    ].join('\n');
   }
 
   /// 一行的**素材原声**轨：逐镜截取、变速跟 atempo、按音量缩放，

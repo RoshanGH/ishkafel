@@ -67,6 +67,7 @@ import '../shared/long_task_dialog.dart';
 import '../workbench/bgm_picker_sheet.dart';
 import 'director_providers.dart';
 import 'find_shots_sheet.dart';
+import '../../core/script/skipped_lines_summary.dart';
 import '../shared/preview_subtitle.dart';
 import 'tag_picker.dart';
 import 'line_board.dart';
@@ -793,12 +794,41 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       return;
     }
     _flushNow();
+    // **该拦的在进门口拦**：有句子没配音/没挑镜头时导出必然失败，
+    // 那就别让人先选一遍分辨率码率、点了「开始导出」才蹦出「没能导出」
+    // （2026-09-10 真机走查）
+    if (ScriptExportRunner.blockingReason(_doc) case final blocked?) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: AppColors.surfaceRaised,
+          title: const Text('还导不了'),
+          content: SizedBox(
+            width: 380,
+            child: SelectableText(blocked,
+                style: const TextStyle(
+                    fontSize: AppFontSize.body,
+                    color: AppColors.textSecondary,
+                    height: 1.6)),
+          ),
+          actions: [
+            FilledButton(
+                key: const Key('script-export-blocked-ok'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
+      return;
+    }
     // 规格该选还得选（与其他模块同一套面板）；记住上次的选择
     final spec = await showScriptExportDialog(
       context,
       initial: _exportSpec,
       durationMs: _planResult.plan.totalMs,
       lineCount: _doc.lines.where((l) => l.shots.isNotEmpty).length,
+      // 少了哪几句、为什么少，在做「就导这个」这个决定的地方说
+      skipped: _planResult.skippedLines,
     );
     if (spec == null || !mounted) return;
     setState(() {
@@ -3027,6 +3057,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         Future<void>.delayed(const Duration(milliseconds: 1100), () async {
       if (!mounted) return;
       setState(() => _draftCelebrating = false);
+      // **有东西可播才播**。所有行都没挑到镜头时预览轨是空的，
+      // 这一下 play() 只会让播放器进「正在播」的状态却停在 0：
+      // 屏幕上是一个暂停按钮配着 00:00 / 00:00，人一看就懵
+      // ——状态跟事实对不上（2026-09-10 真机走查）
+      if (_planResult.isEmpty) return;
       await _playback?.seekMs(0);
       await _playback?.play();
     }));
@@ -3039,10 +3074,17 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 会让人以为整句是空的
       if (shotFailed > 0) '$shotFailed 个分镜没找到像的画面',
     ];
+    // 一句都没进预览时不许说「正在播」——那是假的
+    final nothingToPlay = _planResult.isEmpty;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(problems.isEmpty
-            ? '铺好了，正在播——不满意的镜头随手换。'
-            : '铺好了（${problems.join('、')}，对应句子可以手动补）。')));
+        content: Text(switch ((problems.isEmpty, nothingToPlay)) {
+      (true, false) => '铺好了，正在播——不满意的镜头随手换。',
+      (true, true) => '配音铺好了。镜头还没挑，去右栏「找镜头」，'
+          '或者先传一段参考片让它照着配镜。',
+      (false, true) => '铺好了（${problems.join('、')}）。'
+          '现在还没有可播的内容——镜头挑上就能试片。',
+      (false, false) => '铺好了（${problems.join('、')}，对应句子可以手动补）。',
+    })));
   }
 
   /// 标签名 → id 映射（自动配镜的标签约束用）。
@@ -3826,7 +3868,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
             decoration: BoxDecoration(
               color: AppColors.accentBlue.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(AppRadius.pill),
             ),
             child: const Text('编导台',
                 style: TextStyle(
@@ -3945,6 +3987,32 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (cache == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('当前环境没有素材下载器，生成不了剪映草稿。')));
+      return;
+    }
+    // **拦在进门口**：缺镜头这类问题一眼看得全，不该让人先等素材归集
+    // 几十秒、再被一句「第 2 行还没挑镜头」打回来（2026-09-10 真机走查）
+    if (jianyingBlockingReason(_doc) case final blocked?) {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: AppColors.surfaceRaised,
+          title: const Text('还生成不了剪映草稿'),
+          content: SizedBox(
+            width: 380,
+            child: SelectableText(blocked,
+                style: const TextStyle(
+                    fontSize: AppFontSize.body,
+                    color: AppColors.textSecondary,
+                    height: 1.6)),
+          ),
+          actions: [
+            FilledButton(
+                key: const Key('jianying-blocked-ok'),
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('知道了')),
+          ],
+        ),
+      );
       return;
     }
     setState(() => _jianyingBusy = true);
@@ -4340,7 +4408,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   decoration: BoxDecoration(
                     color: AppColors.stageBackground,
                     borderRadius: BorderRadius.circular(AppRadius.lg),
-                    border: Border.all(color: AppColors.border),
+                    border: Border.all(color: AppColors.stageEdge),
+                    // 和审片台的舞台同一套：一圈边 + 一层落影把画面从
+                    // 舞台底色里托起来。深色画面（夜景、黑场）少了这两样
+                    // 会和背景连成一片，看不出画幅到哪儿为止
+                    boxShadow: const [
+                      BoxShadow(
+                          color: Color(0x99000000),
+                          blurRadius: 24,
+                          offset: Offset(0, 6)),
+                    ],
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: playable
@@ -4378,6 +4455,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             IconButton(
               key: const ValueKey('director-preview-play'),
               visualDensity: VisualDensity.compact,
+              tooltip: _previewPlaying ? '暂停　空格' : '播放　空格',
               onPressed: playable ? _togglePreviewPlay : null,
               iconSize: 20,
               icon: Icon(_previewPlaying ? Icons.pause : Icons.play_arrow,
@@ -4849,7 +4927,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                   key: ValueKey('subtitle-bar-color-$hex'),
                   onTap: () => commit(style.copyWith(
                       colorHex: hex == 'FFFFFF' ? null : hex)),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
                   child: Container(
                     width: 16,
                     height: 16,
@@ -4877,7 +4955,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               child: InkWell(
                 key: ValueKey('subtitle-bar-mask-${preset.name}'),
                 onTap: () => commit(style.copyWith(preset: preset)),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -4885,7 +4963,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                     color: style.preset == preset
                         ? AppColors.accentBlue.withValues(alpha: 0.16)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
                     border: Border.all(
                         color: style.preset == preset
                             ? AppColors.accentBlue
@@ -4944,30 +5022,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
   }
 
-  /// 未进预览的交代：≤4 行逐条点名；再多按原因分组（「第 3~29 行还没
-  /// 生成配音」比二十七行橙字有用得多）
-  String _skippedSummary() {
-    final skipped = _planResult.skippedLines;
-    if (skipped.length <= 4) {
-      return [
-        for (final e in skipped.entries) '第 ${e.key + 1} 行未进预览：${e.value}',
-      ].join('\n');
-    }
-    final byReason = <String, List<int>>{};
-    for (final e in skipped.entries) {
-      (byReason[e.value] ??= []).add(e.key + 1);
-    }
-    return [
-      for (final e in byReason.entries)
-        '${_lineNumbers(e.value)} 未进预览：${e.key}',
-    ].join('\n');
-  }
-
-  static String _lineNumbers(List<int> nums) {
-    nums.sort();
-    if (nums.length <= 3) return '第 ${nums.join('、')} 行';
-    return '第 ${nums.first}~${nums.last} 行等 ${nums.length} 行';
-  }
+  /// 未进预览的交代：**先按原因归堆**，同一个原因下的行号并成区间。
+  ///
+  /// 原来是「不超过 4 行就逐条点名」——于是四行台词都没配音时，屏幕上是
+  /// 四条一模一样的橙字，只有行号不同（2026-09-09 设计走查真机截图）。
+  /// 该省的从来不是行号，是**重复的那句原因**。
+  String _skippedSummary() => summarizeSkippedLines(_planResult.skippedLines);
 
   static String _mmss(int ms) {
     final s = ms ~/ 1000;

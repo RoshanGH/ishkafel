@@ -14,6 +14,7 @@ import '../../app/theme/app_typography.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/export/composed_timeline.dart';
 import '../../core/playback/playback_controller.dart';
+import '../shared/shortcuts_cheatsheet.dart';
 import 'inspector_panel.dart';
 import 'player_panel.dart';
 import 'preview_subtitle_layer.dart';
@@ -24,6 +25,7 @@ import 'agent_focus_request.dart';
 import 'side_panel_tabs.dart';
 import 'workbench_panel_widths.dart';
 import 'segment_playback.dart';
+import 'timeline/timeline_hit_tester.dart';
 import 'timeline/timeline_geometry.dart';
 import 'timeline/timeline_painter.dart';
 import 'timeline/timeline_view.dart';
@@ -462,21 +464,33 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
           onSeekEdge: (toStart) => playback
               .seekMs(toStart ? 0 : (_axis?.totalMs ?? editor.durationMs)),
           onSelectAdjacent: (delta) => _selectAdjacent(editor, playback, delta),
+          onShortcutsHelp: () => showShortcutsCheatSheet(context),
         ),
         // 输入框交出焦点之后由它接住，否则焦点落空、整套键位一起哑掉。
         // **必须摆在 Actions 里面**：按键是从拿着焦点的那个节点往上找动作的，
         // 摆到 Actions 外面就找不到 —— 空格能匹配上，却没人执行
         child: KeyboardHome(
-            child: Column(
+            child: LayoutBuilder(builder: (context, page) {
+          // **时间线要多高，是按它自己有多少内容算出来的，不是一个死比例。**
+          //
+          // 原来写死 5:4（时间线 44%）。1440×900 下 body 是 787px，时间线区
+          // 拿到 350px，而六条轨加工具条要 370px——第六条轨（音频波形）整条
+          // 落在可视区外，人不滚动就永远看不到波形，而波形正是定位切点的
+          // 主要依据（2026-09-09 设计走查真机截图：最底下只到「画面」轨）。
+          //
+          // 现在按内容要多少给多少，两头都夹住：
+          // - 上限 55%：再多就把预览挤没了，这里毕竟是「看画面」的地方
+          // - 下限 35%：CLAUDE.md 要「时间线占比要充足（参考剪映约 40%）」，
+          //   屏幕再高也不能让它退化成一条缝
+          final wanted =
+              TimelineTracks.totalHeight + _timelineToolbarHeight;
+          // 高度无界时（放进可滚容器里）没有「占几成」可言，就按内容给
+          final timelineHeight = page.maxHeight.isFinite
+              ? wanted.clamp(page.maxHeight * 0.35, page.maxHeight * 0.55)
+              : wanted;
+          return Column(
           children: [
-            // 三栏区 : 时间线区 = 5 : 4（时间线约 44%）。
-            //
-            // 原来是 3:2（40%），加上 BGM 轨后五条轨要 290px 而 40% 只给得出
-            // 280，最后一条会整条落在可视区外。抬窗口最小高度会让 1440×900
-            // 的笔记本装不下整个窗口，所以改比例——CLAUDE.md 要的是「时间线
-            // 占比要充足（参考剪映约 40%）」，44% 只多不少。
             Expanded(
-              flex: 5,
               child: LayoutBuilder(builder: (context, box) {
                 // 挑素材时把播放器两侧的死黑还给候选面板：素材是 9:16 竖屏，
                 // 播放器横向再宽也用不上，而候选网格的宽度直接换成
@@ -549,6 +563,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                           onChanged: (t) => setState(() => _sideTab = t),
                         ),
                         Expanded(
+                          // 切 tab 时淡进淡出，不是硬闪一下。
+                          // 120ms 短到不拖慢操作，但足够让眼睛跟上
+                          // 「换了一块内容」这件事（2026-09-10 走查）
+                          child: AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 120),
+                          child: KeyedSubtree(
+                          key: ValueKey(_sideTab),
                           child: switch (_sideTab) {
                             SidePanelTab.inspector => InspectorPanel(
                                 controller: editor,
@@ -590,6 +611,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                             SidePanelTab.candidates =>
                               widget.candidatePanel ?? const _NoCandidatePanel(),
                           },
+                          ),
+                          ),
                         ),
                       ],
                     ),
@@ -599,12 +622,13 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
               }),
             ),
             const Divider(height: 1, color: AppColors.border),
-            Expanded(
-              flex: 4,
+            SizedBox(
+              height: timelineHeight,
               child: _buildTimelineArea(editor, playback),
             ),
           ],
-        )),
+          );
+        })),
       ),
     );
   }
@@ -755,6 +779,16 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
     );
   }
 
+  /// 时间线工具条实际占的高度（撤销/重做/拆分/合并 + 缩放）。
+  /// 时间线区要多高是「轨道总高 + 它」算出来的
+  static const double _timelineToolbarHeight = 40;
+
+  /// 缩放滑杆的宽度：够拖出 20 档，又不至于横跨整条工具条。
+  ///
+  /// 两侧原来各摆一个放大镜图标，不可点、纯装饰——去掉之后这一行省下
+  /// 32px，正好放得下「铺满窗口」这个真能按的按钮
+  static const double _zoomSliderWidth = 160;
+
   Widget _buildTimelineToolbar(SegmentationEditorController editor) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -791,20 +825,42 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
             enabled: !widget.readOnly && editor.selection != null,
             onTap: editor.mergeSelectedWithPrevious,
           ),
-          const SizedBox(width: AppSpacing.sm),
-          const _ToolbarDivider(),
-          const SizedBox(width: AppSpacing.sm),
-          const Icon(Icons.zoom_out, color: AppColors.textTertiary, size: 16),
-          Expanded(
-            child: Slider(
-              key: const Key('timeline-zoom-slider'),
-              value: _zoomLevel.clamp(1.0, TimelineGeometry.maxZoom),
-              min: 1,
-              max: TimelineGeometry.maxZoom,
-              onChanged: _onZoomChanged,
+          // 编辑工具靠左、缩放靠右（剪映 / Final Cut 都是这个位置）。
+          // **滑杆不能用 Expanded 撑满**：它会横跨整条工具条一千多像素，
+          // 屏幕上看到的是「最左边一个小蓝点、最右边一个孤零零的放大镜」，
+          // 中间一千像素什么都没有（2026-09-09 设计走查）
+          // Flexible 吃掉剩余宽度、Align 把滑杆顶到右边、ConstrainedBox 给它
+          // 封顶。**三样缺一不可**：换成 Spacer + 固定宽度，窄窗口
+          // （测试用的 800px）下这一行会溢出 31px
+          Flexible(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: ConstrainedBox(
+                constraints:
+                    const BoxConstraints(maxWidth: _zoomSliderWidth),
+                child: Slider(
+                  key: const Key('timeline-zoom-slider'),
+                  value: _zoomLevel.clamp(1.0, TimelineGeometry.maxZoom),
+                  min: 1,
+                  max: TimelineGeometry.maxZoom,
+                  // 未走过的那一段轨道要看得见：默认色在这个底上几乎是隐形的，
+                  // 屏幕上只剩一个孤零零的蓝点，看不出它是个可以拖的滑杆
+                  // （2026-09-09 设计走查）
+                  inactiveColor: AppColors.border,
+                  onChanged: _onZoomChanged,
+                ),
+              ),
             ),
           ),
-          const Icon(Icons.zoom_in, color: AppColors.textTertiary, size: 16),
+          const SizedBox(width: AppSpacing.xs),
+          // 缩放到看得见整条片子：拖到一半找不着北时的回家键
+          _undoRedoButton(
+            key: const Key('timeline-zoom-fit-btn'),
+            icon: Icons.fit_screen_outlined,
+            tooltip: '整条片子铺满窗口',
+            enabled: _zoomLevel > 1.0001,
+            onTap: () => _onZoomChanged(1),
+          ),
         ],
       ),
     );

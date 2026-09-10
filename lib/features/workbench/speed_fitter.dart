@@ -275,14 +275,28 @@ class SpeedFitter extends ChangeNotifier {
   /// 把不再需要的切片从盘上清掉
   void prune() => cache.keepOnly(protect: _fitted.values.toSet());
 
+  /// 合并窗口内攒着的那次通知
+  Timer? _notifyTimer;
+
+  /// 通知合并窗口。切片是一段一段渲完的，每段一通知，上层就把整条播放方案
+  /// 重推一遍——换源要重开文件，画面连闪好几下（2026-09-09 真机日志：
+  /// 进一次审片台 6 次「画面轨换源」）。攒一小会儿再说，人感觉不到，
+  /// 但换源次数直接掉下来
+  static const _notifyWindow = Duration(milliseconds: 120);
+
   void _notify() {
     if (_disposed) return;
-    notifyListeners();
+    _notifyTimer?.cancel();
+    _notifyTimer = Timer(_notifyWindow, () {
+      if (_disposed) return;
+      notifyListeners();
+    });
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _notifyTimer?.cancel();
     super.dispose();
   }
 }

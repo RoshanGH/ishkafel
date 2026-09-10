@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'package:flutter/material.dart';
+
+import '../shared/thumb_image.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/app_colors.dart';
@@ -656,7 +658,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           _tagRow(section),
           if (section.transcript.isNotEmpty)
             Container(
-              constraints: const BoxConstraints(maxWidth: 1100),
+              // 一行别超过这个宽度。**不是为了留白，是为了读得动**：
+              // 1100px 一行是 100 多个汉字，眼睛扫到行尾再回到下一行行首
+              // 很容易串行——而这段话正是人判断候选贴不贴题的依据
+              // （2026-09-09 设计走查）
+              constraints: const BoxConstraints(maxWidth: _transcriptMaxWidth),
               padding: const EdgeInsets.only(top: 2),
               // **台词不截断**：截成两行加省略号，等于把人要判断的东西藏起来
               // ——他正是靠这段话决定候选贴不贴题的
@@ -668,6 +674,10 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             ),
         ],
       );
+
+  /// 台词一行最宽多少。约 45 个汉字——排版上舒服的行长是 45~75 个字符，
+  /// 中文取下限那一档
+  static const double _transcriptMaxWidth = 720;
 
   /// 这一段的标签。**摆出来，而且能就地改。**
   ///
@@ -795,9 +805,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                   fit: StackFit.expand,
                   children: [
                     if (_originThumbs[section.id] case final thumb?)
-                      Image.file(File(thumb),
+                      ThumbImage(
                           key: Key('review-original-thumb-${section.id}'),
-                          fit: BoxFit.cover)
+                          path: thumb)
                     else
                       Container(
                           color: AppColors.surfaceCard,
@@ -897,12 +907,31 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                       fit: StackFit.expand,
                       children: [
                         if (thumb != null && File(thumb).existsSync())
-                          Image.file(File(thumb), fit: BoxFit.cover)
+                          ThumbImage(path: thumb)
                         else
+                          // **说清为什么是空的**。只摆一个胶片图标的话，人
+                          // 分不出「还没抽到帧」和「这条素材坏了」——而他
+                          // 正要靠画面决定留不留（2026-09-09 设计走查：
+                          // U1·S7 的预览版就是一块空灰底，什么都没说）
                           Container(
-                              color: AppColors.surfaceCard,
-                              child: const Icon(Icons.movie_outlined,
-                                  color: AppColors.textTertiary)),
+                            color: AppColors.surfaceCard,
+                            padding: const EdgeInsets.all(AppSpacing.sm),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.movie_outlined,
+                                    color: AppColors.textTertiary),
+                                const SizedBox(height: AppSpacing.xs),
+                                Text(
+                                  thumb == null ? '画面还没抽出来' : '画面文件不见了',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                      fontSize: AppFontSize.micro,
+                                      color: AppColors.textTertiary),
+                                ),
+                              ],
+                            ),
+                          ),
                         // 悬停时缩略图上盖真视频（有声、循环）
                         if (hovering && !dropped) _hover.buildVideo(),
                         // 角标们

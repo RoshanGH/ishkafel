@@ -304,7 +304,7 @@ void main() {
 
       expect(find.byType(WorkbenchPage), findsNothing);
       expect(find.textContaining('中断'), findsOneWidget);
-      expect(find.text('重试'), findsOneWidget);
+      expect(find.byKey(const Key('analysis-failure-retry')), findsOneWidget);
     });
   });
 
@@ -335,7 +335,7 @@ void main() {
 
       await tester.tap(find.text('失败任务'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('重试'));
+      await tester.tap(find.byKey(const Key('analysis-failure-retry')));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('AI 服务未配置'), findsWidgets);
@@ -648,7 +648,7 @@ void main() {
           reason: '剩下的那一个是筛选标签，不是卡片徽标');
     });
 
-    testWidgets('点击失败任务卡不进入审片台，显示失败原因与「重试」action', (tester) async {
+    testWidgets('点击失败任务卡不进入审片台，摆出失败原因和「重新分析」', (tester) async {
       final repo = InMemoryTaskRepository();
       await repo.save(makeFailedTask());
       await tester.pumpWidget(wrap(repo));
@@ -659,11 +659,33 @@ void main() {
 
       expect(find.byType(WorkbenchPage), findsNothing);
       expect(find.textContaining('网络连接超时，请检查凭据配置'), findsOneWidget);
-      expect(find.text('重试'), findsOneWidget);
+      expect(find.byKey(const Key('analysis-failure-retry')), findsOneWidget);
 
-      // 点击「重试」不应崩溃（pipeline 未配置场景，controller 内部会直接返回）
-      await tester.tap(find.text('重试'));
+      // 点「重新分析」不应崩溃（pipeline 未配置场景，controller 内部直接返回）
+      await tester.tap(find.byKey(const Key('analysis-failure-retry')));
       await tester.pumpAndSettle();
+    });
+
+    /// 失败原因里常带着 ffmpeg / 模型接口的原文，人得把它贴给我们才说得清
+    /// 出了什么事。一闪而过、还选不中的 SnackBar 等于让人对着屏幕手抄。
+    testWidgets('失败原因能选中复制，而且不会自己消失', (tester) async {
+      final repo = InMemoryTaskRepository();
+      await repo.save(makeFailedTask());
+      await tester.pumpWidget(wrap(repo));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('失败任务'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('analysis-failure-detail')), findsOneWidget);
+      expect(
+          tester.widget<SelectableText>(
+              find.byKey(const Key('analysis-failure-detail'))),
+          isA<SelectableText>());
+
+      // 等足 SnackBar 的存活时间，它还得在
+      await tester.pump(const Duration(seconds: 6));
+      expect(find.byKey(const Key('analysis-failure-detail')), findsOneWidget);
     });
   });
 }

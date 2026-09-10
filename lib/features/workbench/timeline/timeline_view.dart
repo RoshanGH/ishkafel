@@ -272,6 +272,9 @@ class _TimelineViewState extends State<TimelineView> {
   /// 用递增的 [_decodeRequestId] 作为"取消令牌"：解码是异步 IO，若 media 连续
   /// 变更两次，先发出的慢请求可能比后发出的快请求更晚完成；写回前比对请求号，
   /// 不是最新请求就丢弃解码结果（并 dispose），不覆盖新结果。
+  /// 胶片条一格的解码高度：轨道高 52，按 2 倍屏留一档
+  static const int _thumbDecodeHeight = 104;
+
   /// 解码结果**按下标对齐**：某一张缺失或解码失败时保留 null 占位，绝不
   /// 压缩列表——压缩会让剩余各张被按新长度重新等分铺开，整条胶片条与
   /// 时间轴错位（见 [TimelineMedia.thumbPaths] 的说明）。
@@ -286,7 +289,11 @@ class _TimelineViewState extends State<TimelineView> {
       if (!await file.exists()) continue;
       try {
         final bytes = await file.readAsBytes();
-        final codec = await ui.instantiateImageCodec(bytes);
+        // **按格子的高度解码，不要整张图**：抽帧图是 270×480，全尺寸解出来
+        // 每张 518KB，而它们会一直握在手里直到离开页面——二十几张就是十几 MB
+        // 白占着，画到屏幕上却只有 52 逻辑像素高（2026-09-09 性能走查）
+        final codec = await ui.instantiateImageCodec(bytes,
+            targetHeight: _thumbDecodeHeight);
         final frame = await codec.getNextFrame();
         decoded[i] = frame.image;
       } catch (e) {
@@ -659,6 +666,28 @@ class _TimelineViewState extends State<TimelineView> {
           // 视口还矮的话子高度就等于视口高度，滚都滚不动（2026-09-08）。
           // 手势坐标取自 CustomPaint 内部，滚动不影响命中判定的 y 基准。
           child: SingleChildScrollView(
+            // 停在哪条轨上，就只亮那条轨的标题、只露那条轨的说明。
+            // **只在跨轨时才 setState**：同一条轨里移动不重建，
+            // 否则鼠标一动就是一次全时间线重绘。
+            //
+            // 摆在 RepaintBoundary **外面**：套在里面的话
+            // RenderCustomPaint 的直接父节点就成了 RenderMouseRegion，
+            // 播放头每次移动的 markNeedsPaint 又会一路上溯到 RenderView
+            child: MouseRegion(
+            // 光标要说得出「这儿能干什么」：压在边界手柄上是双向箭头
+            // （可以拖着改切分），压在刻度尺上是「可以拖播放头」，
+            // 别的地方保持普通箭头。少了这一层，人得靠试才知道哪儿能拖
+            // （2026-09-09 设计走查）
+            cursor: _cursor,
+            onHover: (e) {
+              _setHoverTrack(
+                  TimelineTracks.trackLabelTopAt(e.localPosition.dy));
+              _setCursorFor(e.localPosition);
+            },
+            onExit: (_) {
+              _setHoverTrack(null);
+              _setCursor(MouseCursor.defer);
+            },
             child: RepaintBoundary(
             child: AnimatedBuilder(
               animation: widget.controller,
@@ -685,10 +714,12 @@ class _TimelineViewState extends State<TimelineView> {
                     subtitleEdited: widget.subtitleEdited,
                     subtitleTextOf: widget.subtitleTextOf,
                     subtitleLineCount: widget.subtitleLineCount,
+                    hoveredLabelTop: _hoverLabelTop,
                     textCache: _textCache,
                   ),
                 ),
               ),
+            ),
             ),
           ),
           ),
@@ -696,6 +727,39 @@ class _TimelineViewState extends State<TimelineView> {
         );
       },
     );
+  }
+
+  /// 鼠标停着的那条轨（它标题条的 top）
+  double? _hoverLabelTop;
+
+  void _setHoverTrack(double? top) {
+    if (_hoverLabelTop == top) return;
+    setState(() => _hoverLabelTop = top);
+  }
+
+  /// 当前该用什么光标
+  MouseCursor _cursor = MouseCursor.defer;
+
+  void _setCursor(MouseCursor next) {
+    if (_cursor == next) return;
+    setState(() => _cursor = next);
+  }
+
+  /// **只在光标真的该换时才 setState**：鼠标在同一块区域里移动不重建，
+  /// 否则一动就是一次全时间线重绘
+  void _setCursorFor(Offset local) {
+    final hit = TimelineHitTester.hitTest(
+      local,
+      widget.controller.units,
+      widget.geometry,
+      locks: widget.controller.locks,
+    );
+    _setCursor(switch (hit) {
+      UnitBoundaryHit() || ShotBoundaryHit() =>
+        SystemMouseCursors.resizeLeftRight,
+      RulerHit() => SystemMouseCursors.resizeColumn,
+      _ => MouseCursor.defer,
+    });
   }
 
   /// 滚轮 / 触控板双指手势：

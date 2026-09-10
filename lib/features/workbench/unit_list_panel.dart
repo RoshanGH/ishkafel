@@ -216,19 +216,33 @@ class _UnitRow extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         key: Key('unit-row-$index'),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: onTap,
-        child: Container(
+        child: AnimatedContainer(
           key: Key('unit-row-container-$index'),
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
+            // **未选中的行也要有底**。原来是全透明，一列下来只有文字和
+            // 标签飘在背景上，看不出「一行」到哪儿为止
+            // （2026-09-10 产品负责人：「现在太不好看了」）。
+            // 选中态在此之上再加蓝底和蓝边，对比照样拉得开
             color: selected
-                ? AppColors.accentBlue.withValues(alpha: 0.14)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(9),
-            border: selected
-                ? Border.all(
-                    color: AppColors.accentBlue.withValues(alpha: 0.5))
+                ? AppColors.accentBlue.withValues(alpha: 0.16)
+                : AppColors.surfaceCard.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: selected
+                  ? AppColors.accentBlue.withValues(alpha: 0.65)
+                  : AppColors.border,
+            ),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                        color: AppColors.accentBlue.withValues(alpha: 0.18),
+                        blurRadius: 10),
+                  ]
                 : null,
           ),
           child: Column(
@@ -327,7 +341,7 @@ class _Chip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: AppColors.accentBlue.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Text(text,
           style:

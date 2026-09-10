@@ -18,6 +18,7 @@ Widget _wrap(FakePlaybackController playback) => MaterialApp(
     );
 
 void main() {
+  _tightTransport();
   testWidgets('无视频组件时渲染占位舞台与 transport 控件', (tester) async {
     final playback = FakePlaybackController();
     await tester.pumpWidget(_wrap(playback));
@@ -174,5 +175,57 @@ void main() {
     await tester.tap(find.byKey(const Key('player-seek-start')));
     await tester.pump();
     expect(playback.calls, contains('seekMs(0)'));
+  });
+}
+
+/// 窄栏下时间码不许被咬掉。
+///
+/// 2026-09-09 设计走查真机截图：挑素材时中栏被压到 280，控制条那行显示的是
+/// 「00:00.00 / 01:1」——横向滚动把后半截推出了可视区，而没有任何东西告诉
+/// 人还能滚。挤不下就该换行，不该静默裁掉。
+void _tightTransport() {
+  Widget wrapWidth(double width, FakePlaybackController playback) => MaterialApp(
+        home: Material(
+          child: Center(
+            child: SizedBox(
+              width: width,
+              height: 600,
+              child: PlayerPanel(
+                playback: playback,
+                durationMs: 70000,
+                fps: _fps,
+              ),
+            ),
+          ),
+        ),
+      );
+
+  testWidgets('窄栏下时间码整串都在，不被裁掉', (tester) async {
+    final playback = FakePlaybackController();
+    await tester.pumpWidget(wrapWidth(280, playback));
+    await tester.pump();
+
+    final clock = find.textContaining('/');
+    expect(clock, findsOneWidget);
+    // 文字自己没被截断
+    expect(tester.widget<Text>(clock).data, contains('01:10'));
+    // 而且真的画得下：文字的右边缘没有超出面板
+    final panel = tester.getRect(find.byType(PlayerPanel));
+    final rect = tester.getRect(clock);
+    expect(rect.right, lessThanOrEqualTo(panel.right + 0.5),
+        reason: '时间码被推出了可视区，人看到的是一个咬掉一半的数字');
+    expect(rect.left, greaterThanOrEqualTo(panel.left - 0.5));
+  });
+
+  testWidgets('宽栏下还是一行，不平白多占一行高度', (tester) async {
+    final playback = FakePlaybackController();
+    await tester.pumpWidget(wrapWidth(600, playback));
+    await tester.pump();
+
+    final clock = tester.getRect(find.textContaining('/'));
+    final play = tester.getRect(find.byKey(const Key('player-toggle-play')));
+
+    expect((clock.center.dy - play.center.dy).abs(), lessThan(4),
+        reason: '宽度够的时候时间码该和按钮并排');
   });
 }

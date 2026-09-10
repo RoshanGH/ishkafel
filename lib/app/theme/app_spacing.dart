@@ -43,6 +43,14 @@ abstract final class AppRadius {
 
   /// 12 — 浮层、对话框
   static const lg = 12.0;
+
+  /// 全圆（胶囊）：徽标、开关、进度条端头。
+  /// 写 999 是老办法，但散在几十处就没人知道它是「刻意的全圆」
+  /// 还是「随手打的一个大数」
+  static const pill = 999.0;
+
+  /// 全部档位（供阶梯校验测试使用）
+  static const all = <double>[xs, sm, md, lg, pill];
 }
 
 /// 描边宽度 token

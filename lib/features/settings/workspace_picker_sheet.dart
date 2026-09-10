@@ -250,7 +250,7 @@ class _WorkspacePickerSheetState extends State<WorkspacePickerSheet> {
           hintText: '搜索名称或 ID（共 ${_list?.items.length ?? 0} 个）',
           suffixIcon: _searching
               ? const Padding(
-                  padding: EdgeInsets.all(10),
+                  padding: EdgeInsets.all(AppSpacing.md),
                   child: SizedBox(
                       width: 12,
                       height: 12,

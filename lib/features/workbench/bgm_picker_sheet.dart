@@ -651,7 +651,7 @@ class _Row extends StatelessWidget {
                               horizontal: 5, vertical: 1),
                           decoration: BoxDecoration(
                             color: AppColors.orange.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(AppRadius.xs),
                           ),
                           child: const Text('含人声',
                               style: TextStyle(

@@ -128,8 +128,13 @@ class TimelinePainter extends CustomPainter {
     required this.playheadMs,
     this.replacements = const [],
     this.mediaStatus = TimelineMediaStatus.ready,
+    this.hoveredLabelTop,
     required this.textCache,
   });
+
+  /// 鼠标停在哪条轨上（那条轨标题条的 top）。只有它那一条会亮起标题、
+  /// 露出操作说明——见 [TimelineTracks.trackLabelTopAt]
+  final double? hoveredLabelTop;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -164,10 +169,15 @@ class TimelinePainter extends CustomPainter {
       (TimelineTracks.waveLabelTop, '音频', ''),
     ];
     for (final (top, title, hint) in entries) {
+      final hovered = hoveredLabelTop != null &&
+          (hoveredLabelTop! - top).abs() < 0.5;
       _drawText(canvas, title, Offset(AppSpacing.xs, top),
-          AppColors.textSecondary,
+          hovered ? AppColors.textPrimary : AppColors.textSecondary,
           fontSize: AppFontSize.micro);
-      if (hint.isEmpty) continue;
+      // **说明只在鼠标停在这条轨上时才出**：四条轨各挂一句灰字常驻，
+      // 眼睛先读到的是操作说明而不是内容，而这些话读一次就够了
+      // （2026-09-09 设计走查）
+      if (hint.isEmpty || !hovered) continue;
       // 提示文字紧跟标题排布：此前用硬编码偏移，标题文案一变长就会重叠
       final titleWidth = textCache
           .acquire(
@@ -266,16 +276,47 @@ class TimelinePainter extends CustomPainter {
           selection!.shotIndex == null &&
           selection!.unitIndex == unit.index;
 
-      canvas.drawRect(rect, Paint()..color = color.withValues(alpha: 0.22));
-      canvas.drawRect(
-        rect,
+      // **块体是一块有厚度的东西，不是一个填了色的格子。**
+      //
+      // 原来是「纯色 alpha 0.22 铺满 + 一圈描边」，一排下来像 Excel 的
+      // 单元格（2026-09-10 产品负责人：「现在太不好看了」）。
+      // 改成上亮下沉的渐变 + 圆角 + 左侧一道实色标识条：
+      // 渐变给厚度，标识条让「这一段是哪个单元」在余光里就分得清。
+      final body = RRect.fromRectAndRadius(
+          rect.deflate(0.5), const Radius.circular(AppRadius.xs));
+      canvas.drawRRect(
+        body,
+        Paint()
+          ..shader = ui.Gradient.linear(
+            rect.topCenter,
+            rect.bottomCenter,
+            [
+              color.withValues(alpha: selected ? 0.42 : 0.26),
+              color.withValues(alpha: selected ? 0.24 : 0.13),
+            ],
+          ),
+      );
+      canvas.drawRRect(
+        body,
         Paint()
           ..color = selected
               ? color.withValues(alpha: 1)
-              : color.withValues(alpha: 0.6)
+              : color.withValues(alpha: 0.55)
           ..style = PaintingStyle.stroke
           ..strokeWidth = selected ? 2 : 1,
       );
+      // 左沿的实色标识条：块体再窄也认得出颜色
+      if (rect.width > 6) {
+        canvas.drawRRect(
+          RRect.fromRectAndCorners(
+            Rect.fromLTWH(rect.left + 0.5, rect.top + 0.5, 3,
+                rect.height - 1),
+            topLeft: const Radius.circular(AppRadius.xs),
+            bottomLeft: const Radius.circular(AppRadius.xs),
+          ),
+          Paint()..color = color.withValues(alpha: selected ? 1 : 0.8),
+        );
+      }
 
       // 换过音色的单元在底边画一道绿杠。
       //
@@ -396,22 +437,58 @@ class TimelinePainter extends CustomPainter {
             selection!.shotIndex == s &&
             selection!.unitIndex == unit.index;
 
+        // 上亮下沉的渐变给块体一点厚度，别做成一格格的表格。
+        //
+        // **镜头块紧挨着排，不留空隙**：它们是同一个单元里连续的一串，
+        // 中间用一条实线分开比留缝更像剪映的镜头条——留缝的话窄块之间
+        // 就是一片背景色，反而看不出「这里是分界」
         canvas.drawRect(
           rect,
           Paint()
-            ..color = selected
-                ? AppColors.purple.withValues(alpha: 0.42)
-                : unitColor.withValues(alpha: 0.16),
+            ..shader = ui.Gradient.linear(
+              rect.topCenter,
+              rect.bottomCenter,
+              selected
+                  ? [
+                      AppColors.purple.withValues(alpha: 0.55),
+                      AppColors.purple.withValues(alpha: 0.32),
+                    ]
+                  : [
+                      unitColor.withValues(alpha: 0.24),
+                      unitColor.withValues(alpha: 0.11),
+                    ],
+            ),
         );
-        canvas.drawRect(
-          rect,
-          Paint()
-            ..color = selected
-                ? AppColors.purple
-                : unitColor.withValues(alpha: 0.5)
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = selected ? 2 : 1,
-        );
+        // 左沿一条分界线：块体再窄也数得清有几镜。
+        //
+        // **画左沿不画右沿**：右沿那条会被下一个块的填充盖掉——每个块都是
+        // 「先填充、再画线」，而下一块的填充正好从上一块的右沿开始。
+        // 画在自己的左沿就在自己的填充之后，谁也盖不住它。
+        // 第一个镜头的左沿是单元的边界，那条由单元轨自己画。
+        if (s > 0) {
+          canvas.drawLine(
+            Offset(rect.left, rect.top),
+            Offset(rect.left, rect.bottom),
+            Paint()
+              ..color = unitColor.withValues(alpha: 0.75)
+              ..strokeWidth = 1,
+          );
+        }
+        // **太窄就只留填充，不画描边**：1px 的描边在一个 4px 宽的块上占了
+        // 一半面积，十几个挨在一起就成了一片条形码——那是噪声，不是信息
+        // （2026-09-09 设计走查：U1 的 13 个镜头挤在 300px 里）。
+        // 选中态例外：它必须一眼认得出，哪怕只有几像素宽
+        // 选中态才描一整圈——未选中的块只靠右沿那条分界线，
+        // 十几个窄块挨在一起时才不会糊成条形码
+        if (selected) {
+          canvas.drawRect(
+            rect.deflate(1),
+            Paint()
+              ..color = AppColors.purple
+              ..style = PaintingStyle.stroke
+              ..strokeWidth = 2,
+          );
+        }
 
         // 镜头替换挑了几条同样标出来
         final shotCount =
@@ -476,7 +553,22 @@ class TimelinePainter extends CustomPainter {
       }
     }
 
-    for (final span in bgmSpans(bgm, units, geometry.axis)) {
+    // 一段配乐都没有时，这条轨是一条 24px 高的空槽，什么都不说——人看不出
+    // 它是「还没做」还是「这个任务用不上」。空状态就该说自己是空的
+    // （2026-09-09 设计走查）
+    final spans = bgmSpans(bgm, units, geometry.axis);
+    if (spans.isEmpty && bgmSelecting == null) {
+      _drawText(
+        canvas,
+        '还没加配乐——横向拖选一段台词语义单元就能加',
+        Offset(AppSpacing.sm, top + (bottom - top) / 2 - 7),
+        AppColors.textTertiary,
+        fontSize: AppFontSize.caption,
+        maxWidth: size.width - AppSpacing.sm * 2,
+      );
+    }
+
+    for (final span in spans) {
       // span 已经是**成片**区间，直接转像素
       final left = geometry.composedMsToPx(span.startMs);
       final right = geometry.composedMsToPx(span.endMs);
@@ -574,8 +666,10 @@ class TimelinePainter extends CustomPainter {
         canvas.drawRRect(
           RRect.fromRectAndRadius(box, const Radius.circular(3)),
           Paint()
+            // 0.3 而不是 0.22：淡到那个程度，窄块看着像噪点而不是「这一镜
+            // 有我们烧的字幕」（2026-09-09 设计走查）
             ..color = (edited ? AppColors.accentBlue : AppColors.textTertiary)
-                .withValues(alpha: edited ? 0.5 : 0.22),
+                .withValues(alpha: edited ? 0.5 : 0.3),
         );
         // 多于一行时右上角标个数：轨上只画得下头一句
         // **窄块上文字优先**：角标只是「这一镜还有几行」，而文字告诉你是哪
@@ -797,6 +891,7 @@ class TimelinePainter extends CustomPainter {
         oldDelegate.bgm != bgm ||
         oldDelegate.bgmSelecting != bgmSelecting ||
         oldDelegate.voices != voices ||
+        oldDelegate.hoveredLabelTop != hoveredLabelTop ||
         !const DeepCollectionEquality()
             .equals(oldDelegate.replacements, replacements);
   }

@@ -188,6 +188,26 @@ abstract final class TimelineTracks {
   /// `macos/Runner/MainFlutterWindow.swift` 与
   /// `test/features/workbench/timeline/timeline_tracks_layout_test.dart`。
   static double get totalHeight => waveBottom;
+
+  /// 鼠标停在哪条轨上（**含它自己的标题条**），返回那条轨标题条的 top；
+  /// 没落在任何轨上返回 null。
+  ///
+  /// 用途是「操作说明只在悬停时出现」：那几句「拖两端改长度，点 × 删除」
+  /// 常驻在标题行里，读一次就够了，之后就只是噪音——一条时间线上四行灰字，
+  /// 眼睛先看到的是说明而不是内容（2026-09-09 设计走查）。
+  static double? trackLabelTopAt(double dy) {
+    for (final (top, bottom) in <(double, double)>[
+      (unitsLabelTop, unitsBottom),
+      (shotsLabelTop, shotsBottom),
+      (subsLabelTop, subsBottom),
+      (bgmLabelTop, bgmBottom),
+      (thumbsLabelTop, thumbsBottom),
+      (waveLabelTop, waveBottom),
+    ]) {
+      if (dy >= top && dy < bottom) return top;
+    }
+    return null;
+  }
 }
 
 /// 时间线命中判定器（纯函数，静态方法）

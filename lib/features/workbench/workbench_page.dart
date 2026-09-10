@@ -2667,7 +2667,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               PreviewAudioBanner(
                 text: notice,
                 building: (_tracks?.speedFitter?.pending ?? 0) > 0,
-                onRetry: _retryPreviewAudio,
+                // 「还没选素材」重试一百次也不会变——那种提示不给重试按钮
+                onRetry: _tracks?.noticeRetryable ?? false
+                    ? _retryPreviewAudio
+                    : null,
               ),
             // 素材分离同样十几秒，照原片那条的规矩：正在跑就说在跑，
             // 失败给原因和重试，不许转圈不说话、也不许只写日志

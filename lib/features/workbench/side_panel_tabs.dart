@@ -104,7 +104,7 @@ class _Tab extends StatelessWidget {
                         horizontal: AppSpacing.xs, vertical: 1),
                     decoration: BoxDecoration(
                       color: AppColors.accentBlue.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(999),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
                     ),
                     child: Text(badge!,
                         style: const TextStyle(

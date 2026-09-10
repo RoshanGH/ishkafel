@@ -1,8 +1,9 @@
-import 'dart:io';
 import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../shared/thumb_image.dart';
 
 import 'scroll_into_view.dart';
 
@@ -344,17 +345,19 @@ class _TrimBar extends StatelessWidget {
           // 底条：素材全长——有帧铺帧（看得见画面），没帧退纯色
           Positioned.fill(
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(AppRadius.xs),
               child: cells.isEmpty
                   ? const ColoredBox(color: AppColors.surfaceCard)
                   : Row(children: [
                       for (final f in cells)
                         Expanded(
-                          child: Image.file(File(f),
-                              fit: BoxFit.cover,
-                              height: double.infinity,
-                              errorBuilder: (_, _, _) => const ColoredBox(
-                                  color: AppColors.surfaceCard)),
+                          child: SizedBox(
+                            height: double.infinity,
+                            child: ThumbImage(
+                                path: f,
+                                errorBuilder: (_) => const ColoredBox(
+                                    color: AppColors.surfaceCard)),
+                          ),
                         ),
                     ]),
             ),
@@ -398,7 +401,7 @@ class _TrimBar extends StatelessWidget {
                         ? AppColors.accentBlue.withValues(alpha: 0.28)
                         : Colors.transparent,
                     border: Border.all(color: AppColors.accentBlue, width: 1.6),
-                    borderRadius: BorderRadius.circular(4),
+                    borderRadius: BorderRadius.circular(AppRadius.xs),
                   ),
                   child: Align(
                     alignment: Alignment.bottomCenter,
@@ -407,7 +410,7 @@ class _TrimBar extends StatelessWidget {
                           horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(3)),
+                          borderRadius: BorderRadius.circular(AppRadius.xs)),
                       child: Text('选用 ${_s(alloc)}',
                           style: const TextStyle(
                               fontSize: AppFontSize.micro,
@@ -438,7 +441,7 @@ class _TrimBar extends StatelessWidget {
                     width: 4,
                     decoration: BoxDecoration(
                         color: AppColors.accentBlueLight,
-                        borderRadius: BorderRadius.circular(2)),
+                        borderRadius: BorderRadius.circular(AppRadius.xs)),
                   ),
                 ),
               ),
@@ -743,7 +746,7 @@ class _LineBand extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   color: color,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(AppRadius.xs),
                 ),
               ),
             ),
@@ -1009,7 +1012,7 @@ class _LineBand extends StatelessWidget {
             if (inlineKey == 'ref_${line.id}' && inlineVideo != null)
               inlineVideo!
             else if (thumb != null)
-              Image.file(File(thumb), fit: BoxFit.cover)
+              ThumbImage(path: thumb)
             else
               Container(color: Colors.black),
             // 灰调蒙层：参考是原文引用，不与右侧彩色镜头抢（播放时不压）
@@ -1023,7 +1026,7 @@ class _LineBand extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
-                    borderRadius: BorderRadius.circular(3)),
+                    borderRadius: BorderRadius.circular(AppRadius.xs)),
                 child: const Text('参考',
                     style: TextStyle(
                         fontSize: AppFontSize.micro,
@@ -1115,10 +1118,9 @@ class _LineBand extends StatelessWidget {
               Builder(builder: (context) {
                 final local = handlers.shotFramesOf(shot);
                 if (local != null && local.frames.isNotEmpty) {
-                  return Image.file(File(local.frames.first),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          Container(color: Colors.black));
+                  return ThumbImage(
+                      path: local.frames.first,
+                      errorBuilder: (_) => Container(color: Colors.black));
                 }
                 return shot.thumbnailUrl != null
                     ? Image.network(shot.thumbnailUrl!,
@@ -1141,7 +1143,7 @@ class _LineBand extends StatelessWidget {
                             child: InkWell(
                               key: ValueKey('band-play-shot-$index-$j'),
                               onTap: () => handlers.onPlayShot(index, j),
-                              borderRadius: BorderRadius.circular(999),
+                              borderRadius: BorderRadius.circular(AppRadius.pill),
                               child: Container(
                                 padding: const EdgeInsets.all(5),
                                 decoration: BoxDecoration(
@@ -1171,7 +1173,7 @@ class _LineBand extends StatelessWidget {
                       const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                   decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(3)),
+                      borderRadius: BorderRadius.circular(AppRadius.xs)),
                   child: Text('${j + 1}',
                       style: const TextStyle(
                           fontSize: AppFontSize.micro,
@@ -1189,7 +1191,7 @@ class _LineBand extends StatelessWidget {
                     padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(3)),
+                        borderRadius: BorderRadius.circular(AppRadius.xs)),
                     child:
                         const Icon(Icons.close, size: 10, color: Colors.white),
                   ),
@@ -1229,7 +1231,7 @@ class _LineBand extends StatelessWidget {
                             padding: const EdgeInsets.all(3),
                             decoration: BoxDecoration(
                                 color: AppColors.red.withValues(alpha: 0.9),
-                                borderRadius: BorderRadius.circular(4)),
+                                borderRadius: BorderRadius.circular(AppRadius.xs)),
                             child: const Icon(Icons.refresh,
                                 size: 14, color: Colors.white),
                           ),
@@ -1337,6 +1339,7 @@ class _LineBand extends StatelessWidget {
                       color: AppColors.textSecondary))),
           IconButton(
             key: ValueKey('band-alloc-minus-$index-$j'),
+            tooltip: '这一镜短 0.5 秒',
             visualDensity: VisualDensity.compact,
             iconSize: 13,
             onPressed: alloc == null
@@ -1351,6 +1354,7 @@ class _LineBand extends StatelessWidget {
                   fontFeatures: [FontFeature.tabularFigures()])),
           IconButton(
             key: ValueKey('band-alloc-plus-$index-$j'),
+            tooltip: '这一镜长 0.5 秒',
             visualDensity: VisualDensity.compact,
             iconSize: 13,
             onPressed: alloc == null
@@ -1409,7 +1413,7 @@ class _LineBand extends StatelessWidget {
                     const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.accentBlue.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
                   border: Border.all(color: AppColors.accentBlue),
                 ),
                 child: Text('${shot.speed}x',
@@ -1425,7 +1429,7 @@ class _LineBand extends StatelessWidget {
               child: InkWell(
                 key: ValueKey('band-speed-$index-$j-$v'),
                 onTap: () => handlers.onSpeedShot(index, j, v),
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(AppRadius.pill),
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -1433,7 +1437,7 @@ class _LineBand extends StatelessWidget {
                     color: shot.speed == v
                         ? AppColors.accentBlue.withValues(alpha: 0.16)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
                     border: Border.all(
                         color: shot.speed == v
                             ? AppColors.accentBlue
@@ -1501,7 +1505,7 @@ class _LineBand extends StatelessWidget {
                       color: style.preset == SubtitlePreset.whiteBox
                           ? Colors.black.withValues(alpha: 0.55)
                           : Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(2),
+                      borderRadius: BorderRadius.circular(AppRadius.xs),
                     )
                   : null,
               child: Text(
@@ -2011,7 +2015,7 @@ class _HoverIconState extends State<_HoverIcon> {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
           decoration: BoxDecoration(
             color: _hover && enabled ? AppColors.hover : Colors.transparent,
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(AppRadius.xs),
           ),
           child: Icon(widget.icon,
               size: 14,
