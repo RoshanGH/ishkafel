@@ -1,6 +1,7 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
+
+import '../shared/thumb_image.dart';
 
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
@@ -325,15 +326,16 @@ class PickedTray extends StatelessWidget {
   Widget _thumb(PickedItem item) {
     final path = item.material?.thumbPath;
     return ClipRRect(
-      borderRadius: BorderRadius.circular(3),
+      borderRadius: BorderRadius.circular(AppRadius.xs),
       child: SizedBox(
         width: 13,
         height: 22,
         child: path == null || path.isEmpty
             ? Container(color: AppColors.stageBackground)
-            : Image.file(File(path),
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) =>
+            : ThumbImage(
+                path: path,
+                width: 13,
+                errorBuilder: (_) =>
                     Container(color: AppColors.stageBackground)),
       ),
     );
@@ -351,7 +353,7 @@ class PickedTray extends StatelessWidget {
         child: InkWell(
           key: key,
           onTap: onTap,
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.xs),
           child: Padding(
             padding: const EdgeInsets.all(3),
             child: Icon(icon, size: 14, color: color ?? AppColors.textSecondary),

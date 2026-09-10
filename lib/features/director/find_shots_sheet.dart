@@ -4,6 +4,9 @@ import '../../core/ui/text_editing_keys.dart';
 
 import 'package:flutter/material.dart';
 
+import '../shared/scroll_fade.dart';
+import '../shared/thumb_image.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -603,7 +606,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         ),
         child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           ClipRRect(
-            borderRadius: BorderRadius.circular(3),
+            borderRadius: BorderRadius.circular(AppRadius.xs),
             child: SizedBox(
               width: 78,
               child: Stack(fit: StackFit.expand, children: [
@@ -611,7 +614,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                 if (playing && _previewVideo != null)
                   _previewVideo!
                 else if (thumb != null)
-                  Image.file(File(thumb), fit: BoxFit.cover)
+                  ThumbImage(path: thumb)
                 else
                   Container(
                       color: Colors.black,
@@ -623,7 +626,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                   child: InkWell(
                     key: ValueKey('shots-ref-play-$k'),
                     onTap: () => _toggleRefPreview(k, seg),
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
                     child: Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
@@ -1016,14 +1019,15 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       InkWell(
         key: key,
         onTap: onTap,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md, vertical: AppSpacing.xs),
           decoration: BoxDecoration(
             color: selected
                 ? AppColors.accentBlue.withValues(alpha: 0.16)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
+            borderRadius: BorderRadius.circular(AppRadius.pill),
             border: Border.all(
                 color: selected ? AppColors.accentBlue : AppColors.border),
           ),
@@ -1073,7 +1077,12 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
         }
         return Column(children: [
           Expanded(
-            child: GridView.builder(
+            // 一屏放不下 789 条里的头一页，而底下就是分页条——不给一层
+            // 淡出，人不知道这一页还能往下滚（macOS 的滚动条不动鼠标
+            // 不出现，2026-09-09 设计走查）
+            child: ScrollFade(
+              background: AppColors.surfaceRaised,
+              child: GridView.builder(
               padding: const EdgeInsets.all(AppSpacing.lg),
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 152,
@@ -1083,6 +1092,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
               ),
               itemCount: _search.entries.length,
               itemBuilder: (context, i) => _card(_search.entries[i]),
+            ),
             ),
           ),
           _pager(),
@@ -1097,6 +1107,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
       child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         IconButton(
             visualDensity: VisualDensity.compact,
+            tooltip: '上一页',
             onPressed: _search.hasPrevPage ? _search.prevPage : null,
             iconSize: 14,
             icon: const Icon(Icons.chevron_left)),
@@ -1105,6 +1116,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                 fontSize: AppFontSize.caption, color: AppColors.textTertiary)),
         IconButton(
             visualDensity: VisualDensity.compact,
+            tooltip: '下一页',
             onPressed: _search.hasNextPage ? _search.nextPage : null,
             iconSize: 14,
             icon: const Icon(Icons.chevron_right)),
@@ -1157,7 +1169,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                 child: InkWell(
                   key: ValueKey('shot-preview-${m.id}'),
                   onTap: () => _togglePreview(m),
-                  borderRadius: BorderRadius.circular(999),
+                  borderRadius: BorderRadius.circular(AppRadius.pill),
                   child: Container(
                     padding: const EdgeInsets.all(5),
                     decoration: BoxDecoration(
@@ -1200,7 +1212,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
                       padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(4)),
+                          borderRadius: BorderRadius.circular(AppRadius.xs)),
                       child: const Icon(Icons.image_search,
                           size: 12, color: Colors.white),
                     ),
@@ -1228,13 +1240,30 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
           ),
           Padding(
             padding: const EdgeInsets.all(6),
-            child: Text(m.voiceover.isNotEmpty ? m.voiceover : m.sceneDescription,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: AppFontSize.micro,
-                    color: AppColors.textSecondary,
-                    height: 1.35)),
+            // 两样都没有时**说出来**：留一块纯空白，人分不清是「这条没台词
+            // 也没画面描述」还是「加载没出来」（2026-09-09 设计走查：
+            // 一排卡片里夹着两张下面什么都没有的）
+            child: Builder(builder: (context) {
+              final blurb = m.voiceover.isNotEmpty
+                  ? m.voiceover
+                  : m.sceneDescription;
+              if (blurb.isEmpty) {
+                return const Text('没有台词，也还没有画面描述',
+                    maxLines: 2,
+                    style: TextStyle(
+                        fontSize: AppFontSize.micro,
+                        color: AppColors.textTertiary,
+                        fontStyle: FontStyle.italic,
+                        height: 1.35));
+              }
+              return Text(blurb,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textSecondary,
+                      height: 1.35));
+            }),
           ),
         ]),
       ),
@@ -1244,7 +1273,7 @@ class _FindShotsSheetState extends State<_FindShotsSheet> {
   Widget _badge(String text, Color bg, Color fg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
         decoration: BoxDecoration(
-            color: bg, borderRadius: BorderRadius.circular(4)),
+            color: bg, borderRadius: BorderRadius.circular(AppRadius.xs)),
         child: Text(text,
             style: TextStyle(
                 fontSize: AppFontSize.micro, fontWeight: FontWeight.w600, color: fg)),

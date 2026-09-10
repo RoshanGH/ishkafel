@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -106,7 +107,13 @@ Future<void> main(List<String> args) async {
     // 迁移失败不能挡启动：下次再迁，共享目录还在，数据不会丢
     AppLog.warn('物料迁移失败（下次启动再试）：$e');
   }
-  await _sweepOrphans(repository, dataDir);
+  // **清孤儿不挡首屏**：它要把全部任务读一遍、再扫一遍产物目录，
+  // 盘上东西多的时候是好几百毫秒的纯 IO——挡在 runApp 前面，人点了图标
+  // 只能对着 Dock 上跳动的图标等（2026-09-09 性能走查）。
+  // 这活儿纯粹是维护性的：删的都是没人引用的东西，晚几秒开始不影响任何
+  // 正在用的数据。**注意跟上面的迁移不同**，迁移会改素材的落地位置，
+  // 那个必须在 UI 读到路径之前做完，不能挪。
+  unawaited(_sweepOrphans(repository, dataDir));
 
   // `ishkafel open <task>` 会带 --task=<id> 把 app 拉起来。CLI 写、GUI 读，
   // 两边对同一个约定（见 open_command.dart）

@@ -102,8 +102,25 @@ class MultitrackPlayback implements PlaybackController {
   /// （2026-09-09）。
   Future<void> _pending = Future<void>.value();
 
+  /// 排着队还没轮到的那一版方案。**只留最后一版**——中间那几版是过程，
+  /// 不是人要看的东西。
+  ///
+  /// 进一次审片台，方案会连推六七次：先按原片铺一版，每渲好一段变速切片
+  /// 补一版，代理生成好再整体换一版。老实按顺序全推一遍就是六七次
+  /// mpv loadfile，画面连闪好几下、每次都得重新解码定位
+  /// （2026-09-09 真机日志：一次进入 6 次「画面轨换源」）。
+  /// 中间那几版在被播出来之前就已经过时了，直接丢掉。
+  TrackPlan? _queued;
+
   Future<void> setPlan(TrackPlan plan) {
-    final next = _pending.then((_) => _setPlan(plan));
+    _queued = plan;
+    final next = _pending.then((_) async {
+      final pending = _queued;
+      // 排队期间又来了新的，前面那几版已经被它顶掉
+      if (pending == null) return;
+      _queued = null;
+      await _setPlan(pending);
+    });
     // 前一次失败不该把后面全堵死
     _pending = next.catchError((_) {});
     return next;

@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../shared/thumb_image.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -183,7 +185,7 @@ class _StaleBadge extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
         decoration: BoxDecoration(
           color: AppColors.orange.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(4),
+          borderRadius: BorderRadius.circular(AppRadius.xs),
         ),
         child: const Text('待重打',
             style: TextStyle(
@@ -223,7 +225,7 @@ class _TraceDetail extends StatelessWidget {
               padding: const EdgeInsets.all(AppSpacing.sm),
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
               ),
               child: SelectableText(r,
                   style: const TextStyle(
@@ -253,10 +255,12 @@ class _TraceDetail extends StatelessWidget {
           itemCount: files.length,
           separatorBuilder: (_, _) => const SizedBox(width: 4),
           itemBuilder: (_, i) => ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: Image.file(File(files[i]),
-                height: 56, fit: BoxFit.cover, errorBuilder: (_, _, _) =>
-                    const SizedBox.shrink()),
+            borderRadius: BorderRadius.circular(AppRadius.xs),
+            child: SizedBox(
+              height: 56,
+              // 9:16 素材在 56 高时约 32 宽，按这个解码就够
+              child: ThumbImage(path: files[i], width: 56 * 9 / 16),
+            ),
           ),
         ),
       ),

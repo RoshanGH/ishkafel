@@ -181,15 +181,16 @@ void _globalSlotTests() {
         stepTimeout: const Duration(milliseconds: 60),
       );
 
-      final began = DateTime.now();
       for (var i = 0; i < 6; i++) {
         await stage.show('第 $i 步');
       }
-      final spent = DateTime.now().difference(began);
 
-      // 前两步各等一个超时，后面四步不再等
-      expect(spent.inMilliseconds, lessThan(60 * 4),
-          reason: '六步全等的话是 360ms 起步，人和 Agent 都在白耗');
+      // **数「等了几次」，不拿墙钟量**：并发跑测试时机器一忙，
+      // 两次超时加调度开销就能顶穿任何一个墙钟阈值——这条用例为此
+      // 假红过三次（2026-09-09）。要验的性质本来就是次数，不是耗时。
+      expect(stage.waitedCount, 2,
+          reason: '前两步各等一个超时，后面四步该直接过——'
+              '六步全等的话人和 Agent 都在白耗');
       dir.deleteSync(recursive: true);
     });
   });
