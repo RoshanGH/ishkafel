@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../shared/shortcuts_cheatsheet.dart';
+
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
@@ -69,9 +71,13 @@ class _HelpDialog extends StatelessWidget {
                             '不选就没有候选素材可用。',
                       ),
                       _Section(
-                        title: '快捷键',
-                        body: '空格 播放/暂停　·　J K L 走带　·　← → 逐帧　·　⇧ ← → 10 帧\n'
-                            '↑ ↓ 切换选中　·　Home / End 跳片头片尾　·　⌘Z / ⇧⌘Z 撤销重做',
+                        title: '快捷键（审片台里按 ? 随时能叫出来）',
+                        // 清单只有一份，见 shortcuts_cheatsheet.dart——
+                        // 两处各写各的话，改了键位没人管这段说明
+                        body: [
+                          for (final s in playbackShortcuts)
+                            '${s.keys}　${s.what}',
+                        ].join('\n'),
                       ),
                       const _Section(
                         title: '遇到问题',

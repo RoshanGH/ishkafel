@@ -75,7 +75,7 @@ Future<void> _pump(WidgetTester tester, Widget child) async {
 void main() {
   _composedDuration();
   group('顶栏第二行显示两个标签组（设计稿：标签组 衣清.消毒液 / 画面类型）', () {
-    testWidgets('两个标签组都选了时按「单元组 / 镜头组」显示名字而不是 id',
+    testWidgets('两层各用各的组时，分开说清哪几组管哪一层（名字，不是 id）',
         (tester) async {
       await _pump(
         tester,
@@ -88,9 +88,9 @@ void main() {
         ),
       );
 
-      expect(find.textContaining('标签组'), findsOneWidget);
-      expect(find.textContaining('衣清.消毒液'), findsOneWidget);
-      expect(find.textContaining('画面类型'), findsOneWidget);
+      // 两层不一样就按层说。直接拼一串的话，两层选同一套组（常态）会显示成
+      // 十个名字、后五个跟前五个一模一样（2026-09-09 设计走查）
+      expect(find.text('单元 衣清.消毒液 · 镜头 画面类型'), findsOneWidget);
       expect(find.textContaining('1279'), findsNothing, reason: 'id 是技术黑话');
     });
 

@@ -142,6 +142,22 @@ class PageSeekEdgeAction extends Action<PageSeekEdgeIntent> {
   void invoke(PageSeekEdgeIntent intent) => _callback(intent.toStart);
 }
 
+/// 「快捷键都有哪些」——`?` 或 ⌘/ 叫出速查表。
+///
+/// 这一堆键（JKL 走带、⇧←→ 粗调、Home/End）实现了，界面上却没有任何地方
+/// 说得出来：人在审片台干活时想查，得退回首页翻帮助（2026-09-09 设计走查）。
+class PageShortcutsHelpIntent extends Intent {
+  const PageShortcutsHelpIntent();
+}
+
+class PageShortcutsHelpAction extends Action<PageShortcutsHelpIntent> {
+  final VoidCallback _callback;
+  PageShortcutsHelpAction(this._callback);
+
+  @override
+  void invoke(PageShortcutsHelpIntent intent) => _callback();
+}
+
 /// 工具条/滑块区域的按键放行表。
 ///
 /// 页面级快捷键的作用域包住了整个 body（三栏 + 时间线），于是焦点落在时间线
@@ -207,6 +223,13 @@ const Map<ShortcutActivator, Intent> workbenchPlaybackShortcuts =
   SingleActivator(LogicalKeyboardKey.keyZ, control: true): PageUndoIntent(),
   SingleActivator(LogicalKeyboardKey.keyZ, control: true, shift: true):
       PageRedoIntent(),
+  // 「有哪些快捷键」：? 是各家专业工具的通行键位，⌘/ 是 macOS 的说法，
+  // 两个都绑上——记不住哪个的人按另一个也能中
+  SingleActivator(LogicalKeyboardKey.slash, shift: true):
+      PageShortcutsHelpIntent(),
+  SingleActivator(LogicalKeyboardKey.question): PageShortcutsHelpIntent(),
+  SingleActivator(LogicalKeyboardKey.slash, meta: true):
+      PageShortcutsHelpIntent(),
 };
 
 /// 快捷键动作表：组装 [PageTogglePlayAction]/[PageStepFrameAction]/
@@ -219,6 +242,7 @@ Map<Type, Action<Intent>> workbenchPlaybackActions({
   required ValueChanged<int> onShuttle,
   required ValueChanged<bool> onSeekEdge,
   required ValueChanged<int> onSelectAdjacent,
+  required VoidCallback onShortcutsHelp,
 }) =>
     <Type, Action<Intent>>{
       PageTogglePlayIntent: PageTogglePlayAction(onTogglePlay),
@@ -228,4 +252,5 @@ Map<Type, Action<Intent>> workbenchPlaybackActions({
       PageShuttleIntent: PageShuttleAction(onShuttle),
       PageSeekEdgeIntent: PageSeekEdgeAction(onSeekEdge),
       PageSelectAdjacentIntent: PageSelectAdjacentAction(onSelectAdjacent),
+      PageShortcutsHelpIntent: PageShortcutsHelpAction(onShortcutsHelp),
     };

@@ -102,9 +102,18 @@ void main() {
     await pump(tester,
         locks: EditLocks(shots: {const ShotRef(0, 1)}),
         selection: EditorSelection.shot(0, 1));
+    // 一行说完「怎么了」，「为什么、怎么解开」放 tooltip——那段四行的解释
+    // 常驻在这儿的话，会把下面的「单元台词」和「拆分 / 并入」整个挤出可视区
     expect(find.textContaining('切分已锁定'), findsOneWidget);
-    expect(find.textContaining('移除它的替换素材'), findsOneWidget);
     expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    expect(
+        tester
+            .widget<Tooltip>(find.ancestor(
+                of: find.textContaining('切分已锁定'),
+                matching: find.byType(Tooltip)))
+            .message,
+        contains('移除它的替换素材'),
+        reason: '光说「锁了」不够，还得说得出怎么解开');
   });
 
   testWidgets('没被钉的时候不出现这段说明——别拿噪音占地方', (tester) async {

@@ -103,6 +103,7 @@ class _SearchFieldState extends State<_SearchField> {
               ? null
               : IconButton(
                   key: const Key('task-list-search-clear'),
+                  tooltip: '清空搜索',
                   icon: const Icon(Icons.close,
                       size: 14, color: AppColors.textTertiary),
                   onPressed: () {
@@ -145,10 +146,10 @@ class _FilterChip extends StatelessWidget {
         color: selected
             ? AppColors.accentBlue.withValues(alpha: 0.16)
             : Colors.transparent,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppRadius.pill),
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
           child: Padding(
             padding: const EdgeInsets.symmetric(
                 horizontal: AppSpacing.md, vertical: AppSpacing.sm),

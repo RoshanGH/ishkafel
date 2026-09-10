@@ -100,6 +100,7 @@ class _PreviewDialogState extends State<_PreviewDialog> {
                     ),
                     IconButton(
                       key: const Key('candidate-preview-close'),
+                      tooltip: '关闭',
                       onPressed: () => Navigator.of(context).pop(),
                       icon: const Icon(Icons.close, size: 18),
                       color: AppColors.textSecondary,

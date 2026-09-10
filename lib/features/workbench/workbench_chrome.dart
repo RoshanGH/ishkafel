@@ -242,16 +242,27 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Size get preferredSize => Size.fromHeight(_tagGroupText == null ? 52 : 62);
 
-  /// 「标签组 台词语义单元组 / 视觉镜头组」。
+  /// 「标签组 A / B / C（两层同一套）」或「单元 A / B · 镜头 C / D」。
   ///
   /// 一个都没选时也要说出来——什么都不显示，用户只会以为这条任务本来就不用
   /// 标签，而实际上是打标和标签检索都被悄悄跳过了。
+  ///
+  /// **两层不能直接拼一串**：常见做法就是两层选同一套组，直接拼出来是
+  /// 「植源分子库 / 植源场景 / 植源镜头类别 / 植源动作 / 植源外壳 /
+  /// 植源分子库 / 植源场景 / 植源镜头类别 / 植源动作 / 植源外壳」——
+  /// 十个名字里五个是重的，人第一眼以为软件出错了（2026-09-09 设计走查）。
   String? get _tagGroupText {
-    final names = [
-      for (final g in task.unitTagGroups) g.name,
-      for (final g in task.shotTagGroups) g.name,
-    ];
-    return names.isEmpty ? '未设置标签组，不会打标' : '标签组 ${names.join(' / ')}';
+    final unit = [for (final g in task.unitTagGroups) g.name];
+    final shot = [for (final g in task.shotTagGroups) g.name];
+    if (unit.isEmpty && shot.isEmpty) return '未设置标签组，不会打标';
+    if (unit.isEmpty) return '镜头标签组 ${shot.join(' / ')}（单元层不打标）';
+    if (shot.isEmpty) return '单元标签组 ${unit.join(' / ')}（镜头层不打标）';
+    if (unit.length == shot.length &&
+        List.generate(unit.length, (i) => unit[i] == shot[i])
+            .every((same) => same)) {
+      return '标签组 ${unit.join(' / ')} · 两层同一套';
+    }
+    return '单元 ${unit.join(' / ')} · 镜头 ${shot.join(' / ')}';
   }
 
   @override
@@ -274,6 +285,7 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
         children: [
           IconButton(
             key: const Key('workbench-back-btn'),
+            tooltip: '回到任务列表',
             onPressed: onBack,
             icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary, size: 18),
           ),
@@ -309,40 +321,57 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
               ],
             ),
           ),
+          // 这三个都是**整条片子**的设定。按钮上只放得下两三个字，
+          // 「字幕」是改内容还是改样式、「标签组」改了会怎样，
+          // 全靠 tooltip 说清（2026-09-09 设计走查）
           if (onEditSubtitle != null)
-            TextButton.icon(
-              key: const Key('workbench-subtitle-style-btn'),
-              onPressed: onEditSubtitle,
-              icon: const Icon(Icons.closed_caption_outlined, size: 15),
-              label: const Text('字幕'),
-              style: TextButton.styleFrom(
-                  foregroundColor: AppColors.textSecondary),
+            Tooltip(
+              message: '整片的字幕样式：位置、字号、颜色、衬底。\n'
+                  '只影响我们烧上去的那些字（换过素材的镜头）。',
+              child: TextButton.icon(
+                key: const Key('workbench-subtitle-style-btn'),
+                onPressed: onEditSubtitle,
+                icon: const Icon(Icons.closed_caption_outlined, size: 15),
+                label: const Text('字幕'),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary),
+              ),
             ),
           // 「素材原声」的全片打底开关。摆在这一排是因为它和字幕、标签组
           // 一样是**整条片子**的设定，不属于某一个单元
           if (onEditMaterialAudio != null)
-            TextButton.icon(
-              key: const Key('workbench-material-audio-btn'),
-              onPressed: onEditMaterialAudio,
-              icon: Icon(
-                  materialAudioOn
-                      ? Icons.volume_up_outlined
-                      : Icons.volume_off_outlined,
-                  size: 15),
-              label: Text('素材原声${materialAudioOn ? '·开' : ''}'),
-              style: TextButton.styleFrom(
-                  foregroundColor: materialAudioOn
-                      ? AppColors.accentBlue
-                      : AppColors.textSecondary),
+            Tooltip(
+              message: materialAudioOn
+                  ? '换上去的素材会带着它自己的声音一起播（现在是开的）。'
+                  : '换上去的素材只用画面，声音一律不要（现在是关的）。',
+              child: TextButton.icon(
+                key: const Key('workbench-material-audio-btn'),
+                onPressed: onEditMaterialAudio,
+                icon: Icon(
+                    materialAudioOn
+                        ? Icons.volume_up_outlined
+                        : Icons.volume_off_outlined,
+                    size: 15),
+                label: Text('素材原声${materialAudioOn ? '·开' : ''}'),
+                style: TextButton.styleFrom(
+                    foregroundColor: materialAudioOn
+                        ? AppColors.accentBlue
+                        : AppColors.textSecondary),
+              ),
             ),
           if (onEditTagGroups != null)
-            TextButton.icon(
-              key: const Key('workbench-tag-groups-btn'),
-              onPressed: onEditTagGroups,
-              icon: const Icon(Icons.sell_outlined, size: 15),
-              label: const Text('标签组'),
-              style: TextButton.styleFrom(
-                  foregroundColor: AppColors.textSecondary),
+            Tooltip(
+              message: '这条任务用哪几组标签打标。\n'
+                  '标签同时也是「按相同标签找候选素材」的依据，'
+                  '改了要重新打标才生效。',
+              child: TextButton.icon(
+                key: const Key('workbench-tag-groups-btn'),
+                onPressed: onEditTagGroups,
+                icon: const Icon(Icons.sell_outlined, size: 15),
+                label: const Text('标签组'),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary),
+              ),
             ),
         ],
       ),
@@ -437,26 +466,40 @@ class WorkbenchBottomBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
+          // 这三个是**三个不同的出口**，而按钮上只放得下两三个字。
+          // 尤其「剪映」——点下去就开始归集素材、生成工程（几百 MB、要等），
+          // 不说清楚人不知道自己按了什么（2026-09-09 设计走查）
           if (onReview != null) ...[
-            OutlinedButton(
-              key: const Key('workbench-review-btn'),
-              onPressed: onReview,
-              child: const Text('审核候选'),
+            Tooltip(
+              message: '挑好的候选逐条过一遍：原片这一段 → 换成什么。\n'
+                  '剔掉不合适的，剩下的才进导出。',
+              child: OutlinedButton(
+                key: const Key('workbench-review-btn'),
+                onPressed: onReview,
+                child: const Text('审核候选'),
+              ),
             ),
             const SizedBox(width: 8),
           ],
           // 剪映是**另一个出口**，不是导出的一种格式：导出出的是定死的成片，
           // 剪映拿到的是还没定死的选择——所有候选摞成多条轨，人在那边边看边切
-          OutlinedButton(
-            key: const Key('workbench-jianying-btn'),
-            onPressed: onJianying,
-            child: const Text('剪映'),
+          Tooltip(
+            message: '导一份剪映工程：所有候选摞成多条轨，到剪映里边看边切。\n'
+                '素材会归集到工程目录，要等一会儿。',
+            child: OutlinedButton(
+              key: const Key('workbench-jianying-btn'),
+              onPressed: onJianying,
+              child: const Text('剪映'),
+            ),
           ),
           const SizedBox(width: 8),
-          FilledButton(
-            key: const Key('workbench-export-btn'),
-            onPressed: blockedReason == null ? onExport : null,
-            child: const Text('进入矩阵导出'),
+          Tooltip(
+            message: blockedReason ?? '按当前的挑选排出所有组合，直接合成成片。',
+            child: FilledButton(
+              key: const Key('workbench-export-btn'),
+              onPressed: blockedReason == null ? onExport : null,
+              child: const Text('进入矩阵导出'),
+            ),
           ),
         ],
       ),
