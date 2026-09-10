@@ -1,4 +1,4 @@
-## 0.1.220
+## 0.1.219
 
 **新增：把被替换那一镜的声音拆成两条轨，各选各的。**
 
@@ -42,7 +42,6 @@
   --audio none|vocals|background|original|follow|auto [--volume]`，
   手册和 `task_view` 的 JSON 里都补上了。
 
-## 0.1.219
 
 **修：往同一个目录导第二批成片，上一批被悄悄盖掉了。**
 
