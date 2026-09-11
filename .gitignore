@@ -101,3 +101,6 @@ logs/
 coverage/
 .secrets/
 .secrets
+
+# 参考资料（竞品截图等），只在本机留着，不进库
+参考内容/
