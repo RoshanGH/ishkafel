@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/time/timecode.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
 import '../tasks/task_id_badge.dart';
@@ -268,9 +269,13 @@ class WorkbenchTopBar extends StatelessWidget implements PreferredSizeWidget {
   @override
   Widget build(BuildContext context) {
     final info = task.videoInfo;
+    // **帧率要写出来**：时间线、属性面板、逐帧步进全按原片帧率数帧，
+    // 而它以前在界面上一个字都没有——人看到 `00:17.28` 没法知道 28 帧
+    // 是几分之一秒（2026-09-11 用户提出）
     final metaText = info == null
         ? task.name
         : '${task.name} · ${info.width}×${info.height} · '
+            '${fpsLabel(info.fps)} · '
             '${(info.duration.inMilliseconds / 1000).toStringAsFixed(1)}s';
     final tagGroups = _tagGroupText;
 

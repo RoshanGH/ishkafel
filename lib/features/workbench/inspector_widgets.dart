@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../app/theme/app_spacing.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/time/timecode.dart';
 import '../../app/theme/app_typography.dart';
 
 /// InspectorPanel 的纯展示型辅助组件：不持有状态、不依赖 controller，
@@ -56,6 +57,23 @@ Widget inspectorSubRow(String label, String value) => Column(
                 fontSize: AppFontSize.caption,
                 fontFeatures: [FontFeature.tabularFigures()])),
       ],
+    );
+
+/// 时间码的图例：**摆在有时间码的那张卡里**。
+///
+/// `00:17.28` 的 `.28` 是帧号不是小数，不写清楚一定被读成 17.28 秒
+/// （30fps 下真值 17.933 秒，差 0.65 秒）。字压到最小、颜色压到最淡——
+/// 它是给第一次看的人用的，不该跟主数字抢眼睛
+Widget inspectorTimecodeLegend(double fps) => Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Text(
+        timecodeLegend(fps),
+        key: const Key('inspector-timecode-legend'),
+        style: const TextStyle(
+            color: AppColors.textTertiary,
+            fontSize: AppFontSize.micro,
+            height: 1.5),
+      ),
     );
 
 Widget inspectorInfoRow(String label, String value) => Row(

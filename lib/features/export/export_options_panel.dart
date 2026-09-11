@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/theme/app_colors.dart';
+import '../../core/time/timecode.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/export/export_spec.dart';
@@ -24,6 +25,11 @@ class ExportOptionsPanel extends StatelessWidget {
   /// 每条成片的时长（算预计大小用）。0 表示未知，那时不显示预计大小
   final int durationMs;
 
+  /// 原片的帧率。**时间线、逐帧步进、属性面板全按它数帧**，
+  /// 所以导出帧率低于它就是在丢帧——不拦，但要说出来。
+  /// 0 表示读不出来（空白任务没有原片），那时不提
+  final double sourceFps;
+
   final bool enabled;
 
   const ExportOptionsPanel({
@@ -34,6 +40,7 @@ class ExportOptionsPanel extends StatelessWidget {
     required this.pickCount,
     required this.onPickCountChanged,
     this.durationMs = 0,
+    this.sourceFps = 0,
     this.enabled = true,
   });
 
@@ -49,6 +56,7 @@ class ExportOptionsPanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           _row('分辨率', _resolution()),
           _row('帧率', _frameRate()),
+          ?_fpsNote(),
           _row('码率', _bitrate()),
           if (spec.bitrate == BitrateMode.custom) _row('', _customKbps()),
           _row('编码', _codec()),
@@ -175,10 +183,40 @@ class ExportOptionsPanel extends StatelessWidget {
       );
 
   Widget _frameRate() => _dropdown(
+        key: const Key('export-fps'),
         value: '${spec.fps}',
         items: [for (final f in ExportSpec.frameRates) ('$f', '${f}fps')],
         onChanged: (v) => onSpecChanged(spec.copyWith(fps: int.parse(v))),
       );
+
+  /// 导出帧率和原片帧率对不上时说一句。
+  ///
+  /// 剪映那类软件里「工程帧率」和「导出帧率」是同一个数；我们把它拆成了
+  /// 两个——时间线按原片帧率数帧，导出帧率却是单独选的。默认已经跟着原片
+  /// 走了（见 `ExportSpec.followingSource`），人手动改低时必须点破：
+  /// 60fps 的原片导成 30fps 是每两帧取一，成片和你在时间线上数的帧对不上
+  Widget? _fpsNote() {
+    if (sourceFps <= 0) return null;
+    final source = sourceFps.round();
+    if (spec.fps == source) return null;
+    final lower = spec.fps < source;
+    return Padding(
+      padding: const EdgeInsets.only(left: 84, bottom: AppSpacing.xs),
+      child: Text(
+        lower
+            ? '原片是 ${fpsLabel(sourceFps)}，导成 ${spec.fps}fps 会每'
+                '${(source / spec.fps).toStringAsFixed(1)} 帧取一——'
+                '时间线上是按原片帧率数的帧'
+            : '原片是 ${fpsLabel(sourceFps)}，导成 ${spec.fps}fps 只是把帧复制'
+                '补上去，画面不会因此更流畅',
+        key: const Key('export-fps-note'),
+        style: const TextStyle(
+            color: AppColors.orange,
+            fontSize: AppFontSize.caption,
+            height: 1.5),
+      ),
+    );
+  }
 
   /// 选项是**具体数字**，档位名只是后缀注明。数字按当前分辨率 × 帧率算，
   /// 改了分辨率或帧率，这里的数字跟着变
@@ -256,8 +294,10 @@ class ExportOptionsPanel extends StatelessWidget {
     required String value,
     required List<(String, String)> items,
     required ValueChanged<String> onChanged,
+    Key? key,
   }) =>
       DropdownButtonFormField<String>(
+        key: key,
         initialValue: value,
         isDense: true,
         isExpanded: true,

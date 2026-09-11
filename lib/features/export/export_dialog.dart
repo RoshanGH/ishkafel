@@ -86,6 +86,9 @@ Future<void> showExportDialog(
   /// 「保留素材原声」的全片打底设置（单个镜头可覆盖）
   MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
 
+  /// 原片帧率：导出规格的默认值跟着它走，选到别的档位时会提示
+  double sourceFps = 0,
+
   /// 「原片这一镜的声音」的全片打底 + 分离出来的背景音轨。
   /// 少传任何一个，人在属性面板里设的那一档就只在预览里生效、导出时消失
   SourceAudioSetting sourceAudio = SourceAudioSetting.auto,
@@ -104,6 +107,7 @@ Future<void> showExportDialog(
         sourcePath: sourcePath,
         subtitleSentences: subtitleSentences,
         subtitleStyle: subtitleStyle,
+        sourceFps: sourceFps,
         materialAudio: materialAudio,
         sourceAudio: sourceAudio,
         backgroundPath: backgroundPath,
@@ -164,6 +168,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
   final List<AsrSentence> subtitleSentences;
 
   /// 「保留素材原声」的全片打底设置——不带进来的话，界面上改了导出还是老样子
+  final double sourceFps;
   final MaterialAudioSetting materialAudio;
   final SourceAudioSetting sourceAudio;
   final String? backgroundPath;
@@ -198,6 +203,7 @@ class _ExportDialog extends ConsumerStatefulWidget {
     required this.voices,
     required this.vocalsPath,
     this.subtitleSentences = const [],
+    this.sourceFps = 0,
     this.materialAudio = MaterialAudioSetting.off,
     this.sourceAudio = SourceAudioSetting.auto,
     this.backgroundPath,
@@ -270,7 +276,9 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
   String? _failure;
 
   /// 出多大多清楚。记住上次的选择——同一个项目连着导好几次是常态
-  ExportSpec _spec = ExportSpec.standard;
+  /// 默认跟着原片帧率走——时间线是按原片帧率数帧的，导出默认写死 30
+  /// 等于让「你数的帧」和「导出来的帧」默认就不是一回事
+  late ExportSpec _spec = ExportSpec.followingSource(widget.sourceFps);
 
   /// null = 全部导出；否则只挑这么多条差异最大的
   int? _pickCount;
@@ -427,6 +435,7 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                   pickCount: _pickCount,
                   onPickCountChanged: (n) => setState(() => _pickCount = n),
                   durationMs: _combos.isEmpty ? 0 : _combos.first.durationMs,
+                  sourceFps: widget.sourceFps,
                   enabled: !_running,
                 ),
                 if (_pickCount != null) ...[

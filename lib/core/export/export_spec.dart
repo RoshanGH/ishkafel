@@ -44,6 +44,28 @@ class ExportSpec {
 
   static const standard = ExportSpec();
 
+  /// **跟着原片帧率走**的那一份默认规格。
+  ///
+  /// 剪辑软件里「工程帧率」和「导出帧率」本来是同一个数（剪映就是导出设置
+  /// 即工程帧率）。我们把它拆成了两个——时间线、逐帧步进、属性面板全按
+  /// **原片帧率**数帧，导出帧率却写死 30。原片是 60fps 的话，人在时间线上
+  /// 按 60 数帧，一导出变成 30，中间一句话都没有（2026-09-11 用户提出）。
+  ///
+  /// 取**不高于原片、且最接近**的那一档：档位只有 24/25/30/50/60，
+  /// 原片 29.97 取 25 是错的，取 30 才对——所以先按四舍五入的整数找完全
+  /// 相等的，找不到再退到最接近的一档。
+  /// [fps] 不合法（空白任务没有原片）时给 [standard]
+  static ExportSpec followingSource(double fps) {
+    if (fps <= 0) return standard;
+    final target = fps.round();
+    if (frameRates.contains(target)) return standard.copyWith(fps: target);
+    var best = frameRates.first;
+    for (final f in frameRates) {
+      if ((f - target).abs() < (best - target).abs()) best = f;
+    }
+    return standard.copyWith(fps: best);
+  }
+
   /// 剪映的档位。竖屏下短边就是宽
   static const resolutions = <({String label, int shortSide})>[
     (label: '480P', shortSide: 480),

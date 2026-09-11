@@ -44,4 +44,30 @@ int alignToFrame(int ms, double fps) {
   return ((ms * fps / 1000).round() * 1000 / fps).round();
 }
 
+/// 帧率写给人看：`30fps` / `29.97fps`。整数不拖小数尾巴
+String fpsLabel(double fps) {
+  if (fps <= 0) return '未知帧率';
+  final text = fps == fps.roundToDouble()
+      ? '${fps.round()}'
+      : fps.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '')
+          .replaceFirst(RegExp(r'\.$'), '');
+  return '${text}fps';
+}
+
+/// 时间码的**自报家门**。
+///
+/// `00:17.28` 里的 `.28` 是**帧号**，不是百分之一秒——30fps 下它等于
+/// 17.933 秒，按小数读会差出 0.65 秒。界面上不写清楚，人一定会读错
+/// （2026-09-11 用户原话：「这对我造成了很大的困扰，我不理解这个东西」）。
+///
+/// 所以凡是摆时间码的地方都要带上这一句：格式 + 帧率 + 一个当场能对照的例子。
+String timecodeLegend(double fps) {
+  final fpsRound = fps.round();
+  if (fpsRound <= 0) return '时间码 分:秒.帧';
+  // 例子用一个不可能被误读成小数的帧号：帧率减二，30fps 下是 28
+  final ff = fpsRound > 2 ? fpsRound - 2 : fpsRound - 1;
+  return '时间码 分:秒.帧 · ${fpsLabel(fps)}'
+      '（00:17.${_pad2(ff)} = 17 秒第 $ff 帧）';
+}
+
 String _pad2(int n) => n.toString().padLeft(2, '0');

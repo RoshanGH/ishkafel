@@ -474,7 +474,10 @@ class _InspectorPanelState extends State<InspectorPanel> {
           const SizedBox(height: 10),
           inspectorCard([
             inspectorTimeRow(
-              label: '开始',
+              // **标出是哪条轴**：这两个数是它在成片里的位置，不是原片位置。
+              // 只写「开始」时人没法知道是哪条轴上的开始，而下面那行
+              // 「取自原片」标了——一标一不标最容易让人以为是同一件事
+              label: '成片开始',
               valueText: formatTimecode(_unitStart(unitIndex, unit), widget.fps),
               minusKey: const Key('inspector-start-minus'),
               plusKey: const Key('inspector-start-plus'),
@@ -484,7 +487,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
               onPlus: () => _nudgeAndFollow(startEdge: true, frames: 1),
             ),
             inspectorTimeRow(
-              label: '结束',
+              label: '成片结束',
               valueText: formatTimecode(_unitEnd(unitIndex, unit), widget.fps),
               minusKey: const Key('inspector-end-minus'),
               plusKey: const Key('inspector-end-plus'),
@@ -510,6 +513,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   '取自原片',
                   '${formatTimecode(unit.startMs, widget.fps)}'
                       ' – ${formatTimecode(unit.endMs, widget.fps)}'),
+            inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,
           const SizedBox(height: 10),
@@ -629,7 +633,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             inspectorInfoRow('所属单元',
                 'U${unit.index + 1} · ${(unit.durationMs / 1000).toStringAsFixed(2)}s'),
             inspectorTimeRow(
-              label: '镜头开始',
+              label: '成片开始',
               valueText: formatTimecode(
                   _shotRange(unitIndex, shotIndex)?.$1 ?? shot.startMs,
                   widget.fps),
@@ -641,7 +645,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
               onPlus: () => _nudgeAndFollow(startEdge: true, frames: 1),
             ),
             inspectorTimeRow(
-              label: '镜头结束',
+              label: '成片结束',
               valueText: formatTimecode(
                   _shotRange(unitIndex, shotIndex)?.$2 ?? shot.endMs,
                   widget.fps),
@@ -662,6 +666,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 '取自原片',
                 '${formatTimecode(shot.startMs, widget.fps)}'
                     ' – ${formatTimecode(shot.endMs, widget.fps)}'),
+            inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,
           const SizedBox(height: 10),

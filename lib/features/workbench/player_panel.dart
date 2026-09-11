@@ -7,7 +7,7 @@ import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/playback/playback_controller.dart';
-import 'inspector_panel.dart' show formatTimecode;
+import '../../core/time/timecode.dart' show formatTimecode, timecodeLegend;
 
 /// 播放空格切换意图（Shortcuts→Actions 转发用）
 class _TogglePlayIntent extends Intent {
@@ -226,13 +226,20 @@ class PlayerPanelState extends State<PlayerPanel> {
       child: LayoutBuilder(builder: (context, box) {
         final clock = ValueListenableBuilder<int>(
           valueListenable: _positionMs,
-          builder: (context, posMs, _) => Text(
-            '${formatTimecode(posMs, widget.fps)} / '
-            '${formatTimecode(widget.durationMs, widget.fps)}',
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: AppFontSize.body,
-              fontFeatures: [FontFeature.tabularFigures()],
+          // 这两个数是**成片**位置，而 `.28` 是帧号不是小数。
+          // 播放器这一行摆不下一句说明，那就挂在悬停上——属性面板里
+          // 有完整图例（见 inspectorTimecodeLegend）
+          builder: (context, posMs, _) => Tooltip(
+            message: '成片位置 / 成片总长\n${timecodeLegend(widget.fps)}',
+            child: Text(
+              '${formatTimecode(posMs, widget.fps)} / '
+              '${formatTimecode(widget.durationMs, widget.fps)}',
+              key: const Key('player-clock'),
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: AppFontSize.body,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
         );

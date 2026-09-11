@@ -57,6 +57,7 @@ Future<void> _open(
   List<ExportRecord> exports = const [],
   List<PickedMaterial> pickedMaterials = const [],
   List<SemanticUnit>? units,
+  double sourceFps = 0,
 }) async {
   _recorded.clear();
   _revealed.clear();
@@ -103,6 +104,7 @@ Future<void> _open(
                 now: () => DateTime.utc(2026, 8, 9, 10, 30),
                 exports: exports,
                 pickedMaterials: pickedMaterials,
+                sourceFps: sourceFps,
               ),
               child: const Text('打开'),
             ),
@@ -155,6 +157,51 @@ void main() {
     expect(find.text('2 条全部导出完成'), findsOneWidget);
     expect(find.byKey(const Key('export-start')), findsNothing,
         reason: '跑完了就没有「再开始一次」这回事，避免重复导出');
+  });
+
+  testWidgets('导出帧率默认跟着原片走——时间线就是按它数帧的', (tester) async {
+    await _open(
+      tester,
+      sourceFps: 60,
+      replacements: [
+        UnitReplacement.whole(const [11, 12]),
+        UnitReplacement.keepOriginal(),
+      ],
+    );
+
+    expect(find.text('60fps'), findsOneWidget);
+    // 和原片一致时不该有那句提示——没什么要提醒的
+    expect(find.byKey(const Key('export-fps-note')), findsNothing);
+  });
+
+  testWidgets('手动把帧率选到比原片低：不拦，但要当场说清楚在丢帧',
+      (tester) async {
+    await _open(
+      tester,
+      sourceFps: 60,
+      replacements: [
+        UnitReplacement.whole(const [11, 12]),
+        UnitReplacement.keepOriginal(),
+      ],
+    );
+
+    await tester.tap(find.byKey(const Key('export-fps')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('30fps').last);
+    await tester.pumpAndSettle();
+
+    final note =
+        tester.widget<Text>(find.byKey(const Key('export-fps-note'))).data!;
+    expect(note, contains('60fps'));
+    expect(note, contains('每2.0 帧取一'));
+  });
+
+  testWidgets('空白任务没有原片：不提帧率对不上这回事', (tester) async {
+    await _open(tester, replacements: [
+      UnitReplacement.whole(const [11, 12]),
+      UnitReplacement.keepOriginal(),
+    ]);
+    expect(find.byKey(const Key('export-fps-note')), findsNothing);
   });
 
   testWidgets('组合少到一个档位都放不下时，不摆空的「挑 ▢ 条」', (tester) async {

@@ -2365,6 +2365,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 镜头替换的切片上重渲台词字幕（原片字幕烧在被换掉的画面里）
       subtitleSentences: _task.asrSentences ?? const [],
       subtitleStyle: _task.subtitle,
+      // 导出帧率默认跟着原片走（时间线就是按它数帧的）
+      sourceFps: _task.videoInfo?.fps ?? 0,
       materialAudio: _task.materialAudio,
       // 「原片这一镜的声音」也要带上——只传素材那一层的话，人在属性面板里
       // 设的档位只在预览里生效，导出来的片子还是老样子
