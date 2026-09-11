@@ -13,7 +13,9 @@ import 'package:ishkafel/app/theme/app_spacing.dart';
 import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'bgm_edge_hit.dart';
+import 'subtitle_segments.dart';
 import 'thumbs_span.dart';
 import 'track_px.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
@@ -78,6 +80,14 @@ class TimelinePainter extends CustomPainter {
   /// 这一镜有几行字幕。轨上只画得下头一句，多于一行时在右上角标个数——
   /// 否则人不知道双击进去还有别的行
   final int Function(int unitIndex, int shotIndex)? subtitleLineCount;
+
+  /// 这一镜的字幕全文。**放大到每段都够宽时，轨上按段画**（一句一段、
+  /// 各自可拖）；不够宽就维持整镜一块的老样子
+  final List<SubtitleLine> Function(int unitIndex, int shotIndex)?
+      subtitleLinesOf;
+
+  /// 正在被拖的那一段（单元、镜头、第几段）。画一圈高亮，让人看清在动谁
+  final ({int unitIndex, int shotIndex, int lineIndex})? subtitleDragging;
   final List<double>? waveEnvelope;
   /// 播放头位置——**成片**毫秒（播放器直接给的那个值）
   final int playheadMs;
@@ -124,6 +134,8 @@ class TimelinePainter extends CustomPainter {
     this.subtitleEdited,
     this.subtitleTextOf,
     this.subtitleLineCount,
+    this.subtitleLinesOf,
+    this.subtitleDragging,
     this.waveEnvelope,
     required this.playheadMs,
     this.replacements = const [],
@@ -158,7 +170,7 @@ class TimelinePainter extends CustomPainter {
       (
         TimelineTracks.subsLabelTop,
         '字幕',
-        '只有换过素材的镜头才烧字幕；选中那一镜可以在右侧改'
+        '只有换过素材的镜头才烧字幕；双击就地改，放大后每一段可以直接拖'
       ),
       (
         TimelineTracks.bgmLabelTop,
@@ -663,6 +675,19 @@ class TimelinePainter extends CustomPainter {
         final box = Rect.fromLTRB(left + 1, TimelineTracks.subsTop + 2,
             right - 1, TimelineTracks.subsBottom - 2);
         if (box.width <= 0) continue;
+        // 放大到每段都够宽时按**段**画：一句一段、各自能拖。
+        // 窄的时候维持整镜一块（用户定的：「缩小的时候，画面和现在一样」）
+        final lines = subtitleLinesOf?.call(u, i) ?? const <SubtitleLine>[];
+        final segments = subtitleSegmentBoxes(
+          lines: lines,
+          slotDurationMs: unit.shots[i].durationMs,
+          blockLeft: box.left,
+          blockRight: box.right,
+        );
+        if (subtitleSegmentsFit(segments)) {
+          _paintSubSegments(canvas, u, i, lines, segments, edited);
+          continue;
+        }
         canvas.drawRRect(
           RRect.fromRectAndRadius(box, const Radius.circular(3)),
           Paint()
@@ -699,6 +724,51 @@ class TimelinePainter extends CustomPainter {
       }
     }
     canvas.restore();
+  }
+
+  /// 分段形态：一句一段并排画，正在拖的那一段亮一圈。
+  ///
+  /// 段与段之间**允许留空**（那是用户拉出来的间隙，不是画错了），
+  /// 也允许贴着——但不会重叠，那是 [setSubtitleStart] 那套规则保证的
+  void _paintSubSegments(
+    Canvas canvas,
+    int unitIndex,
+    int shotIndex,
+    List<SubtitleLine> lines,
+    List<SubtitleSegmentBox> segments,
+    bool edited,
+  ) {
+    for (final seg in segments) {
+      final rect = Rect.fromLTRB(seg.left, TimelineTracks.subsTop + 2,
+          seg.right, TimelineTracks.subsBottom - 2);
+      final dragging = subtitleDragging?.unitIndex == unitIndex &&
+          subtitleDragging?.shotIndex == shotIndex &&
+          subtitleDragging?.lineIndex == seg.index;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+        Paint()
+          ..color = (edited ? AppColors.accentBlue : AppColors.textTertiary)
+              .withValues(alpha: dragging ? 0.75 : (edited ? 0.5 : 0.3)),
+      );
+      // 正在拖的那一段描一圈：段挨着段时，光靠深浅分不出在动哪一个
+      if (dragging) {
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect.deflate(0.5), const Radius.circular(3)),
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1
+            ..color = AppColors.accentBlue,
+        );
+      }
+      final text = lines[seg.index].text;
+      if (text.isEmpty || rect.width < 16) continue;
+      canvas.save();
+      canvas.clipRect(rect);
+      _drawText(canvas, text, Offset(rect.left + 3, rect.top + 3),
+          AppColors.textPrimary,
+          fontSize: AppFontSize.micro, maxWidth: rect.width - 6);
+      canvas.restore();
+    }
   }
 
   void _paintThumbsTrack(Canvas canvas, Size size) {

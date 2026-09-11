@@ -27,6 +27,7 @@ void main() {
                 anchor: const Rect.fromLTWH(400, 500, 80, 22),
                 lines: lines,
                 edited: true,
+                slotDurationMs: 60000,
                 onChanged: (v) => committed = v,
                 onResetToAuto: () => reset = true,
               ),
@@ -43,8 +44,10 @@ void main() {
   testWidgets('弹出来就是这一镜的全部字幕行，不只头一句', (tester) async {
     await open(tester);
 
-    expect(find.byType(TextField), findsNWidgets(2),
+    // 按 key 数文字框：同一行里还有两个时间格，按类型数会把它们也算进来
+    expect(find.byKey(const ValueKey('subtitle-text-0')), findsOneWidget,
         reason: '轨上只画得下头一句，浮层里要能看到全部');
+    expect(find.byKey(const ValueKey('subtitle-text-1')), findsOneWidget);
     expect(find.text('了李斯特菌'), findsOneWidget);
     expect(find.text('沙门氏菌的游乐场'), findsOneWidget);
   });
@@ -52,11 +55,11 @@ void main() {
   testWidgets('改完离开输入框才提交——和右侧那张卡一个规矩', (tester) async {
     await open(tester);
 
-    await tester.enterText(find.byType(TextField).first, '李斯特菌');
+    await tester.enterText(find.byKey(const ValueKey('subtitle-text-0')), '李斯特菌');
     await tester.pump();
     expect(committed, isEmpty, reason: '敲字的过程中不该提交');
 
-    await tester.tap(find.byType(TextField).last);
+    await tester.tap(find.byKey(const ValueKey('subtitle-text-1')));
     await tester.pumpAndSettle();
 
     expect(committed.first.text, '李斯特菌');
@@ -68,7 +71,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('subtitle-add')));
     await tester.pumpAndSettle();
 
-    expect(find.byType(TextField), findsNWidgets(3),
+    expect(find.byKey(const ValueKey('subtitle-text-2')), findsOneWidget,
         reason: '浮层拿的是打开那一刻的快照，不自己更新的话人看不到新加的行');
     expect(committed.length, 3);
   });

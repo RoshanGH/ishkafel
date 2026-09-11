@@ -21,6 +21,21 @@ class SubtitleLine {
 
   const SubtitleLine(
       {required this.startMs, required this.endMs, required this.text});
+
+  /// 值相等：改完一段之后要能判断「这份和原来那份是不是同一个东西」，
+  /// 按引用比的话每次重建都算「改过了」
+  @override
+  bool operator ==(Object other) =>
+      other is SubtitleLine &&
+      other.startMs == startMs &&
+      other.endMs == endMs &&
+      other.text == text;
+
+  @override
+  int get hashCode => Object.hash(startMs, endMs, text);
+
+  @override
+  String toString() => 'SubtitleLine($startMs~$endMs: $text)';
 }
 
 /// 毛玻璃遮罩的文本框（输出画面坐标，顶部原点）

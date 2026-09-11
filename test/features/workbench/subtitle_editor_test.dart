@@ -24,6 +24,7 @@ void main() {
       home: Scaffold(
         body: SingleChildScrollView(
           child: SubtitleEditorCard(
+            slotDurationMs: 60000,
             replaced: replaced,
             lines: lines,
             edited: edited,
@@ -51,16 +52,19 @@ void main() {
   testWidgets('列出每一段，文字可以直接改（离开这一格才提交）', (tester) async {
     await pump(tester, lines: two);
 
-    expect(find.byType(TextField), findsNWidgets(2));
+    // 每段一个文字框（时间格另算，见 subtitle_time_edit_test.dart）
+    expect(find.byKey(const ValueKey('subtitle-text-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('subtitle-text-1')), findsOneWidget);
 
-    await tester.enterText(find.byType(TextField).first, '李斯特菌');
+    await tester.enterText(
+        find.byKey(const ValueKey('subtitle-text-0')), '李斯特菌');
     await tester.pump();
 
     expect(changed, isNull,
         reason: '敲字的过程中不提交——每提交一次就要重烧一遍字幕');
 
     // 光标离开这一格
-    await tester.tap(find.byType(TextField).last);
+    await tester.tap(find.byKey(const ValueKey('subtitle-text-1')));
     await tester.pumpAndSettle();
 
     expect(changed!.first.text, '李斯特菌',
@@ -128,6 +132,7 @@ void main() {
         home: Scaffold(
           body: StatefulBuilder(
             builder: (context, setState) => SubtitleEditorCard(
+            slotDurationMs: 60000,
               replaced: true,
               lines: lines,
               edited: true,
@@ -142,7 +147,7 @@ void main() {
 
     testWidgets('敲到一半的拼音还在，候选区没被清掉', (tester) async {
       await pumpLive(tester);
-      await tester.tap(find.byType(TextField).first);
+      await tester.tap(find.byKey(const ValueKey('subtitle-text-0')));
       await tester.pumpAndSettle();
 
       // 输入法：'ni' 还在候选区，一个汉字都还没上屏
@@ -153,8 +158,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      final state =
-          tester.state<EditableTextState>(find.byType(EditableText).first);
+      // **定位到文字框里的那个** EditableText：同一行里还有两个时间格，
+      // 按类型取 first 会取到时间格
+      final state = tester.state<EditableTextState>(find.descendant(
+          of: find.byKey(const ValueKey('subtitle-text-0')),
+          matching: find.byType(EditableText)));
       expect(state.textEditingValue.text, 'ni');
       expect(state.textEditingValue.composing, const TextRange(start: 0, end: 2),
           reason: '每次重建都新建 controller 的话候选区在这里就没了，'
@@ -164,7 +172,7 @@ void main() {
 
     testWidgets('接着敲第二个字母，前面的不会被吞掉', (tester) async {
       await pumpLive(tester);
-      await tester.tap(find.byType(TextField).first);
+      await tester.tap(find.byKey(const ValueKey('subtitle-text-0')));
       await tester.pumpAndSettle();
 
       for (final v in const ['n', 'ni', 'nih', 'niha', 'nihao']) {
@@ -176,8 +184,11 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      final state =
-          tester.state<EditableTextState>(find.byType(EditableText).first);
+      // **定位到文字框里的那个** EditableText：同一行里还有两个时间格，
+      // 按类型取 first 会取到时间格
+      final state = tester.state<EditableTextState>(find.descendant(
+          of: find.byKey(const ValueKey('subtitle-text-0')),
+          matching: find.byType(EditableText)));
       expect(state.textEditingValue.text, 'nihao');
       expect(state.textEditingValue.composing.isValid, isTrue);
     });
@@ -191,6 +202,7 @@ void main() {
           body: StatefulBuilder(builder: (context, setState) {
             setOuter = setState;
             return SubtitleEditorCard(
+            slotDurationMs: 60000,
               replaced: true,
               lines: lines,
               edited: true,
@@ -220,6 +232,7 @@ void main() {
         home: Scaffold(
           body: StatefulBuilder(
             builder: (context, setState) => SubtitleEditorCard(
+            slotDurationMs: 60000,
               replaced: true,
               lines: lines,
               edited: true,

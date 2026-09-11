@@ -688,6 +688,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
             lines: widget.subtitleLinesOf?.call(unitIndex, shotIndex) ??
                 const [],
             edited: widget.subtitleEdited?.call(unitIndex, shotIndex) ?? false,
+            // 字幕的时间是相对这一镜开头的，改时间时靠它夹住上界
+            slotDurationMs: shot.durationMs,
             onChanged: (v) =>
                 widget.onSubtitleChanged?.call(unitIndex, shotIndex, v),
             onResetToAuto: () =>

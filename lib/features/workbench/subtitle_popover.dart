@@ -27,6 +27,9 @@ Future<void> showSubtitlePopover(
   required Rect anchor,
   required List<SubtitleLine> lines,
   required bool edited,
+
+  /// 这一镜有多长。字幕时间是相对这一镜开头的，改时间时要靠它夹住上界
+  required int slotDurationMs,
   required ValueChanged<List<SubtitleLine>> onChanged,
   required VoidCallback onResetToAuto,
 }) {
@@ -51,6 +54,7 @@ Future<void> showSubtitlePopover(
             child: _Live(
               lines: lines,
               edited: edited,
+              slotDurationMs: slotDurationMs,
               onChanged: onChanged,
               onResetToAuto: () {
                 onResetToAuto();
@@ -85,12 +89,14 @@ Future<void> showSubtitlePopover(
 class _Live extends StatefulWidget {
   final List<SubtitleLine> lines;
   final bool edited;
+  final int slotDurationMs;
   final ValueChanged<List<SubtitleLine>> onChanged;
   final VoidCallback onResetToAuto;
 
   const _Live({
     required this.lines,
     required this.edited,
+    required this.slotDurationMs,
     required this.onChanged,
     required this.onResetToAuto,
   });
@@ -107,6 +113,7 @@ class _LiveState extends State<_Live> {
         replaced: true,
         lines: _lines,
         edited: true,
+        slotDurationMs: widget.slotDurationMs,
         onChanged: (v) {
           setState(() => _lines = v);
           widget.onChanged(v);
