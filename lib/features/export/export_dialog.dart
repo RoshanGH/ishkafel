@@ -844,6 +844,19 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
                 height: 1.5),
           ),
         ],
+        // 导成了但有话要说的（目前只有「这一段过载了」）。**不能不说**：
+        // 各层声音是相加的，叠出来可能发破——软件不替他压音量，但要告诉他
+        // 是哪一段、去调哪一层
+        for (final note in {for (final r in results) ...r.notes})
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(note,
+                key: const Key('export-result-note'),
+                style: const TextStyle(
+                    color: AppColors.orange,
+                    fontSize: AppFontSize.micro,
+                    height: 1.4)),
+          ),
         // 失败的要逐条点名并带原因，否则用户只能一条条自己找
         for (final f in failed)
           Padding(

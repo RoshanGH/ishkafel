@@ -35,7 +35,19 @@ class ExportOutcome {
   /// 失败原因（已是中文）；成功时为 null
   final String? failure;
 
-  const ExportOutcome({required this.index, this.path, this.failure});
+  /// 导成了、但有话要说（已是中文，可直接展示）。
+  ///
+  /// 目前只有一件事：某一段声音叠出来过载了。它不是失败——片子导得出来，
+  /// 只是那一段听着会发破，调不调是人的判断（用户定的：不偷偷压音量躲过去，
+  /// 如实报出来是哪一段）
+  final List<String> notes;
+
+  const ExportOutcome({
+    required this.index,
+    this.path,
+    this.failure,
+    this.notes = const [],
+  });
 
   bool get ok => path != null;
 }
@@ -384,6 +396,11 @@ class ExportRunner {
       ];
     }
 
+    /// 合声音时量出来的话（目前只有过载）。**不是失败**，跟着成片一起报出去
+    final audioNotes = <String>[];
+    /// 共用那条声音的话——它对每一条成片都成立
+    final sharedNotes = <String>[];
+
     // 配乐每段只有一首时所有变体的声音一模一样，合一次就够；有备选（轮流用）
     // 或整体替换（各条变体的候选不同、时长也不同）就得逐条合
     final perVariant =
@@ -449,6 +466,11 @@ class ExportRunner {
       if (track.bgmWarnings.isNotEmpty) {
         throw Exception('声音合成失败：配乐没能铺上——${track.bgmWarnings.join('；')}');
       }
+      // 过载不中止导出，但要带到人眼前——量了不报等于没量
+      for (final note in track.overloads) {
+        AppLog.warn('导出：$note');
+      }
+      audioNotes.addAll(track.overloads);
       return track.path;
     }
 
@@ -459,6 +481,8 @@ class ExportRunner {
       try {
         onProgress?.call(0, total, '合成声音（含人声分离，可能要几分钟）');
         sharedAudio = await buildAudio(0);
+        // 共用的那条声音，它的话对每一条都成立
+        sharedNotes.addAll(audioNotes);
       } catch (e) {
         AppLog.warn('导出：$e');
         // 共用的那条声音挂了，每一条都成不了——如实给同一个原因
@@ -479,6 +503,9 @@ class ExportRunner {
           perVariant && sharedAudio == null
               ? '第 ${combo.index} 条：合成声音（含人声分离，可能要几分钟）'
               : '第 ${combo.index} 条');
+      // 逐条合声音时各条各的话，别把上一条的算到这一条头上。
+      // 共用那条是在循环外合的，它的话已经存进 sharedNotes，不能在这儿清掉
+      if (sharedAudio == null) audioNotes.clear();
       try {
         final path = await _composeOne(
           combo: combo,
@@ -492,7 +519,12 @@ class ExportRunner {
           renderSpec: renderSpec,
           subtitleSentences: subtitleSentences,
         );
-        out.add(ExportOutcome(index: combo.index, path: path));
+        out.add(ExportOutcome(
+          index: combo.index,
+          path: path,
+          notes: List.unmodifiable(
+              sharedAudio == null ? audioNotes : sharedNotes),
+        ));
       } catch (e) {
         // 一条成片没出来是**硬失败**，不是「注意一下」——用 error 级别，
         // 别让人在一屏 warn 里把它滑过去

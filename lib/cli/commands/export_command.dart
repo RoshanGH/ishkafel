@@ -270,6 +270,9 @@ Future<int> runExportCommand({
           'name': validation.plans[i].name,
           'path': outcomes[i].path,
           'failure': outcomes[i].failure,
+          // 导成了但有话要说（目前只有「这一段过载了」）。**存了就要报**：
+          // Agent 查到的空看起来正好像「没问题」
+          'notes': outcomes[i].notes,
         },
     ],
   }, out: out);

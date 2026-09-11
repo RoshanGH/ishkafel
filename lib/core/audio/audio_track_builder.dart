@@ -9,6 +9,7 @@ import '../models/semantic_unit.dart';
 import 'bgm_cache.dart';
 import 'bgm_plan.dart';
 import 'material_audio.dart';
+import 'overload_check.dart';
 import 'source_audio.dart';
 import 'vocal_separator.dart';
 
@@ -37,7 +38,21 @@ class AudioTrack {
   /// **预览据此提示、导出据此中止**——同一份信息，两种处置
   final List<String> bgmWarnings;
 
-  const AudioTrack({required this.path, this.bgmWarnings = const []});
+  /// 哪几层叠上去之后过载了（人话，可直接展示）。
+  ///
+  /// 各层是**相加**的（用户定的规则，和剪映的时序轴一致），代价就是叠出来
+  /// 可能过载。处置方式也是用户定的：**不偷偷压音量躲过去**——那又变成
+  /// 软件背着人做判断——而是如实报出来是哪一段，他自己决定调哪一层。
+  ///
+  /// **和 [bgmWarnings] 不同，这个不中止导出**：片子是合得出来的，只是
+  /// 某一段可能听着发破，调不调是人的判断
+  final List<String> overloads;
+
+  const AudioTrack({
+    required this.path,
+    this.bgmWarnings = const [],
+    this.overloads = const [],
+  });
 }
 
 class AudioTrackBuilder {
@@ -203,6 +218,11 @@ class AudioTrackBuilder {
       args: (dest) => ExportCommands.concat(listFile: listFile, out: dest),
       what: '拼接声音',
     );
+    // 叠任何一层之前的样子。过载只看**叠加新添了多少**——原片母带本来就
+    // 压到顶，拿绝对峰值当判据等于每条片子都报（见 [AudioLevels.addedClipping]）
+    final baseVoice = out;
+    /// 叠上去的每一层：叫什么、占成片的哪一段。过载了要能指着说是哪一层
+    final layers = <({String label, int startMs, int durationMs})>[];
 
     // 素材原声逐镜叠上去（视觉镜头替换里开了「保留素材原声」的那些）。
     //
@@ -233,6 +253,11 @@ class AudioTrackBuilder {
         what: '这一镜的素材原声',
       );
       key = mixedKey;
+      layers.add((
+        label: shot.label.isEmpty ? '某一镜的素材原声' : '${shot.label} 的镜头声音',
+        startMs: shot.composedStartMs,
+        durationMs: shot.durationMs,
+      ));
     }
 
     // 配乐逐段叠上去。段与段之间互不重叠，顺序无所谓。
@@ -298,10 +323,70 @@ class AudioTrackBuilder {
       }
       out = mixed;
       key = mixedKey;
+      layers.add((
+        label: '配乐「${material.name}」',
+        startMs: range.$1,
+        durationMs: range.$2 - range.$1,
+      ));
     }
     // 指纹命名意味着换一次方案就多攒一套，不清就只增不减
     _cache.keepOnly();
-    return AudioTrack(path: out, bgmWarnings: List.unmodifiable(degraded));
+    return AudioTrack(
+      path: out,
+      bgmWarnings: List.unmodifiable(degraded),
+      overloads: List.unmodifiable(
+          await _overloads(base: baseVoice, mixed: out, layers: layers)),
+    );
+  }
+
+  /// 叠出来过载的是哪几层。一层都没叠时**连量都不用量**。
+  ///
+  /// 分两步走是为了不做白花的活：先整条量一次（两次 ffmpeg），确认叠加真的
+  /// 新添了可听见的过载，才逐层去量各自那一小段。过载是例外，绝大多数导出
+  /// 只多花那两次
+  Future<List<String>> _overloads({
+    required String base,
+    required String mixed,
+    required List<({String label, int startMs, int durationMs})> layers,
+  }) async {
+    if (layers.isEmpty || base == mixed) return const [];
+    if (!AudioLevels.addedClipping(
+        base: await _levelsOf(base), mixed: await _levelsOf(mixed))) {
+      return const [];
+    }
+    final named = <String>[];
+    for (final layer in layers) {
+      final before = await _levelsOf(base,
+          fromMs: layer.startMs, durationMs: layer.durationMs);
+      final after = await _levelsOf(mixed,
+          fromMs: layer.startMs, durationMs: layer.durationMs);
+      if (AudioLevels.addedClipping(base: before, mixed: after)) {
+        named.add('${layer.label}叠上去之后这一段过载了，听着会发破——'
+            '把它的音量调小一点');
+      }
+    }
+    // 整条量出来有过载、却落不到具体某一层（几层各自都不过分、加在一起才过）
+    // ：也要说，只是说不出是哪一层
+    if (named.isEmpty) {
+      named.add('几层声音加在一起有一段过载了，听着会发破——'
+          '把镜头声音或配乐的音量调小一点');
+    }
+    return named;
+  }
+
+  /// 量一段声音的电平。量不到就返回 null——**不许猜**，猜出来的警告比不报更糟
+  Future<AudioLevels?> _levelsOf(String path,
+      {int? fromMs, int? durationMs}) async {
+    try {
+      final result = await run(
+          'ffmpeg',
+          ExportCommands.measureLevels(
+              input: path, fromMs: fromMs, durationMs: durationMs));
+      return AudioLevels.parse('${result.stderr}');
+    } catch (e) {
+      AppLog.warn('量不到电平（$path）：$e');
+      return null;
+    }
   }
 
   /// 缺省退回素材自带地址——它随时可能已经失效，所以真实装配一定要注入

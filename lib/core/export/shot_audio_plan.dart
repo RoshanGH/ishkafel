@@ -44,6 +44,7 @@ Future<List<ShotMaterialAudio>> planShotMaterialAudio({
     if (!setting.mode.audible) continue;
 
     final path = await resolveMaterial(candidateId);
+    final label = 'U${segment.unitIndex + 1}·S${shotIndex + 1}';
     final source = await _sourceFor(setting.mode, path, separate,
         where: 'U${segment.unitIndex + 1} 的 S${shotIndex + 1}');
     final candidateMs = await probe(path);
@@ -61,6 +62,7 @@ Future<List<ShotMaterialAudio>> planShotMaterialAudio({
       composedStartMs:
           timeline.startOf(segment.unitIndex) + (segment.startMs - unit.startMs),
       durationMs: segment.durationMs,
+      label: label,
     ));
   }
   return out;

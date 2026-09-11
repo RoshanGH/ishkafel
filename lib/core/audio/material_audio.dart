@@ -183,12 +183,18 @@ class ShotMaterialAudio {
   final int composedStartMs;
   final int durationMs;
 
+  /// 这是哪一镜（`U1·S2`），出事时要能指着说。
+  ///
+  /// 报「有一层声音过载了」等于没报——人得知道去调哪一层的音量
+  final String label;
+
   const ShotMaterialAudio({
     required this.path,
     required this.speedFactor,
     required this.volume,
     required this.composedStartMs,
     required this.durationMs,
+    this.label = '',
     this.trimStartMs,
   });
 }

@@ -407,6 +407,28 @@ class ExportCommands {
     ];
   }
 
+  /// 量一段声音的峰值与贴顶采样点数（用来判断叠加有没有新添过载）。
+  ///
+  /// **不能用 `-v error`**：`volumedetect` 的结果打在 info 级上，压掉了就什么
+  /// 都读不到。`-nostats` 把进度行去掉，剩下的 stderr 干净得能直接解析
+  /// （见 [AudioLevels.parse]）。
+  ///
+  /// 给了 [fromMs]/[durationMs] 就只量那一小段——出了过载要指着说是哪一镜，
+  /// 而逐层全长扫一遍太贵
+  static List<String> measureLevels({
+    required String input,
+    int? fromMs,
+    int? durationMs,
+  }) =>
+      [
+        '-v', 'info', '-nostats',
+        if (fromMs != null) ...['-ss', _seconds(fromMs)],
+        if (durationMs != null) ...['-t', _seconds(durationMs)],
+        '-i', input,
+        '-af', 'volumedetect',
+        '-f', 'null', '-',
+      ];
+
   /// 统一画面规格：缩放到目标画幅，比例不同的补黑边（不拉伸变形）。
   /// 给了 [target] 就按原片的分辨率，否则按成片标准的 1080×1920
   static String _scalePad([MediaSpec? target, ExportSpec? spec]) {
