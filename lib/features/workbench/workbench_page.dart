@@ -2886,6 +2886,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onShotMaterialAudioChanged:
                     _isEditable && _lock == null ? _setShotMaterialAudio : null,
                 sourceAudioDefault: _task.sourceAudio,
+                // 时间线靠它判断「字幕改过没有、要不要重画」
+                subtitleTrack: _task.subtitleTrack,
                 onShotSourceAudioChanged:
                     _isEditable && _lock == null ? _setShotSourceAudio : null,
                 unitVoiceSwapped: (i) {

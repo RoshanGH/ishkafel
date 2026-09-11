@@ -12,6 +12,7 @@ import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:collection/collection.dart';
 import 'package:ishkafel/core/subtitle/subtitle_edit.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'bgm_edge_hit.dart';
 import 'subtitle_segments.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
@@ -99,6 +100,10 @@ class TimelineView extends StatefulWidget {
   final void Function(int unitIndex, int shotIndex, List<SubtitleLine> lines)?
       onSubtitleChanged;
 
+  /// 手改过的字幕。**只为重画判定**：改字幕不动 units，不给画布一个会变的
+  /// 值，轨上那一句就一直是旧的（见 [TimelinePainter.subtitleTrack]）
+  final SubtitleTrack subtitleTrack;
+
   /// 配乐方案（画在配乐轨上）
   final BgmPlan bgm;
 
@@ -160,6 +165,7 @@ class TimelineView extends StatefulWidget {
     this.onEditSubtitleBlock,
     this.subtitleLinesOf,
     this.onSubtitleChanged,
+    this.subtitleTrack = const SubtitleTrack.empty(),
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.replacements = const [],
@@ -879,7 +885,11 @@ class _TimelineViewState extends State<TimelineView> {
                             unitIndex: _subsDragging!.unitIndex,
                             shotIndex: _subsDragging!.shotIndex,
                             lineIndex: _subsDragging!.lineIndex,
+                            // 拖到哪儿了也要交给画布：不然 shouldRepaint
+                            // 看不出变化，整个拖动一帧都不重画
+                            lines: _subsDragging!.lines,
                           ),
+                    subtitleTrack: widget.subtitleTrack,
                     hoveredLabelTop: _hoverLabelTop,
                     textCache: _textCache,
                   ),

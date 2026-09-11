@@ -4,6 +4,7 @@ import '../../core/ui/text_editing_keys.dart';
 import 'package:flutter/material.dart';
 import '../../core/audio/material_audio.dart';
 import '../../core/audio/source_audio.dart';
+import '../../core/subtitle/subtitle_track.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../core/models/semantic_unit.dart';
@@ -108,6 +109,9 @@ class WorkbenchBody extends StatefulWidget {
   final void Function(int unitIndex, int shotIndex, MaterialAudioMode? mode,
       double? volume)? onShotSourceAudioChanged;
 
+  /// 手改过的字幕。传给时间线只为一件事：改完要重画（见 TimelinePainter）
+  final SubtitleTrack subtitleTrack;
+
   /// 这个单元换过音色没有；以及这条任务有没有分离好的人声/背景轨
   final bool Function(int unitIndex)? unitVoiceSwapped;
   final bool hasVocals;
@@ -205,6 +209,7 @@ class WorkbenchBody extends StatefulWidget {
     this.onShotMaterialAudioChanged,
     this.sourceAudioDefault = SourceAudioSetting.auto,
     this.onShotSourceAudioChanged,
+    this.subtitleTrack = const SubtitleTrack.empty(),
     this.unitVoiceSwapped,
     this.hasVocals = false,
     this.hasBackground = false,
@@ -763,6 +768,8 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   // 字幕轨按段画、拖完整份交回去
                   subtitleLinesOf: widget.subtitleLinesOf,
                   onSubtitleChanged: widget.onSubtitleChanged,
+                  // 只为重画判定：改字幕不动 units
+                  subtitleTrack: widget.subtitleTrack,
                   media: widget.media,
                   playhead: widget.playhead,
                   mediaStatus: widget.mediaStatus,

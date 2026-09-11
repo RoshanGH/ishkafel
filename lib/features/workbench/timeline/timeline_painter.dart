@@ -14,6 +14,7 @@ import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'bgm_edge_hit.dart';
 import 'subtitle_segments.dart';
 import 'thumbs_span.dart';
@@ -86,8 +87,26 @@ class TimelinePainter extends CustomPainter {
   final List<SubtitleLine> Function(int unitIndex, int shotIndex)?
       subtitleLinesOf;
 
-  /// 正在被拖的那一段（单元、镜头、第几段）。画一圈高亮，让人看清在动谁
-  final ({int unitIndex, int shotIndex, int lineIndex})? subtitleDragging;
+  /// 正在被拖的那一段，以及**拖到哪儿了**的那份临时行。画一圈高亮，
+  /// 让人看清在动谁。
+  ///
+  /// **那份行必须在这儿**（而不是只在 [subtitleLinesOf] 那个闭包背后）：
+  /// 闭包没法比较，[shouldRepaint] 就看不出拖动过程中有任何变化，于是整个
+  /// 拖动一帧都不重画——人看到的是「拖不动，连着拖两三下才会动」
+  /// （2026-09-11 用户反馈，根因就在这一行）
+  final ({
+    int unitIndex,
+    int shotIndex,
+    int lineIndex,
+    List<SubtitleLine> lines
+  })? subtitleDragging;
+
+  /// 手改过的字幕。**画布不直接读它**（读的是 [subtitleLinesOf]），
+  /// 摆在这儿只为一件事：改完字幕落了库要重画。
+  ///
+  /// 改字幕**不动 units**，而 [shouldRepaint] 能比的都是值——不给它一个
+  /// 会变的值，轨上那一句就一直是旧的，直到下一次鼠标划过蹭出一次重画
+  final SubtitleTrack subtitleTrack;
   final List<double>? waveEnvelope;
   /// 播放头位置——**成片**毫秒（播放器直接给的那个值）
   final int playheadMs;
@@ -136,6 +155,7 @@ class TimelinePainter extends CustomPainter {
     this.subtitleLineCount,
     this.subtitleLinesOf,
     this.subtitleDragging,
+    this.subtitleTrack = const SubtitleTrack.empty(),
     this.waveEnvelope,
     required this.playheadMs,
     this.replacements = const [],
@@ -962,8 +982,25 @@ class TimelinePainter extends CustomPainter {
         oldDelegate.bgmSelecting != bgmSelecting ||
         oldDelegate.voices != voices ||
         oldDelegate.hoveredLabelTop != hoveredLabelTop ||
+        oldDelegate.subtitleTrack != subtitleTrack ||
+        !_sameDrag(oldDelegate.subtitleDragging, subtitleDragging) ||
         !const DeepCollectionEquality()
             .equals(oldDelegate.replacements, replacements);
+  }
+
+  /// 两次拖动状态算不算同一个。**行的内容要比进去**——拖动过程中
+  /// 变的只有它
+  static bool _sameDrag(
+    ({int unitIndex, int shotIndex, int lineIndex, List<SubtitleLine> lines})?
+        a,
+    ({int unitIndex, int shotIndex, int lineIndex, List<SubtitleLine> lines})?
+        b,
+  ) {
+    if (a == null || b == null) return a == null && b == null;
+    return a.unitIndex == b.unitIndex &&
+        a.shotIndex == b.shotIndex &&
+        a.lineIndex == b.lineIndex &&
+        const ListEquality<SubtitleLine>().equals(a.lines, b.lines);
   }
 }
 
