@@ -233,9 +233,15 @@ class AudioTrackBuilder {
     // 打开保留原声的（要的就是那个水声、喷雾声），静默少一层他不会发现，
     // 而这是影响成片的东西
     for (final shot in shotAudio) {
-      final mixedKey = 'mataudio|$key|${shot.path}|${shot.composedStartMs}'
-          '|${shot.durationMs}|${shot.speedFactor}|${shot.trimStartMs}'
-          '|${shot.volume}';
+      final mixedKey = materialMixKey(
+        base: key,
+        materialPath: shot.path,
+        startMs: shot.composedStartMs,
+        durationMs: shot.durationMs,
+        speedFactor: shot.speedFactor,
+        trimStartMs: shot.trimStartMs,
+        volume: shot.volume,
+      );
       out = await _cache.render(
         key: mixedKey,
         prefix: 'mix_material',
@@ -295,8 +301,13 @@ class AudioTrackBuilder {
         continue;
       }
       // 叠配乐是链式的：这一段的内容由「上一层是什么 + 这一段铺的是谁」决定
-      final mixedKey =
-          'bgm|$key|${material.id}|${range.$1}|${range.$2}|${segment.volume}';
+      final mixedKey = bgmMixKey(
+        base: key,
+        materialId: material.id,
+        startMs: range.$1,
+        endMs: range.$2,
+        volume: segment.volume,
+      );
       final String mixed;
       try {
         mixed = await _cache.render(
@@ -388,6 +399,35 @@ class AudioTrackBuilder {
       return null;
     }
   }
+
+  /// 「这一镜的素材原声叠上去」这件产物的指纹。
+  ///
+  /// **规则版本要在里面**（见 [ExportCommands.mixRuleVersion]）：只拼入参的话，
+  /// 改了滤镜链也命中旧产物，用户装了新版重新导出听到的还是老毛病
+  static String materialMixKey({
+    required String base,
+    required String materialPath,
+    required int startMs,
+    required int durationMs,
+    required double speedFactor,
+    required int? trimStartMs,
+    required double volume,
+    String? version,
+  }) =>
+      'mataudio|${version ?? ExportCommands.mixRuleVersion}|$base'
+      '|$materialPath|$startMs|$durationMs|$speedFactor|$trimStartMs|$volume';
+
+  /// 「这一段配乐铺上去」这件产物的指纹。同样要带规则版本
+  static String bgmMixKey({
+    required String base,
+    required int materialId,
+    required int startMs,
+    required int endMs,
+    required double volume,
+    String? version,
+  }) =>
+      'bgm|${version ?? ExportCommands.mixRuleVersion}|$base'
+      '|$materialId|$startMs|$endMs|$volume';
 
   /// 缺省退回素材自带地址——它随时可能已经失效，所以真实装配一定要注入
   /// [resolveBgm]
