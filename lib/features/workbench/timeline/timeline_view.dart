@@ -9,7 +9,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:collection/collection.dart';
+import 'package:ishkafel/core/subtitle/subtitle_edit.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'bgm_edge_hit.dart';
+import 'subtitle_segments.dart';
 import 'package:ishkafel/core/audio/voice_plan.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/log/app_log.dart';
@@ -87,6 +91,14 @@ class TimelineView extends StatefulWidget {
   final void Function(int unitIndex, int shotIndex, Rect blockOnScreen)?
       onEditSubtitleBlock;
 
+  /// 这一镜的字幕。轨上按段画、拖动时算位置都要它
+  final List<SubtitleLine> Function(int unitIndex, int shotIndex)?
+      subtitleLinesOf;
+
+  /// 拖完一段交出去：整份行交回去（与属性卡同一条通路）
+  final void Function(int unitIndex, int shotIndex, List<SubtitleLine> lines)?
+      onSubtitleChanged;
+
   /// 配乐方案（画在配乐轨上）
   final BgmPlan bgm;
 
@@ -146,6 +158,8 @@ class TimelineView extends StatefulWidget {
     this.onScrubEnd,
     this.onPlaySegment,
     this.onEditSubtitleBlock,
+    this.subtitleLinesOf,
+    this.onSubtitleChanged,
     this.bgm = BgmPlan.empty,
     this.voices = VoicePlan.empty,
     this.replacements = const [],
@@ -172,6 +186,20 @@ class _TimelineViewState extends State<TimelineView> {
 
   /// 正在拖某一段的边界：(这一段的起点, 拖的是哪一头, 当前的另一头)
   ({int startUnit, BgmEdge edge, int from, int to})? _bgmResizing;
+
+  /// 正在拖的那一段字幕：拖的是谁、抓的哪一头、拖动中的那份行。
+  ///
+  /// **拖动中只改这份临时的**，松手才交出去：每移动一像素就提交等于每像素
+  /// 重烧一次字幕（属性卡那边「离开才提交」是同一个理由）
+  ({
+    int unitIndex,
+    int shotIndex,
+    int lineIndex,
+    SubtitleGrab grab,
+    double startDx,
+    List<SubtitleLine> original,
+    List<SubtitleLine> lines,
+  })? _subsDragging;
 
   /// 本次拖拽是「拖播放头」而不是「拖时间线」
   bool _scrubbing = false;
@@ -389,6 +417,110 @@ class _TimelineViewState extends State<TimelineView> {
     }
   }
 
+  /// 光标落在字幕轨的哪一段上。没展开成多段（太窄）时一律返回 null——
+  /// 那时轨上是整镜一块，只能双击进弹窗改
+  ({
+    int unitIndex,
+    int shotIndex,
+    int lineIndex,
+    SubtitleGrab grab,
+    double startDx,
+    List<SubtitleLine> original,
+    List<SubtitleLine> lines,
+  })? _grabSubtitle(double dx) {
+    final linesOf = widget.subtitleLinesOf;
+    if (linesOf == null || widget.onSubtitleChanged == null) return null;
+    final units = widget.controller.units;
+    for (var u = 0; u < units.length; u++) {
+      for (var i = 0; i < units[u].shots.length; i++) {
+        final (left, right) = shotPx(u, i, units, widget.geometry);
+        if (dx < left - subtitleEdgeHitPx || dx > right + subtitleEdgeHitPx) {
+          continue;
+        }
+        final lines = linesOf(u, i);
+        final boxes = subtitleSegmentBoxes(
+          lines: lines,
+          slotDurationMs: units[u].shots[i].durationMs,
+          blockLeft: left + 1,
+          blockRight: right - 1,
+        );
+        if (!subtitleSegmentsFit(boxes)) return null;
+        final hit = subtitleGrabAt(dx: dx, boxes: boxes);
+        if (hit == null) return null;
+        return (
+          unitIndex: u,
+          shotIndex: i,
+          lineIndex: hit.index,
+          grab: hit.grab,
+          startDx: dx,
+          original: lines,
+          lines: lines,
+        );
+      }
+    }
+    return null;
+  }
+
+  /// 拖动中：按位移算出新的一份行。**夹的规则走 core 那一套**——
+  /// 属性卡里输数字和这里拖，能做到的事必须一样
+  void _updateSubtitleDrag(
+    ({
+      int unitIndex,
+      int shotIndex,
+      int lineIndex,
+      SubtitleGrab grab,
+      double startDx,
+      List<SubtitleLine> original,
+      List<SubtitleLine> lines,
+    }) drag,
+    double dx,
+  ) {
+    final units = widget.controller.units;
+    if (drag.unitIndex >= units.length) return;
+    final shots = units[drag.unitIndex].shots;
+    if (drag.shotIndex >= shots.length) return;
+    final slotMs = shots[drag.shotIndex].durationMs;
+    final (left, right) =
+        shotPx(drag.unitIndex, drag.shotIndex, units, widget.geometry);
+    final deltaMs = subtitleDeltaMs(
+      deltaPx: dx - drag.startDx,
+      slotDurationMs: slotMs,
+      blockLeft: left + 1,
+      blockRight: right - 1,
+    );
+    final source = drag.original;
+    final line = source[drag.lineIndex];
+    final next = switch (drag.grab) {
+      SubtitleGrab.start => setSubtitleStart(
+          source, drag.lineIndex, line.startMs + deltaMs,
+          slotDurationMs: slotMs),
+      SubtitleGrab.end => setSubtitleEnd(
+          source, drag.lineIndex, line.endMs + deltaMs,
+          slotDurationMs: slotMs),
+      SubtitleGrab.move =>
+        moveSubtitle(source, drag.lineIndex, deltaMs, slotDurationMs: slotMs),
+    };
+    if (const ListEquality<SubtitleLine>().equals(next, drag.lines)) return;
+    setState(() => _subsDragging = (
+          unitIndex: drag.unitIndex,
+          shotIndex: drag.shotIndex,
+          lineIndex: drag.lineIndex,
+          grab: drag.grab,
+          startDx: drag.startDx,
+          original: drag.original,
+          lines: next,
+        ));
+  }
+
+  /// 画布要看到的那份行：正在拖的那一镜给临时的，别的镜头给真的
+  List<SubtitleLine> _subtitleLinesForPaint(int unitIndex, int shotIndex) {
+    if (_subsDragging case final drag?
+        when drag.unitIndex == unitIndex && drag.shotIndex == shotIndex) {
+      return drag.lines;
+    }
+    return widget.subtitleLinesOf?.call(unitIndex, shotIndex) ?? const [];
+  }
+
   /// 把这一镜的字幕块换算成屏幕坐标，交给上层去贴浮层
   void _editSubtitleAt(int unitIndex, int shotIndex) {
     final onEdit = widget.onEditSubtitleBlock;
@@ -447,6 +579,17 @@ class _TimelineViewState extends State<TimelineView> {
       final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null) {
         setState(() => _bgmSelecting = (from: at, to: at));
+        return;
+      }
+    }
+    // 字幕轨：放大到每段都够宽时，一句一段各自能拖（左右边缘改起止、
+    // 中间整段平移）。窄的时候不展开，那时这里抓不到任何东西，
+    // 横向拖照旧当滚动
+    if (!widget.readOnly && TimelineTracks.isOnSubsTrack(
+        details.localPosition.dy)) {
+      final grabbed = _grabSubtitle(details.localPosition.dx);
+      if (grabbed != null) {
+        setState(() => _subsDragging = grabbed);
         return;
       }
     }
@@ -558,6 +701,10 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {
+    if (_subsDragging case final drag?) {
+      _updateSubtitleDrag(drag, details.localPosition.dx);
+      return;
+    }
     if (_bgmResizing case final rs?) {
       final at = _unitIndexAtX(details.localPosition.dx);
       if (at != null) {
@@ -586,6 +733,16 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   void _endDrag() {
+    if (_subsDragging case final drag?) {
+      setState(() => _subsDragging = null);
+      // 没动就不提交——白提交一次等于白烧一次字幕
+      if (!const ListEquality<SubtitleLine>()
+          .equals(drag.lines, drag.original)) {
+        widget.onSubtitleChanged
+            ?.call(drag.unitIndex, drag.shotIndex, drag.lines);
+      }
+      return;
+    }
     if (_bgmResizing case final rs?) {
       setState(() => _bgmResizing = null);
       widget.onBgmResize?.call(rs.startUnit, rs.from, rs.to);
@@ -714,6 +871,15 @@ class _TimelineViewState extends State<TimelineView> {
                     subtitleEdited: widget.subtitleEdited,
                     subtitleTextOf: widget.subtitleTextOf,
                     subtitleLineCount: widget.subtitleLineCount,
+                    // 正在拖的那一镜给临时的那份，别的镜头给真的
+                    subtitleLinesOf: _subtitleLinesForPaint,
+                    subtitleDragging: _subsDragging == null
+                        ? null
+                        : (
+                            unitIndex: _subsDragging!.unitIndex,
+                            shotIndex: _subsDragging!.shotIndex,
+                            lineIndex: _subsDragging!.lineIndex,
+                          ),
                     hoveredLabelTop: _hoverLabelTop,
                     textCache: _textCache,
                   ),
@@ -748,6 +914,17 @@ class _TimelineViewState extends State<TimelineView> {
   /// **只在光标真的该换时才 setState**：鼠标在同一块区域里移动不重建，
   /// 否则一动就是一次全时间线重绘
   void _setCursorFor(Offset local) {
+    // 字幕轨上先问「这儿能不能抓」：抓边缘是双向箭头、抓中间是手型。
+    // 少了这一层，人得靠试才知道哪儿能拖（和边界手柄同一条理由）
+    if (!widget.readOnly && TimelineTracks.isOnSubsTrack(local.dy)) {
+      final grab = _grabSubtitle(local.dx);
+      if (grab != null) {
+        _setCursor(grab.grab == SubtitleGrab.move
+            ? SystemMouseCursors.grab
+            : SystemMouseCursors.resizeLeftRight);
+        return;
+      }
+    }
     final hit = TimelineHitTester.hitTest(
       local,
       widget.controller.units,

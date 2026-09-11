@@ -27,6 +27,7 @@ void main() {
       home: Scaffold(
         body: StatefulBuilder(
           builder: (context, setState) => SubtitleEditorCard(
+            slotDurationMs: 60000,
             replaced: true,
             lines: current,
             edited: true,
@@ -46,7 +47,8 @@ void main() {
     await pump(tester);
 
     for (final v in const ['李', '李斯', '李斯特', '李斯特菌']) {
-      await tester.enterText(find.byType(TextField).first, v);
+      await tester.enterText(
+          find.byKey(const ValueKey('subtitle-text-0')), v);
       await tester.pump();
     }
 
@@ -58,10 +60,11 @@ void main() {
   testWidgets('光标离开这一格时提交一次，内容是最后敲完的那个', (tester) async {
     await pump(tester);
 
-    await tester.enterText(find.byType(TextField).first, '李斯特菌');
+    await tester.enterText(
+        find.byKey(const ValueKey('subtitle-text-0')), '李斯特菌');
     await tester.pump();
     // 点到第二格 = 离开第一格
-    await tester.tap(find.byType(TextField).last);
+    await tester.tap(find.byKey(const ValueKey('subtitle-text-1')));
     await tester.pumpAndSettle();
 
     expect(commits, 1);
@@ -71,9 +74,9 @@ void main() {
   testWidgets('没改就离开，不提交——不该白烧一次', (tester) async {
     await pump(tester);
 
-    await tester.tap(find.byType(TextField).first);
+    await tester.tap(find.byKey(const ValueKey('subtitle-text-0')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(TextField).last);
+    await tester.tap(find.byKey(const ValueKey('subtitle-text-1')));
     await tester.pumpAndSettle();
 
     expect(commits, 0);

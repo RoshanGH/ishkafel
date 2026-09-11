@@ -4,6 +4,7 @@ import '../../core/ui/text_editing_keys.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
+import '../../core/subtitle/subtitle_edit.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import 'inspector_widgets.dart';
 
@@ -29,6 +30,10 @@ class SubtitleEditorCard extends StatefulWidget {
   /// 是不是手改过（改过才给「改回自动」，并标出来）
   final bool edited;
 
+  /// 这一镜有多长（毫秒）。字幕的时间是**相对这一镜开头**的，
+  /// 改时间时要靠它夹住上界——字幕不许拖出这一镜
+  final int slotDurationMs;
+
   final ValueChanged<List<SubtitleLine>> onChanged;
 
   /// 清掉手改，回到按 ASR 自动算
@@ -39,6 +44,7 @@ class SubtitleEditorCard extends StatefulWidget {
     required this.replaced,
     required this.lines,
     required this.edited,
+    required this.slotDurationMs,
     required this.onChanged,
     required this.onResetToAuto,
   });
@@ -64,6 +70,13 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
   /// 这个东西我觉得可以在我修改完光标离开的时候，你再去进行烧录会好一点。」
   final List<FocusNode> _focus = [];
 
+  /// 每一行两个时间输入框（起、止），同样长期持有：在 build 里现造的话
+  /// 打第二个字符时光标会被推到末尾
+  final List<TextEditingController> _startControllers = [];
+  final List<TextEditingController> _endControllers = [];
+  final List<FocusNode> _startFocus = [];
+  final List<FocusNode> _endFocus = [];
+
   @override
   void initState() {
     super.initState();
@@ -87,18 +100,39 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
       final i = _controllers.length;
       _controllers.add(TextEditingController());
       _focus.add(FocusNode()..addListener(() => _commitIfLeft(i)));
+      _startControllers.add(TextEditingController());
+      _endControllers.add(TextEditingController());
+      _startFocus.add(FocusNode()..addListener(() => _commitTimeIfLeft(i, true)));
+      _endFocus.add(FocusNode()..addListener(() => _commitTimeIfLeft(i, false)));
     }
     while (_controllers.length > lines.length) {
       _controllers.removeLast().dispose();
       _focus.removeLast().dispose();
+      _startControllers.removeLast().dispose();
+      _endControllers.removeLast().dispose();
+      _startFocus.removeLast().dispose();
+      _endFocus.removeLast().dispose();
     }
     for (var i = 0; i < lines.length; i++) {
-      if (_controllers[i].text == lines[i].text) continue;
-      _controllers[i].value = TextEditingValue(
-        text: lines[i].text,
-        selection: TextSelection.collapsed(offset: lines[i].text.length),
-      );
+      if (_controllers[i].text != lines[i].text) {
+        _controllers[i].value = TextEditingValue(
+          text: lines[i].text,
+          selection: TextSelection.collapsed(offset: lines[i].text.length),
+        );
+      }
+      // 时间框同理：人正在里面敲的时候不许覆盖他，只有值真的变了才刷
+      _syncTime(_startControllers[i], _startFocus[i], lines[i].startMs);
+      _syncTime(_endControllers[i], _endFocus[i], lines[i].endMs);
     }
+  }
+
+  /// 时间框的值跟上外面那份数据。**有焦点就不碰**——人正在这一格里敲
+  static void _syncTime(
+      TextEditingController controller, FocusNode focus, int ms) {
+    if (focus.hasFocus) return;
+    final text = _secText(ms);
+    if (controller.text == text) return;
+    controller.text = text;
   }
 
   /// 焦点离开第 [i] 格：把框里的文字交出去。没改过就不交——白交一次等于
@@ -120,12 +154,52 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     ]);
   }
 
+  /// 焦点离开时间格：解析、夹回合法范围、交出去。
+  ///
+  /// **夹的规则和时间线上拖是同一套**（见 [setSubtitleStart]）：不重叠、
+  /// 可以挨着、不许出这一镜。两处各写一份的话，输出来的和拖出来的
+  /// 迟早不一样
+  void _commitTimeIfLeft(int i, bool isStart) {
+    final focus = isStart ? _startFocus : _endFocus;
+    final controllers = isStart ? _startControllers : _endControllers;
+    if (i >= focus.length || focus[i].hasFocus) return;
+    if (i >= widget.lines.length) return;
+    final raw = controllers[i].text.trim().replaceAll('s', '');
+    final seconds = double.tryParse(raw);
+    if (seconds == null) {
+      // 输了个看不懂的：把原值放回去，不猜也不报错框
+      _sync();
+      setState(() {});
+      return;
+    }
+    final ms = (seconds * 1000).round();
+    final next = isStart
+        ? setSubtitleStart(widget.lines, i, ms,
+            slotDurationMs: widget.slotDurationMs)
+        : setSubtitleEnd(widget.lines, i, ms,
+            slotDurationMs: widget.slotDurationMs);
+    if (next[i] == widget.lines[i]) {
+      // 夹回去之后没变（或者本来就没改）：把框里的字也纠回来，
+      // 不然人看到的是他输的那个越界的数，而实际没生效
+      _sync();
+      setState(() {});
+      return;
+    }
+    widget.onChanged(next);
+  }
+
   @override
   void dispose() {
     for (final c in _controllers) {
       c.dispose();
     }
     for (final f in _focus) {
+      f.dispose();
+    }
+    for (final c in [..._startControllers, ..._endControllers]) {
+      c.dispose();
+    }
+    for (final f in [..._startFocus, ..._endFocus]) {
       f.dispose();
     }
     super.dispose();
@@ -149,7 +223,8 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
                   fontSize: AppFontSize.micro, color: AppColors.accentBlue)),
       ]),
       const SizedBox(height: 4),
-      const Text('换过素材的镜头，原片的字跟着旧画面一起没了，这里的字会重新烧上去',
+      const Text('换过素材的镜头，原片的字跟着旧画面一起没了，这里的字会重新烧上去。'
+          '左边两个数是这句话在**这一镜里**的起止秒数，可以直接改',
           style: TextStyle(
               fontSize: AppFontSize.caption,
               height: 1.5,
@@ -188,13 +263,17 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
         padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           SizedBox(
-            width: 76,
-            child: Text(
-              '${_sec(lines[i].startMs)}→${_sec(lines[i].endMs)}',
-              style: const TextStyle(
-                  fontSize: AppFontSize.micro, color: AppColors.textTertiary),
-            ),
+            width: 96,
+            child: Row(children: [
+              _timeField(i, isStart: true),
+              const Text('→',
+                  style: TextStyle(
+                      fontSize: AppFontSize.micro,
+                      color: AppColors.textTertiary)),
+              _timeField(i, isStart: false),
+            ]),
           ),
+          const SizedBox(width: AppSpacing.xs),
           Expanded(
             child: TextField(
               key: ValueKey('subtitle-text-$i'),
@@ -230,6 +309,29 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
         ]),
       );
 
+  /// 一个时间格。**秒，相对这一镜的开头**（不是成片时间码）——
+  /// 这一层人关心的是「这句话在这一镜里第几秒出现」，
+  /// 换算成整片位置反而要他自己减一次（2026-09-11 用户定的）
+  Widget _timeField(int i, {required bool isStart}) => Expanded(
+        child: TextField(
+          key: ValueKey('subtitle-${isStart ? 'start' : 'end'}-$i'),
+          controller:
+              isStart ? _startControllers[i] : _endControllers[i],
+          focusNode: isStart ? _startFocus[i] : _endFocus[i],
+          textAlign: TextAlign.center,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          style: const TextStyle(
+              fontSize: AppFontSize.micro, color: AppColors.textSecondary),
+          decoration: const InputDecoration(
+            isDense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _commitTimeIfLeft(i, isStart),
+          onTapOutside: (_) => KeyboardHome.take(context),
+        ),
+      );
+
   /// 加一段：接在最后一段后面，长度给 1 秒。时间可以在时间线上再调
   void _add() {
     final start = lines.isEmpty ? 0 : lines.last.endMs;
@@ -239,5 +341,6 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     ]);
   }
 
-  static String _sec(int ms) => '${(ms / 1000).toStringAsFixed(1)}s';
+  /// 秒，一位小数。**不带单位**：格子很窄，`0.5` 比 `0.5s` 多出一个字的地方
+  static String _secText(int ms) => (ms / 1000).toStringAsFixed(1);
 }

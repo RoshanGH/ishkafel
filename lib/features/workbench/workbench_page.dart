@@ -1212,9 +1212,18 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       anchor: blockOnScreen,
       lines: _subtitleLinesOf(unitIndex, shotIndex),
       edited: _subtitleEdited(unitIndex, shotIndex),
+      slotDurationMs: _shotDurationMs(unitIndex, shotIndex),
       onChanged: (lines) => _setSubtitleLines(unitIndex, shotIndex, lines),
       onResetToAuto: () => _resetSubtitle(unitIndex, shotIndex),
     );
+  }
+
+  /// 这一镜有多长。字幕的时间以这一镜的开头为 0，改时间时靠它夹住上界
+  int _shotDurationMs(int unitIndex, int shotIndex) {
+    final units = _editor?.units ?? const [];
+    if (unitIndex >= units.length) return 0;
+    final shots = units[unitIndex].shots;
+    return shotIndex >= shots.length ? 0 : shots[shotIndex].durationMs;
   }
 
   /// 这一镜字幕的头一句，画在时间线的字幕轨上当预览

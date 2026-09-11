@@ -760,6 +760,9 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                   subtitleTextOf: widget.subtitleTextOf,
                   subtitleLineCount: widget.subtitleLineCount,
                   onEditSubtitleBlock: widget.onEditSubtitleBlock,
+                  // 字幕轨按段画、拖完整份交回去
+                  subtitleLinesOf: widget.subtitleLinesOf,
+                  onSubtitleChanged: widget.onSubtitleChanged,
                   media: widget.media,
                   playhead: widget.playhead,
                   mediaStatus: widget.mediaStatus,
