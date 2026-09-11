@@ -130,6 +130,17 @@ class ExportCommands {
     /// 原片段是新规格、这段是死值——`-c copy` 拼接轻则花屏重则失败。
     /// 与 [target] 互斥：预览传 target、导出传 spec；都传时以 target 为准
     ExportSpec? spec,
+
+    /// 切片要不要带着**素材自己的声音**。
+    ///
+    /// 预览要（true）：「替换分镜的声音」这一层在预览里读的就是这个文件
+    /// （见 `MultitrackPlayback.source`）。不带的话这一层在预览里是哑的，
+    /// 而导出会有——人照着预览挑完组合，拿到的成片多一层声音
+    /// （2026-09-11 真机）。
+    ///
+    /// 导出不要（false）：那条路的声音单独成轨（见 `AudioTrackBuilder`），
+    /// 切片带声音只会在 concat 时多一条谁也不用的音轨。
+    bool keepAudio = false,
   }) {
     // 倍率**只问 [SpeedFit.effectiveFactor]**：保留素材原声时声音要用同一个
     // 倍率，两边各算一份迟早分叉，而分叉的结果是声音和画面越走越偏、不报错
@@ -149,20 +160,30 @@ class ExportCommands {
     final baseChain = '${_scalePad(target, effectiveSpec)}$speed'
         ',tpad=stop_mode=clone:stop_duration=${_seconds(durationMs)}';
     final outFps = target?.fps ?? effectiveSpec?.fps.toDouble();
+    // 声音跟画面**同一个倍率**：画面走 setpts=PTS/factor，声音走等效的
+    // atempo。同一个文件里两边各走各的，就是画面到了声音还没到
+    final tempo = keepAudio ? atempoChain(factor) : const <String>[];
     return [
       '-y', '-v', 'error',
       // -ss 摆在 -i 前面：放后面是解码完再丢，跳过开头 5 秒要白解 5 秒
       if (skipHead) ...['-ss', _seconds(trimStartMs)],
       '-i', input,
       for (final o in subtitleOverlays) ...['-i', o.pngPath],
-      '-an',
+      if (!keepAudio) '-an',
       if (subtitleOverlays.isEmpty) ...[
         '-vf', baseChain,
       ] else ...[
         '-filter_complex',
         subtitleFilterComplex(baseChain: baseChain, overlays: subtitleOverlays),
         '-map', subtitleFilterOutLabel(subtitleOverlays.length),
+        // filter_complex 只输出画面，声音要自己点名带上（`?` = 素材没有
+        // 音轨时不报错）
+        if (keepAudio) ...['-map', '0:a?'],
       ],
+      if (tempo.isNotEmpty) ...['-af', tempo.join(',')],
+      // 声音长度跟画面走：变速后余下的那截是凭空多的现场音，
+      // 而且会让这个切片比坑位长
+      if (keepAudio) '-shortest',
       '-r', target?.frameRate ?? '${effectiveSpec?.fps ?? fps}',
       // 导出段与 trimOriginalVideo 同一套编码参数（码率/编码器跟设置），
       // 预览段维持统一代理编码

@@ -77,12 +77,18 @@ class TrackPlanBuilder {
     /// 选了「不播放」的那几镜要垫的静音（`单元下标/镜头下标` → 文件）。
     /// **EDL 表达不了音量为 0，也不能留洞**——留洞后面全体提前
     Map<String, String> silentClips = const {},
+
+    /// 「替换分镜的声音」的全片打底。换过素材的镜头才谈得上这一层
+    /// （与导出同一条规则，见 [planShotMaterialAudio]）
+    MaterialAudioSetting materialAudio = MaterialAudioSetting.off,
   }) {
 
     final video = <TrackSegment>[];
     final voice = <TrackSegment>[];
     /// 「原片这一镜的声音」要的分离轨这一刻不在的那几镜
     final stemMissing = <String>[];
+    /// 「替换分镜的声音」选了要分离的那一档、而预览只能放原混音的那几镜
+    final materialStemMissing = <String>[];
     final skipped = <int>[];
     /// 放不了的那几段在成片上的区间——播放头走到这儿要停下来点名
     final unplayable = <UnplayableSpan>[];
@@ -181,7 +187,20 @@ class TrackPlanBuilder {
                 atMs: at,
                 durationMs: slotMs,
                 source: fitted,
-                volume: 0, // 画面轨不出声，声音走口播轨
+                // 「替换分镜的声音」这一层。画面轨本身**永远静音**，这个值
+                // 是给原声轨看的（见 [MultitrackPlayback.source]）——导出会
+                // 把这一层叠进成片，预览不播就等于让人照着错的判断挑组合
+                volume: _materialVolume(
+                  replacement: replacement,
+                  shotIndex: shotIndex,
+                  shotMode: unit.shots[shotIndex].materialAudioMode,
+                  shotVolume: unit.shots[shotIndex].materialAudioVolume,
+                  taskDefault: materialAudio,
+                  // 选了要分离的那一档时记一笔：预览放的是切片带的原混音，
+                  // 导出放的是分离轨，两边不是一回事，得说出来
+                  onStemMissing: () => materialStemMissing
+                      .add('U${unit.index + 1}·S${shotIndex + 1}'),
+                ),
                 // 它在**原片轴**上占的还是这个镜头的坑位。不写这两项的话
                 // sourceStartMs 会默认取 inMs（=0），这一段就变成「对应原片
                 // 开头几秒」，同时把它真正占着的原片区间挖成一个空洞——换轨
@@ -265,11 +284,37 @@ class TrackPlanBuilder {
           _bgmTrack(bgm, unitRanges, bgmPaths, missing)),
       bgmMissing: List.unmodifiable(missing),
       sourceStemMissing: List.unmodifiable(stemMissing),
+      materialStemMissing: List.unmodifiable(materialStemMissing),
       skippedEmptyUnits: List.unmodifiable(skipped),
       unitRanges: Map.unmodifiable(unitRanges),
       unplayable: List.unmodifiable(unplayable),
       composedTotalMs: at,
     );
+  }
+
+  /// 这一镜的**素材原声**在预览里该多大声。
+  ///
+  /// 与导出同一条规则（见 `planShotMaterialAudio`）：没换素材的镜头没有
+  /// 「素材的声音」可言，明确选了「不播放」的也是 0。
+  static double _materialVolume({
+    required UnitReplacement replacement,
+    required int shotIndex,
+    required MaterialAudioMode? shotMode,
+    required double? shotVolume,
+    required MaterialAudioSetting taskDefault,
+    required void Function() onStemMissing,
+  }) {
+    if (shotIndex < 0 || !_hasCandidates(replacement, shotIndex)) return 0;
+    final setting = resolveMaterialAudio(
+      taskDefault: taskDefault,
+      shotMode: shotMode,
+      shotVolume: shotVolume,
+    );
+    if (!setting.mode.audible) return 0;
+    // 预览读的是变速切片，切片带的是素材**原混音**。人选了「人声」「背景声」
+    // 时导出用的是分离出来的那一路——两边不是一回事，如实说出来
+    if (setting.mode.needsSeparation) onStemMissing();
+    return setting.volume;
   }
 
   /// 这一镜挑过候选没有。挑过 = 导出时它一定会被替换掉，

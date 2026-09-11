@@ -223,9 +223,11 @@ class SpeedFitter extends ChangeNotifier {
     final cut = trimFor(
         materialMs: candidateMs ?? 0, slotMs: slotMs, startMs: trimStartMs);
     // 取段起点进指纹：换了截哪一段却复用旧切片，人看到的是「调了没反应」。
-    // **v3 起切片上不带字幕**：v2 的缓存里烧着字，复用它画面上就是两层字
+    // **v3 起切片上不带字幕**：v2 的缓存里烧着字，复用它画面上就是两层字。
+    // **v4 起切片带着素材自己的声音**：v3 是 `-an` 渲的，复用它「替换分镜的
+    // 声音」这一层在预览里永远是哑的，而导出会有
     final cacheKey =
-        'fit|v3|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target';
+        'fit|v4|$candidatePath|$slotMs|$candidateMs|t${cut.startMs}|$target';
     final expected =
         cache.pathFor(key: cacheKey, prefix: 'fit', extension: 'mp4');
     // 已经渲染好的直接用，一次 ffmpeg 都不跑
@@ -257,6 +259,9 @@ class SpeedFitter extends ChangeNotifier {
           out: dest,
           // 和原片一个规格，播放器换段时才不用重建解码器
           target: target,
+          // 带着素材自己的声音：「替换分镜的声音」这一层在预览里读的就是
+          // 这个文件（见 MultitrackPlayback.source）
+          keepAudio: true,
         ),
         what: '把替换镜头变速对齐坑位',
       );

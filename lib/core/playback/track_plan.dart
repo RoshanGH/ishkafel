@@ -169,6 +169,14 @@ class TrackPlan {
   /// 不是一回事，而他正是照着预览在挑组合
   final List<String> sourceStemMissing;
 
+  /// 「替换分镜的声音」选了人声/背景声的那几镜。人话标签（`U2·S3`）。
+  ///
+  /// 预览里这一层读的是**变速切片**，切片带的是素材原混音；而导出用的是
+  /// 分离出来的那一路。和 [sourceStemMissing] 同一个道理：预览可以退回
+  /// 原混音，但必须说出来——不说的话人听到的和导出的不是一回事，
+  /// 而他正是照着预览在挑组合
+  final List<String> materialStemMissing;
+
   /// 空白任务里还没挑素材、这一轮预览**跳过**了的分子（下标，从 0 起）。
   ///
   /// 没有原片可以垫底，跳过是唯一的选择——但跳过必须说出来，否则用户看到
@@ -198,6 +206,7 @@ class TrackPlan {
     this.bgm = const [],
     this.bgmMissing = const [],
     this.sourceStemMissing = const [],
+    this.materialStemMissing = const [],
     this.skippedEmptyUnits = const [],
     this.unplayable = const [],
     this.composedTotalMs = 0,

@@ -68,7 +68,7 @@ void main() {
     // 镜头替换一定会变速（候选压进原坑位），所以变速是这条路的常态，
     // 不是边角情形
     for (final speed in [1.0, 2.5]) {
-      test('变速 ${speed}× 时，素材声落在 5~7 秒，片头一点都不该有', () async {
+      test('变速 $speed× 时，素材声落在 5~7 秒，片头一点都不该有', () async {
         final voice = await tone('voice', 440, 10);
         final material = await tone('material', 1000, 2 * speed);
         final out = '${work.path}/mixed.wav';
@@ -91,7 +91,7 @@ void main() {
                 '片头只该是底噪（量到 $atHead dB）');
       });
 
-      test('变速 ${speed}× 时，口播从头到尾不被压——各层是相加，不是取平均', () async {
+      test('变速 $speed× 时，口播从头到尾不被压——各层是相加，不是取平均', () async {
         final voice = await tone('voice', 440, 10);
         final material = await tone('material', 1000, 2 * speed);
         final out = '${work.path}/mixed.wav';

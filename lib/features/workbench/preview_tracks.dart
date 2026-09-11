@@ -86,6 +86,12 @@ class PreviewTracks extends ChangeNotifier {
           '那一档，但这条任务还没有分离轨——预览先放原混音。'
           '点「重新分离」补一份';
     }
+    // 「替换分镜的声音」选了人声/背景声：预览读的是变速切片，切片带的是
+    // 素材原混音，而导出用的是分离出来的那一路。同样不能不说
+    if (_plan.materialStemMissing.isNotEmpty) {
+      return '${_plan.materialStemMissing.join('、')} 的镜头声音选了'
+          '「人声」或「背景声」——预览先放素材的原混音，导出会按你选的那一路分开';
+    }
     // 还没挑素材的那几段：**不等人播到那儿才说**。它们在成片里占着位置却
     // 没有画面，人一按播放就会在那儿停住——先把话说在前面，并点名是哪几段
     if (_plan.unplayable.isNotEmpty) {
@@ -333,6 +339,8 @@ class PreviewTracks extends ChangeNotifier {
       backgroundPath: task.backgroundPath,
       sourceAudio: task.sourceAudio,
       silentClips: _silences,
+      // 「替换分镜的声音」这一层预览也要播——与导出同一份设置
+      materialAudio: task.materialAudio,
     );
   }
 
