@@ -336,9 +336,9 @@ class ExportCommands {
         // 配乐从头取，循环铺满这一段（短的循环、长的截断）
         '-stream_loop', '-1', '-i', bgm,
         '-filter_complex',
-        '[1:a]volume=$bgmVolume,adelay=$startMs|$startMs,'
-            'atrim=0:${_seconds(startMs + durationMs)}[bg];'
-            '[0:a][bg]amix=inputs=2:duration=first:dropout_transition=0[a]',
+        '[1:a]volume=$bgmVolume,'
+            '${_placeClip(startMs: startMs, durationMs: durationMs).join(',')}'
+            '[bg];[0:a][bg]${_sumTwo()}[a]',
         '-map', '[a]',
         ..._audioNormalize(),
         out,
@@ -369,8 +369,7 @@ class ExportCommands {
     final chain = [
       'volume=$volume',
       ...tempo,
-      'adelay=$startMs|$startMs',
-      'atrim=0:${_seconds(startMs + durationMs)}',
+      ..._placeClip(startMs: startMs, durationMs: durationMs),
     ].join(',');
     return [
       '-y', '-v', 'error',
@@ -380,8 +379,7 @@ class ExportCommands {
       if (trimStartMs != null) ...['-ss', _seconds(trimStartMs)],
       '-i', material,
       '-filter_complex',
-      '[1:a]$chain[mat];'
-          '[0:a][mat]amix=inputs=2:duration=first:dropout_transition=0[a]',
+      '[1:a]$chain[mat];[0:a][mat]${_sumTwo()}[a]',
       '-map', '[a]',
       ..._audioNormalize(),
       out,
@@ -408,6 +406,45 @@ class ExportCommands {
         '-ar', '$audioSampleRate', '-ac', '2',
         '-c:a', 'pcm_s16le',
       ];
+
+  /// 把一层声音**摆到成片时间轴的 [startMs] 处、占 [durationMs]**——
+  /// 时序轴上的一个片段，就像剪映里拖过去的那一块。
+  ///
+  /// 顺序是「**先裁成自己该有的长度，再整块挪到位置上**」，不能反过来。
+  /// 反过来（先 `adelay` 再 `atrim`）真机上炸过（2026-09-11）：`atrim` 认
+  /// 时间戳，`adelay` 垫出来的那一大段前导静音会被它整段丢掉，这一层于是
+  /// 掉回第 0 秒。以前没暴露，是因为输出时 muxer 会按首帧时间戳自动补空隙
+  /// ——而链上一旦有 `atempo`（镜头替换必然变速），这道补偿就不发生了，
+  /// 于是「没变速的配乐位置是对的、变速的素材声跑到片头」。
+  ///
+  /// 用户原话：「每一块对应的位置都应该像剪映的时序轴一样，出现在对应的
+  /// 位置上，不往前补齐任何补位。」
+  static List<String> _placeClip({
+    required int startMs,
+    required int durationMs,
+  }) =>
+      [
+        // 此刻这一块的时间轴还是它自己的（从 0 起），按它自己的长度裁
+        'atrim=0:${_seconds(durationMs)}',
+        // 裁完把时间戳重新从 0 排一遍，下一步的位移才有确定的基准
+        'asetpts=N/SR/TB',
+        // 再整块摆到成片时间轴上它该在的位置
+        if (startMs > 0) 'adelay=$startMs|$startMs:all=1',
+      ];
+
+  /// 两层声音**相加**成一层。
+  ///
+  /// `normalize=0` 是重点：`amix` 默认按路数归一化（两路各乘 0.5），而
+  /// `adelay` 垫的静音也算一路"有信号"，于是**从片头起**口播就被压掉 6dB，
+  /// 直到这一层结束才弹回来。叠加又是一层套一层的，有 N 镜保留原声，
+  /// 最前面那段就要被压 6×N dB——真机上叠三层，片头掉了 18dB
+  /// （2026-09-11，用户听到的「S1 人声特别小、背景音像被去掉了」）。
+  ///
+  /// 相加是剪映那套时序轴的规则，也是用户要的：各层保持自己的音量，
+  /// 谁也不因为多了一层而变小。代价是叠出来可能过载，那要如实报出来
+  /// （见 [DeliveryAnalyzer]），不能靠偷偷压音量来躲。
+  static String _sumTwo() =>
+      'amix=inputs=2:duration=first:dropout_transition=0:normalize=0';
 
   /// ffmpeg 的时间参数用秒（小数）。毫秒整数除以 1000 保三位小数即可无损。
   static String _seconds(int ms) => (ms / 1000).toStringAsFixed(3);

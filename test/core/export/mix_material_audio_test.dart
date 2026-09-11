@@ -69,7 +69,20 @@ void main() {
   test('声音只取这一段那么长，不许溢到后面的镜头上', () {
     final f = filterOf(cmd());
 
-    expect(f, contains('atrim=0:7.000'),
-        reason: '5 秒处开始、放 2 秒，到 7 秒截断');
+    expect(f, contains('atrim=0:2.000'),
+        reason: '这一镜放 2 秒，素材就只取 2 秒');
+  });
+
+  test('先裁成自己那么长，再整块摆到位置上——反过来这一层会掉回片头', () {
+    final f = filterOf(cmd());
+
+    expect(f.indexOf('atrim'), lessThan(f.indexOf('adelay')),
+        reason: 'adelay 垫出来的前导静音会被后面的 atrim 整段丢掉，'
+            '这一层于是落到第 0 秒（2026-09-11 真机）');
+    expect(f, contains('adelay=5000|5000'), reason: '摆在成片的第 5 秒');
+  });
+
+  test('叠加是相加，不是取平均——否则口播从片头起就被压小一半', () {
+    expect(filterOf(cmd()), contains('normalize=0'));
   });
 }
