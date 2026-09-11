@@ -1,0 +1,1142 @@
+<title>ishkafel 功能清单</title>
+<style>
+  :root {
+    --ground: #F7F8FA;
+    --surface: #FFFFFF;
+    --surface-sunk: #EEF1F6;
+    --ink: #141821;
+    --ink-soft: #3C4452;
+    --muted: #5C6370;
+    --rule: #DFE3EA;
+    --rule-strong: #C6CCD8;
+    --accent: #0A6FD8;
+    --accent-soft: rgba(10, 111, 216, .08);
+    --star: #B27A16;
+    --u1: #3E6BE0;
+    --u2: #2E9E63;
+    --u3: #B27A16;
+    --u4: #C1503F;
+    --stage: #11141B;
+    --stage-ink: #E8EBF0;
+    --stage-muted: #98A1B0;
+    --stage-rule: #262D3A;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+      "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C0E13;
+      --surface: #151922;
+      --surface-sunk: #10131A;
+      --ink: #E8EBF0;
+      --ink-soft: #C3CAD6;
+      --muted: #98A1B0;
+      --rule: #242B36;
+      --rule-strong: #323B4A;
+      --accent: #4C9CFF;
+      --accent-soft: rgba(76, 156, 255, .10);
+      --star: #D2952B;
+      --u1: #5B86F5;
+      --u2: #3FB877;
+      --u3: #D2952B;
+      --u4: #DC6754;
+      --stage: #0A0C11;
+      --stage-ink: #E8EBF0;
+      --stage-muted: #98A1B0;
+      --stage-rule: #222836;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C0E13;
+    --surface: #151922;
+    --surface-sunk: #10131A;
+    --ink: #E8EBF0;
+    --ink-soft: #C3CAD6;
+    --muted: #98A1B0;
+    --rule: #242B36;
+    --rule-strong: #323B4A;
+    --accent: #4C9CFF;
+    --accent-soft: rgba(76, 156, 255, .10);
+    --star: #D2952B;
+    --u1: #5B86F5;
+    --u2: #3FB877;
+    --u3: #D2952B;
+    --u4: #DC6754;
+    --stage: #0A0C11;
+    --stage-ink: #E8EBF0;
+    --stage-muted: #98A1B0;
+    --stage-rule: #222836;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15.5px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 56rem; margin: 0 auto; padding: 0 1.5rem 6rem; }
+
+  p { margin: 0 0 .9rem; color: var(--ink-soft); }
+  p:last-child { margin-bottom: 0; }
+  strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); }
+  code {
+    font-family: var(--mono);
+    font-size: .86em;
+    background: var(--surface-sunk);
+    padding: .1em .35em;
+    border-radius: 3px;
+  }
+
+  /* ── 头 ───────────────────────────────────────────── */
+  header { padding: 3rem 0 0; }
+  .crumb {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .04em;
+    color: var(--muted);
+    margin: 0 0 1.6rem;
+  }
+  .crumb a { text-decoration: none; }
+  .crumb a:hover { text-decoration: underline; }
+  h1 {
+    font-size: clamp(1.9rem, 4.4vw, 2.7rem);
+    line-height: 1.18;
+    letter-spacing: -.02em;
+    font-weight: 700;
+    margin: 0 0 .9rem;
+    text-wrap: balance;
+  }
+  .lede { font-size: 1.05rem; color: var(--ink-soft); max-width: 36rem; }
+  .lede .star { color: var(--star); font-weight: 700; }
+
+  /* ── 索引 ─────────────────────────────────────────── */
+  .index {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0;
+    border-top: 1px solid var(--rule-strong);
+    border-left: 1px solid var(--rule);
+    margin: 2.2rem 0 1rem;
+  }
+  .index a {
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: .7rem .85rem .8rem;
+    text-decoration: none;
+    color: var(--ink);
+    display: block;
+  }
+  .index a:hover { background: var(--accent-soft); }
+  .index .n {
+    font-family: var(--mono);
+    font-size: .66rem;
+    letter-spacing: .1em;
+    color: var(--muted);
+    display: block;
+  }
+  .index .t { font-size: .92rem; font-weight: 600; }
+  .index .c {
+    font-size: .74rem;
+    color: var(--muted);
+    display: block;
+    line-height: 1.5;
+  }
+
+  /* ── 模块 ─────────────────────────────────────────── */
+  .mod { padding: 3.2rem 0 0; scroll-margin-top: 1rem; }
+  .mod-h {
+    display: flex;
+    align-items: baseline;
+    gap: .8rem;
+    border-bottom: 1px solid var(--rule-strong);
+    padding-bottom: .7rem;
+    margin-bottom: 1.6rem;
+  }
+  .mod-n {
+    font-family: var(--mono);
+    font-size: .78rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    color: var(--accent);
+    flex: none;
+  }
+  .mod-h h2 {
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -.015em;
+    margin: 0;
+  }
+  .mod-note {
+    font-size: .86rem;
+    color: var(--muted);
+    margin: -.7rem 0 1.6rem;
+  }
+
+  /* ── 一条功能 ─────────────────────────────────────── */
+  .f { margin: 0 0 1.5rem; }
+  .f-h { display: flex; align-items: baseline; gap: .6rem; margin-bottom: .5rem; }
+  .f-id {
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--muted);
+    flex: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .f-t { font-size: 1.02rem; font-weight: 700; margin: 0; letter-spacing: -.005em; }
+  .f-star {
+    font-family: var(--mono);
+    font-size: .62rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    color: var(--star);
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    padding: 0 .3rem;
+    flex: none;
+    align-self: center;
+  }
+  .f-body { font-size: .95rem; }
+
+  /* 核心功能：只给它抬一层，别的保持平的 */
+  .f-core {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--star);
+    border-radius: 4px;
+    padding: 1rem 1.15rem 1.1rem;
+  }
+
+  /* 「为什么这么设计」——这一段才是这份文档的重点 */
+  .why {
+    margin-top: .7rem;
+    padding: .7rem 0 .1rem .9rem;
+    border-left: 2px solid var(--rule-strong);
+    font-size: .9rem;
+    color: var(--ink-soft);
+  }
+  .why::before {
+    content: "为什么这么设计";
+    display: block;
+    font-family: var(--mono);
+    font-size: .62rem;
+    letter-spacing: .12em;
+    color: var(--muted);
+    margin-bottom: .35rem;
+  }
+  .f-core .why { border-left-color: var(--star); }
+  .why ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+  .why li { margin-bottom: .35rem; }
+
+  /* ── 表 ──────────────────────────────────────────── */
+  .tw { overflow-x: auto; margin: .9rem 0 .3rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 26rem; font-size: .88rem; }
+  th, td {
+    text-align: left;
+    padding: .55rem .7rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  thead th {
+    font-family: var(--mono);
+    font-size: .64rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  td:first-child { color: var(--ink); white-space: nowrap; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ── 引用用户原话 ─────────────────────────────────── */
+  .said {
+    margin: .7rem 0;
+    padding: .55rem .9rem;
+    background: var(--surface-sunk);
+    border-radius: 4px;
+    font-size: .88rem;
+    color: var(--ink);
+  }
+  .said::before {
+    content: "用户原话";
+    font-family: var(--mono);
+    font-size: .6rem;
+    letter-spacing: .12em;
+    color: var(--muted);
+    display: block;
+    margin-bottom: .2rem;
+  }
+
+  /* ── 小示意图 ─────────────────────────────────────── */
+  .dia {
+    background: var(--stage);
+    border: 1px solid var(--stage-rule);
+    border-radius: 5px;
+    padding: .8rem;
+    margin: .9rem 0 .3rem;
+    overflow-x: auto;
+  }
+  .dia-row { display: flex; align-items: center; gap: .6rem; margin-bottom: .25rem; }
+  .dia-row:last-child { margin-bottom: 0; }
+  .dia-name {
+    width: 5.2rem;
+    flex: none;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: .6rem;
+    letter-spacing: .06em;
+    color: var(--stage-muted);
+  }
+  .dia-track { flex: 1; display: flex; gap: 2px; min-width: 20rem; }
+  .dia-blk {
+    height: 22px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding: 0 .35rem;
+    font-family: var(--mono);
+    font-size: .58rem;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dia-sm { height: 13px; }
+  .dia-ghost {
+    background: rgba(152, 161, 176, .2);
+    color: var(--stage-muted);
+  }
+  .dia-cap {
+    font-family: var(--mono);
+    font-size: .64rem;
+    color: var(--muted);
+    line-height: 1.7;
+    margin: .45rem 0 0;
+  }
+
+  /* ── 声音两层的示意 ───────────────────────────────── */
+  .layers { display: grid; gap: .4rem; margin: .9rem 0 .3rem; }
+  .layer {
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .5rem .7rem;
+    background: var(--surface);
+  }
+  .layer-k {
+    font-size: .84rem;
+    font-weight: 600;
+    width: 9.5rem;
+    flex: none;
+  }
+  .opts { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .opt {
+    font-family: var(--mono);
+    font-size: .66rem;
+    border: 1px solid var(--rule-strong);
+    border-radius: 999px;
+    padding: .05rem .5rem;
+    color: var(--muted);
+  }
+  .opt.on { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 规矩表 ───────────────────────────────────────── */
+  .rules { margin: 1.4rem 0 0; }
+
+  /* ── 核心一览 ─────────────────────────────────────── */
+  .cores { counter-reset: c; display: grid; gap: .45rem; margin: 1.4rem 0 0; padding: 0; list-style: none; }
+  .cores li {
+    counter-increment: c;
+    display: flex;
+    gap: .7rem;
+    align-items: baseline;
+    font-size: .95rem;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: .45rem;
+  }
+  .cores li::before {
+    content: counter(c, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: .7rem;
+    font-weight: 700;
+    color: var(--star);
+    flex: none;
+  }
+  .cores b { color: var(--ink); }
+
+  footer {
+    margin-top: 3.5rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    line-height: 1.9;
+  }
+
+  @media (max-width: 640px) {
+    body { font-size: 15px; }
+    .layer-k { width: auto; }
+    .layer { flex-wrap: wrap; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <p class="crumb"><a href="./index.html">← 路演主稿</a> · ishkafel · v0.1.223 · 2026-09-11</p>
+    <h1>功能清单与设计初衷</h1>
+    <p class="lede">
+      逐模块的详表：每个功能<strong>能干什么</strong>，以及当初<strong>为什么这么设计</strong>。
+      后半句往往比前半句重要——这个产品里几乎每个不寻常的设计，背后都有一次真机上踩出来的坑。
+      带 <span class="star">★</span> 的是核心功能，拿掉它这条线就不成立。
+    </p>
+
+    <nav class="index">
+      <a href="#m1"><span class="n">01</span><span class="t">进门</span><span class="c">新建任务与素材库</span></a>
+      <a href="#m2"><span class="n">02</span><span class="t">分析</span><span class="c">拆成可操作的结构</span></a>
+      <a href="#m3"><span class="n">03</span><span class="t">工作台</span><span class="c">替换裂变 · 11 项</span></a>
+      <a href="#m4"><span class="n">04</span><span class="t">编导台</span><span class="c">脚本成片 · 4 项</span></a>
+      <a href="#m5"><span class="n">05</span><span class="t">出片与交付</span><span class="c">矩阵导出 · 剪映</span></a>
+      <a href="#m6"><span class="n">06</span><span class="t">给 Agent 的那一面</span><span class="c">CLI · 手册 · 可视化</span></a>
+      <a href="#m7"><span class="n">07</span><span class="t">后台与运维</span><span class="c">更新 · 缓存 · 记账</span></a>
+      <a href="#m8"><span class="n">08</span><span class="t">贯穿全局的规矩</span><span class="c">所有模块都要守</span></a>
+    </nav>
+  </header>
+
+  <!-- ══ 01 ══ -->
+  <section class="mod" id="m1">
+    <div class="mod-h"><span class="mod-n">01</span><h2>进门：新建任务与素材库</h2></div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">1.1</span><h3 class="f-t">两条线的入口</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          新建任务时先选生产线——<strong>替换裂变</strong>（要原片的声音）或
+          <strong>脚本成片</strong>（不要原片的声音）。每条线又各有「有原片 / 没有原片」两种起点。
+        </p>
+        <div class="why">
+          起点不是模式，只是入口。判据只有一条——<strong>原片那个人的声音还要不要</strong>。
+          要就走替换裂变（台词与节奏天然一致），不要就走脚本成片（TTS 重念，成片长度必然与
+          原片不同，这是结构性的）。把这个判断摆在第一步，后面所有分叉都省了。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">1.2</span><h3 class="f-t">新建任务向导</h3></div>
+      <div class="f-body">
+        <p>
+          四件事一次填完：素材来源（本地文件 / miaoa 视频 ID）、<strong>两层标签组</strong>
+          （台词语义单元组 + 视觉镜头组）、两层打标约束（人写的提示词）、限定在哪个
+          miaoa 项目下找素材。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>标签组当受控词表</strong>：AI 打标只许用选定组里的标签。自由发挥的标签
+              没法用来检索——打出来的词和素材库里的词对不上，等于没打。</li>
+            <li><strong>打标约束一层一条，不是一组一条</strong>：一层选四个组时，那四个组是同一次
+              打标里的四个维度。每组各挂一条，界面上会冒出四个输入框，人得把同一句话抄四遍。</li>
+            <li><strong>项目限定</strong>：素材库里四万多条分镜横跨几十个项目，不限项目搜出来的
+              大多不是这条片子能用的。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">1.3</span><h3 class="f-t">miaoa 素材库对接</h3></div>
+      <div class="f-body">
+        <p>
+          登录、拉取企业与项目、拉取标签库、三种方式检索候选、把选中的素材下载到本地。
+        </p>
+        <div class="why">
+          miaoa 是素材存放层，素材在那边<strong>已经带着标签、画面描述、ASR 结果</strong>
+          ——这正是路演稿里说的「AI 预处理」。ishkafel 是消费端，第一版不做入库流程。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 02 ══ -->
+  <section class="mod" id="m2">
+    <div class="mod-h"><span class="mod-n">02</span><h2>分析：把一条片子拆成可操作的结构</h2></div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">2.1</span><h3 class="f-t">两层切分</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          导入后自动跑完：提取音频 → 人声/背景分离 → ASR（句级+字级时间戳）→ 镜头切点检测
+          → LLM 语义分组切出<strong>台词语义单元</strong> → 在每个单元内部切出<strong>视觉镜头</strong>
+          → 两层各自打标。
+        </p>
+
+        <div class="dia">
+          <div class="dia-row">
+            <div class="dia-name">台词语义单元</div>
+            <div class="dia-track">
+              <div class="dia-blk" style="flex:21.3;background:var(--u1)">U1 促单</div>
+              <div class="dia-blk" style="flex:26.3;background:var(--u2)">U2 促单 · 实拍 · 口播</div>
+              <div class="dia-blk" style="flex:33.3;background:var(--u3)">U3 品类PK</div>
+              <div class="dia-blk" style="flex:19.1;background:var(--u4)">U4 剧情</div>
+            </div>
+          </div>
+          <div class="dia-row">
+            <div class="dia-name">视觉镜头</div>
+            <div class="dia-track">
+              <div class="dia-track" style="flex:21.3">
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+              </div>
+              <div class="dia-track" style="flex:26.3">
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+              </div>
+              <div class="dia-track" style="flex:33.3">
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+              </div>
+              <div class="dia-track" style="flex:19.1">
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+                <div class="dia-blk dia-sm dia-ghost" style="flex:1"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="dia-cap">
+          视觉镜头严格嵌套在单元内，不可跨单元；单元边界必然同时是镜头边界。
+        </p>
+
+        <p style="margin-top:.8rem">
+          真机实测：75 秒的片子 <span class="num">22.5 秒</span>可进工作台，AI 花费约
+          <span class="num">0.27 元</span>。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>为什么按台词语义切，不按画面切换切</strong>：一段完整的表达可能跨好几个画面。
+              按画面切，换素材时会把一句话劈成两半；按语义切，换的是「这一段要说的事」。</li>
+            <li><strong>严格嵌套</strong>：两层坐标系对不齐的话，Agent 说「U2 的 S2」就指不准东西。</li>
+            <li><strong>切点不信 ASR</strong>：ASR 时间戳只做粗定位（容忍 ±0.5s）。LLM 分完组之后，
+              在 ±0.6s 窗口内吸附到<strong>本地帧级信号</strong>——优先视觉镜头边界，次选静音谷。
+              最终切点来自本地检测，从机制上免疫 ASR 时间戳漂移。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">2.2</span><h3 class="f-t">分析结果按内容指纹缓存</h3></div>
+      <div class="f-body">
+        <p>同一条片子重新导入，直接复用上次的切分，省掉一次 ASR + LLM。</p>
+        <div class="why">
+          语义切分是 LLM 干的、有随机性——真机上同一个文件导三次切出 3/4/5 个单元。
+          不复用的话方案文件就跨不了任务（<code>unit 2 shot 3</code> 在新任务里指向别的画面），
+          「1:1 复刻」也打了折扣。顺带省真金白银。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">2.3</span><h3 class="f-t">断点续跑与后台补齐</h3></div>
+      <div class="f-body">
+        <p>
+          切分一出来就能进工作台干活，<strong>打标在后台继续补</strong>。分析失败有原因和重试
+          入口；打标中断下次进来会接着跑。
+        </p>
+        <div class="why">
+          人等的是「能开始干活」，不是「全部跑完」。把可用的那一刻提前到 22 秒，
+          剩下的慢活挪到后台。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 03 ══ -->
+  <section class="mod" id="m3">
+    <div class="mod-h"><span class="mod-n">03</span><h2>工作台（替换裂变）</h2></div>
+    <p class="mod-note">左侧台词语义单元列表、中间预览、右侧候选素材、下方时间线。</p>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.1</span><h3 class="f-t">双层时间线</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          六条轨：台词语义单元、视觉镜头、字幕、配乐、画面缩略图、音频波形。缩放、平移、
+          跟随播放头；点选任意一块，右侧属性面板跟着变。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>时间线是主操作区</strong>，占比要足（参考剪映约 40% 高度）。</li>
+            <li><strong>所有时间数字一律成片时间</strong>：时间线画的是原片切分，但整体替换会改变
+              时长，显示原片毫秒会和播放器对不上。属性面板里「成片开始/结束」与「取自原片」
+              分两行写清楚——一个标了来源一个没标，最容易让人以为是同一件事。</li>
+            <li><strong>帧对齐是强制的</strong>：时间码精确到帧（<code>00:17.28</code> = 17 秒第 28 帧，
+              不是 17.28 秒）。卡片上带图例说明——不写清楚人一定读错，30fps 下差 0.65 秒。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.2</span><h3 class="f-t">三种替换模式（互斥）</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <div class="tw">
+          <table>
+            <thead><tr><th>模式</th><th>换什么</th><th>时长</th></tr></thead>
+            <tbody>
+              <tr><td>保留原片</td><td>什么都不换</td><td>不变</td></tr>
+              <tr><td><strong>整体替换</strong>（单元层）</td><td>画面和声音一起换</td><td>跟候选走，后面整体后移</td></tr>
+              <tr><td><strong>镜头替换</strong>（镜头层）</td><td>只换画面，口播照旧</td><td>变速铺满原坑位，<strong>一帧不变</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="why">
+          这两层是不同的生意。整体替换换的是「这一段要说的事」——所以候选面板在这一层
+          优先展示台词，人是<strong>按台词挑素材</strong>的。镜头替换换的是画面，台词与节奏
+          必须原样保住，所以变速对齐、时长不变。进入一方另一方锁定——同一个单元两种模式
+          并存，导出时没法判断该听谁的。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.3</span><h3 class="f-t">候选检索三模式</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>三种互斥的找素材方式，两层通用：</p>
+        <div class="opts" style="margin:.6rem 0 .8rem">
+          <span class="opt on">标签精确筛</span>
+          <span class="opt on">画面描述语义搜</span>
+          <span class="opt on">首帧以图搜图</span>
+        </div>
+        <p>
+          候选可多选（一个坑位备好几条），带时长差徽标（绿=变速容忍内，橙=超限）、
+          低清徽标、烧字警告、品牌角标。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>三种不是冗余，是三种不同的判断依据</strong>。标签命中太宽时（真机上撞到过
+              5318 条）就换画面描述；描述搜不准就用首帧以图搜图。</li>
+            <li><strong>候选多选是矩阵导出的前提</strong>：一个坑位选 N 条，就是 N 条变体的来源。</li>
+            <li><strong>烧字警告是硬需求</strong>：素材画面上烧着别家的字，换上去再叠一层我们的
+              台词字幕，两行字打架，片子直接废。而素材库的画面描述里一个字都看不出来。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.4</span><h3 class="f-t">画面复核（看图问两件事）</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          对候选素材的首帧做一次 Vision 调用，一次问清两件事：<strong>画面上烧着什么字</strong>、
+          <strong>露出的产品是谁家的</strong>。结果落库、进候选卡。
+        </p>
+        <div class="why">
+          这两件事同源——素材库给的描述里两样都看不出来，而且都要等到成片出来才发现。
+          既然都要看图，就一次问完（多问一个问题几乎不加钱，多跑一次调用是成倍的）。
+          <strong>品牌一致性</strong>尤其要紧：替换裂变里跨品牌露出会直接出事故。
+          「认不出来」和「画面干净」必须分得开——认不出来给空，瞎猜一个牌子比承认不知道更糟。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">3.5</span><h3 class="f-t">属性面板</h3></div>
+      <div class="f-body">
+        <p>
+          跟随选中对象三态显示（单元 / 镜头 / 无选中）。单元上能改台词、逐帧微调边界、拆分、
+          并入、手填标签、换音色；镜头上能改边界、改标签、改这一镜的字幕、设两层声音。
+        </p>
+        <div class="why">
+          <strong>逐帧步进按钮而不是拖边界</strong>——切分边界来自分析管线 + 帧信号，
+          人要做的是「切、合并、逐帧微调」，在轴上把两段拉来拉去只带来误操作。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.6</span><h3 class="f-t">多轨预览</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          画面轨、口播轨、素材原声轨、配乐轨同时播，按成片时间轴对位。换方案不重新合成，
+          改一下就能听。
+        </p>
+        <div class="why">
+          <strong>预览的全部意义就是「听到的就是要交付的」。</strong>
+          这条踩过好几次：「替换分镜的声音」一度只在导出那条路上有，预览压根没有它——
+          人在预览里听着一切正常、挑好了组合，一导出发现多一层声音，而他找不出原因。
+          预览必要时可以降级（比如分离轨还没好先放原混音），<strong>但必须把降级说出来</strong>。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">3.7</span><h3 class="f-t">字幕层</h3></div>
+      <div class="f-body">
+        <p>
+          换过素材的镜头会重新烧字幕。字幕在预览里是<strong>画面上现画的一层</strong>（不烧进文件），
+          拖位置、改字号、换颜色、换衬底都即刻可见；文字和时间都能改——属性卡里按成片时间码
+          输入，时间线上放大后一句一段，可拖左右边缘与整体平移。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>为什么现画不烧录</strong>：烧进切片的话，每动一下滑杆都要重渲 → 换播放源 →
+              播放器重开文件，转圈几秒、位置归零。</li>
+            <li><strong>为什么只有换过素材的镜头才有字幕</strong>：没换的镜头，台词字幕烧在原片
+              像素里，我们既读不出也不重渲，再叠一层就是两行字打架。</li>
+            <li><strong>为什么能手改</strong>：字幕默认按 ASR 的词级时间戳切给各镜，而「哪里断句
+              好看」是编导的判断——真机上「了」这个字的声音落在下一镜，那一镜的字幕就以一个
+              孤零零的「了」开头。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">3.8</span><h3 class="f-t">两层声音</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>被替换的那一镜，声音是两层，各自四档 + 独立音量；全片打底 + 单镜覆盖两级。</p>
+
+        <div class="layers">
+          <div class="layer">
+            <span class="layer-k">原片这一镜的声音</span>
+            <span class="opts">
+              <span class="opt">不播放</span><span class="opt on">人声</span>
+              <span class="opt">背景声</span><span class="opt">原声</span>
+            </span>
+          </div>
+          <div class="layer">
+            <span class="layer-k">替换素材的声音</span>
+            <span class="opts">
+              <span class="opt">不播放</span><span class="opt">人声</span>
+              <span class="opt on">背景声</span><span class="opt">原声</span>
+            </span>
+          </div>
+        </div>
+        <p class="dia-cap">
+          图示的这一组＝「要原片那句口播 + 要素材的现场感」，两层相加。
+        </p>
+
+        <div class="said">
+          我需要用替换分镜的原声，加上参考分镜的人声或者背景声，排列组合由我自己选。
+          我不想做这么定制化，我要把它拆成功能。
+        </div>
+        <div class="why">
+          <ul>
+            <li><strong>没点过 = 自动</strong>（原混音；铺了配乐就换纯人声）。直接把默认写死成
+              「原声」的话，人什么都没动、铺了配乐的段落声音反而变差。</li>
+            <li><strong>一旦点了任意一档，就完全按他选的来</strong>——冲突只提示，不替他改。</li>
+            <li><strong>各层相加，不取平均</strong>。取平均的话每叠一层前面的口播就掉 6dB，
+              三层掉 18dB。叠出来真过载了<strong>点名是哪一段</strong>，不偷偷压——
+              那等于软件背着人做判断。</li>
+            <li>「不播放」垫的是<strong>等长静音</strong>，不是少拼一段（少一段后面全体提前）。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">3.9</span><h3 class="f-t">换音色（TTS）</h3></div>
+      <div class="f-body">
+        <p>
+          按单元换音色，生成配音替换原口播。有音色库、试听、本片基调（全片统一）+ 单行覆盖，
+          语速可调，配音生成后落库复用。
+        </p>
+        <div class="why">
+          换音色与整体替换<strong>互斥</strong>——前者用 TTS 合成的口播，后者用候选素材自己的
+          口播，同一段只能要一个。导出前置检查拦下并说明，不静默取其一。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">3.10</span><h3 class="f-t">配乐</h3></div>
+      <div class="f-body">
+        <p>
+          横向拖选一段连续的台词语义单元铺配乐，每段独立音量，<strong>一段可选多首互为备选</strong>
+          （导出多条时轮流用，不是叠着放）。曲库来自 miaoa，本地缓存。
+        </p>
+        <div class="why">
+          <ul>
+            <li><strong>按台词语义单元对齐，不按镜头</strong>：整体替换之后单元还在（只是时长变了），
+              镜头没了——按镜头记的区间在那一刻就悬空了。</li>
+            <li><strong>多首是备选不是叠加</strong>：一段选 4 首、导 6 条，就是 A/B/C/D/A/B。
+              总变体数只由画面替换决定，配乐不做乘法。</li>
+            <li>被配乐盖住的段落自动改用<strong>分离出来的纯人声</strong>，否则原片背景音和新配乐
+              两首曲子一起响。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">3.11</span><h3 class="f-t">审核候选</h3></div>
+      <div class="f-body">
+        <p>把这一批挑中的素材摊在一页上逐条过，悬停即播，剔掉不合适的。剔除结果直接落进替换方案。</p>
+        <div class="why">
+          Agent 挑完之后人要有一个<strong>集中复核</strong>的地方——在工作台里一个个点开看太慢。
+          剔除落在主流程的替换方案里（唯一真相），不是另存一份回执。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 04 ══ -->
+  <section class="mod" id="m4">
+    <div class="mod-h"><span class="mod-n">04</span><h2>编导台（脚本成片）</h2></div>
+    <p class="mod-note">一行台词一个带子：写台词 → 生成配音 → 配画面 → 铺配乐。</p>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">4.1</span><h3 class="f-t">行带式工作台</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>逐行写台词、生成配音、配画面、铺配乐。台词可以自己写，也可以从参考片里提取。</p>
+        <div class="why">
+          这条线的根是<strong>台词</strong>——「脚本即成片」。节奏由配音决定，所以配音先于画面：
+          先知道这句话念多久，才知道要配多长的画面。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">4.2</span><h3 class="f-t">参考片复刻</h3></div>
+      <div class="f-body">
+        <p>
+          上传一条参考片，提取它的台词、逐行的参考镜头（首帧）、镜头时长分配，然后照着这个
+          结构去找自己的素材。
+        </p>
+        <div class="why">
+          「照着这条片子做一条」是最常见的需求。参考镜头给 Agent 的是<strong>看图判断的依据</strong>
+          ——像不像那一镜，只有看图才知道。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">4.3</span><h3 class="f-t">逐行配画面与时长分配</h3></div>
+      <div class="f-body">
+        <p>一行可以配多个镜头，自动/手动分配每镜占多长；镜头不够铺满这一行时会点名说清楚。</p>
+        <div class="why">
+          配音时长是硬约束。画面必须铺满，<strong>缺一段不许静默跳过</strong>——
+          那会让成片少一截而没人发现。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">4.4</span><h3 class="f-t">本片基调与逐行覆盖</h3></div>
+      <div class="f-body">
+        <p>全片统一的音色与语速（基调），个别行可以单独改。</p>
+        <div class="why">同一条片子里音色跳来跳去是硬伤。默认统一、例外单设。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 05 ══ -->
+  <section class="mod" id="m5">
+    <div class="mod-h"><span class="mod-n">05</span><h2>出片与交付</h2></div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">5.1</span><h3 class="f-t">矩阵导出</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          把各位置选中的候选做组合，一次批量合成，<strong>上限 100 条</strong>。导出前摆出
+          「这几条各用什么」（位置标到 <code>U2·S2</code>），导出后列出实际文件名。
+        </p>
+        <div class="why">
+          一个坑位选 N 条素材，就该出 N 条变体去投放测试——这正是「裂变」两个字的意思。
+          上限 100 条是产品定的闸，超了要人自己减。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">5.2</span><h3 class="f-t">「挑差异最大的」</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>从全部组合里挑 3 / 5 / 10 / 20 条彼此差异最大的。</p>
+        <div class="said">
+          一个镜头选了 5 个替换，但是导出 10 条全是选用的其中同一个……任何一个替换的位置
+          都尽量不重复。
+        </div>
+        <div class="why">
+          这一条真机上翻过车，根因是三个毛病叠在一起：组合超过上限时掐里程表前 100 条
+          （慢的那一位的候选根本没进池子）；挑选算法把一个单元的多镜合并成一条素材；
+          「差异」只按素材长得像不像算（同一批拍摄的相似度接近 1，算法认为换了等于没换）。
+          <br><br>
+          现在的规则：<strong>每个位置的候选按配额摊开</strong>（5 个候选出 10 条 = 各 2 次），
+          配额之内才比距离，收尾还做一轮局部交换把偏斜换平。
+          <strong>看着像不是重复用同一条的理由——人既然挑了 5 条，5 条就都得露面。</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">5.3</span><h3 class="f-t">导出规格与帧率</h3></div>
+      <div class="f-body">
+        <p>
+          分辨率 / 帧率 / 码率 / 编码 / 格式可选，预计大小实时算。<strong>帧率默认跟着原片走</strong>；
+          手动选到比原片低时会说清楚在丢帧。
+        </p>
+        <div class="why">
+          剪辑软件里「工程帧率」和「导出帧率」本来是同一个数。我们把它拆成了两个——时间线
+          按原片帧率数帧，导出帧率却写死 30。原片 60fps 的话，人在时间线上按 60 数帧、
+          一导出变成 30，中间一句话都没有。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">5.4</span><h3 class="f-t">出门前的交付拦截</h3></div>
+      <div class="f-body">
+        <p>
+          导出<strong>在进门口</strong>拦下会静默出错的几种情况并点名：整体替换与换音色冲突、
+          选了音色没生成配音、有配乐却没有人声轨、选了要分离的声音档位却没有分离轨、
+          手加的单元还没挑素材、同一条素材占了两个位置导致一条都排不出来……
+        </p>
+        <div class="why">
+          <strong>该拦的在进门口拦。</strong>让人先选一遍分辨率码率、点了「开始导出」才蹦出
+          「没能导出」，是在浪费他的时间。而且这些错的共同点是——导出来的片子看着正常，
+          其实不是用户要的，他发现不了，所以宁可不导。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">5.5</span><h3 class="f-t">同名不覆盖</h3></div>
+      <div class="f-body">
+        <p>往同一个目录导第二批时，撞名的文件往后排（<code>变体1(2).mp4</code>）。</p>
+        <div class="why">
+          导出目录默认沿用上次导到哪儿，而文件名只由方案名决定——第二批和上一批一模一样，
+          底下的 ffmpeg 又一律带 <code>-y</code>，上一批成片<strong>凭空消失</strong>。
+          成片是要交付给客户的东西，「数据不能凭空消失」这条在这儿最实。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">5.6</span><h3 class="f-t">剪映草稿交付</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          生成剪映草稿工程——分子轨、原子轨、候选轨、口播轨、配乐轨、字幕，素材一并落地。
+          打开剪映就能继续精修。
+        </p>
+        <div class="why">
+          <strong>我们不做精修。</strong>最后那两三分钟的手感活交给剪映，我们把前面一小时的活
+          干掉，然后把一份结构完整的工程交出去。草稿名按序号递增、<strong>从不覆盖</strong>——
+          剪映打开过的草稿会被加密，覆盖会毁掉人已经做的精修。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 06 ══ -->
+  <section class="mod" id="m6">
+    <div class="mod-h"><span class="mod-n">06</span><h2>给 Agent 的那一面</h2></div>
+    <p class="mod-note">这个产品是给 AI Agent 用的工作台——这一节是它的操作面。</p>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">6.1</span><h3 class="f-t">全量 CLI（27 个顶层命令）</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          <code>analyze</code> <code>candidates</code> <code>apply</code> <code>unit</code>
+          <code>subtitle</code> <code>voice</code> <code>bgm</code> <code>export</code>
+          <code>jianying</code> <code>script</code> <code>review</code> <code>task</code>
+          <code>todo</code> <code>ui</code> …
+          <strong>人在界面上能拧的每个旋钮，命令行都能拧</strong>。所有输出是 JSON。
+        </p>
+        <div class="why">
+          少一个旋钮，Agent 就只能被动接受软件给的默认值——那又退回成规则了。有一条架构
+          测试拿命令清单去对手册：<strong>新加了旋钮却没写进手册，测试当场红</strong>。
+          照着不存在的命令走，Agent 会以为是环境坏了，而不是文档错了。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">6.2</span><h3 class="f-t">内嵌技能手册</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          <code>ishkafel skill --install</code> 直接把手册装进 Claude Code / Codex 的技能目录。
+          手册里写了完整工作流、每个旋钮的用法、以及<strong>为什么这么设计</strong>。
+        </p>
+        <div class="why">
+          只读不装的话，对话一长 Agent 就会忘掉规则。手册正文是<strong>生成</strong>进二进制的，
+          有测试盯着它和源文档一字不差——生成物对不上，使用者装到的就是旧手册，
+          Agent 照着旧文档调新命令，报错还不知道为什么。
+        </div>
+      </div>
+    </div>
+
+    <div class="f f-core">
+      <div class="f-h"><span class="f-id">6.3</span><h3 class="f-t">可视化模式</h3><span class="f-star">核心</span></div>
+      <div class="f-body">
+        <p>
+          Agent 每一步在界面上播报「它在做什么」，界面自动滚到它正在动的那一行并高亮，
+          慢步骤给<strong>带分母的进度</strong>（「全片 23/47 镜」）。人可以随时点「我来接手」
+          抢回控制权。
+        </p>
+        <div class="why">
+          这是这个产品的灵魂，不是日志。终局是静默执行，但通往静默只有一条路——人得能从头
+          跟着看它是怎么想的。四条硬指标：每一步说人话、慢步骤带分母、界面跟着走、
+          「在忙」和「坏了」分得开。
+          <br><br>
+          <strong>最值钱的是判断类播报</strong>：「标签命中 5318 条太宽，改用画面描述再搜一轮」
+          ——这种话是人肯把花钱的活交给静默模式的唯一理由。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">6.4</span><h3 class="f-t">写锁让位</h3></div>
+      <div class="f-body">
+        <p>
+          Agent 要写任务时，界面<strong>把写锁让出来但留在页面上</strong>，自己转成只读跟随；
+          Agent 收工后界面把锁拿回来。
+        </p>
+        <div class="why">
+          可视模式要求界面停在这个任务上，而 Agent 写这个任务要求界面不能停在上面——
+          最该让人看见的那几步，恰恰因为「人在看」而做不了。让界面退出去腾锁是错解
+          （一退出人就什么都看不见了）。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 07 ══ -->
+  <section class="mod" id="m7">
+    <div class="mod-h"><span class="mod-n">07</span><h2>后台与运维</h2></div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">7.1</span><h3 class="f-t">自动更新</h3></div>
+      <div class="f-body">
+        <p>发版后所有人下次打开设置就看到更新提示，一键下载安装。包有 SHA256 校验。</p>
+        <div class="why">
+          <strong>打包和上线是两件事</strong>——打包是内部动作随时可做，上线是对外动作，
+          产品负责人点头才做。不是每个版本号都要上线。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">7.2</span><h3 class="f-t">缓存与产物治理</h3></div>
+      <div class="f-body">
+        <p>
+          设置页能看到各类缓存占用、一键清理；删任务时带走它的全部产物；启动时扫一遍
+          孤儿产物清掉。
+        </p>
+        <div class="why">
+          磁盘上躺着的每一份数据都要有人读、有人删。真机上量到过：1.4G 数据里活着的任务
+          只有一条，六条已删任务的封面、人声分离结果（32M/条）、预览切片全都还躺着——
+          因为清理器把目录整个跳过了。现在<strong>产物清单收敛成唯一一份</strong>，
+          新增一种产物只改那一处。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">7.3</span><h3 class="f-t">AI 用量记账</h3></div>
+      <div class="f-body">
+        <p>每条任务记下它累计花掉的 AI 钱（按模型、按服务分开），任务卡上直接显示。</p>
+        <div class="why">
+          这是花钱的活。人要能随时知道一条片子花了多少——真机上一条 75 秒的片子约 0.27 元。
+        </div>
+      </div>
+    </div>
+
+    <div class="f">
+      <div class="f-h"><span class="f-id">7.4</span><h3 class="f-t">运行环境自检</h3></div>
+      <div class="f-body">
+        <p>
+          <code>ishkafel doctor</code> 与设置页的「运行环境」检查 ffmpeg、人声分离工具、
+          AI 凭据、miaoa 登录态是否就绪，缺什么说清楚怎么补。
+        </p>
+        <div class="why">
+          「在忙」和「坏了」必须分得开。缺工具就说缺哪个工具，不要让人对着一个失败去猜。
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 08 ══ -->
+  <section class="mod" id="m8">
+    <div class="mod-h"><span class="mod-n">08</span><h2>贯穿全局的几条规矩</h2></div>
+    <p class="mod-note">
+      不是某个模块的功能，是所有模块都要守的——也是这个产品和「能跑就行」之间的距离。
+    </p>
+
+    <div class="tw rules">
+      <table>
+        <thead><tr><th>规矩</th><th>为什么</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>不静默降级</td>
+            <td>影响成片的东西出错就失败并点名，不许悄悄少一段、拿默认值顶上。可降级的只有预览这类「人还在看着」的环节，且必须说出来</td>
+          </tr>
+          <tr>
+            <td>缓存按内容指纹</td>
+            <td>按文件名存在就当命中，会静默放出上一个版本的内容。改了规则就要改指纹——否则装了新版、老任务重新导出，听到的还是老毛病</td>
+          </tr>
+          <tr>
+            <td>不留孤儿数据</td>
+            <td>每一份数据都要有人读、有人删</td>
+          </tr>
+          <tr>
+            <td>状态可见可操作</td>
+            <td>后台在干活就说清在干什么、到第几步；失败给原因和重试入口</td>
+          </tr>
+          <tr>
+            <td>存了就要报</td>
+            <td>存进去却不在 <code>--json</code> 里报出来，Agent 查到的空看起来正好像「没问题」</td>
+          </tr>
+          <tr>
+            <td>同一件事只有一处说了算</td>
+            <td>两处各算各的，迟早不一样。这个项目在这上面栽过不止三次</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="mod">
+    <div class="mod-h"><span class="mod-n">★</span><h2>核心功能一览</h2></div>
+    <p class="mod-note">拿掉任何一条，这个产品就不成立。</p>
+    <ol class="cores">
+      <li><b>两层切分</b>（台词语义单元 ⊃ 视觉镜头）—— Agent 下判断的坐标系</li>
+      <li><b>三种替换模式</b> —— 换什么、时长怎么算，规则清楚</li>
+      <li><b>候选检索三模式</b> —— 三种不同的判断依据</li>
+      <li><b>画面复核</b> —— 烧字与品牌，只有看图才知道</li>
+      <li><b>双层时间线 + 帧对齐</b> —— 主操作区</li>
+      <li><b>多轨预览</b> —— 听到的就是要交付的</li>
+      <li><b>两层声音</b> —— 原片与素材各选各的</li>
+      <li><b>矩阵导出 + 挑差异最大的</b> —— 裂变的出口</li>
+      <li><b>剪映草稿交付</b> —— 我们不做精修，我们把工程交出去</li>
+      <li><b>全量 CLI + 技能手册 + 可视化模式</b> —— 这个产品是给 Agent 用的工作台</li>
+    </ol>
+  </section>
+
+  <footer>
+    ishkafel 功能清单 · v0.1.223 · 2026-09-11<br>
+    功能会持续变动，这一份随版本更新。真机数字取自仓库与跑过的任务，没有估算。
+  </footer>
+
+</div>

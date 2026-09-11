@@ -1,0 +1,1154 @@
+<title>ishkafel 路演</title>
+<style>
+  :root {
+    --ground: #F7F8FA;
+    --surface: #FFFFFF;
+    --surface-sunk: #EEF1F6;
+    --ink: #141821;
+    --ink-soft: #3C4452;
+    --muted: #5C6370;
+    --rule: #DFE3EA;
+    --rule-strong: #C6CCD8;
+    --accent: #0A6FD8;
+    --accent-soft: rgba(10, 111, 216, .10);
+    --u1: #3E6BE0;
+    --u2: #2E9E63;
+    --u3: #B27A16;
+    --u4: #C1503F;
+    --stage: #11141B;
+    --stage-ink: #E8EBF0;
+    --stage-muted: #98A1B0;
+    --stage-rule: #262D3A;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+      "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Noto Sans SC",
+      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --measure: 34rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0C0E13;
+      --surface: #151922;
+      --surface-sunk: #10131A;
+      --ink: #E8EBF0;
+      --ink-soft: #C3CAD6;
+      --muted: #98A1B0;
+      --rule: #242B36;
+      --rule-strong: #323B4A;
+      --accent: #4C9CFF;
+      --accent-soft: rgba(76, 156, 255, .14);
+      --u1: #5B86F5;
+      --u2: #3FB877;
+      --u3: #D2952B;
+      --u4: #DC6754;
+      --stage: #0A0C11;
+      --stage-ink: #E8EBF0;
+      --stage-muted: #98A1B0;
+      --stage-rule: #222836;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0C0E13;
+    --surface: #151922;
+    --surface-sunk: #10131A;
+    --ink: #E8EBF0;
+    --ink-soft: #C3CAD6;
+    --muted: #98A1B0;
+    --rule: #242B36;
+    --rule-strong: #323B4A;
+    --accent: #4C9CFF;
+    --accent-soft: rgba(76, 156, 255, .14);
+    --u1: #5B86F5;
+    --u2: #3FB877;
+    --u3: #D2952B;
+    --u4: #DC6754;
+    --stage: #0A0C11;
+    --stage-ink: #E8EBF0;
+    --stage-muted: #98A1B0;
+    --stage-rule: #222836;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 62rem;
+    margin: 0 auto;
+    padding: 0 1.5rem 6rem;
+  }
+
+  .measure { max-width: var(--measure); }
+
+  p { margin: 0 0 1.1rem; color: var(--ink-soft); }
+  strong { color: var(--ink); font-weight: 600; }
+  a { color: var(--accent); }
+
+  /* ── 轨道标签：照产品时间线左侧那一列的样子 ───────────── */
+  .track-label {
+    font-family: var(--mono);
+    font-size: .68rem;
+    font-weight: 500;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin: 0 0 1.4rem;
+  }
+  .track-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+  }
+
+  section { padding: 3.5rem 0 0; }
+
+  h1 {
+    font-size: clamp(2.1rem, 5.2vw, 3.4rem);
+    line-height: 1.14;
+    letter-spacing: -.022em;
+    font-weight: 700;
+    margin: 0 0 1.2rem;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(1.4rem, 2.6vw, 1.85rem);
+    line-height: 1.3;
+    letter-spacing: -.015em;
+    font-weight: 700;
+    margin: 0 0 1rem;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1.02rem;
+    font-weight: 700;
+    margin: 2rem 0 .6rem;
+    letter-spacing: -.005em;
+  }
+
+  /* ── 头部 ──────────────────────────────────────────── */
+  header {
+    padding: 3.5rem 0 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .9rem 1.2rem;
+  }
+  .wordmark {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 1.02rem;
+    letter-spacing: .04em;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: .72rem;
+    color: var(--muted);
+    letter-spacing: .04em;
+  }
+  .lede {
+    font-size: 1.12rem;
+    color: var(--ink-soft);
+    max-width: var(--measure);
+  }
+
+  /* ── 满幅仪表带 ───────────────────────────────────── */
+  .panel {
+    background: var(--stage);
+    border: 1px solid var(--stage-rule);
+    border-radius: 6px;
+    padding: 1rem 1rem 1.15rem;
+    margin: 2rem 0 .8rem;
+    overflow-x: auto;
+  }
+  .panel-caption {
+    font-family: var(--mono);
+    font-size: .7rem;
+    line-height: 1.7;
+    color: var(--muted);
+    margin: 0 0 2.4rem;
+  }
+
+  .tl { min-width: 40rem; }
+  .tl-row { display: flex; align-items: center; gap: .7rem; margin-bottom: .3rem; }
+  .tl-name {
+    width: 5.6rem;
+    flex: none;
+    font-family: var(--mono);
+    font-size: .62rem;
+    letter-spacing: .08em;
+    color: var(--stage-muted);
+    text-align: right;
+  }
+  .tl-track { flex: 1; display: flex; gap: 2px; }
+  .tl-ruler {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: .6rem;
+    color: var(--stage-muted);
+    padding-bottom: .35rem;
+    border-bottom: 1px solid var(--stage-rule);
+    margin-bottom: .5rem;
+  }
+  .blk {
+    height: 30px;
+    border-radius: 3px;
+    display: flex;
+    align-items: center;
+    padding: 0 .4rem;
+    font-family: var(--mono);
+    font-size: .62rem;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .blk-sm { height: 15px; }
+  .blk-u1 { background: var(--u1); }
+  .blk-u2 { background: var(--u2); }
+  .blk-u3 { background: var(--u3); }
+  .blk-u4 { background: var(--u4); }
+  .shot {
+    height: 15px;
+    border-radius: 2px;
+    background: rgba(152, 161, 176, .22);
+    background: color-mix(in srgb, var(--stage-ink) 16%, transparent);
+    flex: 1;
+  }
+  .shot.picked {
+    background: var(--accent);
+    box-shadow: 0 0 0 1px rgba(76, 156, 255, .6);
+  }
+  .sub {
+    height: 15px;
+    border-radius: 2px;
+    background: rgba(76, 156, 255, .45);
+    font-family: var(--mono);
+    font-size: .58rem;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 .3rem;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .gap { flex: none; }
+
+  /* ── 数字条 ───────────────────────────────────────── */
+  .figs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    border-top: 1px solid var(--rule);
+    border-left: 1px solid var(--rule);
+    margin: 2rem 0 .8rem;
+  }
+  .fig {
+    border-right: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: .95rem 1rem 1.05rem;
+  }
+  .fig-n {
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -.02em;
+    line-height: 1.15;
+  }
+  .fig-n span { font-size: .82rem; font-weight: 500; color: var(--muted); }
+  .fig-k {
+    font-size: .76rem;
+    color: var(--muted);
+    line-height: 1.5;
+    margin-top: .2rem;
+  }
+
+  /* ── 表 ──────────────────────────────────────────── */
+  .tw { overflow-x: auto; margin: 1.2rem 0 1.6rem; }
+  table { border-collapse: collapse; width: 100%; min-width: 30rem; font-size: .9rem; }
+  th, td {
+    text-align: left;
+    padding: .7rem .85rem;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+    line-height: 1.6;
+  }
+  thead th {
+    font-family: var(--mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+  td:first-child { color: var(--ink); }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ── 两条线 ───────────────────────────────────────── */
+  .lines { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); margin: 1.6rem 0; }
+  .line {
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--edge);
+    border-radius: 4px;
+    padding: 1.05rem 1.1rem 1.2rem;
+    background: var(--surface);
+  }
+  .line:nth-child(1) { --edge: var(--u1); }
+  .line:nth-child(2) { --edge: var(--u3); }
+  .line h3 { margin: 0 0 .15rem; font-size: 1.05rem; }
+  .line .why { font-size: .82rem; color: var(--muted); margin: 0 0 .9rem; }
+  .line dl { margin: 0; display: grid; gap: .55rem; }
+  .line dt {
+    font-family: var(--mono);
+    font-size: .64rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .line dd { margin: .1rem 0 0; font-size: .88rem; color: var(--ink-soft); }
+
+  /* ── 判断清单 ─────────────────────────────────────── */
+  .asks { list-style: none; padding: 0; margin: 1.2rem 0 1.4rem; display: grid; gap: .5rem; }
+  .asks li {
+    display: flex;
+    gap: .75rem;
+    align-items: baseline;
+    font-size: .93rem;
+    color: var(--ink-soft);
+  }
+  .asks li::before {
+    content: "?";
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--accent);
+    flex: none;
+  }
+
+  blockquote {
+    margin: 1.5rem 0;
+    padding: .1rem 0 .1rem 1.1rem;
+    border-left: 2px solid var(--accent);
+    color: var(--ink);
+    font-size: 1rem;
+  }
+  blockquote p:last-child { margin-bottom: 0; }
+  blockquote .src {
+    display: block;
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    margin-top: .5rem;
+    letter-spacing: .04em;
+  }
+
+  /* ── 架构 ─────────────────────────────────────────── */
+  .arch {
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    background: var(--surface);
+    padding: 1rem;
+    margin: 1.6rem 0 .8rem;
+    display: grid;
+    gap: .5rem;
+  }
+  .arch-top {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .08em;
+    color: var(--muted);
+    padding-bottom: .3rem;
+  }
+  .arch-row { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .box {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--surface-sunk);
+    padding: .6rem .7rem .7rem;
+  }
+  .box b { display: block; font-size: .84rem; font-weight: 600; }
+  .box span { font-size: .74rem; color: var(--muted); line-height: 1.55; display: block; margin-top: .1rem; }
+  .box.remote { border-style: dashed; background: transparent; }
+
+  /* ── 能力边界：能 / 不能 两栏 ─────────────────────── */
+  .ability {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    margin: 2.2rem 0 .5rem;
+  }
+  .ab {
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 1rem 1.15rem 1.15rem;
+    background: var(--surface);
+  }
+  .ab-h {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    margin: 0 0 .75rem;
+  }
+  .ab-can { border-left: 3px solid var(--u2); }
+  .ab-can .ab-h { color: var(--u2); }
+  .ab-cant { border-left: 3px solid var(--u4); }
+  .ab-cant .ab-h { color: var(--u4); }
+  .ab ul { margin: 0; padding: 0; list-style: none; display: grid; gap: .45rem; }
+  .ab li {
+    font-size: .92rem;
+    color: var(--ink-soft);
+    padding-left: 1rem;
+    position: relative;
+    line-height: 1.6;
+  }
+  .ab li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: .68em;
+    width: 6px;
+    height: 1.5px;
+    background: var(--rule-strong);
+  }
+  .ab-note {
+    margin: .9rem 0 0;
+    padding-top: .8rem;
+    border-top: 1px solid var(--rule);
+    font-size: .82rem;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+
+  /* ── 三段生产环节 ─────────────────────────────────── */
+  .stages {
+    display: grid;
+    gap: 0;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    border-top: 1px solid var(--rule-strong);
+    margin: 1.8rem 0 .5rem;
+  }
+  .stage-col {
+    padding: 1rem 1.1rem 1.3rem;
+    border-bottom: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+  }
+  .stage-col:last-child { border-right: none; }
+  .stage-hot { background: var(--accent-soft); }
+  .stage-k {
+    font-family: var(--mono);
+    font-size: .7rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .5rem;
+  }
+  .stage-hot .stage-k { color: var(--accent); }
+  .stage-v { font-size: .95rem; color: var(--ink); margin: 0 0 .6rem; line-height: 1.65; }
+  .stage-n { font-size: .8rem; color: var(--muted); margin: 0; line-height: 1.7; }
+
+  /* ── 流程带 ───────────────────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: .5rem;
+    flex-wrap: wrap;
+    margin: 1.8rem 0 1.6rem;
+  }
+  .flow-step {
+    flex: 1 1 9rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: .8rem .85rem .9rem;
+    background: var(--surface);
+  }
+  .flow-here {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .flow-k {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .06em;
+    color: var(--ink);
+    margin: 0 0 .25rem;
+    font-weight: 500;
+  }
+  .flow-here .flow-k { color: var(--accent); font-weight: 700; }
+  .flow-v { font-size: .78rem; color: var(--muted); margin: 0; line-height: 1.6; }
+  .flow-arrow {
+    display: flex;
+    align-items: center;
+    color: var(--rule-strong);
+    font-family: var(--mono);
+    flex: none;
+  }
+
+  /* ── 分隔：进入「软件内部」 ───────────────────────── */
+  .divider {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 5rem 0 0;
+  }
+  .divider::before, .divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule-strong);
+  }
+  .divider span {
+    font-family: var(--mono);
+    font-size: .74rem;
+    letter-spacing: .18em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  /* ── 子页入口 ─────────────────────────────────────── */
+  .subpage {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    background: var(--accent-soft);
+    padding: 1.05rem 1.2rem;
+    margin: 2rem 0 .5rem;
+    text-decoration: none;
+    color: inherit;
+    flex-wrap: wrap;
+  }
+  .subpage:hover { background: var(--surface); border-color: var(--accent); }
+  .subpage-t {
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 0 0 .2rem;
+  }
+  .subpage-d { font-size: .86rem; color: var(--muted); margin: 0; line-height: 1.6; }
+  .subpage-go {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    color: var(--accent);
+    margin-left: auto;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  /* ── 收尾 ─────────────────────────────────────────── */
+  .kicker {
+    margin: 3.5rem 0 0;
+    padding: 1.8rem 0 0;
+    border-top: 1px solid var(--rule-strong);
+  }
+  .kicker p { font-size: 1.08rem; color: var(--ink); }
+  .kicker p.small { font-size: .88rem; color: var(--muted); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: .68rem;
+    color: var(--muted);
+    line-height: 1.9;
+  }
+
+  @media (max-width: 640px) {
+    .tl-name { width: 4rem; }
+    body { font-size: 15px; }
+  }
+</style>
+
+<div class="page">
+
+  <header>
+    <span class="wordmark">ishkafel</span>
+    <span class="meta">素材生产平台 · v0.1.223 已上线 · 2026-09-11</span>
+  </header>
+
+  <section style="padding-top:2rem">
+    <h1>AI 今天看得懂，<br>但手不稳</h1>
+    <p class="lede">
+      所以别让它去剪。把它<strong>看得懂</strong>的那一段——找镜头、放位置、定快慢
+      ——整个交给它；把它<strong>手不稳</strong>的那一段固化成稳定、帧级正确的能力，
+      让它调用。<span style="color:var(--ink)">ishkafel 就是给 AI Agent 干这件事的工作台。</span>
+    </p>
+
+    <div class="ability">
+      <div class="ab ab-can">
+        <p class="ab-h">AI 今天做得到</p>
+        <ul>
+          <li>准确理解你的话术、你要的情感</li>
+          <li>理解它看到的视频里有什么内容</li>
+          <li>理解画面表达的情感</li>
+          <li>理解口播说的是什么意思</li>
+        </ul>
+      </div>
+      <div class="ab ab-cant">
+        <p class="ab-h">AI 今天做不到</p>
+        <ul>
+          <li><strong>对视频做精细化的裁剪操作</strong></li>
+          <li>帧级的取舍与手感</li>
+        </ul>
+        <p class="ab-note">
+          这就是「AI 剪视频还是粗糙」的原因——不是它不懂，是它手不稳。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">重新拆一遍</p>
+    <div class="measure">
+      <h2>脚本、拍摄、剪辑——今天各归谁</h2>
+      <p>
+        一条片子的生产就三段。按上面那条边界，重新看一遍每一段该怎么分工：
+      </p>
+    </div>
+
+    <div class="stages">
+      <div class="stage-col">
+        <p class="stage-k">脚本</p>
+        <p class="stage-v">AI 可以写。</p>
+        <p class="stage-n">这一段已经没有争议</p>
+      </div>
+      <div class="stage-col">
+        <p class="stage-k">拍摄</p>
+        <p class="stage-v">人拍，或者 AI 生成。<br><strong>但更重要的是：AI 要对原始素材做预处理。</strong></p>
+        <p class="stage-n">
+          打标签、写画面描述、抽口播台词。这不是可选项，是<strong>进入生产环节的前提</strong>
+          ——没有它，Agent 面对的就是一堆文件名
+        </p>
+      </div>
+      <div class="stage-col stage-hot">
+        <p class="stage-k">剪辑</p>
+        <p class="stage-v">精细化剪辑 AI 做不了。<br><strong>但最耗时的那个环节可以被彻底取消。</strong></p>
+        <p class="stage-n">
+          找镜头 · 对齐字幕 · 镜头替换<br>
+          ——这几件恰好全落在「理解」这一侧
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">位置</p>
+    <div class="measure">
+      <h2>这个软件在流程里站在哪儿</h2>
+    </div>
+
+    <div class="flow">
+      <div class="flow-step">
+        <p class="flow-k">原始镜头</p>
+        <p class="flow-v">人拍 / AI 生成</p>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <p class="flow-k">AI 预处理</p>
+        <p class="flow-v">标签 / 画面描述 / 口播台词</p>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step flow-here">
+        <p class="flow-k">ishkafel 工作台</p>
+        <p class="flow-v">Agent 在这儿找镜头、放位置、定快慢</p>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-step">
+        <p class="flow-k">人</p>
+        <p class="flow-v">最后 2~5 分钟精修</p>
+      </div>
+    </div>
+
+    <div class="measure">
+      <p>
+        因为多模态理解已经到了可用的程度，<strong>找镜头这一步可以完全交给 AI Agent</strong>。
+        它找到镜头之后还要能干这些——都在「精细化操作」之外，都是判断题：
+      </p>
+      <ul class="asks">
+        <li>这个镜头该放在哪一个位置</li>
+        <li>这一镜要加速还是放慢</li>
+        <li>一个坑位快速备多个替换候选</li>
+        <li>甚至多个镜头同时替换</li>
+      </ul>
+      <p>
+        <strong>剪辑里那段长达一小时的活，直接缩减到最后两三分钟到五分钟的人工精修。</strong>
+        人只做最后那一下——那一下恰好是 AI 做不好的部分。
+      </p>
+
+      <h3>有没有这个软件，区别在哪</h3>
+      <p>这是最要紧的一条。</p>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th></th><th>没有这个软件</th><th>有这个软件</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Agent 怎么干活</td>
+            <td><strong>自己写程序</strong>去实现人规定的工作流</td>
+            <td><strong>调用软件里对应的功能</strong></td>
+          </tr>
+          <tr>
+            <td>产出</td>
+            <td>每次现写、每次不一样</td>
+            <td><strong>稳定，而且足够精细</strong></td>
+          </tr>
+          <tr>
+            <td>人要验的东西</td>
+            <td>它写的那份程序对不对</td>
+            <td>它的<strong>判断</strong>对不对</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="measure">
+      <p>
+        让 Agent 每次现写一套 ffmpeg 流程，等于把「精细化操作」又推回给它——
+        而那正是它做不好的那一侧。软件把这些操作固化成
+        <strong>稳定、帧级正确、有保护的能力</strong>，Agent 只负责调用与判断。
+      </p>
+    </div>
+  </section>
+
+  <div class="divider"><span>软件内部是什么样</span></div>
+
+  <section style="padding-top:2rem">
+    <div class="panel">
+      <div class="tl">
+        <div class="tl-ruler">
+          <span>00:00.00</span><span>00:16.01</span><span>00:35.26</span>
+          <span>01:00.29</span><span>01:15.09</span>
+        </div>
+        <div class="tl-row">
+          <div class="tl-name">台词语义单元</div>
+          <div class="tl-track">
+            <div class="blk blk-u1" style="flex:21.29">U1 促单</div>
+            <div class="blk blk-u2" style="flex:26.34">U2 促单 · 实拍 · 口播</div>
+            <div class="blk blk-u3" style="flex:33.33">U3 品类PK · 使用方法</div>
+            <div class="blk blk-u4" style="flex:19.04">U4 品类PK · 剧情</div>
+          </div>
+        </div>
+        <div class="tl-row">
+          <div class="tl-name">视觉镜头</div>
+          <div class="tl-track">
+            <div class="tl-track" style="flex:21.29">
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+              <div class="shot"></div>
+            </div>
+            <div class="tl-track" style="flex:26.34">
+              <div class="shot"></div>
+              <div class="shot picked"></div>
+              <div class="shot"></div>
+            </div>
+            <div class="tl-track" style="flex:33.33">
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+            </div>
+            <div class="tl-track" style="flex:19.04">
+              <div class="shot"></div><div class="shot"></div><div class="shot"></div>
+              <div class="shot"></div><div class="shot"></div>
+            </div>
+          </div>
+        </div>
+        <div class="tl-row">
+          <div class="tl-name">字幕</div>
+          <div class="tl-track">
+            <div class="gap" style="flex:30.07"></div>
+            <div class="sub" style="flex:8.78">赶紧再围几瓶</div>
+            <div class="gap" style="flex:61.15"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="panel-caption">
+      真机任务 #3：一条 75.3 秒的竖屏口播片，切成 4 个台词语义单元 / 24 个视觉镜头。<br>
+      蓝色那一镜（U2·S2）换过素材，字幕轨上那一段是它重新烧上去的字。
+    </p>
+  </section>
+
+  <section>
+    <p class="track-label">形态</p>
+    <div class="measure">
+      <h2>两条生产线，各有两种起点</h2>
+      <p>选哪条线，判据只有一个：<strong>原片那个人的声音还要不要。</strong></p>
+    </div>
+
+    <div class="lines">
+      <div class="line">
+        <h3>替换裂变 · 工作台</h3>
+        <p class="why">要原声：台词与节奏照搬，只换画面</p>
+        <dl>
+          <dt>有原片</dt>
+          <dd>上传成片 → 分析切分 → 逐镜换素材</dd>
+          <dt>没有原片</dt>
+          <dd>不用原片，直接从素材拼</dd>
+        </dl>
+      </div>
+      <div class="line">
+        <h3>脚本成片 · 编导台</h3>
+        <p class="why">不要原声：台词重写，TTS 重念，节奏由配音决定</p>
+        <dl>
+          <dt>有参考片</dt>
+          <dd>上传参考片 → 提取台词 → 配音配画面</dd>
+          <dt>没有参考片</dt>
+          <dd>直接写台词 → 配音配画面</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="measure">
+      <p>
+        起点（有没有原片）不是模式，只是入口——同一条线进去之后干的是同一件事。
+      </p>
+      <h3>两层切分，是这个产品的地基</h3>
+      <p>
+        一句「这个东西能把衣服洗干净」是<strong>一个台词语义单元</strong>，
+        它内部可能过了 3 个<strong>视觉镜头</strong>：脏衣服 → 正在洗 → 洗干净了。
+        替换发生在哪一层，决定了它是什么行为：
+      </p>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead>
+          <tr><th>层</th><th>换什么</th><th>时长</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>整体替换（单元层）</td>
+            <td>画面和声音一起换</td>
+            <td>跟候选走，后面整体后移</td>
+          </tr>
+          <tr>
+            <td>镜头替换（镜头层）</td>
+            <td>只换画面，口播照旧</td>
+            <td>变速铺满原坑位，<span class="num">一帧不变</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">洞察</p>
+    <div class="measure">
+      <h2>为什么必须是 Agent，而不是自动化脚本</h2>
+      <p>
+        「自动铺一版」这种整装功能我们做了——<strong>它只配当草片</strong>。
+        真正要的是把编导操作台上的<strong>每一个旋钮</strong>都交到 Agent 手上，
+        事实也一样不少地摆给它（参考图、ASR 台词、画面描述、时长、烧字、品牌），
+        然后<strong>判断权归 Agent，软件只提供能力和保护</strong>。
+      </p>
+      <h3>推论三条，每条都是踩出来的</h3>
+      <p>
+        <strong>一、人在界面上能拧的每个旋钮，Agent 都要能拧。</strong>
+        少一个，它就只能被动接受软件给的默认值——那又退回成规则了。
+        落地成 27 个顶层命令加一份内嵌手册（<span class="num">ishkafel skill --install</span>
+        直接装进 Claude Code / Codex 的技能目录），外加一条架构测试：
+        新加了旋钮却没写进手册，测试当场红。
+      </p>
+      <p>
+        <strong>二、软件不替 Agent 做判断，也不背着它自己干活。</strong>
+      </p>
+      <p>
+        <strong>三、播报只报 Agent 在做什么。</strong>
+        软件自己跑的活儿不许占那条通道——占了，人就分不清是谁在动手。
+      </p>
+
+      <h3>可视化模式不是给 Agent 加日志，它就是产品本身</h3>
+      <blockquote>
+        <p>
+          终局是静默执行，但通往静默只有一条路：人得能从头跟着看它是怎么想的。
+          人需要去干涉的时候，你只给他最后的成片去干涉，就已经来不及了。
+          他如果从头跟了你两遍，发现你整个找视频的逻辑都没有问题，
+          那后面就可以写 skills 总结，让 Agent 直接静默执行了。
+        </p>
+        <span class="src">—— 产品负责人原话，写进了仓库的 CLAUDE.md</span>
+      </blockquote>
+      <p>
+        所以可视化验的是<strong>它的判断逻辑对不对</strong>，不是「它做完了没有」。
+        最值钱的是判断类播报：
+      </p>
+      <blockquote>
+        <p>「标签命中 5318 条太宽，改用画面描述再搜一轮」</p>
+        <span class="src">这种话是人肯把花钱的活交给静默模式的唯一理由</span>
+      </blockquote>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">现状</p>
+    <div class="measure">
+      <h2>一条 75 秒的片子，现在是什么体感</h2>
+    </div>
+
+    <div class="figs">
+      <div class="fig">
+        <div class="fig-n">22.5<span>秒</span></div>
+        <div class="fig-k">导入到能进工作台干活</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">¥0.27</div>
+        <div class="fig-k">这一次分析的 AI 花费<br>50 次 LLM + 1 次 ASR</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">4 / 24</div>
+        <div class="fig-k">切出的台词语义单元 / 视觉镜头</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">100<span>条</span></div>
+        <div class="fig-k">矩阵导出一次最多合成</div>
+      </div>
+    </div>
+    <p class="panel-caption">
+      数字取自真机任务 #3 的落库字段（firstReadyMs、aiUsage），不是估算。
+      另外三条真实任务分别是 24.3 秒 / 28.3 秒可用，51 和 38 个镜头。
+    </p>
+
+    <div class="measure">
+      <p>
+        这 22 秒里跑完的是：提取音频 → 人声/背景分离 → ASR（句级+字级时间戳）→
+        镜头切点检测 → LLM 语义切分 → 两层打标。分析结果按<strong>源文件内容指纹</strong>缓存，
+        同一条片子再导入直接复用切分。
+      </p>
+
+      <h3>出片这一头</h3>
+      <p>
+        <strong>矩阵导出</strong>把各位置的候选组合起来批量合成，上限 100 条。
+        「挑差异最大的」不是随机抽——每个替换位置的候选<strong>按配额摊开</strong>
+        （5 个候选出 10 条 = 各 2 次），并保证十条之间的搭配互不重样。
+      </p>
+      <p>
+        合成在本地跑（ffmpeg + 硬件编码），素材、声音、字幕都在自己电脑上过，
+        云端只负责 AI 那几步。交付两种形态：直接出 mp4/mov，或者生成
+        <strong>剪映草稿工程</strong>拖进去继续精修。
+      </p>
+
+      <h3>声音这一层</h3>
+      <p>
+        被替换的那一镜，声音是<strong>两层</strong>，各自四档
+        （不播放 / 人声 / 背景声 / 原声）：原片这一镜的声音——要那句口播，还是要现场音；
+        替换素材的声音——要它的现场感，还是要它说的那句话。
+      </p>
+      <p>
+        两层各选各的，最后按你设的音量<strong>相加</strong>（不是取平均，各层保持自己的音量）。
+        叠出来真的过载了会<strong>点名是哪一段</strong>，不偷偷帮你压——
+        那等于软件背着人做判断。
+      </p>
+    </div>
+  </section>
+
+  <a class="subpage" href="./功能清单.html">
+    <div>
+      <p class="subpage-t">逐模块的功能清单与设计初衷 →</p>
+      <p class="subpage-d">35 项功能，每项写清「能干什么」和「当初为什么这么设计」，核心功能带 ★</p>
+    </div>
+    <span class="subpage-go">打开附页</span>
+  </a>
+
+  <section>
+    <p class="track-label">护城河</p>
+    <div class="measure">
+      <h2>拿什么保证「能用」，而不只是「能跑」</h2>
+      <blockquote>
+        <p>这东西如果是花钱买来的商业软件，用户能忍吗？</p>
+        <span class="src">不能忍就是不合格，哪怕功能上「能用」</span>
+      </blockquote>
+      <p>这句话落成五条可执行的判据，每一条都有代码和测试守着：</p>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>判据</th><th>具体是什么</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>不静默降级</td>
+            <td>影响成片的东西出错就失败并点名，不许悄悄少一段、拿默认值顶上。可降级的只有预览这类「人还在看着」的环节，且必须把降级说出来</td>
+          </tr>
+          <tr>
+            <td>不做一次性的脏活</td>
+            <td>算过一次的落地复用，改动了才重算。缓存一律按<strong>内容指纹</strong>判定——按文件名存在就当命中，会静默放出上一个版本的内容</td>
+          </tr>
+          <tr>
+            <td>不留孤儿数据</td>
+            <td>磁盘上每一份数据都要有人读、有人删。产物清单收敛成唯一一份，新增一种产物只改那一处</td>
+          </tr>
+          <tr>
+            <td>状态可见且可操作</td>
+            <td>后台在干活就说清在干什么、到第几步；失败要给原因和重试入口</td>
+          </tr>
+          <tr>
+            <td>自己先验一遍</td>
+            <td>UI 改动要真机跑起来截图核对，不允许只报「测试通过」</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="figs">
+      <div class="fig">
+        <div class="fig-n">87,138</div>
+        <div class="fig-k">行产品代码 / 409 个文件</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">71,005</div>
+        <div class="fig-k">行测试代码 / 552 个文件</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">4,196</div>
+        <div class="fig-k">项自动化测试，全绿</div>
+      </div>
+      <div class="fig">
+        <div class="fig-n">51</div>
+        <div class="fig-k">条架构守卫（扫源码，不测功能）</div>
+      </div>
+    </div>
+
+    <div class="measure">
+      <h3>架构守卫是这个项目的特色做法</h3>
+      <p>它不测功能，<strong>它扫源码</strong>。比如：</p>
+      <ul class="asks">
+        <li>导出的六个声音参数，任何一处调用漏传就红</li>
+        <li>core 里让人「点某个按钮」的提示，必须同时给出命令行的走法——命令行那头没有按钮可点，Agent 照做会走进死路</li>
+        <li>新加的旋钮必须出现在 Agent 手册里</li>
+      </ul>
+      <p>
+        这类洞不是逻辑写错，是<strong>加东西时忘了改另一处</strong>，只有扫描拦得住。
+      </p>
+
+      <h3>一个真实例子：为什么这套机制值钱</h3>
+      <p>
+        上周有个 bug：替换镜头的声音跑到了片头，还把前面的口播压小了一半。
+        两个原因——<span class="num">adelay</span> 挪位之后再 <span class="num">atrim</span>，
+        会把挪出来的前导静音整段吃掉；<span class="num">amix</span> 默认按路数归一化，
+        叠三层片头就掉 <span class="num">18dB</span>。
+      </p>
+      <p>
+        <strong>参数看上去全是对的</strong>——原来的测试比对 ffmpeg 参数字符串，全绿。
+        只有真跑一遍把声音合出来、逐秒量电平，这两个错才暴露。修完还剩一道坎：
+        盘上那些按错规则渲出来的中间产物，指纹没变，重新导出照样被原样取出来用。
+        所以规则版本也进了缓存指纹——老任务直接重新导出就行。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">技术形态</p>
+    <div class="measure">
+      <h2>一套 Dart 代码，编译成原生程序</h2>
+    </div>
+
+    <div class="arch">
+      <div class="arch-top">ishkafel.app / ishkafel.exe</div>
+      <div class="arch-row">
+        <div class="box">
+          <b>Flutter 自绘 UI</b>
+          <span>工作台、编导台、双层时间线、预览窗</span>
+        </div>
+        <div class="box">
+          <b>libmpv（FFI）</b>
+          <span>多轨预览、硬件解码、逐帧</span>
+        </div>
+        <div class="box">
+          <b>ffmpeg（子进程）</b>
+          <span>切分 / 抽帧 / 变速 / 合成导出，硬件编码</span>
+        </div>
+      </div>
+      <div class="arch-row">
+        <div class="box remote">
+          <b>miaoa 素材库</b>
+          <span>标签精确筛 / 画面描述语义搜 / 首帧以图搜图</span>
+        </div>
+        <div class="box remote">
+          <b>云端 AI</b>
+          <span>ASR、LLM 语义切分与打标、Vision 画面理解、TTS</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="measure">
+      <p>几条关键取舍：</p>
+      <ul class="asks">
+        <li>不是网页套壳，也不是双原生。视频工具的时间线、审片台这类 UI 系统控件给不了，必须自绘</li>
+        <li>本地无 Python、无本地模型、无 CUDA 依赖。重活在云端和 miaoa，本地只做「UI + 编排 + ffmpeg 合成」</li>
+        <li>使用者永远不接触任何云凭据。内部版编译期注入公司 key，打开即用；商业化版走托管中转，客户端零凭据</li>
+        <li>自动更新已上线：装了 0.1.172 以上的人，下次打开设置就看到更新提示</li>
+      </ul>
+      <p>
+        目前正式包只出 macOS（<span class="num">.app</span>，Developer ID 签名）。
+        Windows 是同一套代码、工程已在仓库里，还没走打包流程。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <p class="track-label">下一步</p>
+    <div class="measure">
+      <h2>现在到哪一步了</h2>
+      <p>
+        <strong>已经在同事手上跑的（0.1.223）</strong>：两条生产线全通、矩阵导出、
+        剪映交付、两层声音、字幕层、换音色、配乐、自动更新、Agent 全量 CLI 与技能手册。
+      </p>
+    </div>
+
+    <div class="tw">
+      <table>
+        <thead><tr><th>方向</th><th>要解决什么</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>从「盯着看」走向「静默执行」</td>
+            <td>产品设计里写死的终局。路径已定：人跟着看两遍 → 把判断逻辑写成 skills → Agent 静默出片</td>
+          </tr>
+          <tr>
+            <td>商业化形态的凭据与计费</td>
+            <td>托管中转服务，客户端零凭据、手机号登录即用，计费与配额都在服务端</td>
+          </tr>
+          <tr>
+            <td>Windows 打包</td>
+            <td>代码已经是跨平台的，缺的是打包与签名流程</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="kicker measure">
+    <p>
+      AI 今天<strong>看得懂</strong>，但<strong>手不稳</strong>。
+    </p>
+    <p>
+      我们把它手不稳的那部分固化成稳定、帧级正确的能力，
+      把它看得懂的那部分——找镜头、放位置、定快慢——整个交给它，
+      只给人留下最后那两三分钟。
+    </p>
+  </div>
+
+  <footer>
+    ishkafel · 0.1.223 · 2026-09-11 · <a href="./功能清单.html">功能清单附页</a><br>
+    页面里的数字全部取自仓库与真机跑过的任务，来源标在各处，没有估算。
+  </footer>
+
+</div>
