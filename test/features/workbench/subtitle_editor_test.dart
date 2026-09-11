@@ -25,6 +25,8 @@ void main() {
         body: SingleChildScrollView(
           child: SubtitleEditorCard(
             slotDurationMs: 60000,
+            slotStartMs: 0,
+            fps: 30,
             replaced: replaced,
             lines: lines,
             edited: edited,
@@ -133,6 +135,8 @@ void main() {
           body: StatefulBuilder(
             builder: (context, setState) => SubtitleEditorCard(
             slotDurationMs: 60000,
+            slotStartMs: 0,
+            fps: 30,
               replaced: true,
               lines: lines,
               edited: true,
@@ -203,6 +207,8 @@ void main() {
             setOuter = setState;
             return SubtitleEditorCard(
             slotDurationMs: 60000,
+            slotStartMs: 0,
+            fps: 30,
               replaced: true,
               lines: lines,
               edited: true,
@@ -233,6 +239,8 @@ void main() {
           body: StatefulBuilder(
             builder: (context, setState) => SubtitleEditorCard(
             slotDurationMs: 60000,
+            slotStartMs: 0,
+            fps: 30,
               replaced: true,
               lines: lines,
               edited: true,

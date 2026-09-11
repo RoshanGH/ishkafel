@@ -11,6 +11,7 @@ import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
 import 'package:collection/collection.dart';
 import 'package:ishkafel/core/subtitle/subtitle_edit.dart';
+import 'package:ishkafel/core/time/timecode.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'bgm_edge_hit.dart';
@@ -488,20 +489,24 @@ class _TimelineViewState extends State<TimelineView> {
     final slotMs = shots[drag.shotIndex].durationMs;
     final (left, right) =
         shotPx(drag.unitIndex, drag.shotIndex, units, widget.geometry);
-    final deltaMs = subtitleDeltaMs(
+    // **吸到帧上**：属性卡里这两个数是按帧显示的（`00:17.10`），
+    // 拖出来的值落在帧缝里的话，人看到的和实际存的对不上一帧
+    final fps = widget.controller.fps;
+    final rawDelta = subtitleDeltaMs(
       deltaPx: dx - drag.startDx,
       slotDurationMs: slotMs,
       blockLeft: left + 1,
       blockRight: right - 1,
     );
+    final deltaMs = alignToFrame(rawDelta, fps);
     final source = drag.original;
     final line = source[drag.lineIndex];
     final next = switch (drag.grab) {
       SubtitleGrab.start => setSubtitleStart(
-          source, drag.lineIndex, line.startMs + deltaMs,
+          source, drag.lineIndex, alignToFrame(line.startMs + deltaMs, fps),
           slotDurationMs: slotMs),
       SubtitleGrab.end => setSubtitleEnd(
-          source, drag.lineIndex, line.endMs + deltaMs,
+          source, drag.lineIndex, alignToFrame(line.endMs + deltaMs, fps),
           slotDurationMs: slotMs),
       SubtitleGrab.move =>
         moveSubtitle(source, drag.lineIndex, deltaMs, slotDurationMs: slotMs),

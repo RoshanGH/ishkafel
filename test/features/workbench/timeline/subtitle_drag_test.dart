@@ -5,6 +5,7 @@ import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/time/timecode.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_geometry.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_view.dart';
@@ -130,6 +131,17 @@ void main() {
     expect(committed.single.lines[1].endMs, 4000);
     expect(committed.single.lines[1].endMs -
         committed.single.lines[1].startMs, 1000);
+  });
+
+  testWidgets('拖出来的时间落在帧上——属性卡是按帧显示的，落在帧缝里就对不上',
+      (tester) async {
+    await pump(tester);
+    // 601px → 约 401ms，不是 30fps 的整帧（1 帧 = 33.33ms）
+    await drag(tester, 600, 701);
+    final moved = committed.single.lines[1];
+    expect(alignToFrame(moved.startMs, 30), moved.startMs,
+        reason: '起点落在帧缝里，卡片上显示的帧号和实际存的差一帧');
+    expect(alignToFrame(moved.endMs, 30), moved.endMs);
   });
 
   testWidgets('拖完才提交一次——每像素提交等于每像素重烧一遍字幕',

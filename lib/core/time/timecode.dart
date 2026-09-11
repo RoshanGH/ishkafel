@@ -44,6 +44,28 @@ int alignToFrame(int ms, double fps) {
   return ((ms * fps / 1000).round() * 1000 / fps).round();
 }
 
+/// 把人敲进去的时间码读回毫秒。**认不出来返回 null**——猜一个数出来，
+/// 人看到的就是「我明明输的不是这个」。
+///
+/// 认这几种写法（帧位一律按 [fps] 换算，不是百分之一秒）：
+/// `00:17.10`、`17.10`、`00:17`、`17`。冒号允许全角，前后空格无所谓。
+///
+/// 帧号超出这一秒的范围时**夹到满帧**，不进位：人敲 `.30`（30fps 下没有
+/// 第 30 帧）多半是想要「这一秒的最后」，跳成下一秒整会让他以为输错了地方。
+int? parseTimecode(String raw, double fps) {
+  final fpsRound = fps.round();
+  if (fpsRound <= 0) return null;
+  final text = raw.trim().replaceAll('：', ':');
+  if (text.isEmpty) return null;
+  final m = RegExp(r'^(?:(\d{1,3}):)?(\d{1,2})(?:\.(\d{1,2}))?$')
+      .firstMatch(text);
+  if (m == null) return null;
+  final minutes = int.parse(m.group(1) ?? '0');
+  final seconds = int.parse(m.group(2)!);
+  final frames = int.parse(m.group(3) ?? '0').clamp(0, fpsRound - 1);
+  return ((minutes * 60 + seconds) * 1000) + (frames * 1000 ~/ fpsRound);
+}
+
 /// 帧率写给人看：`30fps` / `29.97fps`。整数不拖小数尾巴
 String fpsLabel(double fps) {
   if (fps <= 0) return '未知帧率';

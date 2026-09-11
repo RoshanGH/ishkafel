@@ -688,8 +688,11 @@ class _InspectorPanelState extends State<InspectorPanel> {
             lines: widget.subtitleLinesOf?.call(unitIndex, shotIndex) ??
                 const [],
             edited: widget.subtitleEdited?.call(unitIndex, shotIndex) ?? false,
-            // 字幕的时间是相对这一镜开头的，改时间时靠它夹住上界
+            // 存的是相对这一镜的时间，摆给人看的是成片时间码——
+            // 所以两样都要：这一镜多长（夹上界）、它在成片上从哪儿开始
             slotDurationMs: shot.durationMs,
+            slotStartMs: _shotRange(unitIndex, shotIndex)?.$1 ?? shot.startMs,
+            fps: widget.fps,
             onChanged: (v) =>
                 widget.onSubtitleChanged?.call(unitIndex, shotIndex, v),
             onResetToAuto: () =>

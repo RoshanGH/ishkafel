@@ -1213,6 +1213,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       lines: _subtitleLinesOf(unitIndex, shotIndex),
       edited: _subtitleEdited(unitIndex, shotIndex),
       slotDurationMs: _shotDurationMs(unitIndex, shotIndex),
+      slotStartMs: _shotComposedStartMs(unitIndex, shotIndex),
+      fps: _editor?.fps ?? 30,
       onChanged: (lines) => _setSubtitleLines(unitIndex, shotIndex, lines),
       onResetToAuto: () => _resetSubtitle(unitIndex, shotIndex),
     );
@@ -1224,6 +1226,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (unitIndex >= units.length) return 0;
     final shots = units[unitIndex].shots;
     return shotIndex >= shots.length ? 0 : shots[shotIndex].durationMs;
+  }
+
+  /// 这一镜在**成片时间轴**上从哪儿开始。字幕存的是相对这一镜的时间，
+  /// 摆给人看的是成片时间码，靠它换算
+  int _shotComposedStartMs(int unitIndex, int shotIndex) {
+    final editor = _editor;
+    if (editor == null) return 0;
+    final axis = ComposedTimeline.of(
+        units: editor.units, wholeDurations: _composedDurations);
+    return axis.composedShotStart(unitIndex, shotIndex) ?? 0;
   }
 
   /// 这一镜字幕的头一句，画在时间线的字幕轨上当预览

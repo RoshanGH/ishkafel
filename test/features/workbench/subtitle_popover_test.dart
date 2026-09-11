@@ -28,6 +28,8 @@ void main() {
                 lines: lines,
                 edited: true,
                 slotDurationMs: 60000,
+                slotStartMs: 0,
+                fps: 30,
                 onChanged: (v) => committed = v,
                 onResetToAuto: () => reset = true,
               ),

@@ -5,6 +5,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/subtitle/subtitle_edit.dart';
+import '../../core/time/timecode.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import 'inspector_widgets.dart';
 
@@ -30,9 +31,20 @@ class SubtitleEditorCard extends StatefulWidget {
   /// 是不是手改过（改过才给「改回自动」，并标出来）
   final bool edited;
 
-  /// 这一镜有多长（毫秒）。字幕的时间是**相对这一镜开头**的，
+  /// 这一镜有多长（毫秒）。字幕的时间**存的是相对这一镜开头**的，
   /// 改时间时要靠它夹住上界——字幕不许拖出这一镜
   final int slotDurationMs;
+
+  /// 这一镜在**成片时间轴**上的起点。
+  ///
+  /// 存的是相对时间，**摆给人看的是成片时间码**（`00:17.10`）——
+  /// 2026-09-11 用户改的主意：「字幕时间用完整的时序帧……问了下同事
+  /// 还是这个更符合使用习惯」。单元一挪位置，这两个数自己就跟着重算，
+  /// 因为它是由这个起点现算出来的
+  final int slotStartMs;
+
+  /// 数帧用的帧率（原片帧率）。`00:17.10` 里的 `.10` 是第 10 帧
+  final double fps;
 
   final ValueChanged<List<SubtitleLine>> onChanged;
 
@@ -45,6 +57,8 @@ class SubtitleEditorCard extends StatefulWidget {
     required this.lines,
     required this.edited,
     required this.slotDurationMs,
+    required this.slotStartMs,
+    required this.fps,
     required this.onChanged,
     required this.onResetToAuto,
   });
@@ -126,11 +140,12 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     }
   }
 
-  /// 时间框的值跟上外面那份数据。**有焦点就不碰**——人正在这一格里敲
-  static void _syncTime(
+  /// 时间框的值跟上外面那份数据。**有焦点就不碰**——人正在这一格里敲。
+  /// [ms] 是相对这一镜的，摆出去要换成成片时间码
+  void _syncTime(
       TextEditingController controller, FocusNode focus, int ms) {
     if (focus.hasFocus) return;
-    final text = _secText(ms);
+    final text = formatTimecode(widget.slotStartMs + ms, widget.fps);
     if (controller.text == text) return;
     controller.text = text;
   }
@@ -164,15 +179,15 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     final controllers = isStart ? _startControllers : _endControllers;
     if (i >= focus.length || focus[i].hasFocus) return;
     if (i >= widget.lines.length) return;
-    final raw = controllers[i].text.trim().replaceAll('s', '');
-    final seconds = double.tryParse(raw);
-    if (seconds == null) {
+    // 人输的是**成片时间码**，存的是相对这一镜的毫秒，这里换算一次
+    final absolute = parseTimecode(controllers[i].text, widget.fps);
+    if (absolute == null) {
       // 输了个看不懂的：把原值放回去，不猜也不报错框
       _sync();
       setState(() {});
       return;
     }
-    final ms = (seconds * 1000).round();
+    final ms = absolute - widget.slotStartMs;
     final next = isStart
         ? setSubtitleStart(widget.lines, i, ms,
             slotDurationMs: widget.slotDurationMs)
@@ -224,13 +239,15 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
       ]),
       const SizedBox(height: 4),
       const Text('换过素材的镜头，原片的字跟着旧画面一起没了，这里的字会重新烧上去。'
-          '左边两个数是这句话在**这一镜里**的起止秒数，可以直接改',
+          '左边两个数是这句话在成片里的起止位置，可以直接改',
           style: TextStyle(
               fontSize: AppFontSize.caption,
               height: 1.5,
               color: AppColors.textTertiary)),
       const SizedBox(height: AppSpacing.sm),
       for (var i = 0; i < lines.length; i++) _row(i),
+      // 和属性面板别处同一句说明：`.10` 是帧号不是小数
+      inspectorTimecodeLegend(widget.fps),
       const SizedBox(height: AppSpacing.xs),
       Row(children: [
         TextButton(
@@ -263,7 +280,7 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
         padding: const EdgeInsets.only(bottom: AppSpacing.xs),
         child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           SizedBox(
-            width: 96,
+            width: 148,
             child: Row(children: [
               _timeField(i, isStart: true),
               const Text('→',
@@ -309,9 +326,9 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
         ]),
       );
 
-  /// 一个时间格。**秒，相对这一镜的开头**（不是成片时间码）——
-  /// 这一层人关心的是「这句话在这一镜里第几秒出现」，
-  /// 换算成整片位置反而要他自己减一次（2026-09-11 用户定的）
+  /// 一个时间格。**成片时间码**（`分:秒.帧`），和属性面板别处、
+  /// 播放器下面那个读数是同一套——人照着哪儿都能对上
+  /// （2026-09-11 用户改的主意，理由是同事的使用习惯）
   Widget _timeField(int i, {required bool isStart}) => Expanded(
         child: TextField(
           key: ValueKey('subtitle-${isStart ? 'start' : 'end'}-$i'),
@@ -319,7 +336,7 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
               isStart ? _startControllers[i] : _endControllers[i],
           focusNode: isStart ? _startFocus[i] : _endFocus[i],
           textAlign: TextAlign.center,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          keyboardType: TextInputType.text,
           style: const TextStyle(
               fontSize: AppFontSize.micro, color: AppColors.textSecondary),
           decoration: const InputDecoration(
@@ -341,6 +358,5 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
     ]);
   }
 
-  /// 秒，一位小数。**不带单位**：格子很窄，`0.5` 比 `0.5s` 多出一个字的地方
-  static String _secText(int ms) => (ms / 1000).toStringAsFixed(1);
+
 }

@@ -28,6 +28,8 @@ void main() {
         body: StatefulBuilder(
           builder: (context, setState) => SubtitleEditorCard(
             slotDurationMs: 60000,
+            slotStartMs: 0,
+            fps: 30,
             replaced: true,
             lines: current,
             edited: true,
