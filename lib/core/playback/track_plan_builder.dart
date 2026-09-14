@@ -114,7 +114,10 @@ class TrackPlanBuilder {
         durationOf: (id) => materials[id]?.durationMs,
       );
 
-      if (base != null && !base.isOriginal) {
+      // 底片是素材、**镜头又不是按它切的**：整段原样接上。按它切过的往下走
+      // 「按镜头逐段取底片」那条路——那些镜头是新底片上的真切点，
+      // 要一格格放、要能各自换素材
+      if (base != null && !base.isOriginal && !hasOwnBaseShots(unit)) {
         // 整体替换：画面与声音都来自候选，整段原样接上，时长跟候选走
         final durationMs = base.durationMs;
         video.add(TrackSegment(
@@ -175,9 +178,17 @@ class TrackPlanBuilder {
         continue;
       }
 
-      // 走到这儿底片一定是原片的一段——上面两个分支已经把别的情况拦下了
+      // 走到这儿一定有底片：要么是原片的一段，要么是切过镜头的素材。
+      // 两者从这里起走同一条路——差别只在「取底片的第几毫秒」，
+      // 由 [_inBase] 算
       final basePath = base.path;
-      final audioSource = audioSourcePath ?? basePath;
+      // 代理只对原片有意义（它是原片转出来的）；底片是素材时声音就取素材本身
+      final audioSource =
+          base.isOriginal ? (audioSourcePath ?? basePath) : basePath;
+      // 原片分离出来的人声/背景轨对素材底片不适用——那是另一条片子的声音。
+      // 传 null 会让选了这两档的镜头走 stemMissing 那条路，如实说出来
+      final unitVocals = base.isOriginal ? vocalsPath : null;
+      final unitBackground = base.isOriginal ? backgroundPath : null;
 
       // 没有整体替换：画面按镜头逐段取，声音按「这一段该用哪条音源」取
       final shots = unit.shots.isEmpty
@@ -223,7 +234,7 @@ class TrackPlanBuilder {
                 durationMs: slotMs,
                 source: basePath,
                 volume: 0, // 画面轨不出声，声音走口播轨
-                inMs: shotStart));
+                inMs: _inBase(base, unit, shotStart)));
         at += slotMs;
       }
 
@@ -249,15 +260,16 @@ class TrackPlanBuilder {
                 );
           // 被配乐盖住的段落必须用纯人声，否则新配乐与原背景两首曲子一起响。
           // **人选过就以人选的为准**——冲突只提示，不替他改
-          final clean =
-              picked == null && vocalsPath != null && coveredUnits.contains(u);
+          final clean = picked == null &&
+              unitVocals != null &&
+              coveredUnits.contains(u);
           final silent = shotIndex < 0
               ? null
               : silentClips[shotKey(unit.index, shotIndex)];
           final stem = picked?.mode == MaterialAudioMode.vocals
-              ? vocalsPath
+              ? unitVocals
               : picked?.mode == MaterialAudioMode.background
-                  ? backgroundPath
+                  ? unitBackground
                   : '';
           if (stem == null) {
             // 分离轨不在：预览先放原混音，但要说出来
@@ -267,10 +279,10 @@ class TrackPlanBuilder {
             picked: picked,
             clean: clean,
             audioSource: audioSource,
-            vocalsPath: vocalsPath,
-            backgroundPath: backgroundPath,
+            vocalsPath: unitVocals,
+            backgroundPath: unitBackground,
             silent: silent,
-            shotStart: shotStart,
+            shotStart: _inBase(base, unit, shotStart),
           );
           voice.add(TrackSegment(
             atMs: cursor,
@@ -363,6 +375,14 @@ class TrackPlanBuilder {
   }
 
   /// 镜头替换的变速切片按这个 key 索引
+  /// 这一镜取**底片**的第几毫秒。
+  ///
+  /// 镜头坐标一贯是「单元坐标」（`unit.startMs + 偏移`），底片是原片时
+  /// `base.startMs == unit.startMs`，算出来就是原来那个值；底片是素材时
+  /// `base.startMs == 0`，算出来是素材内偏移。一个式子管两种
+  static int _inBase(UnitBase base, SemanticUnit unit, int shotStartMs) =>
+      base.startMs + (shotStartMs - unit.startMs);
+
   static String shotKey(int unitIndex, int shotIndex) => '$unitIndex/$shotIndex';
 
   static UnitReplacement _replacementOf(

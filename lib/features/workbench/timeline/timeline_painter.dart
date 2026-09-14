@@ -452,7 +452,7 @@ class TimelinePainter extends CustomPainter {
       final unitColor = _unitColors[unit.index % _unitColors.length];
       // 被整体替换的单元：原来那些视觉镜头在成片里已经不存在了（整段换成了
       // 另一条素材）。还按原样画一排小格子，等于让用户去点一批点不动的东西
-      if (geometry.axis?.isReplaced(unit.index) ?? false) {
+      if (geometry.axis?.isSolidBlock(unit.index) ?? false) {
         _paintReplacedShotSpan(canvas, size, u, unit, unitColor);
         continue;
       }

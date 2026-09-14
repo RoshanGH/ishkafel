@@ -40,6 +40,21 @@ class ExportSegment {
   /// 视觉镜头替换不自动截断（见 [trimFor]）
   final int? trimStartMs;
 
+  /// **这一镜没换素材时，画面从哪张底片上剪。**
+  ///
+  /// null = 任务原片（分析切出来的单元，绝大多数情况）。非 null = 这个单元
+  /// 的底片被固定成了那条素材，镜头也是按它切的，所以「没换的那一镜」要从
+  /// 素材上剪，不是从原片上剪。不带这个字段的话，导出会跑去原片的同一个
+  /// 时间点剪一段毫不相干的画面，而哪儿都不报错
+  final int? baseCandidateId;
+
+  /// 这一段落在底片的第几毫秒（配合 [baseCandidateId] 用）。
+  /// 不给就是 [startMs]——底片是原片时两者本来就相同
+  /// 不给就是 [startMs]——用 [baseStartMs] 读，别直接读这个
+  final int? baseStartMsOrNull;
+
+  int get baseStartMs => baseStartMsOrNull ?? startMs;
+
   const ExportSegment({
     required this.startMs,
     required this.endMs,
@@ -49,7 +64,10 @@ class ExportSegment {
     this.candidateId,
     this.composedMs,
     this.trimStartMs,
-  });
+    this.baseCandidateId,
+    int? baseStartMs,
+  }) : baseStartMsOrNull = baseStartMs;
+
 
   /// 这一段在**成片**里占多长
   int get durationMs => composedMs ?? (endMs - startMs);
@@ -66,11 +84,15 @@ class ExportSegment {
       other.candidateId == candidateId &&
       other.unitIndex == unitIndex &&
       other.shotIndex == shotIndex &&
-      other.composedMs == composedMs;
+      other.composedMs == composedMs &&
+      // 底片换了就是另一段画面：不比这一项，换底片重导会命中上一张底片
+      // 留下的切片缓存，人看到的是「改了没反应」
+      other.baseCandidateId == baseCandidateId &&
+      other.baseStartMs == baseStartMs;
 
   @override
-  int get hashCode => Object.hash(
-      startMs, endMs, candidateId, unitIndex, shotIndex, composedMs);
+  int get hashCode => Object.hash(startMs, endMs, candidateId, unitIndex,
+      shotIndex, composedMs, baseCandidateId, baseStartMs);
 
   @override
   String toString() => 'ExportSegment(U${unitIndex + 1}'
@@ -332,7 +354,10 @@ class ExportPlanner {
         replacement: replacement ?? UnitReplacement.keepOriginal(),
         wholeCandidateId: whole[i],
       );
-      if (choice case MaterialBase(:final candidateId)) {
+      // 底片是素材、镜头又不是按它切的：整段原样接上。
+      // 按它切过的往下走「按镜头逐段」那条路
+      if (choice case MaterialBase(:final candidateId)
+          when !hasOwnBaseShots(unit)) {
         // 整体替换：整个单元换成这一条候选，原样接上，成片时长跟候选走。
         // 探不出来就按原单元算——报得保守好过拿 0 顶（那会把总时长算成一团）
         out.add(ExportSegment(
@@ -345,14 +370,17 @@ class ExportPlanner {
         ));
         continue;
       }
-      if (replacement?.mode == ReplacementMode.perShot &&
-          unit.shots.isNotEmpty) {
+      // 底片自己的镜头一律逐镜产段——那一段的画面就是一格格拼出来的，
+      // 哪怕一镜都没换（没换的从底片上剪）
+      if (hasOwnBaseShots(unit) ||
+          (replacement?.mode == ReplacementMode.perShot &&
+              unit.shots.isNotEmpty)) {
         for (var s = 0; s < unit.shots.length; s++) {
           out.add(_shotSegment(
             unit: unit,
             shotIndex: s,
             candidateId: perShot[i]?[s],
-            replacement: replacement!,
+            replacement: replacement ?? UnitReplacement.keepOriginal(),
             materialDurations: materialDurations,
           ));
         }
@@ -467,12 +495,19 @@ class ExportPlanner {
   }) {
     final shot = unit.shots[shotIndex];
     if (candidateId == null) {
+      // 没换素材的这一镜：从**这个单元的底片**上剪。底片是原片时
+      // baseStartMs 就等于 shot.startMs（原坐标），底片是素材时是
+      // 「素材内偏移」——一个式子管两种，见 [hasOwnBaseShots]
       return ExportSegment(
         startMs: shot.startMs,
         endMs: shot.endMs,
         unitIndex: unit.index,
         unitUid: unit.uid,
         shotIndex: shotIndex,
+        baseCandidateId: unit.baseCandidateId,
+        baseStartMs: unit.baseCandidateId == null
+            ? shot.startMs
+            : shot.startMs - unit.startMs,
       );
     }
     final materialMs = materialDurations[candidateId] ?? 0;

@@ -1,4 +1,5 @@
 import '../models/semantic_unit.dart';
+import '../replacement/unit_base.dart';
 
 /// 成片的时间轴：**整体替换会改变单元的时长**，后面所有单元跟着挪。
 ///
@@ -61,9 +62,10 @@ class ComposedTimeline {
   /// 界面上所有时间数字都该是成片时间——存的是原片毫秒（那是切分点），
   /// 显示的是它在成片里落到哪儿，每次现算。
   ///
-  /// **整体替换的单元返回 null**：那一段整个换成了另一条素材，原片的镜头
-  /// 切分在成片里已经不存在了。按比例缩一个数出来是假精度，而人会拿它去对时。
-  /// 下标越界也返回 null——界面在编辑过程中会短暂拿到对不上的下标。
+  /// **整体替换、又没切过自己底片的单元返回 null**：那一段整个换成了另一条
+  /// 素材，原片的镜头切分在成片里已经不存在了。按比例缩一个数出来是假精度，
+  /// 而人会拿它去对时。底片固定并切过镜头的照常给——那些镜头是新底片上的
+  /// 真切点。下标越界也返回 null——界面在编辑过程中会短暂拿到对不上的下标。
   int? composedShotStart(int unitIndex, int shotIndex) =>
       _composedShot(unitIndex, shotIndex, end: false);
 
@@ -73,7 +75,8 @@ class ComposedTimeline {
 
   int? _composedShot(int unitIndex, int shotIndex, {required bool end}) {
     if (unitIndex < 0 || unitIndex >= units.length) return null;
-    if (isReplaced(unitIndex)) return null;
+    // 一整块的没有镜头可定位；切过自己底片的有，照常按偏移算
+    if (isSolidBlock(unitIndex)) return null;
     final unit = units[unitIndex];
     if (shotIndex < 0 || shotIndex >= unit.shots.length) return null;
     final shot = unit.shots[shotIndex];
@@ -125,14 +128,36 @@ class ComposedTimeline {
     return (_starts[lo], _starts[hi] + _durations[hi]);
   }
 
-  /// 这个单元被整体替换了吗。时间线上它要画成一整块（原来的那些视觉镜头
-  /// 在成片里已经不存在了——整段换成了另一条素材）
+  /// 这个单元被整体替换了吗——**原片的那些视觉镜头在成片里已经不存在了**。
+  ///
+  /// 字幕按它判（整体替换的段落不渲台词字幕：时长跟素材走、和原坑位对不齐）。
+  /// 要判「时间线上画不画成一整块」请用 [isSolidBlock]：底片固定并切过镜头
+  /// 之后，那一段有自己的镜头，不是一整块了
   bool isReplaced(int unitIndex) {
+    if (unitIndex < 0 || unitIndex >= units.length) return false;
+    // 底片被固定成了一条素材：画面已经不是原片，**哪怕时长恰好相等**。
+    // 只按「时长变没变」判的话，素材长度正好等于坑位时会判成「没替换」，
+    // 于是按原片时间戳算的台词字幕被贴到一段素材画面上——对不上而不报错
+    if (units[unitIndex].baseCandidateId != null) return true;
     final replaced = wholeDurations[unitIndex];
     if (replaced == null || replaced <= 0) return false;
-    if (unitIndex < 0 || unitIndex >= units.length) return false;
     return replaced != units[unitIndex].endMs - units[unitIndex].startMs;
   }
+
+  /// 这个单元有没有**按自己那张底片切出来的**镜头。
+  ///
+  /// 这些镜头真实存在于成片里（是新底片上的切点），要一格格画出来、
+  /// 要能点、要能各自换素材——跟整体替换那种「一整块」是两回事
+  bool hasOwnShots(int unitIndex) =>
+      unitIndex >= 0 &&
+      unitIndex < units.length &&
+      hasOwnBaseShots(units[unitIndex]);
+
+  /// 时间线上这一段要不要画成**一整块**。
+  ///
+  /// 整体替换的段落原本就是一整块；**底片固定并切过镜头之后不是**
+  bool isSolidBlock(int unitIndex) =>
+      isReplaced(unitIndex) && !hasOwnShots(unitIndex);
   /// **已删除 `toComposedMs`（原片时刻 → 成片时刻）。**
   ///
   /// 这个方向病态：给一个原片时刻问它在成片哪儿，本身没有唯一答案——

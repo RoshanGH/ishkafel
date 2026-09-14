@@ -66,6 +66,9 @@ class WorkbenchBody extends StatefulWidget {
   /// 空白任务：分子标签手填，检查器里给一个能选的编辑器
   final Widget? Function(int unitIndex, SemanticUnit unit)? unitTagEditor;
 
+  /// 「这一段的底片」卡片（见 [BaseSegmentCard]）。挑了素材的插入段才有
+  final Widget? Function(int unitIndex, SemanticUnit unit)? baseCard;
+
   /// 手改单元 / 镜头的标签
   final void Function(int unitIndex)? onEditUnitTags;
   final void Function(int unitIndex, int shotIndex)? onEditShotTags;
@@ -193,6 +196,7 @@ class WorkbenchBody extends StatefulWidget {
     this.onAddUnit,
     this.onReorderUnit,
     this.unitTagEditor,
+    this.baseCard,
     this.blankTask = false,
     this.materialAudioDefault = MaterialAudioSetting.off,
     this.shotReplaced,
@@ -613,6 +617,7 @@ class _WorkbenchBodyState extends State<WorkbenchBody> {
                                 onChangeVoice: widget.onChangeVoice,
                                 previewVoice: widget.previewVoice,
                                 unitTagEditor: widget.unitTagEditor,
+                                baseCard: widget.baseCard,
                                 blankTask: widget.blankTask,
                                 composedDurationOf: (i) =>
                                     widget.composedDurations[i],

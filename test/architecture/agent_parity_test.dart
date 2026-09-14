@@ -40,6 +40,9 @@ void main() {
       'unit source-audio': '这一镜的**原片**声音放哪一路、多大声',
       'task-copy': '复制一条任务（两条完全隔离）——界面上人能复制',
       'unit subtitle': '改这一镜要烧的字幕',
+      'unit base': '这一段的底片是谁、能不能切——Agent 要先看得到才谈得上判断',
+      'unit segment': '切分这一段的底片，从此每一镜都能单独换素材',
+      'unit unpin': '换一张底片（旧底片切出来的镜头全部作废）',
     };
     for (final e in knobs.entries) {
       expect(agentSkillMarkdown, contains(e.key),

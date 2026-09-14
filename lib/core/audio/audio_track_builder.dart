@@ -157,6 +157,12 @@ class AudioTrackBuilder {
     /// 那一段的口播来自候选自己，不再是原片
     Map<int, String> wholeAudio = const {},
 
+    /// **底片被固定过**的单元：单元下标 → 那张底片的本地路径
+    /// （见 [SemanticUnit.baseCandidateId]）。这些单元按镜头逐段取声音，
+    /// 但取的是底片而不是原片——不传的话会跑去原片同一个时间点剪一段
+    /// 毫不相干的声音，而哪儿都不报错
+    Map<int, String> baseAudio = const {},
+
     /// 被整体替换的单元在成片里有多长（单元下标 → 毫秒）。配乐的位置要按
     /// 这个换算，否则从被替换的那个单元之后全部错位
     Map<int, int> wholeDurations = const {},
@@ -196,6 +202,7 @@ class AudioTrackBuilder {
         unit: unit,
         listIndex: i,
         sourcePath: sourcePath,
+        basePath: baseAudio[unit.index],
         vocalsPath: vocalsPath,
         backgroundPath: backgroundPath,
         covered: covered,
@@ -453,6 +460,10 @@ class AudioTrackBuilder {
     required SemanticUnit unit,
     required int listIndex,
     required String? sourcePath,
+
+    /// 这个单元的底片是这条素材（[SemanticUnit.baseCandidateId] 固定过的）。
+    /// null = 底片就是任务原片，按老路走
+    String? basePath,
     required String? vocalsPath,
     required String? backgroundPath,
     required Set<int> covered,
@@ -553,8 +564,10 @@ class AudioTrackBuilder {
       // 被配乐盖住的段落必须用纯人声，否则老背景与新配乐一起响
       // 配乐按整格单元铺，所以这一格里每一镜的答案都一样。
       // **人选过就以人选的为准**——冲突只提示，不替他改（那是静默降级）
-      final needsClean =
-          picked == null && covered.contains(listIndex) && vocalsPath != null;
+      final needsClean = picked == null &&
+          covered.contains(listIndex) &&
+          basePath == null &&
+          vocalsPath != null;
       // **手动加的单元不许去原片上剪**：它的 startMs~endMs 只是时间线上的
       // 占位，原片里没有这一段。不挡住的话会剪出一段别的声音接进成片，
       // 而且哪儿都不报错——人只有听出来才知道。
@@ -563,7 +576,12 @@ class AudioTrackBuilder {
       // 给出不同答案，就是一边有声一边黑屏。这里问的是「底片是原片吗」
       // ——整体替换（底片是素材）在本方法开头就已经处理掉了，所以传
       // keepOriginal
-      final hasBase = baseChoiceOf(
+      // 底片是素材时，这一段的「原声」就是素材自己的声音——原片分离出来的
+      // 人声/背景轨是另一条片子的，不能拿来顶
+      final unitVocals = basePath == null ? vocalsPath : null;
+      final unitBackground = basePath == null ? backgroundPath : null;
+      final hasBase = basePath != null ||
+          baseChoiceOf(
             unit: unit,
             replacement: UnitReplacement.keepOriginal(),
             hasOriginal: sourcePath != null,
@@ -573,13 +591,13 @@ class AudioTrackBuilder {
           : picked != null
               ? _sourceTrackFor(
                   mode: picked.mode!,
-                  sourcePath: sourcePath,
-                  vocalsPath: vocalsPath,
-                  backgroundPath: backgroundPath,
+                  sourcePath: basePath ?? sourcePath,
+                  vocalsPath: unitVocals,
+                  backgroundPath: unitBackground,
                   where: 'U${unit.index + 1}'
                       '${shotIndex < 0 ? '' : ' 的 S${shotIndex + 1}'}',
                 )
-              : (needsClean ? vocalsPath : sourcePath);
+              : (needsClean ? unitVocals : (basePath ?? sourcePath));
       if (source == null) {
         // 空白任务里每个单元都是整体替换，走不到这儿。走到了就是有一段
         // 既没有素材也没有原片——不许拿静音顶上，那会让成片少一段声音
@@ -587,15 +605,18 @@ class AudioTrackBuilder {
             '合不出声音。请给它挑一条素材，或者删掉它');
       }
       final volume = picked?.volume ?? 1.0;
+      // 底片是素材时，镜头坐标要减掉单元起点才是「素材内第几毫秒」
+      // （镜头坐标一贯是 `unit.startMs + 偏移`，见 [hasOwnBaseShots]）
+      final shift = basePath == null ? 0 : -unit.startMs;
       pieces.add(await _cache.render(
         // 音量进指纹：改了音量要重渲，不能命中上一次那份
-        key: 'trim|$source|$start|$end|$exportFps|$volume',
+        key: 'trim|$source|${start + shift}|${end + shift}|$exportFps|$volume',
         prefix: 'mix_u${unit.index}_$i${needsClean ? '_v' : ''}',
         extension: 'wav',
         args: (dest) => ExportCommands.trimOriginalAudio(
           source: source,
-          startMs: start,
-          endMs: end,
+          startMs: start + shift,
+          endMs: end + shift,
           out: dest,
           atFps: exportFps,
           volume: volume,

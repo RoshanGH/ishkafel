@@ -9,6 +9,7 @@ import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/audio/material_audio.dart';
 import '../../core/audio/source_audio.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/replacement/unit_base.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/export/composed_timeline.dart';
 import '../../core/time/timecode.dart';
@@ -112,6 +113,12 @@ class InspectorPanel extends StatefulWidget {
   /// 判断某一个单元有没有台词要看 [SemanticUnit.hasSource]，不是看这个 flag
   final bool blankTask;
 
+  /// 这一段的底片卡片（挑了素材的插入段才有）。返回 null 表示不摆。
+  ///
+  /// 交给外面造而不是在这儿拼：它要知道素材叫什么、要能发起切分、
+  /// 要显示切分进度——那些都在工作台那一层
+  final Widget? Function(int unitIndex, SemanticUnit unit)? baseCard;
+
   /// 单元标签的**手填**编辑器。返回 null 表示这个单元不该手填
   /// （分析切出来的单元：标签是模型按台词打的，在这儿手改会和「重新打标」
   /// 互相覆盖，而用户看不出是谁赢了）。
@@ -132,6 +139,7 @@ class InspectorPanel extends StatefulWidget {
     this.unitTagEditor,
     this.blankTask = false,
     this.composedDurationOf,
+    this.baseCard,
     this.onEditUnitTags,
     this.onEditShotTags,
     this.subtitleLinesOf,
@@ -516,6 +524,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
             inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,
+          ?widget.baseCard?.call(unitIndex, unit),
           const SizedBox(height: 10),
           // 空白任务给一个能选的编辑器；有原片的任务照旧只展示模型打的结果
           widget.unitTagEditor?.call(unitIndex, unit) ??
@@ -710,6 +719,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
             unreplacedSiblings: _unreplacedSiblings(unitIndex, shotIndex),
             hasVocals: widget.hasVocals,
             hasBackground: widget.hasBackground,
+            // 底片被固定成素材的那些单元，这张卡调的是**素材**自己的声音
+            onMaterialBase: hasOwnBaseShots(units[unitIndex]),
             onChanged: (mode, volume) => widget.onShotSourceAudioChanged
                 ?.call(unitIndex, shotIndex, mode, volume),
           ),

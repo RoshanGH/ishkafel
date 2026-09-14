@@ -27,6 +27,10 @@ import '../../core/editing/blank_unit_ops.dart';
 import '../../core/review/review_receipt.dart';
 import '../review/review_page.dart';
 import '../../core/editing/blank_unit_removal.dart';
+import '../../core/editing/base_pin_ops.dart';
+import '../../core/replacement/unit_base.dart';
+import 'base_segment_card.dart';
+import 'base_pin_dialogs.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
@@ -1981,6 +1985,168 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 先把受影响单元标记为待重打并落库，再送去打标：打标要走两趟云端推理，
   /// 中途失败或用户关掉窗口都是常事，标记留在盘上，界面上才看得出这些标签
   /// 已经过期，而不是让人拿着一份对不上画面的标签往下走。
+  /// 正在切哪个单元的底片（下标）。切分要跑 ffmpeg 加云端复核，得让人看见
+  int? _segmentingUnit;
+
+  /// 底片被固定过的单元 → 那张底片在本地的路径。
+  ///
+  /// **抽帧、打标、合声音都要它**：那些镜头是按素材切的，跑去原片同一个
+  /// 时间点取，拿到的是一段毫不相干的画面/声音，而哪儿都不报错
+  Map<int, String> _baseVideoPaths() {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return const {};
+    final media = TaskMedia(dataDir: dataDir, taskId: _task.id);
+    final out = <int, String>{};
+    for (final u in (_editor?.units ?? const <SemanticUnit>[])) {
+      if (u.baseCandidateId case final id?) {
+        if (media.localMaterial(id) case final path?) out[u.index] = path;
+      }
+    }
+    return out;
+  }
+
+  /// 属性面板里的「这一段的底片」卡片
+  Widget? _baseCard(int unitIndex, SemanticUnit unit) {
+    final plans = _replacements ?? const <UnitReplacement>[];
+    final plan = unitIndex < plans.length
+        ? plans[unitIndex]
+        : UnitReplacement.keepOriginal();
+    final id = baseChoiceOf(unit: unit, replacement: plan) is MaterialBase
+        ? (unit.baseCandidateId ?? plan.wholePreviewId)
+        : null;
+    return BaseSegmentCard(
+      unit: unit,
+      replacement: plan,
+      materialName: id == null
+          ? null
+          : _task.pickedMaterials
+              .firstWhereOrNull((m) => m.id == id)
+              ?.name,
+      segmenting: _segmentingUnit == unitIndex,
+      onSegment: _isEditable && _lock == null
+          ? () => _segmentUnitBase(unitIndex)
+          : null,
+      onUnpin: _isEditable && _lock == null && hasOwnBaseShots(unit)
+          ? () => _unpinUnitBase(unitIndex)
+          : null,
+    );
+  }
+
+  /// 切这一段的底片：把它切成视觉镜头，从此每一镜都能单独换素材。
+  ///
+  /// **显式触发**：这一步要跑 ffmpeg 采信号、还要云端复核灰区切点，
+  /// 花钱也花时间。不在用户挑完素材时偷偷跑
+  Future<void> _segmentUnitBase(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final units = editor.units;
+    if (unitIndex < 0 || unitIndex >= units.length) return;
+    final unit = units[unitIndex];
+    final plans = _replacements ?? const <UnitReplacement>[];
+    final plan = unitIndex < plans.length
+        ? plans[unitIndex]
+        : UnitReplacement.keepOriginal();
+
+    final blocked =
+        BasePinOps.segmentBlockedReason(unit: unit, replacement: plan);
+    if (blocked != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(blocked)));
+      return;
+    }
+    final choice = baseChoiceOf(unit: unit, replacement: plan);
+    if (choice is! MaterialBase) return;
+    final candidateId = choice.candidateId;
+
+    final segmenter = ref.read(unitSegmenterProvider);
+    if (segmenter == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务，切分用不了；补齐凭据后重启再试')));
+      return;
+    }
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return;
+    final media = TaskMedia(dataDir: dataDir, taskId: _task.id);
+    final basePath = media.localMaterial(candidateId);
+    if (basePath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('这条素材还没下到本地，等它下完再切')));
+      return;
+    }
+
+    // 点之前把作废什么说清楚——不是破坏性操作，但会掉东西
+    final cost = BasePinOps.costOf(
+        unit: unit, replacement: plan, candidateId: candidateId);
+    if (!cost.isFree || hasOwnBaseShots(unit)) {
+      final ok = await confirmPinBase(context,
+          unitLabel: 'U${unit.index + 1}', cost: cost, repin: hasOwnBaseShots(unit));
+      if (!ok || !mounted) return;
+    }
+
+    setState(() => _segmentingUnit = unitIndex);
+    try {
+      final durationMs = _task.pickedMaterials
+              .firstWhereOrNull((m) => m.id == candidateId)
+              ?.durationMs ??
+          unit.durationMs;
+      final shots = await segmenter.segment(
+        unit: unit,
+        base: UnitBase(
+            path: basePath,
+            startMs: 0,
+            endMs: durationMs,
+            candidateId: candidateId),
+        taskId: _task.id,
+        fps: editor.fps,
+      );
+      if (!mounted) return;
+      if (shots.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('这条素材读不出时长，切不了。换一条试试')));
+        return;
+      }
+      final (nextUnits, nextPlans) = BasePinOps.pin(
+          editor.units, _replacements ?? const [], unitIndex,
+          candidateId: candidateId, shots: shots);
+      editor.replaceUnits(nextUnits);
+      await _onReplacementsChanged(nextPlans);
+      await _flushAutosave();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头，'
+              '现在每一镜都能单独换素材')));
+    } catch (e) {
+      AppLog.warn('切分这一段的底片失败（taskId=${_task.id}, U$unitIndex）：$e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('切分失败：$e'),
+        backgroundColor: AppColors.red,
+      ));
+    } finally {
+      if (mounted) setState(() => _segmentingUnit = null);
+    }
+  }
+
+  /// 换一张底片：先把旧底片切出来的镜头和挂在上面的选择清掉
+  Future<void> _unpinUnitBase(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final units = editor.units;
+    if (unitIndex < 0 || unitIndex >= units.length) return;
+    final unit = units[unitIndex];
+    final ok = await confirmUnpinBase(context,
+        unitLabel: 'U${unit.index + 1}', shotCount: unit.shots.length);
+    if (!ok || !mounted) return;
+    final (nextUnits, nextPlans) =
+        BasePinOps.unpin(editor.units, _replacements ?? const [], unitIndex);
+    editor.replaceUnits(nextUnits);
+    await _onReplacementsChanged(nextPlans);
+    await _flushAutosave();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('U${unit.index + 1} 的底片已清掉，重新挑一条素材吧')));
+  }
+
   Future<void> _retag(EditConsequence consequence) async {
     final editor = _editor;
     if (editor == null) return;
@@ -2003,7 +2169,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       final usage = await AiUsageScope.collect(
         () async {
           tagged = await tagging.tag(_task, editor.units,
-              only: consequence.unitIndexes.toSet());
+              only: consequence.unitIndexes.toSet(),
+              baseVideoPaths: _baseVideoPaths());
         },
         onPartial: (partial) => _task =
             _task.copyWith(aiUsage: _task.aiUsage.merge(partial)),
@@ -2915,6 +3082,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 unitTagEditor: (i, u) => _task.isBlank || !u.hasSource
                     ? _blankTagEditor(i, u.tags)
                     : null,
+                baseCard: _baseCard,
                 blankTask: _task.isBlank,
                 onDeleteUnit: _isEditable && _lock == null
                     ? _deleteBlankUnit

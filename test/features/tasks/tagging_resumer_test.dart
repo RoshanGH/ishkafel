@@ -37,7 +37,9 @@ class _FakeTagging implements TaggingService {
 
   @override
   Future<List<SemanticUnit>> tag(RenewTask task, List<SemanticUnit> units,
-      {Set<int>? only, dynamic onProgress}) async {
+      {Set<int>? only,
+      dynamic onProgress,
+      Map<int, String> baseVideoPaths = const {}}) async {
     calls++;
     lastOnly = only;
     if (fail) throw StateError('云端挂了');

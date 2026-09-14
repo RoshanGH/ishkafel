@@ -270,4 +270,67 @@ void main() {
       );
     });
   });
+
+  group('底片被固定之后', () {
+    SemanticUnit pinned() => SemanticUnit(
+          uid: 'u0',
+          index: 0,
+          startMs: 1000,
+          endMs: 5000,
+          transcript: '一句台词',
+          baseCandidateId: 7,
+        );
+
+    test('固定过就是它，压过整体替换的候选', () {
+      expect(
+        baseChoiceOf(
+            unit: pinned(), replacement: UnitReplacement.whole([9])),
+        const MaterialBase(7),
+        reason: '镜头是按 7 切出来的，改成 9 那些切点就全指错地方',
+      );
+    });
+
+    test('也压过调用方指定的那一条——固定就是固定', () {
+      expect(
+        baseChoiceOf(
+          unit: pinned(),
+          replacement: UnitReplacement.whole([7, 9]),
+          wholeCandidateId: 9,
+        ),
+        const MaterialBase(7),
+      );
+    });
+
+    test('连保留原片都压过：它的画面已经不来自原片了', () {
+      expect(
+        baseChoiceOf(
+            unit: pinned(), replacement: UnitReplacement.keepOriginal()),
+        const MaterialBase(7),
+      );
+    });
+
+    test('镜头替换不动底片：换的是底片上的某一刀', () {
+      expect(
+        baseChoiceOf(
+            unit: pinned(),
+            replacement: UnitReplacement.perShot({
+              1: [9]
+            })),
+        const MaterialBase(7),
+      );
+    });
+
+    test('解析成路径时同样认它', () {
+      final base = baseOf(
+        unit: pinned(),
+        replacement: UnitReplacement.keepOriginal(),
+        sourcePath: '/v/src.mp4',
+        pathOf: _pathOf,
+        durationOf: _durationOf,
+      );
+
+      expect(base?.path, '/m/7.mp4');
+      expect(base?.candidateId, 7);
+    });
+  });
 }

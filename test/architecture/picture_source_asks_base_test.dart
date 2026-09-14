@@ -48,6 +48,30 @@ void main() {
     });
   }
 
+  test('「镜头是不是按自己底片切的」也只有一份判据', () {
+    // 这条判据决定了三件互相牵连的事：时间线画不画成一整块、预览与导出
+    // 按不按镜头逐段取、声音从哪个文件剪。各写一份迟早对不上——画面按
+    // 镜头拼、声音却整段取原片，人听到的和看到的是两条片子
+    final dupes = <String>[];
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      if (f.path.endsWith('core/replacement/unit_base.dart')) continue;
+      final code = codeOnly(f.readAsStringSync());
+      // 手写「baseCandidateId != null && shots.isNotEmpty」就是在旁边
+      // 又抄了一份 hasOwnBaseShots
+      if (RegExp(r'baseCandidateId\s*!=\s*null\s*&&[\s\S]{0,40}shots')
+          .hasMatch(code)) {
+        dupes.add(f.path);
+      }
+    }
+
+    expect(dupes, isEmpty,
+        reason: '这几处自己拼了一份判据，改用 hasOwnBaseShots()：'
+            '${dupes.join('、')}');
+  });
+
   test('底片的解析只有这一份实现', () {
     final impl = File('lib/core/replacement/unit_base.dart');
     expect(impl.existsSync(), isTrue);

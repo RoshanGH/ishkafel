@@ -396,6 +396,23 @@ class ExportRunner {
       ];
     }
 
+    // 底片固定过的单元：先把那几张底片下到本地。声音和画面取的必须是同
+    // 一个文件，不然人听到的和看到的对不上
+    final baseAudioPaths = <int, String>{};
+    try {
+      for (final unit in units) {
+        if (unit.baseCandidateId case final id?) {
+          baseAudioPaths[unit.index] = await material(id);
+        }
+      }
+    } catch (e) {
+      AppLog.warn('导出：底片素材准备失败：$e');
+      return [
+        for (final c in combos)
+          ExportOutcome(index: c.index, failure: '底片素材取不到：$e'),
+      ];
+    }
+
     /// 合声音时量出来的话（目前只有过载）。**不是失败**，跟着成片一起报出去
     final audioNotes = <String>[];
     /// 共用那条声音的话——它对每一条成片都成立
@@ -438,6 +455,8 @@ class ExportRunner {
                 for (final e in (wholeByCombo[i] ?? const {}).entries)
                   e.key: e.value.path,
               },
+              // 底片固定过的单元：声音同样从底片上剪，不是从原片
+              baseAudio: baseAudioPaths,
               wholeDurations: {
                 for (final e in (wholeByCombo[i] ?? const {}).entries)
                   e.key: e.value.ms,
@@ -666,6 +685,9 @@ class ExportRunner {
             '_${subtitleStyle.fingerprint.hashCode}';
     final key =
         '${segment.startMs}_${segment.endMs}_${segment.candidateId}'
+        // 底片进指纹：换了底片重导，不带这一项会命中上一张底片留下的切片
+        '${segment.baseCandidateId == null ? '' : '_b${segment.baseCandidateId}'
+            '@${segment.baseStartMs}'}'
         // 取段起点进指纹：改了截哪一段却复用上一份切片，
         // 人看到的是「调了没反应」，而盘上那份是旧画面
         '_t${segment.trimStartMs ?? 0}'
@@ -677,9 +699,14 @@ class ExportRunner {
       // 没变的段落一次 ffmpeg 都不跑
       if (File(out).existsSync() && File(out).lengthSync() > 0) return out;
       if (segment.isOriginal) {
+        // 这一段没换素材——从**这个单元的底片**上剪。底片多半是任务原片；
+        // 固定过底片的单元（见 [hasOwnBaseShots]）剪的是那条素材
+        final fromMaterial = segment.baseCandidateId;
+        final baseVideo =
+            fromMaterial == null ? sourcePath : await material(fromMaterial);
         // 空白任务没有原片。走到这儿说明有一段没挑素材而前置检查漏了——
         // 让它掉进 ffmpeg 只会得到一句「No such file」，指不出是哪一段
-        if (sourcePath == null) {
+        if (baseVideo == null) {
           throw StateError(
             'U${segment.unitIndex + 1} 这一段要用原片，但这条任务没有原片。'
             '请给它挑一条素材，或者删掉这个分子',
@@ -687,13 +714,13 @@ class ExportRunner {
         }
         await _ffmpeg(
           ExportCommands.trimOriginalVideo(
-            source: sourcePath,
-            startMs: segment.startMs,
-            endMs: segment.endMs,
+            source: baseVideo,
+            startMs: segment.baseStartMs,
+            endMs: segment.baseStartMs + segment.sourceDurationMs,
             out: out,
             spec: renderSpec,
           ),
-          'U${segment.unitIndex + 1} 的原片画面',
+          'U${segment.unitIndex + 1} 的${fromMaterial == null ? '原片' : '底片'}画面',
         );
       } else {
         final path = await material(segment.candidateId!);

@@ -85,4 +85,60 @@ void main() {
     expect(shot.tags, isEmpty);
     expect(tagged.startMs, 0);
   });
+
+  group('底片：这些镜头是按谁切出来的', () {
+    test('存档往返：固定过的底片要带得住', () {
+      const unit = SemanticUnit(
+        uid: 'u1',
+        index: 1,
+        startMs: 4000,
+        endMs: 10000,
+        transcript: '',
+        hasSource: false,
+        baseCandidateId: 7,
+        shots: [Shot(startMs: 4000, endMs: 6500)],
+      );
+
+      final back = SemanticUnit.fromJson(unit.toJson());
+
+      expect(back.baseCandidateId, 7);
+    });
+
+    test('老存档没有这个字段：读出来是 null，就是「按原片切的」', () {
+      final back = SemanticUnit.fromJson(const {
+        'index': 0,
+        'startMs': 0,
+        'endMs': 4000,
+        'transcript': '一句台词',
+      });
+
+      expect(back.baseCandidateId, isNull);
+    });
+
+    test('没固定过就不写进存档：null 和「按原片切的」是同一件事', () {
+      const unit = SemanticUnit(
+          index: 0, startMs: 0, endMs: 4000, transcript: '一句台词');
+
+      expect(unit.toJson().containsKey('baseCandidateId'), isFalse);
+    });
+
+    test('底片换了就是另一个单元——不比这一项，界面会判成「没变」而不刷新',
+        () {
+      const a = SemanticUnit(
+          index: 0,
+          startMs: 0,
+          endMs: 4000,
+          transcript: '',
+          baseCandidateId: 7);
+      const b = SemanticUnit(
+          index: 0,
+          startMs: 0,
+          endMs: 4000,
+          transcript: '',
+          baseCandidateId: 8);
+
+      expect(a == b, isFalse);
+      expect(a.hashCode == b.hashCode, isFalse);
+    });
+  });
 }

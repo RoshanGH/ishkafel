@@ -53,6 +53,12 @@ class SourceAudioCard extends StatelessWidget {
   final bool hasVocals;
   final bool hasBackground;
 
+  /// 这一段的底片是一条**素材**（不是原片）。
+  ///
+  /// 那时这张卡调的是那条素材自己的声音——原片这一段根本不在成片里，
+  /// 标签还写「原片」会让人以为调的是另一条声音
+  final bool onMaterialBase;
+
   /// mode 传 null 表示改回「跟随全片」
   final void Function(MaterialAudioMode? mode, double? volume) onChanged;
 
@@ -67,6 +73,7 @@ class SourceAudioCard extends StatelessWidget {
     this.unreplacedSiblings = const [],
     this.hasVocals = false,
     this.hasBackground = false,
+    this.onMaterialBase = false,
   });
 
   SourceAudioSetting? get _effective => resolveSourceAudio(
@@ -76,12 +83,17 @@ class SourceAudioCard extends StatelessWidget {
         shotVolume: shotVolume,
       );
 
+  /// 这一段的**底片**说人话叫什么：底片是原片就是「原片」，底片被固定成
+  /// 一条素材就是「底片」——那时原片那一段的声音根本不在成片里，
+  /// 还写「原片」会让人以为调的是另一条声音
+  String get _whose => onMaterialBase ? '底片' : '原片';
+
   @override
   Widget build(BuildContext context) {
     if (!replaced) return const SizedBox.shrink();
     if (voiceSwapped) {
       return inspectorCard([
-        inspectorLabel('原片这一镜的声音'),
+        inspectorLabel('$_whose这一镜的声音'),
         const SizedBox(height: 4),
         const Text('这个单元换过音色——那一段的人声来自生成的配音，'
             '原片这一路已经不在成片里了',
@@ -95,10 +107,10 @@ class SourceAudioCard extends StatelessWidget {
     final effective = _effective;
     final volume = effective?.volume ?? taskDefault.volume;
     return inspectorCard([
-      inspectorLabel('原片这一镜的声音'),
+      inspectorLabel('$_whose这一镜的声音'),
       const SizedBox(height: 4),
-      const Text('这一镜换成了别的素材，原片这一段自己放哪一路声音',
-          style: TextStyle(
+      Text('这一镜换成了别的素材，$_whose这一段自己放哪一路声音',
+          style: const TextStyle(
               fontSize: AppFontSize.caption, color: AppColors.textTertiary)),
       const SizedBox(height: AppSpacing.sm),
       Wrap(spacing: AppSpacing.xs, runSpacing: AppSpacing.xs, children: [

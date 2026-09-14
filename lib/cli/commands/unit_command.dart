@@ -2,6 +2,13 @@ import 'dart:io';
 
 import '../../core/audio/material_audio.dart';
 import '../../core/audio/source_audio.dart';
+import '../../app/service_wiring.dart';
+import '../../core/analysis/scene_detector.dart';
+import '../../core/analysis/unit_segmenter.dart';
+import '../../core/editing/base_pin_ops.dart';
+import '../../core/replacement/replacement_plan.dart';
+import '../../core/replacement/unit_base.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
@@ -17,7 +24,7 @@ import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
-import 'analyze_command.dart' show vocabularyFor;
+import 'analyze_command.dart' show loadCliCredentials, vocabularyFor;
 
 /// `ishkafel unit <add|remove|move|tags|audio> …` —— 台词语义单元这一层的旋钮。
 ///
@@ -92,10 +99,13 @@ Future<int> runUnitCommand({
           repository, task, unit, shot, audio, volume, sink, o),
       'subtitle' =>
         await _subtitle(repository, task, unit, shot, text, auto, sink, o),
+      'base' => await _base(task, unit, sink, o),
+      'segment' => await _segment(repository, task, unit, dataDir, sink, o),
+      'unpin' => await _unpin(repository, task, unit, sink, o),
       _ => () {
           sink.writeln('认不出「$what」。'
               '可用：add / remove / move / tags / audio / '
-              'source-audio / subtitle');
+              'source-audio / subtitle / base / segment / unpin');
           return exitBadUsage;
         }(),
     };
@@ -107,6 +117,9 @@ Future<int> runUnitCommand({
 
 /// 播报只说人话——「正在挪单元顺序」，不是「runUnitCommand move」
 String _stageWord(String what) => switch (what) {
+      'base' => '正在看这一段的底片',
+      'segment' => '正在切分这一段的底片',
+      'unpin' => '正在换这一段的底片',
       'add' => '正在加一个台词语义单元',
       'remove' => '正在删掉一个台词语义单元',
       'move' => '正在调整台词语义单元的顺序',
@@ -129,7 +142,10 @@ const String _usage = '用法：\n'
     '      --audio none|vocals|background|original|follow|auto \\\n'
     '      [--volume 1.0]                                  原片这一镜放哪一路声音\n'
     '  ishkafel unit subtitle <任务 id> --unit N --shot M \\\n'
-    '      --text "第一句|第二句" | --auto                   改这一镜要烧的字幕';
+    '      --text "第一句|第二句" | --auto                   改这一镜要烧的字幕\n'
+    '  ishkafel unit base <任务 id> --unit N                这一段的底片是谁\n'
+    '  ishkafel unit segment <任务 id> --unit N             切分这一段的底片\n'
+    '  ishkafel unit unpin <任务 id> --unit N               换一张底片（清掉旧的）';
 
 Future<int> _add(
     FileTaskRepository repository, RenewTask task, StringSink out) async {
@@ -495,6 +511,163 @@ Future<int> _subtitle(
   final next = task.copyWith(
       subtitleTrack: task.subtitleTrack.withLines(slot, lines),
       updatedAt: DateTime.now());
+  await repository.save(next);
+  emitJson(taskToJson(next), out: out);
+  return 0;
+}
+
+
+/// `unit base` —— 这一段的画面从哪儿来、能不能切。
+///
+/// **先问再做**：Agent 拿到「能不能切、切了会掉什么」才谈得上自己判断，
+/// 不给它就只能试一下看报错
+Future<int> _base(
+    RenewTask task, int? unit, StringSink sink, StringSink out) async {
+  final units = task.units ?? const [];
+  if (unit == null || unit < 0 || unit >= units.length) {
+    sink.writeln('要给 --unit N（0 开始，共 ${units.length} 个）');
+    return exitBadUsage;
+  }
+  final u = units[unit];
+  final plan = task.replacementsFor(units).elementAtOrNull(unit) ??
+      UnitReplacement.keepOriginal();
+  final choice = baseChoiceOf(unit: u, replacement: plan);
+  final blocked =
+      BasePinOps.segmentBlockedReason(unit: u, replacement: plan);
+  final pinnedId = u.baseCandidateId;
+  final cost = pinnedId == null && choice is MaterialBase
+      ? BasePinOps.costOf(
+          unit: u, replacement: plan, candidateId: choice.candidateId)
+      : null;
+
+  emitJson({
+    'unit': unit,
+    'uid': u.uid,
+    'base': switch (choice) {
+      MaterialBase(:final candidateId) => {
+          'kind': 'material',
+          'candidateId': candidateId,
+        },
+      OriginalBase(:final startMs, :final endMs) => {
+          'kind': 'original',
+          'startMs': startMs,
+          'endMs': endMs,
+        },
+      NoBase() => {'kind': 'none'},
+    },
+    // 固定过 = 镜头是按这张底片切出来的，这一段从此只能用它
+    'pinned': pinnedId != null,
+    'pinnedCandidateId': pinnedId,
+    'shots': u.shots.length,
+    'canSegment': blocked == null,
+    'blockedReason': ?blocked,
+    if (cost != null)
+      'segmentWouldDrop': {
+        'otherCandidates': cost.droppedCandidates,
+        'shotPicks': cost.droppedShotPicks,
+      },
+  }, out: out);
+  return 0;
+}
+
+/// `unit segment` —— 切这一段的底片，从此每一镜都能单独换素材。
+///
+/// 跟界面上那个按钮同一条路：同样要跑 ffmpeg 采信号、同样会把其余候选
+/// 收敛掉。**会花时间也会花钱**，所以它是显式命令，不在挑素材时自动跑
+Future<int> _segment(FileTaskRepository repository, RenewTask task, int? unit,
+    Directory dataDir, StringSink sink, StringSink out) async {
+  final units = task.units ?? const [];
+  if (unit == null || unit < 0 || unit >= units.length) {
+    sink.writeln('要给 --unit N（0 开始，共 ${units.length} 个）');
+    return exitBadUsage;
+  }
+  final u = units[unit];
+  final plans = task.replacementsFor(units);
+  final plan = plans.elementAtOrNull(unit) ?? UnitReplacement.keepOriginal();
+
+  final blocked =
+      BasePinOps.segmentBlockedReason(unit: u, replacement: plan);
+  if (blocked != null) {
+    sink.writeln(blocked);
+    return exitBadUsage;
+  }
+  final choice = baseChoiceOf(unit: u, replacement: plan);
+  if (choice is! MaterialBase) {
+    sink.writeln('这一段没有可切的底片');
+    return exitBadUsage;
+  }
+  final candidateId = choice.candidateId;
+
+  final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+  final basePath = media.localMaterial(candidateId);
+  if (basePath == null) {
+    sink.writeln('素材 $candidateId 还没下到本地，切不了。'
+        '先跑一次预览或导出把它拉下来');
+    return exitEnv;
+  }
+
+  final credentials = loadCliCredentials(dataDir);
+  final pipeline = buildAnalysisPipeline(credentials, dataDir);
+  final segmenter = UnitSegmenter(
+      scenes: SceneDetector(), boundaries: pipeline?.shotBoundaries);
+
+  final durationMs = task.pickedMaterials
+          .where((m) => m.id == candidateId)
+          .map((m) => m.durationMs)
+          .firstOrNull ??
+      u.durationMs;
+  final shots = await segmenter.segment(
+    unit: u,
+    base: UnitBase(
+        path: basePath,
+        startMs: 0,
+        endMs: durationMs,
+        candidateId: candidateId),
+    taskId: task.id,
+    fps: task.videoInfo?.fps ?? 25,
+  );
+  if (shots.isEmpty) {
+    sink.writeln('这条素材读不出时长，切不出镜头');
+    return exitEnv;
+  }
+
+  final (nextUnits, nextPlans) =
+      BasePinOps.pin(units, plans, unit, candidateId: candidateId, shots: shots);
+  final next = task.copyWith(
+    units: nextUnits,
+    replacementsByUid: {
+      for (var i = 0; i < nextUnits.length && i < nextPlans.length; i++)
+        nextUnits[i].uid: nextPlans[i],
+    },
+    updatedAt: DateTime.now(),
+  );
+  await repository.save(next);
+  emitJson(taskToJson(next), out: out);
+  return 0;
+}
+
+/// `unit unpin` —— 换一张底片：旧底片切出来的镜头和挑在上面的素材全清掉
+Future<int> _unpin(FileTaskRepository repository, RenewTask task, int? unit,
+    StringSink sink, StringSink out) async {
+  final units = task.units ?? const [];
+  if (unit == null || unit < 0 || unit >= units.length) {
+    sink.writeln('要给 --unit N（0 开始，共 ${units.length} 个）');
+    return exitBadUsage;
+  }
+  if (units[unit].baseCandidateId == null) {
+    sink.writeln('U${unit + 1} 的底片本来就没固定过，没有可清的');
+    return exitBadUsage;
+  }
+  final plans = task.replacementsFor(units);
+  final (nextUnits, nextPlans) = BasePinOps.unpin(units, plans, unit);
+  final next = task.copyWith(
+    units: nextUnits,
+    replacementsByUid: {
+      for (var i = 0; i < nextUnits.length && i < nextPlans.length; i++)
+        nextUnits[i].uid: nextPlans[i],
+    },
+    updatedAt: DateTime.now(),
+  );
   await repository.save(next);
   emitJson(taskToJson(next), out: out);
   return 0;

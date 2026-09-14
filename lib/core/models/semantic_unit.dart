@@ -53,6 +53,20 @@ class SemanticUnit {
   /// 整体替换时素材声音压到几成。null = 满音量（原来的行为）
   final double? wholeAudioVolume;
 
+  /// 这个单元的 [shots] 是**按哪张底片切出来的**。
+  ///
+  /// null = 按原片切的（分析那一次），也就是这个功能出现之前的全部情况。
+  /// 非 null = 用户对这一段点过「切分这一段」，底片是这条素材，
+  /// [shots] 的坐标是 `startMs + 底片内偏移`。
+  ///
+  /// 它同时是**底片被固定下来**的标记：底片一固定，整体替换就只能选这一条
+  /// ——第二条底片切出来的镜头数和切点都不一样，挂在第 3 镜上的选择无处安放
+  /// （见 `docs/superpowers/specs/2026-09-14-底片-design.md`）。
+  ///
+  /// 为什么要记：不记的话用户改掉整体替换的候选，[shots] 就悄悄指向了
+  /// 另一条素材的时间点，画面全错而哪儿都不报错。
+  final int? baseCandidateId;
+
   /// 这个单元在**原片上有没有对应的一段**。
   ///
   /// 默认 true——分析切出来的单元都取自原片。false 只出现在用户**手动加**
@@ -74,6 +88,7 @@ class SemanticUnit {
     this.tagsHandpicked = false,
     this.trace,
     this.shots = const [],
+    this.baseCandidateId,
     this.hasSource = true,
     this.wholeAudioMode,
     this.wholeAudioVolume,
@@ -96,6 +111,7 @@ class SemanticUnit {
     bool? tagsHandpicked,
     TagTrace? trace,
     List<Shot>? shots,
+    int? baseCandidateId,
     bool? hasSource,
     MaterialAudioMode? wholeAudioMode,
     double? wholeAudioVolume,
@@ -111,6 +127,7 @@ class SemanticUnit {
         tagsHandpicked: tagsHandpicked ?? this.tagsHandpicked,
         trace: trace ?? this.trace,
         shots: shots ?? this.shots,
+        baseCandidateId: baseCandidateId ?? this.baseCandidateId,
         hasSource: hasSource ?? this.hasSource,
         wholeAudioMode: wholeAudioMode ?? this.wholeAudioMode,
         wholeAudioVolume: wholeAudioVolume ?? this.wholeAudioVolume,
@@ -129,6 +146,8 @@ class SemanticUnit {
         'shots': shots.map((s) => s.toJson()).toList(),
         'trace': trace?.toJson(),
         'hasSource': hasSource,
+        // 只在固定过底片时才写：null 和「按原片切的」是同一件事
+        if (baseCandidateId != null) 'baseCandidateId': baseCandidateId,
         // 只在设过时才写：没设过和「明确设成原声」在存档里要分得开
         if (wholeAudioMode != null) 'wholeAudioMode': wholeAudioMode!.name,
         if (wholeAudioVolume != null) 'wholeAudioVolume': wholeAudioVolume,
@@ -152,6 +171,8 @@ class SemanticUnit {
                 .toList() ??
             const [],
         trace: TagTrace.tryFromJson(json['trace']),
+        // 存量存档里没有这个字段——那时的镜头都是按原片切的
+        baseCandidateId: json['baseCandidateId'] as int?,
         // 存量存档里没有这个字段——它们的单元都是分析切出来的，都有原片来源。
         // 缺失时必须兜底为 true，兜成 false 会让老任务整条以为原片不见了
         hasSource: json['hasSource'] != false,
@@ -171,9 +192,12 @@ class SemanticUnit {
       other.transcript == transcript &&
       _listEq.equals(other.tags, tags) &&
       other.tagsStale == tagsStale &&
+      // 底片换了就是另一个单元：同样的 shots 按另一条素材切出来，
+      // 画面完全不同。不比这一项，换底片后界面会判成「没变」而不刷新
+      other.baseCandidateId == baseCandidateId &&
       _listEq.equals(other.shots, shots);
 
   @override
   int get hashCode => Object.hash(index, startMs, endMs, transcript,
-      Object.hashAll(tags), tagsStale, Object.hashAll(shots));
+      Object.hashAll(tags), tagsStale, baseCandidateId, Object.hashAll(shots));
 }

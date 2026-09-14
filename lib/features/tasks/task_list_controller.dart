@@ -22,6 +22,7 @@ import '../../core/storage/task_seq.dart';
 import '../import_flow/import_service.dart';
 import 'analysis_error_message.dart';
 import 'analysis_progress_store.dart';
+import '../../core/analysis/unit_segmenter.dart';
 import 'task_artifact_cleaner.dart';
 import 'task_list_merge.dart';
 
@@ -38,6 +39,15 @@ final analysisPipelineProvider = Provider<AnalysisPipeline?>((ref) => null);
 /// （抽音频、ASR、语义切分）再拖进来。缺省取自分析管线，凭据未配置时为 null。
 final taggingServiceProvider = Provider<TaggingService?>(
     (ref) => ref.watch(analysisPipelineProvider)?.tagging);
+
+/// 单段底片切分器：跟全片切分同一条链路（采信号 → 双判据 → 灰区画面复核），
+/// 只是喂进去的视频换成了这一段自己的底片。null 表示凭据未配置
+final unitSegmenterProvider = Provider<UnitSegmenter?>((ref) {
+  final pipeline = ref.watch(analysisPipelineProvider);
+  if (pipeline == null) return null;
+  return UnitSegmenter(
+      scenes: pipeline.scenes, boundaries: pipeline.shotBoundaries);
+});
 
 /// 任务中间产物清理器：null 表示未接线（测试场景），删除任务时只删记录
 final taskArtifactCleanerProvider = Provider<TaskArtifactCleaner?>((ref) => null);

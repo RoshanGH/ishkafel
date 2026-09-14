@@ -71,19 +71,27 @@ class TaggingService {
   ///
   /// [only] 限定只打这几个单元（含其视觉镜头），其余原样返回——用户改完
   /// U3 要求重打时，把全片十几个单元重打一遍既慢又费钱。null 表示全打。
+  /// [baseVideoPaths] 是**底片被固定过**的那几个单元：单元下标 → 底片的
+  /// 本地路径（见 [SemanticUnit.baseCandidateId]）。它们的镜头是按那条素材
+  /// 切的，抽帧也得从那条素材上抽——不给的话会跑去原片同一个时间点抽一张
+  /// 毫不相干的画面，打出来的标签张冠李戴而哪儿都不报错
   Future<List<SemanticUnit>> tag(
     RenewTask task,
     List<SemanticUnit> units, {
     Set<int>? only,
     AnalysisProgressSink? onProgress,
+    Map<int, String> baseVideoPaths = const {},
   }) =>
-      _tagUnits(task, units, onProgress, only);
+      _tagUnits(task, units, onProgress, only, baseVideoPaths);
 
   /// 取不到词表都只降级掉那一层，不中断整条分析——分析结果（切分）本身
   /// 仍然有价值，为了标签把它整条废掉不划算。
-  Future<List<SemanticUnit>> _tagUnits(RenewTask task,
-      List<SemanticUnit> units, AnalysisProgressSink? onProgress,
-      Set<int>? only) async {
+  Future<List<SemanticUnit>> _tagUnits(
+      RenewTask task,
+      List<SemanticUnit> units,
+      AnalysisProgressSink? onProgress,
+      Set<int>? only,
+      Map<int, String> baseVideoPaths) async {
     final unitVocabulary = unitTagger == null
         ? const <TagDimension>[]
         : await _dimensionsFor(task.unitTagGroups, '台词语义单元');
@@ -130,7 +138,8 @@ class TaggingService {
       ]);
     }
     if (!tagShots) return result;
-    return _tagAllShotsConcurrently(task, result, shotVocabulary, onProgress, only);
+    return _tagAllShotsConcurrently(
+        task, result, shotVocabulary, onProgress, only, baseVideoPaths);
   }
 
   /// 云端调用**不限并发**。
@@ -152,7 +161,8 @@ class TaggingService {
       List<SemanticUnit> units,
       List<TagDimension> vocabulary,
       AnalysisProgressSink? onProgress,
-      Set<int>? only) async {
+      Set<int>? only,
+      Map<int, String> baseVideoPaths) async {
     final flat = <({int unit, int shot})>[
       for (var u = 0; u < units.length; u++)
         if (only == null || only.contains(u))
@@ -160,7 +170,13 @@ class TaggingService {
     ];
     if (flat.isEmpty) return units;
 
-    final prefetched = await _prefetchFrames(task, units, flat);
+    // 批量抽帧解的是**原片**那一条。底片是素材的单元不在里面——它们各是
+    // 一个独立的小文件，逐帧抽本来就便宜
+    final onOriginal = [
+      for (final at in flat)
+        if (!baseVideoPaths.containsKey(units[at.unit].index)) at,
+    ];
+    final prefetched = await _prefetchFrames(task, units, onOriginal);
 
     final tagged = List<Shot?>.filled(flat.length, null);
     // 完成计数与回填下标是两回事：并发下第 5 个开工的可能第 1 个结束，
@@ -172,9 +188,10 @@ class TaggingService {
       for (var i = 0; i < flat.length; i++)
         () async {
           final at = flat[i];
-          tagged[i] = await _tagShot(
-              task, units[at.unit].shots[at.shot], i, vocabulary,
-              prefetched: prefetched);
+          tagged[i] = await _tagShot(task, units[at.unit],
+              units[at.unit].shots[at.shot], i, vocabulary,
+              prefetched: prefetched,
+              basePath: baseVideoPaths[units[at.unit].index]);
           _report(onProgress, AnalysisStage.taggingShots,
               done: ++completed, total: flat.length);
         }(),
@@ -289,18 +306,23 @@ class TaggingService {
   ///
   /// 缩到 512 宽再送：多帧时分辨率是 token 消耗的主因，而判断「画面是什么」
   /// 不需要原始 1080p。
-  Future<Shot> _tagShot(RenewTask task, Shot shot, int shotIndex,
-      List<TagDimension> shotVocabulary,
-      {Map<int, String>? prefetched}) async {
-    final sourcePath = task.sourcePath;
+  Future<Shot> _tagShot(RenewTask task, SemanticUnit unit, Shot shot,
+      int shotIndex, List<TagDimension> shotVocabulary,
+      {Map<int, String>? prefetched, String? basePath}) async {
+    // 底片被固定过的单元从**那条素材**上抽帧；其余照旧用任务原片
+    final sourcePath = basePath ?? task.sourcePath;
     if (sourcePath == null) {
       // 空白任务的镜头标签是手动填的，不该走到视觉打标
       AppLog.warn('任务 ${task.id} 没有原片，跳过 S${shotIndex + 1} 的视觉打标');
       return shot;
     }
     try {
+      // 镜头坐标一贯是「单元起点 + 偏移」。底片是素材时要减掉单元起点，
+      // 才是「素材内第几毫秒」——不减的话抽到的是素材里另一个时间点的画面，
+      // 打出来的标签张冠李戴，而哪儿都不报错
+      final shift = basePath == null ? 0 : -unit.startMs;
       final at = ShotFrameSampler.sampleAt(
-          startMs: shot.startMs, endMs: shot.endMs);
+          startMs: shot.startMs + shift, endMs: shot.endMs + shift);
       final frames = <List<int>>[];
       final paths = <String>[];
       for (var i = 0; i < at.length; i++) {

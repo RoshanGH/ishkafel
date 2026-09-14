@@ -48,6 +48,16 @@ class UnitBase {
       'UnitBase($path, $startMs~$endMs, candidate=$candidateId)';
 }
 
+/// 这个单元的镜头是不是**按它自己那张底片**切出来的。
+///
+/// 真时，[SemanticUnit.shots] 的坐标是「`startMs` + 底片内偏移」，那一段
+/// 在时间线上要一格格画、每一格可以各自换素材；假时，镜头要么是分析那次
+/// 按原片切的，要么根本没有（整体替换后的一整块）。
+///
+/// **这条判据只有这一份**——预览、导出、时间线、属性面板全问它
+bool hasOwnBaseShots(SemanticUnit unit) =>
+    unit.baseCandidateId != null && unit.shots.isNotEmpty;
+
 /// 底片是谁——**只做决策，不碰文件系统**。
 ///
 /// 分成两层是因为两边问的时机不同：预览时素材已经落地，可以连路径一起算
@@ -107,18 +117,25 @@ class NoBase extends BaseChoice {
 
 /// 决定这一段的底片是谁。回退链，**顺序即优先级**：
 ///
+/// 0. 底片被固定过（[SemanticUnit.baseCandidateId] 非空）→ 就是它
 /// 1. 整体替换选了素材 → 那条素材
 /// 2. 这个单元在原片上有对应的一段，且这条任务有原片 → 原片的那一段
 /// 3. 否则 [NoBase]
 ///
+/// 第 0 条为什么压过一切：这一段的镜头是**按那张底片切出来的**，换一张
+/// 底片这些切点就全指错地方了。用户要换底片得走「换底片」那条路
+/// （明说已挑的镜头替换会作废），不能靠改整体替换的候选悄悄换掉。
+///
 /// [wholeCandidateId] 是「这一条变体在这个单元上用哪张底片」。导出时同一个
 /// 单元在不同变体里用不同候选，由调用方指定；不给就用 ★ 预览那条。
+/// **底片固定之后它不再起作用**——固定就是固定。
 BaseChoice baseChoiceOf({
   required SemanticUnit unit,
   required UnitReplacement replacement,
   int? wholeCandidateId,
   bool hasOriginal = true,
 }) {
+  if (unit.baseCandidateId case final pinned?) return MaterialBase(pinned);
   if (replacement.mode == ReplacementMode.whole) {
     final id = wholeCandidateId ?? replacement.wholePreviewId;
     if (id != null) return MaterialBase(id);
