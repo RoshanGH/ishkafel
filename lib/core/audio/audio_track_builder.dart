@@ -2,6 +2,8 @@ import 'dart:io';
 
 import '../export/composed_timeline.dart';
 import '../export/export_commands.dart';
+import '../replacement/replacement_plan.dart';
+import '../replacement/unit_base.dart';
 import '../ffmpeg/process_runner.dart';
 import '../ffmpeg/rendered_cache.dart';
 import '../log/app_log.dart';
@@ -555,8 +557,18 @@ class AudioTrackBuilder {
           picked == null && covered.contains(listIndex) && vocalsPath != null;
       // **手动加的单元不许去原片上剪**：它的 startMs~endMs 只是时间线上的
       // 占位，原片里没有这一段。不挡住的话会剪出一段别的声音接进成片，
-      // 而且哪儿都不报错——人只有听出来才知道
-      final source = !unit.hasSource
+      // 而且哪儿都不报错——人只有听出来才知道。
+      //
+      // 判据走[baseChoiceOf]，跟画面同一份规则：声音和画面对同一个单元
+      // 给出不同答案，就是一边有声一边黑屏。这里问的是「底片是原片吗」
+      // ——整体替换（底片是素材）在本方法开头就已经处理掉了，所以传
+      // keepOriginal
+      final hasBase = baseChoiceOf(
+            unit: unit,
+            replacement: UnitReplacement.keepOriginal(),
+            hasOriginal: sourcePath != null,
+          ) is OriginalBase;
+      final source = !hasBase
           ? null
           : picked != null
               ? _sourceTrackFor(

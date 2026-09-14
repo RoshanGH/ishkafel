@@ -1,6 +1,7 @@
 import '../models/semantic_unit.dart';
 import '../replacement/candidate_trim.dart';
 import '../replacement/replacement_plan.dart';
+import '../replacement/unit_base.dart';
 import 'balanced_sample.dart';
 
 /// 成片里的一段。要么用原片这一段，要么用一条候选素材顶上去。
@@ -106,8 +107,8 @@ class ExportCombination {
 /// 枚举顺序是**里程表式**：最后一个单元变化最快，第一个单元变化最慢。这样
 /// 前几条成片之间只有片尾不同，用户对着导出目录一眼就能看出规律；随机顺序
 /// 会让「这一批到底覆盖了什么」变得没法核对。
-/// 哪些单元**根本没东西可放**：原片上没有它（[SemanticUnit.hasSource] 为假，
-/// 也就是用户手动加的），又一条候选素材都没挑。
+/// 哪些单元**根本没有底片**：原片上没有它（用户手动加的），又一条候选素材
+/// 都没挑。
 ///
 /// 为什么必须单独拦一道：导出那边「没挑素材」一律走「用原片这一段」，
 /// 而这些单元的 `startMs`~`endMs` 根本不指向原片的任何位置——真让它跑下去，
@@ -121,7 +122,15 @@ List<int> unitsWithNothingToShow(
 ) =>
     [
       for (var i = 0; i < units.length; i++)
-        if (!units[i].hasSource && !_hasAnyCandidate(_planAt(replacements, i)))
+        // 「有没有底片」走同一份规则；`_hasAnyCandidate` 是额外的一层宽容
+        // ——镜头级挑过素材的也算有东西可放（手加的单元本不该走到镜头级，
+        // 但存档里残留过这种数据，拦死会让人导不出去且不知道为什么）
+        if (baseChoiceOf(
+                  unit: units[i],
+                  replacement:
+                      _planAt(replacements, i) ?? UnitReplacement.keepOriginal(),
+                ) is NoBase &&
+            !_hasAnyCandidate(_planAt(replacements, i)))
           i,
     ];
 
@@ -311,8 +320,19 @@ class ExportPlanner {
     for (var i = 0; i < units.length; i++) {
       final unit = units[i];
       final replacement = i < replacements.length ? replacements[i] : null;
-      final wholeId = whole[i];
-      if (wholeId != null) {
+      // 「这一段的底片是谁」跟预览走同一份规则（见 [baseChoiceOf]）。
+      // **这里问的只是底片**：底片是原片时还要再看要不要按镜头分段，
+      // 那是底片之上的一层。
+      //
+      // `hasOriginal: true`——导出侧「这条任务到底有没有原片」由前置检查
+      // 负责点名（见 [emptyInsertedUnits] / `_blankBlocker`），不在排段落
+      // 这一步默默把它变成别的东西
+      final choice = baseChoiceOf(
+        unit: unit,
+        replacement: replacement ?? UnitReplacement.keepOriginal(),
+        wholeCandidateId: whole[i],
+      );
+      if (choice case MaterialBase(:final candidateId)) {
         // 整体替换：整个单元换成这一条候选，原样接上，成片时长跟候选走。
         // 探不出来就按原单元算——报得保守好过拿 0 顶（那会把总时长算成一团）
         out.add(ExportSegment(
@@ -320,8 +340,8 @@ class ExportPlanner {
           endMs: unit.endMs,
           unitIndex: unit.index,
           unitUid: unit.uid,
-          candidateId: wholeId,
-          composedMs: materialDurations[wholeId],
+          candidateId: candidateId,
+          composedMs: materialDurations[candidateId],
         ));
         continue;
       }

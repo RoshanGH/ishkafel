@@ -5,6 +5,7 @@ import '../audio/source_audio.dart';
 import '../ffmpeg/proxy_spec.dart';
 import '../models/semantic_unit.dart';
 import '../replacement/replacement_plan.dart';
+import '../replacement/unit_base.dart';
 import 'track_plan.dart';
 
 /// 一条候选素材在本地的样子：路径 + 真实时长。
@@ -103,15 +104,23 @@ class TrackPlanBuilder {
       final unit = units[u];
       final start = at;
       final replacement = _replacementOf(replacements, unit.index);
-      final whole = _wholePick(replacement, materials);
+      // 「这一段画面从哪儿来」只问一次（见 [baseOf]）。底片是素材 =
+      // 整体替换，底片是原片 = 按镜头逐段取，没有底片 = 这一段放不了
+      final base = baseOf(
+        unit: unit,
+        replacement: replacement,
+        sourcePath: sourcePath,
+        pathOf: (id) => materials[id]?.path,
+        durationOf: (id) => materials[id]?.durationMs,
+      );
 
-      if (whole != null) {
+      if (base != null && !base.isOriginal) {
         // 整体替换：画面与声音都来自候选，整段原样接上，时长跟候选走
-        final durationMs = whole.durationMs ?? unit.durationMs;
+        final durationMs = base.durationMs;
         video.add(TrackSegment(
           atMs: at,
           durationMs: durationMs,
-          source: whole.path,
+          source: base.path,
           // 画面轨不出声：这条线的声音一律走口播轨（整体替换用候选自己的
           // 声音、被配乐盖住用纯人声）。两边都响就是两份声音重叠
           volume: 0,
@@ -122,7 +131,7 @@ class TrackPlanBuilder {
         // 这一段被配乐盖住时用素材的纯人声（与导出同一条规则）
         final wholeCovered = coveredUnits.contains(u);
         final wholeVoice =
-            (wholeCovered ? materialVocals[whole.path] : null) ?? whole.path;
+            (wholeCovered ? materialVocals[base.path] : null) ?? base.path;
         voice.add(TrackSegment(
             atMs: at, durationMs: durationMs, source: wholeVoice));
         at += durationMs;
@@ -135,12 +144,12 @@ class TrackPlanBuilder {
       // 两种情况都在这儿：空白任务里的分子（整条任务没有原片），以及
       // **手加的台词语义单元**（这条任务有原片，但原片里没有它）。
       //
-      // 判据必须是「**这个单元**有没有原片来源」，不是「这条任务有没有原片」
+      // 判据必须是「**这个单元**有没有底片」，不是「这条任务有没有原片」
       // ——同一条任务里两种单元现在是并存的。按后者判的话，手加单元会掉进
       // 下面「按镜头逐段取原片」的分支，而它的 startMs/endMs 只是时间线上的
       // 占位、落在原片时长之外：取的是一段根本不存在的时间，播出来是黑的
       // 或者干脆卡住（2026-09-08 真机：「添加的台词语义单元不能正常播放」）。
-      if (sourcePath == null || !unit.hasSource) {
+      if (base == null) {
         skipped.add(unit.index);
         // **跳过的是画面，不是时间**：这一段照样占着它在成片里的位置，
         // 游标必须往前走，否则后面的单元全部前移——真机上用户把手加的单元
@@ -166,8 +175,9 @@ class TrackPlanBuilder {
         continue;
       }
 
-      // 走到这儿 sourcePath 一定非空——上一个分支已经把没有原片的都拦下了
-      final audioSource = audioSourcePath ?? sourcePath;
+      // 走到这儿底片一定是原片的一段——上面两个分支已经把别的情况拦下了
+      final basePath = base.path;
+      final audioSource = audioSourcePath ?? basePath;
 
       // 没有整体替换：画面按镜头逐段取，声音按「这一段该用哪条音源」取
       final shots = unit.shots.isEmpty
@@ -211,7 +221,7 @@ class TrackPlanBuilder {
             : TrackSegment(
                 atMs: at,
                 durationMs: slotMs,
-                source: sourcePath,
+                source: basePath,
                 volume: 0, // 画面轨不出声，声音走口播轨
                 inMs: shotStart));
         at += slotMs;
@@ -364,13 +374,6 @@ class TrackPlanBuilder {
   }
 
   /// 这个单元的整体替换预览版；没选、或素材还没落到本地就返回 null
-  static LocalMaterial? _wholePick(
-      UnitReplacement replacement, Map<int, LocalMaterial> materials) {
-    if (replacement.mode != ReplacementMode.whole) return null;
-    final id = replacement.wholePreviewId;
-    return id == null ? null : materials[id];
-  }
-
   /// 这一格被配乐盖住了没有。**按列表下标问**——原来是拿原片时间区间比重叠，
   /// 而那个区间是用列表下标去取 startMs/endMs 拼的：调过序就指到别的段上，
   /// 甚至首尾颠倒。判错的后果是这一段该用纯人声还是原声反了，
