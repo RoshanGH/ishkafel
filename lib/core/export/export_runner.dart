@@ -128,7 +128,12 @@ class ExportRunner {
     // 同一个单元两者矛盾，静默取其一正是用户反对的
     final conflict = [
       for (var i = 0; i < units.length; i++)
+        // **固定过底片的单元不算冲突**：它的声音是按镜头从底片上剪的，
+        // 不是「整段用素材自己的口播」。换音色后画面来自素材、口播来自
+        // 合成——这是个有用的组合（插入段用别人的画面、自己的配音），
+        // 拦下来等于把它禁掉
         if (voices.assignedUnits.contains(units[i].uid) &&
+            units[i].baseCandidateId == null &&
             i < replacements.length &&
             replacements[i].mode == ReplacementMode.whole &&
             replacements[i].wholeCandidateIds.isNotEmpty)

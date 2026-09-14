@@ -31,9 +31,16 @@ class ComposedTimeline {
     var cursor = 0;
     for (var i = 0; i < units.length; i++) {
       final replaced = wholeDurations[i];
-      final ms = replaced != null && replaced > 0
-          ? replaced
-          : units[i].endMs - units[i].startMs;
+      // **固定过底片的单元，长度由它的镜头说了算**——那些镜头是按底片切的，
+      // 末镜头的终点就是底片的终点。不认这一条就得指望调用方把底片时长塞进
+      // wholeDurations，而导出那边的 wholeByCombo 只收「整段替换」的段落，
+      // 固定底片的单元一个都不在里面：算出来会是原片那个坑位的长度，
+      // 于是后面每一段的位置全偏（配乐、镜头定位一起错）
+      final ms = hasOwnBaseShots(units[i])
+          ? units[i].shots.last.endMs - units[i].startMs
+          : (replaced != null && replaced > 0
+              ? replaced
+              : units[i].endMs - units[i].startMs);
       starts.add(cursor);
       durations.add(ms);
       cursor += ms;

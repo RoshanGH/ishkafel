@@ -330,9 +330,13 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final String detail;
     if (shotIndex != null) {
       if (!locks.isShotLocked(unitIndex, shotIndex)) return null;
-      detail = locks.isUnitLocked(unitIndex)
+      detail = locks.isShotBoundaryLocked(unitIndex)
           ? '这个单元已整体替换，里面的镜头在成片里已经不存在了。'
           : '这个镜头已选替换素材。';
+    } else if (locks.basePinned.contains(unitIndex)) {
+      // 固定过底片的：单元层锁着、镜头层是活的。只写「锁定」的话，
+      // 人会以为这一段彻底不能改了
+      detail = '这一段按底片切成了镜头：单元边界不能动，每一镜还能调。';
     } else if (locks.isUnitLocked(unitIndex)) {
       detail = '这个单元已选整体替换素材。';
     } else {
@@ -619,6 +623,9 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final shots = unit.shots;
     if (shotIndex < 0 || shotIndex >= shots.length) return _buildPlaceholder();
     final shot = shots[shotIndex];
+    // 这一镜是按**这个单元自己的底片**切出来的吗——决定「取自」那一行
+    // 写原片还是写底片，以及数字要不要减掉单元起点
+    final onBase = hasOwnBaseShots(unit);
     // 单元内首/末镜头同理没有对应方向的相邻边界可调；只读模式下同样禁用。
     final locks = widget.controller.locks;
     final lockedNote = _lockNoteFor(locks, unitIndex, shotIndex);
@@ -671,10 +678,12 @@ class _InspectorPanelState extends State<InspectorPanel> {
             // 而人有时要知道这一镜取自原片哪一段（回原片去看、去对素材）。
             // 两者混在同一个字段里就是 2026-09-08 那个「属性栏写 00:45.03、
             // 时间线画在 01:03」的来源
+            // 底片被固定成一条素材时，这一镜取的是**那条素材**的第几秒——
+            // 还写「取自原片」会让人跑回原片去对时，怎么对都对不上
             inspectorSubRow(
-                '取自原片',
-                '${formatTimecode(shot.startMs, widget.fps)}'
-                    ' – ${formatTimecode(shot.endMs, widget.fps)}'),
+                onBase ? '取自底片' : '取自原片',
+                '${formatTimecode(shot.startMs - (onBase ? unit.startMs : 0), widget.fps)}'
+                    ' – ${formatTimecode(shot.endMs - (onBase ? unit.startMs : 0), widget.fps)}'),
             inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,

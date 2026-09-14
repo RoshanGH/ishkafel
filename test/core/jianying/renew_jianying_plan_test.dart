@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/audio/bgm_plan.dart';
+import 'package:ishkafel/core/jianying/jianying_plan.dart';
 import 'package:ishkafel/core/jianying/renew_jianying_plan.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
@@ -260,4 +261,77 @@ void main() {
     });
   });
 
+
+  group('固定过底片的单元：工程里那几段要指到素材，不是原片', () {
+    // U0 取自原片 0~10000；U1 取自原片 10000~14000，底片换成 6 秒的素材 7
+    final pinnedUnits = [
+      unit(0, 0, 10000, shots: [shot(0, 10000)]),
+      SemanticUnit(
+        index: 1,
+        startMs: 10000,
+        endMs: 14000,
+        transcript: 'U1',
+        baseCandidateId: 7,
+        shots: [shot(10000, 12000), shot(12000, 16000)],
+      ),
+    ];
+
+    List<JyVideoSegment> atomOf(JianyingPlan plan) => plan.videoTracks[1];
+
+    JianyingPlan build({String? Function(int)? materialOf}) =>
+        buildRenewJianyingPlan(
+          units: pinnedUnits,
+          replacements: [
+            UnitReplacement.keepOriginal(),
+            UnitReplacement.whole([7], previewId: 7),
+          ],
+          sourcePath: source,
+          sourceTotalMs: 14000,
+          materialOf: materialOf ?? material,
+          materialDurationOf: (id) => 6000,
+        );
+
+    test('原子轨上这两镜用的是素材文件', () {
+      final pinned =
+          atomOf(build()).where((s) => s.path == '/tmp/素材7.mp4').toList();
+
+      expect(pinned.length, 2);
+    });
+
+    test('取的是素材内偏移——不减掉单元起点就是原片里另一个时间点', () {
+      final pinned =
+          atomOf(build()).where((s) => s.path == '/tmp/素材7.mp4').toList();
+
+      expect(pinned[0].sourceStartMs, 0);
+      expect(pinned[1].sourceStartMs, 2000);
+    });
+
+    test('素材有多长由它自己说了算，不拿原片总长去夹', () {
+      final pinned =
+          atomOf(build()).where((s) => s.path == '/tmp/素材7.mp4').toList();
+
+      expect(pinned.first.sourceTotalMs, 6000);
+    });
+
+    test('取自原片的那一段不受影响', () {
+      final fromSource =
+          atomOf(build()).where((s) => s.path == source).toList();
+
+      expect(fromSource.length, 1);
+      expect(fromSource.single.sourceStartMs, 0);
+    });
+
+    test('候选轨不再摆同一条素材——原子轨上已经有了，摆两遍是重复画面', () {
+      final plan = build();
+      // 分子轨、原子轨之上才是候选轨
+      final candidates = plan.videoTracks.skip(2).expand((t) => t);
+
+      expect(candidates.where((s) => s.path == '/tmp/素材7.mp4'), isEmpty);
+    });
+
+    test('底片素材没落地：点名，不静默摆一段原片顶上', () {
+      expect(() => build(materialOf: (id) => null),
+          throwsA(isA<JianyingPlanException>()));
+    });
+  });
 }

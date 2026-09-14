@@ -31,6 +31,12 @@ class BaseSegmentCard extends StatelessWidget {
   /// 点「换一张底片」。null = 只读或还没固定过
   final VoidCallback? onUnpin;
 
+  /// 点「给这些镜头打标」。null = 只读，或者 AI 没配
+  final VoidCallback? onRetag;
+
+  /// 正在给这一段的镜头打标
+  final bool retagging;
+
   const BaseSegmentCard({
     super.key,
     required this.unit,
@@ -39,6 +45,8 @@ class BaseSegmentCard extends StatelessWidget {
     this.segmenting = false,
     this.onSegment,
     this.onUnpin,
+    this.onRetag,
+    this.retagging = false,
   });
 
   @override
@@ -67,6 +75,7 @@ class BaseSegmentCard extends StatelessWidget {
             _hint(pinned, blocked),
             const SizedBox(height: 10),
             _buttons(pinned, blocked),
+            ?_retagRow(pinned),
           ]),
         ],
       ),
@@ -95,6 +104,48 @@ class BaseSegmentCard extends StatelessWidget {
         color: AppColors.textSecondary,
         height: 1.5,
       ),
+    );
+  }
+
+  /// 新切出来的镜头还没打标——**按画面搜素材要靠它**。
+  ///
+  /// 不自动跑：打标是逐镜看图的云端调用，切成七八镜就是七八次，
+  /// 要花钱也要等。但也不能只让人对着「画面描述为空，无法检索」发愣
+  Widget? _retagRow(bool pinned) {
+    if (!pinned || !unit.tagsStale) return null;
+    return Padding(
+      key: const Key('base-retag-row'),
+      padding: const EdgeInsets.only(top: AppSpacing.md),
+      child: retagging
+          ? const Row(children: [
+              SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2)),
+              SizedBox(width: 8),
+              Text('正在逐镜看图打标…',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.textSecondary)),
+            ])
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '这些镜头还没打标，按画面/标签搜素材会搜不出东西。',
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: AppColors.orange,
+                      height: 1.5),
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  key: const Key('base-retag-button'),
+                  onPressed: onRetag,
+                  child: const Text('给这些镜头打标'),
+                ),
+              ],
+            ),
     );
   }
 

@@ -72,6 +72,31 @@ void main() {
             '${dupes.join('、')}');
   });
 
+  test('「这条素材还有没有人用」也只有一份判据', () {
+    // 少算一处，那条素材就会被当孤儿清掉。底片记在单元身上、不在方案里，
+    // 正是最容易漏的那一处（2026-09-15 真机：切完分镜再挑一镜，
+    // 底片被清掉，预览整段变黑而哪儿都不报错）
+    final dupes = <String>[];
+    for (final f in Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))) {
+      if (f.path.endsWith('core/replacement/unit_base.dart')) continue;
+      final code = codeOnly(f.readAsStringSync());
+      // 手写「摊平 wholeCandidateIds + shotCandidateIds」就是在旁边
+      // 又抄了一份 referencedCandidateIds
+      if (RegExp(r'\.\.\.[a-zA-Z_.]*wholeCandidateIds[\s\S]{0,120}'
+              r'shotCandidateIds\.values')
+          .hasMatch(code)) {
+        dupes.add(f.path);
+      }
+    }
+
+    expect(dupes, isEmpty,
+        reason: '这几处自己摊平了一份引用集合，改用 referencedCandidateIds()：'
+            '${dupes.join('、')}');
+  });
+
   test('底片的解析只有这一份实现', () {
     final impl = File('lib/core/replacement/unit_base.dart');
     expect(impl.existsSync(), isTrue);

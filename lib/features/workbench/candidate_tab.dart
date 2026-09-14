@@ -15,6 +15,7 @@ import '../../core/models/tag_group_ref.dart';
 import '../../core/replacement/brand_consistency.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/replacement/unit_base.dart';
 import '../picking/candidate_panel.dart';
 import '../picking/picked_material_store.dart';
 import '../picking/picked_media_cache.dart';
@@ -421,12 +422,10 @@ class CandidateTabState extends State<CandidateTab> {
   }
 
   /// 方案里引用到的全部候选 id（两层都算）
-  Set<int> _referencedCandidateIds() => {
-        for (final r in _picking.replacements) ...[
-          ...r.wholeCandidateIds,
-          for (final ids in r.shotCandidateIds.values) ...ids,
-        ],
-      };
+  /// 规则在 [referencedCandidateIds] 里，**全仓只有那一份**——
+  /// 少算一处（比如固定过底片的那张底片）就会把还在用的素材当孤儿清掉
+  Set<int> _referencedCandidateIds() =>
+      referencedCandidateIds(widget.editor.units, _picking.replacements);
 
   void _emitPicked() {
     final list = _picked.values.toList(growable: false);

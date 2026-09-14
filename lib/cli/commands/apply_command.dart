@@ -19,6 +19,7 @@ import '../../core/ai/frame_check.dart';
 import '../../core/replacement/brand_consistency.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
+import '../../core/replacement/unit_base.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
@@ -305,12 +306,10 @@ Future<List<PickedMaterial>> gatherPickedMaterials({
   CandidateProbe? candidateProbe,
   Future<FrameCheck> Function(int id)? frameCheckOf,
 }) async {
-  final used = <int>{
-    for (final r in replacements) ...[
-      ...r.wholeCandidateIds,
-      for (final ids in r.shotCandidateIds.values) ...ids,
-    ],
-  };
+  // 规则在 [referencedCandidateIds] 里，**全仓只有那一份**——底片记在
+  // 单元身上、不在方案里，漏掉它那条素材会被当孤儿清掉
+  final used =
+      referencedCandidateIds(task.units ?? const [], replacements);
   final content = contentService ?? MiaoaContentService();
   final probe = candidateProbe ??
       CandidateProbe(run: const ResolvingProcessRunner().call);

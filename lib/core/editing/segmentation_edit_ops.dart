@@ -1,6 +1,7 @@
 import '../analysis/boundary_snapper.dart';
 import '../analysis/providers.dart';
 import '../models/semantic_unit.dart';
+import '../replacement/unit_base.dart';
 import '../models/unit_uid.dart';
 import '../models/shot.dart';
 import '../time/timecode.dart';
@@ -112,10 +113,21 @@ abstract final class SegmentationEditOps {
       ];
 
   /// 移动单元 i 与 i+1 之间的边界；两侧首尾镜头联动裁剪（被越过的镜头边界吞并）
+  /// 固定过底片的单元，**这一层的操作一律不做**。
+  ///
+  /// 它的镜头是按那张底片切出来的，坐标是「`startMs` + 底片内偏移」。
+  /// 一动单元边界，偏移关系就全错——画面会去取素材里另一个时间点，
+  /// 而哪儿都不报错。界面上这些单元本来就被 [EditLocks] 锁着，这里再拦一道，
+  /// 是因为命令行和别的调用方不走那把锁
+  static bool _basePinned(List<SemanticUnit> units, int i) =>
+      i >= 0 && i < units.length && hasOwnBaseShots(units[i]);
+
   static List<SemanticUnit>? moveUnitBoundary(
       List<SemanticUnit> units, int i, int rawMs,
       {required double fps}) {
     if (i < 0 || i + 1 >= units.length) return null;
+    // 两侧任一边固定过底片就不许动（理由见 [_basePinned]）
+    if (_basePinned(units, i) || _basePinned(units, i + 1)) return null;
     final durationMs = units.last.endMs;
     final left = units[i];
     final right = units[i + 1];
@@ -210,6 +222,8 @@ abstract final class SegmentationEditOps {
       List<SemanticUnit> units, int u, int rawMs,
       {required double fps, required List<AsrSentence> sentences}) {
     if (u < 0 || u >= units.length) return null;
+    // 拆开之后两半各自的镜头还挂着同一张底片的偏移，对不上任何一边
+    if (_basePinned(units, u)) return null;
     final durationMs = units.last.endMs;
     final unit = units[u];
     final minB = _frameAfter(unit.startMs, fps);
@@ -287,6 +301,8 @@ abstract final class SegmentationEditOps {
   static List<SemanticUnit>? mergeUnitWithPrevious(
       List<SemanticUnit> units, int u) {
     if (u <= 0 || u >= units.length) return null;
+    // 合并会把两串镜头接起来，而它们量的是两张不同的底片
+    if (_basePinned(units, u) || _basePinned(units, u - 1)) return null;
     final prev = units[u - 1];
     final curr = units[u];
     final merged = prev.copyWith(
@@ -418,10 +434,19 @@ abstract final class SegmentationEditOps {
 
       if (unit.shots.isEmpty) return false;
       if (unit.shots.first.startMs != unit.startMs) return false;
-      if (unit.shots.last.endMs != unit.endMs) return false;
+      // **固定过底片的单元，镜头盖的是那张底片，不是原片这个坑位**：
+      // 底片多半比坑位长或短，末镜头的 endMs 本来就不等于 unit.endMs
+      // （见 `docs/superpowers/specs/2026-09-14-底片-design.md`）。
+      // 照原样要求它「盖满坑位」会把一份完全合法的数据判成坏的
+      if (!hasOwnBaseShots(unit) && unit.shots.last.endMs != unit.endMs) {
+        return false;
+      }
       for (var j = 0; j < unit.shots.length; j++) {
         final shot = unit.shots[j];
-        final isLastShotOfLastUnit = isLastUnit && j == unit.shots.length - 1;
+        // 末单元末镜头那条帧点豁免，只对「镜头盖满坑位」的单元成立——
+        // 固定过底片的单元，它的末镜头是底片的末尾，跟片长无关，照常要求帧点
+        final isLastShotOfLastUnit =
+            isLastUnit && j == unit.shots.length - 1 && !hasOwnBaseShots(unit);
         if (shot.durationMs < frame) return false;
         if (!isFramePoint(shot.startMs)) return false;
         if (!isLastShotOfLastUnit && !isFramePoint(shot.endMs)) return false;

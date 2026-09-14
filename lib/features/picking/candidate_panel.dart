@@ -342,13 +342,17 @@ class CandidatePanel extends StatelessWidget {
         SegmentOption(
           key: const Key('picking-mode-keep'),
           label: '保留原片',
+          // 固定过底片的：画面已经来自那条素材，回不去原片。
+          // 要回去得先在属性面板「换一张底片」
+          enabled: !picking.currentBasePinned,
           onTap: () => onModeChanged(ReplacementMode.keepOriginal),
         ),
         SegmentOption(
           key: const Key('picking-mode-whole'),
-          label: '整体替换',
-          enabled: !picking.wholeLocked,
-          locked: picking.wholeLocked,
+          // 固定过底片之后这一档说的就是「这一段的底片」，换个说法更准
+          label: picking.currentBasePinned ? '底片' : '整体替换',
+          enabled: !picking.wholeLocked && !picking.wholeLockedByBase,
+          locked: picking.wholeLocked || picking.wholeLockedByBase,
           onTap: () => onModeChanged(ReplacementMode.whole),
         ),
         SegmentOption(
@@ -366,7 +370,12 @@ class CandidatePanel extends StatelessWidget {
   /// 但也不必让每句话各占一行常驻。
   List<String> _noteTexts() {
     final notes = <String>[];
-    if (picking.wholeLocked || picking.perShotLocked) {
+    if (picking.currentBasePinned) {
+      // 这一段已经按底片切好了，两档的关系跟别处不一样——说清楚，
+      // 不然人只看到「底片」那一档灰着，不知道该去哪儿换
+      notes.add('这一段的画面按底片切成了镜头：每一镜都能单独挑素材。'
+          '要换掉底片本身，去左边属性面板的「这一段的底片」');
+    } else if (picking.wholeLocked || picking.perShotLocked) {
       notes.add(picking.wholeLocked
           ? '已进入镜头替换，整体替换被锁定。清空本单元的镜头选择后可切回'
           : '已进入整体替换，镜头替换被锁定。清空本单元的整体选择后可切回');
@@ -434,9 +443,13 @@ class CandidatePanel extends StatelessWidget {
                           fontSize: AppFontSize.caption,
                           fontWeight: FontWeight.w700)),
                   const SizedBox(width: 4),
-                  // 「原片 / ×2」横着放在编号旁边——竖着摞会让这一条高一倍
+                  // 「原片 / 底片 / ×2」横着放在编号旁边——竖着摞会让这一条
+                  // 高一倍。固定过底片的单元，没换的那一镜放的是**底片**，
+                  // 写「原片」会让人以为它还是原来那段片子
                   Text(
-                    picked.isEmpty ? '原片' : '×${picked.length}',
+                    picked.isEmpty
+                        ? (picking.currentBasePinned ? '底片' : '原片')
+                        : '×${picked.length}',
                     style: TextStyle(
                         color: picked.isEmpty
                             ? AppColors.orange

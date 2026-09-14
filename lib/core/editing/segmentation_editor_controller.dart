@@ -293,7 +293,9 @@ class SegmentationEditorController extends ChangeNotifier {
 
   /// 移动单元 [u] 内第 [s] 与第 [s+1] 个镜头之间的边界
   bool moveShotBoundary(int u, int s, int rawMs) {
-    if (_locks.isUnitLocked(u)) return _block(LockWording.unit(u));
+    // **镜头这一层的锁**：固定过底片的单元放行——那些镜头是这条素材上的
+    // 刀口，调它们正是这个功能要给的能力（见 [EditLocks.isShotBoundaryLocked]）
+    if (_locks.isShotBoundaryLocked(u)) return _block(LockWording.unit(u));
     for (final shot in [s, s + 1]) {
       if (_locks.isShotLocked(u, shot)) {
         return _block(LockWording.shot(u, shot));
@@ -359,10 +361,11 @@ class SegmentationEditorController extends ChangeNotifier {
           '播放头这个位置在 U${unitIndex + 1} 里、但不在任何视觉镜头上——往旁边挪几帧再拆',
           materialLock: false);
     }
+    if (_locks.isShotBoundaryLocked(unitIndex)) {
+      return _block(LockWording.unit(unitIndex));
+    }
     if (_locks.isShotLocked(unitIndex, shotIndex)) {
-      return _block(_locks.isUnitLocked(unitIndex)
-          ? LockWording.unit(unitIndex)
-          : LockWording.shot(unitIndex, shotIndex));
+      return _block(LockWording.shot(unitIndex, shotIndex));
     }
     final result = SegmentationEditOps.splitShotAt(_units, unitIndex, rawMs,
         fps: fps, shotIndex: shotIndex);
@@ -402,7 +405,7 @@ class SegmentationEditorController extends ChangeNotifier {
     }
     final u = sel.unitIndex;
     final s = sel.shotIndex!;
-    if (_locks.isUnitLocked(u)) return _block(LockWording.unit(u));
+    if (_locks.isShotBoundaryLocked(u)) return _block(LockWording.unit(u));
     // 被吞的和吞人的都动了：一个消失、一个变长
     for (final shot in [s - 1, s]) {
       if (shot >= 0 && _locks.isShotLocked(u, shot)) {

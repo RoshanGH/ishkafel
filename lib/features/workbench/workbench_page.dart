@@ -2023,13 +2023,66 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               .firstWhereOrNull((m) => m.id == id)
               ?.name,
       segmenting: _segmentingUnit == unitIndex,
+      retagging: _retaggingBaseUnit == unitIndex,
       onSegment: _isEditable && _lock == null
           ? () => _segmentUnitBase(unitIndex)
           : null,
       onUnpin: _isEditable && _lock == null && hasOwnBaseShots(unit)
           ? () => _unpinUnitBase(unitIndex)
           : null,
+      onRetag: _isEditable && _lock == null
+          ? () => _retagBaseUnit(unitIndex)
+          : null,
     );
+  }
+
+  /// 正在给哪个单元的底片镜头打标
+  int? _retaggingBaseUnit;
+
+  /// 给切出来的这几镜打标。**按画面/标签搜素材全靠它**。
+  ///
+  /// 单独一条路而不是复用编辑后的重打标：那条要 [EditConsequence]，
+  /// 而这里的触发点是人在底片卡片上点的按钮，只针对这一个单元
+  Future<void> _retagBaseUnit(int unitIndex) async {
+    final editor = _editor;
+    if (editor == null) return;
+    final tagging = ref.read(taggingServiceProvider);
+    if (tagging == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('尚未配置 AI 服务，打不了标；补齐凭据后重启再试')));
+      return;
+    }
+    setState(() => _retaggingBaseUnit = unitIndex);
+    try {
+      late List<SemanticUnit> tagged;
+      final usage = await AiUsageScope.collect(
+        () async {
+          tagged = await tagging.tag(_task, editor.units,
+              only: {unitIndex}, baseVideoPaths: _baseVideoPaths());
+        },
+        onPartial: (partial) => _task =
+            _task.copyWith(aiUsage: _task.aiUsage.merge(partial)),
+      );
+      _task = _task.copyWith(aiUsage: _task.aiUsage.merge(usage));
+      if (!mounted) return;
+      editor.replaceUnits(tagged);
+      await _flushAutosave();
+      if (!mounted) return;
+      final shots = tagged[unitIndex].shots.length;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('U${unitIndex + 1} 的 $shots 个镜头打好标了，'
+              '现在按画面搜素材就有结果了')));
+    } catch (e) {
+      AppLog.warn('底片镜头打标失败（taskId=${_task.id}, U$unitIndex）：$e');
+      unawaited(_flushAutosave());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('打标失败：$e'),
+        backgroundColor: AppColors.red,
+      ));
+    } finally {
+      if (mounted) setState(() => _retaggingBaseUnit = null);
+    }
   }
 
   /// 切这一段的底片：把它切成视觉镜头，从此每一镜都能单独换素材。
@@ -2113,8 +2166,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       await _flushAutosave();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头，'
-              '现在每一镜都能单独换素材')));
+          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头。'
+              '这些镜头还没打标——在左边卡片上点「给这些镜头打标」，'
+              '按画面搜素材才有结果')));
     } catch (e) {
       AppLog.warn('切分这一段的底片失败（taskId=${_task.id}, U$unitIndex）：$e');
       if (!mounted) return;
@@ -2641,7 +2695,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// S6 上的素材就跑到别的镜头上去了；改边界则会让已经按旧时长变速好的
   /// 切片全部作废，而用户毫不知情。见 [EditLocks]
   void _syncEditLocks() =>
-      _editor?.locks = EditLocks.of(_replacements ?? const []);
+      _editor?.locks = EditLocks.of(_replacements ?? const [],
+          semanticUnits: _editor?.units ?? const []);
 
   /// 把替换方案落盘。**重排/删单元这类「顺带改到方案」的操作用它**——
   /// 失败要说出来，不然人只会在下次打开时发现素材跑到了别人身上
@@ -2778,12 +2833,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final cache = _mediaCache;
     final replacements = _replacements;
     if (cache == null || replacements == null) return;
-    cache.pinAll({
-      for (final r in replacements) ...[
-        ...r.wholeCandidateIds,
-        for (final ids in r.shotCandidateIds.values) ...ids,
-      ],
-    });
+    // 底片也要固定住（规则见 [referencedCandidateIds]）——漏了它，
+    // 那条素材会被当成没人要的缓存清掉，预览整段变黑
+    cache.pinAll(referencedCandidateIds(
+        _editor?.units ?? const <SemanticUnit>[], replacements));
   }
 
   /// 首帧图落在任务数据目录下。没有数据目录（测试环境）就不落地——
@@ -2881,6 +2934,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 这个分子挑中的素材有多长；null 表示还没挑。空白任务的时长统计靠它
   int? _pickedDurationOf(int unitIndex) {
+    final units = _editor?.units ?? const <SemanticUnit>[];
+    // **固定过底片的分子当然算「已填」**：它的画面就是那条素材，而且已经
+    // 按它切成了镜头。只看整体替换的候选会把它算成没填——切完分镜之后
+    // 底部立刻变成「一条素材都没挑」，人会以为刚才那一下把东西弄丢了
+    if (unitIndex < units.length && hasOwnBaseShots(units[unitIndex])) {
+      return units[unitIndex].shots.last.endMs - units[unitIndex].startMs;
+    }
     final replacements = _replacements ?? const [];
     if (unitIndex >= replacements.length) return null;
     final replacement = replacements[unitIndex];

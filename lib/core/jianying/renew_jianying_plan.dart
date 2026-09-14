@@ -60,34 +60,48 @@ JianyingPlan buildRenewJianyingPlan({
       ),
   ];
 
-  // 2. 原子轨：原片按镜头切开。没切出镜头的单元整段摆着——
+  // 2. 原子轨：底片按镜头切开。没切出镜头的单元整段摆着——
   //    留空的话那一段在原子轨上是个洞，人以为素材丢了
   final atomTrack = <JyVideoSegment>[];
   for (final u in units) {
     final shots = u.shots;
+    // **固定过底片的单元，画面来自那条素材，不是原片**。不认这一条的话，
+    // 剪映工程里那几段会指到原片的同一个时间点——一段毫不相干的画面，
+    // 而人要进了剪映才发现（见 hasOwnBaseShots）
+    final pinned = u.baseCandidateId;
+    final basePath = pinned == null ? sourcePath : materialOf(pinned);
+    if (basePath == null) {
+      throw JianyingPlanException('U${u.index + 1} 的底片（素材 $pinned）'
+          '还没下到本地，生成不了剪映工程。先跑一次预览把它拉下来');
+    }
+    // 底片是素材时，镜头坐标要减掉单元起点才是「素材内第几毫秒」
+    final shift = pinned == null ? 0 : -u.startMs;
+    // 素材有多长由它自己说了算，不能拿原片总长去夹
+    final baseTotalMs =
+        pinned == null ? sourceTotalMs : materialDurationOf(pinned);
     if (shots.isEmpty) {
       atomTrack.add(JyVideoSegment(
-        path: sourcePath,
+        path: basePath,
         atMs: u.startMs,
         durationMs: u.endMs - u.startMs,
-        sourceStartMs: u.startMs,
+        sourceStartMs: u.startMs + shift,
         sourceDurationMs: u.endMs - u.startMs,
         speed: 1.0,
         volume: 1.0,
-        sourceTotalMs: sourceTotalMs,
+        sourceTotalMs: baseTotalMs,
       ));
       continue;
     }
     for (final s in shots) {
       atomTrack.add(JyVideoSegment(
-        path: sourcePath,
+        path: basePath,
         atMs: s.startMs,
         durationMs: s.endMs - s.startMs,
-        sourceStartMs: s.startMs,
+        sourceStartMs: s.startMs + shift,
         sourceDurationMs: s.endMs - s.startMs,
         speed: 1.0,
         volume: 1.0,
-        sourceTotalMs: sourceTotalMs,
+        sourceTotalMs: baseTotalMs,
       ));
     }
   }
@@ -99,8 +113,12 @@ JianyingPlan buildRenewJianyingPlan({
     if (r == null) continue;
     switch (r.mode) {
       case ReplacementMode.whole:
-        _collect(picks, r.wholeCandidateIds, u.startMs, u.endMs,
-            trimStarts: r.wholeTrimStarts, fillBySpeed: false);
+        // 底片固定过的单元：那条素材已经摆在原子轨上了，候选轨再摆一遍
+        // 就是同一段画面叠两层，人进剪映看到的是重复的东西
+        if (u.baseCandidateId == null) {
+          _collect(picks, r.wholeCandidateIds, u.startMs, u.endMs,
+              trimStarts: r.wholeTrimStarts, fillBySpeed: false);
+        }
       case ReplacementMode.perShot:
         for (final entry in r.shotCandidateIds.entries) {
           final shot = _shotAt(u.shots, entry.key);

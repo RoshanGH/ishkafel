@@ -32,8 +32,10 @@ Future<void> _pump(
   required UnitReplacement replacement,
   String? materialName,
   bool segmenting = false,
+  bool retagging = false,
   VoidCallback? onSegment,
   VoidCallback? onUnpin,
+  VoidCallback? onRetag,
 }) =>
     tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -44,8 +46,10 @@ Future<void> _pump(
             replacement: replacement,
             materialName: materialName,
             segmenting: segmenting,
+            retagging: retagging,
             onSegment: onSegment,
             onUnpin: onUnpin,
+            onRetag: onRetag,
           ),
         ),
       ),
@@ -131,5 +135,46 @@ void main() {
 
     await tester.tap(find.byKey(const Key('base-segment-button')));
     expect(tapped, 1);
+  });
+
+  testWidgets('刚切完还没打标：说清楚搜不出东西，并给打标的入口',
+      (tester) async {
+    await _pump(tester,
+        unit: _inserted(pinned: 7, shots: const [
+          Shot(startMs: 4000, endMs: 6500),
+          Shot(startMs: 6500, endMs: 10000),
+        ]).copyWith(tagsStale: true),
+        replacement: UnitReplacement.whole([7]),
+        onSegment: () {},
+        onRetag: () {});
+
+    expect(find.textContaining('还没打标'), findsOneWidget);
+    expect(find.byKey(const Key('base-retag-button')), findsOneWidget);
+  });
+
+  testWidgets('打完标就不再摆那句话', (tester) async {
+    await _pump(tester,
+        unit: _inserted(pinned: 7, shots: const [
+          Shot(startMs: 4000, endMs: 10000),
+        ]),
+        replacement: UnitReplacement.whole([7]),
+        onSegment: () {},
+        onRetag: () {});
+
+    expect(find.byKey(const Key('base-retag-row')), findsNothing);
+  });
+
+  testWidgets('正在打标：摆一句在动的话，不摆按钮', (tester) async {
+    await _pump(tester,
+        unit: _inserted(pinned: 7, shots: const [
+          Shot(startMs: 4000, endMs: 10000),
+        ]).copyWith(tagsStale: true),
+        replacement: UnitReplacement.whole([7]),
+        retagging: true,
+        onSegment: () {},
+        onRetag: () {});
+
+    expect(find.textContaining('正在逐镜看图打标'), findsOneWidget);
+    expect(find.byKey(const Key('base-retag-button')), findsNothing);
   });
 }

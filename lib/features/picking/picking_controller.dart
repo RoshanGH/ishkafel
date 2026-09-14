@@ -1,3 +1,4 @@
+import '../../core/replacement/unit_base.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../core/models/semantic_unit.dart';
@@ -71,15 +72,39 @@ class PickingController extends ChangeNotifier {
       currentMode == ReplacementMode.perShot &&
       currentReplacement.shotCandidateIds.values.any((v) => v.isNotEmpty);
 
-  /// 镜头级替换是否被锁定：已经在整体替换里选过候选
+  /// 这个单元**固定过底片**：它的镜头是按那条素材切出来的。
+  ///
+  /// 数据上它仍然是「整体替换、选了一条」，但那一条的角色已经从「顶替这一段
+  /// 的素材」变成「这一段的底片」——镜头替换换的是底片上的某一刀，两者不再
+  /// 互斥（见 `docs/superpowers/specs/2026-09-14-底片-design.md`）
+  bool get currentBasePinned {
+    final unit = currentUnit;
+    return unit != null && hasOwnBaseShots(unit);
+  }
+
+  /// 镜头级替换是否被锁定：已经在整体替换里选过候选。
+  ///
+  /// **固定过底片的单元不锁**——它的那一条是底片，镜头替换换的是底片上的
+  /// 某一刀。锁住的话，人切完分镜却给不了任何一镜挑素材，整件事就白做了
   bool get perShotLocked =>
+      !currentBasePinned &&
       currentMode == ReplacementMode.whole &&
       currentReplacement.wholeCandidateIds.isNotEmpty;
+
+  /// 反过来，**固定过底片之后整体替换那一档要锁死**：那一条已经是底片，
+  /// 在这里换掉它，切好的镜头就全指向另一条素材的时间点。
+  /// 要换底片去属性面板走「换一张底片」——那条路会把作废什么说清楚
+  bool get wholeLockedByBase => currentBasePinned;
 
   /// 切到 [mode] 会不会丢弃已选候选。UI 据此弹二次确认——直接清掉是破坏性
   /// 操作，用户点错一次就得重挑一遍。
   bool discardsSelectionsWhenSwitchingTo(ReplacementMode mode) {
     if (mode == currentMode) return false;
+    // **固定过底片的单元切到镜头替换，什么都不丢**：那一条候选是底片，
+    // 记在单元身上（[SemanticUnit.baseCandidateId]），不在方案里。
+    // 照旧弹「已选候选会被清空」的话，人会以为底片没了而不敢点——
+    // 而切过去挑镜头正是切分之后该做的下一步
+    if (currentBasePinned && mode == ReplacementMode.perShot) return false;
     return currentReplacement.factor > 1 ||
         currentReplacement.wholeCandidateIds.isNotEmpty ||
         currentReplacement.shotCandidateIds.values.any((v) => v.isNotEmpty);

@@ -203,6 +203,9 @@ class AudioTrackBuilder {
         listIndex: i,
         sourcePath: sourcePath,
         basePath: baseAudio[unit.index],
+        // 这一段在**成片**里多长。固定过底片的单元，长度跟底片走，
+        // 不是原片那个坑位——配音按坑位裁的话声画从这儿起全错位
+        composedMs: timeline.durationOf(i),
         vocalsPath: vocalsPath,
         backgroundPath: backgroundPath,
         covered: covered,
@@ -464,6 +467,10 @@ class AudioTrackBuilder {
     /// 这个单元的底片是这条素材（[SemanticUnit.baseCandidateId] 固定过的）。
     /// null = 底片就是任务原片，按老路走
     String? basePath,
+
+    /// 这一段在**成片**里多长。整体替换和固定底片都会让它不等于
+    /// `unit.durationMs`；配音要裁到这个长度，裁成坑位长度就声画错位
+    required int composedMs,
     required String? vocalsPath,
     required String? backgroundPath,
     required Set<int> covered,
@@ -518,12 +525,12 @@ class AudioTrackBuilder {
       return [
         await _cache.render(
           // fps 进键：-t 是按帧取整算的，30fps 与 60fps 的产物不同
-          key: 'voice|$voice|${unit.durationMs}|$exportFps',
+          key: 'voice|$voice|$composedMs|$exportFps',
           prefix: 'mix_u${unit.index}_voice',
           extension: 'wav',
           args: (dest) => ExportCommands.fitVoiceAudio(
               input: voice,
-              durationMs: unit.durationMs,
+              durationMs: composedMs,
               out: dest,
               atFps: exportFps),
           what: 'U${unit.index + 1} 的配音',

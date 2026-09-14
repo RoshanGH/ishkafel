@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 import '../replacement/replacement_plan.dart';
+import '../models/semantic_unit.dart';
+import '../replacement/unit_base.dart';
 
 /// 一个视觉镜头的坐标。
 @immutable
@@ -44,13 +46,26 @@ class EditLocks {
   /// 单独挑过素材的镜头
   final Set<ShotRef> shots;
 
-  const EditLocks({this.units = const {}, this.shots = const {}});
+  /// **固定过底片**的单元。它们在 [units] 里也有（整体替换过），
+  /// 但镜头这一层要放行——见 [isShotBoundaryLocked]
+  final Set<int> basePinned;
+
+  const EditLocks(
+      {this.units = const {},
+      this.shots = const {},
+      this.basePinned = const {}});
 
   static const none = EditLocks();
 
-  static EditLocks of(List<UnitReplacement> replacements) {
+  /// [semanticUnits] 用来认出**固定过底片**的那几个单元。它们照旧锁着
+  /// 单元这一层（边界、拆分、合并），但**镜头这一层是活的**——那些镜头
+  /// 是按底片切出来的，调它们的切点就是在调这条素材上的刀口，正是这个
+  /// 功能要给的能力（见 `docs/superpowers/specs/2026-09-14-底片-design.md`）
+  static EditLocks of(List<UnitReplacement> replacements,
+      {List<SemanticUnit> semanticUnits = const []}) {
     final units = <int>{};
     final shots = <ShotRef>{};
+    final pinned = <int>{};
     for (var u = 0; u < replacements.length; u++) {
       final replacement = replacements[u];
       if (replacement.wholeCandidateIds.isNotEmpty) units.add(u);
@@ -58,13 +73,33 @@ class EditLocks {
         if (entry.value.isNotEmpty) shots.add(ShotRef(u, entry.key));
       }
     }
-    return EditLocks(units: Set.unmodifiable(units), shots: Set.unmodifiable(shots));
+    for (var u = 0; u < semanticUnits.length; u++) {
+      if (hasOwnBaseShots(semanticUnits[u])) pinned.add(u);
+    }
+    return EditLocks(
+        units: Set.unmodifiable(units),
+        shots: Set.unmodifiable(shots),
+        basePinned: Set.unmodifiable(pinned));
   }
 
   bool get isEmpty => units.isEmpty && shots.isEmpty;
 
   /// 这个单元被整体替换了吗
-  bool isUnitLocked(int unitIndex) => units.contains(unitIndex);
+  /// 单元这一层动不动得：整体替换过的、**或者固定过底片的**都不行。
+  ///
+  /// 固定底片之后方案会落到「镜头替换」上（人切完就能直接挑镜头），
+  /// 那时 [units] 里不再有它——但单元边界照样不能动：一动，按底片切出来的
+  /// 镜头就全对不上素材了
+  bool isUnitLocked(int unitIndex) =>
+      units.contains(unitIndex) || basePinned.contains(unitIndex);
+
+  /// 这个单元里的**镜头边界**动不动得。
+  ///
+  /// 整体替换的单元原本整个钉死（里面的镜头在成片里已经不存在了）；
+  /// 但**固定过底片之后那些镜头真实存在**——它们是这条素材上的刀口，
+  /// 调它们正是这个功能要给的能力
+  bool isShotBoundaryLocked(int unitIndex) =>
+      isUnitLocked(unitIndex) && !basePinned.contains(unitIndex);
 
   /// 这个镜头动不了吗。整段被换掉时里面的每个镜头都动不了
   bool isShotLocked(int unitIndex, int shotIndex) =>
@@ -98,6 +133,12 @@ class EditLocks {
 abstract final class LockWording {
   static String unit(int unitIndex) =>
       'U${unitIndex + 1} 已选替换素材，切分锁定。要调整请先移除它的替换素材。';
+
+  /// 固定过底片的单元：单元这一层锁着，但镜头这一层是活的。
+  /// **说清楚哪一层能动**——只写「锁定」，人会以为这一段彻底不能改了
+  static String basePinnedUnit(int unitIndex) =>
+      'U${unitIndex + 1} 的画面按这张底片切成了镜头。单元边界不能再动'
+      '（一动镜头就全对不上素材了），但每一镜的切点和素材都还能调。';
 
   static String shot(int unitIndex, int shotIndex) =>
       'U${unitIndex + 1} 的 S${shotIndex + 1} 已选替换素材，切分锁定。'

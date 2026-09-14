@@ -58,9 +58,9 @@ abstract final class BasePinOps {
 
   /// 把这一段的底片固定成 [candidateId]，并写入按它切出来的 [shots]。
   ///
-  /// 同时把替换方案收敛成「整体替换、只选这一条」——**这是一条不变量**：
-  /// 底片固定之后候选列表里要是还留着别的，成片时间轴会按别人的时长排，
-  /// 而镜头是按这一条切的，整段错位。
+  /// 同时把替换方案落到**镜头替换**上、清空整体替换的候选——**这是一条
+  /// 不变量**：底片固定之后候选列表里要是还留着别的，成片时间轴会按别人的
+  /// 时长排，而镜头是按这一条切的，整段错位。
   static (List<SemanticUnit>, List<UnitReplacement>) pin(
     List<SemanticUnit> units,
     List<UnitReplacement> replacements,
@@ -111,15 +111,17 @@ abstract final class BasePinOps {
     return (nextUnits, _clearShotPicks(replacements, index));
   }
 
-  /// 收敛成「整体替换、只选这一条」
+  /// 切完就落到**镜头替换**上：底片记在单元身上
+  /// （[SemanticUnit.baseCandidateId]），方案这一层从此说的是「哪一镜换了
+  /// 什么」。人切完分镜的下一步就是挑镜头，让他还得先切一次模式是多余的。
+  ///
+  /// 顺带把整体替换的候选清空——它们的角色已经由底片接管，留着会让成片
+  /// 按别人的时长排，而镜头是按这一条切的
   static List<UnitReplacement> _onlyThisCandidate(
           List<UnitReplacement> replacements, int index, int candidateId) =>
       [
         for (var i = 0; i < replacements.length; i++)
-          if (i == index)
-            UnitReplacement.whole([candidateId], previewId: candidateId)
-          else
-            replacements[i],
+          if (i == index) UnitReplacement.perShot(const {}) else replacements[i],
       ];
 
   static List<UnitReplacement> _clearShotPicks(

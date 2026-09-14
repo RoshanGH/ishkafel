@@ -125,7 +125,7 @@ void main() {
       expect(units[0], before);
     });
 
-    test('候选收敛成这一条——留着别的，成片会按别人的时长排', () {
+    test('整体替换的候选清空——它们的角色由底片接管了', () {
       final (_, plans) = BasePinOps.pin(
         [_inserted()],
         [UnitReplacement.whole([7, 8, 9], previewId: 9)],
@@ -134,8 +134,33 @@ void main() {
         shots: _cut(),
       );
 
-      expect(plans[0].wholeCandidateIds, [7]);
-      expect(plans[0].wholePreviewId, 7);
+      expect(plans[0].wholeCandidateIds, isEmpty,
+          reason: '留着别的，成片会按别人的时长排，而镜头是按 7 切的');
+    });
+
+    test('切完直接落到镜头替换上——人下一步就是挑镜头', () {
+      final (_, plans) = BasePinOps.pin(
+        [_inserted()],
+        [UnitReplacement.whole([7])],
+        0,
+        candidateId: 7,
+        shots: _cut(),
+      );
+
+      expect(plans[0].mode, ReplacementMode.perShot);
+    });
+
+    test('底片记在单元身上，不靠方案记——切模式也丢不了', () {
+      final (units, plans) = BasePinOps.pin(
+        [_inserted()],
+        [UnitReplacement.whole([7])],
+        0,
+        candidateId: 7,
+        shots: _cut(),
+      );
+
+      expect(baseChoiceOf(unit: units[0], replacement: plans[0]),
+          const MaterialBase(7));
     });
 
     test('新切的镜头还没打标：标成过期，重新打标会把它们捡起来', () {

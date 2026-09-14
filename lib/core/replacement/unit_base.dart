@@ -58,6 +58,30 @@ class UnitBase {
 bool hasOwnBaseShots(SemanticUnit unit) =>
     unit.baseCandidateId != null && unit.shots.isNotEmpty;
 
+/// 这份方案里**还有人引用**的候选素材 id。
+///
+/// 「引用」有三处，少算一处那条素材就会被当成孤儿清掉：
+/// 1. 整体替换选的候选
+/// 2. 镜头替换选的候选
+/// 3. **固定过底片的单元的那张底片**——它记在单元身上
+///    （[SemanticUnit.baseCandidateId]），不在方案里
+///
+/// 第 3 条是踩出来的：切完分镜再挑一镜素材，方案从 whole 落到 perShot，
+/// 底片就不在任何 replacement 里了。收敛「已选素材」时把它判成没人引用、
+/// 连记录带首帧图一起清掉，预览于是找不到底片的路径——**整段变黑**，
+/// 而哪儿都不报错（2026-09-15 真机走查撞到）。
+Set<int> referencedCandidateIds(
+  List<SemanticUnit> units,
+  List<UnitReplacement> replacements,
+) =>
+    {
+      for (final r in replacements) ...[
+        ...r.wholeCandidateIds,
+        for (final ids in r.shotCandidateIds.values) ...ids,
+      ],
+      for (final u in units) ?u.baseCandidateId,
+    };
+
 /// 底片是谁——**只做决策，不碰文件系统**。
 ///
 /// 分成两层是因为两边问的时机不同：预览时素材已经落地，可以连路径一起算
