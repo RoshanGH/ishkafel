@@ -530,7 +530,13 @@ void main() {
       expect(find.byKey(const Key('bgm-picked-1')), findsOneWidget);
       expect(find.byKey(const Key('bgm-picked-2')), findsOneWidget);
       expect(find.textContaining('已选 2 首'), findsOneWidget);
-      expect(find.textContaining('轮流用'), findsOneWidget);
+      // 「导出时轮流用」那句解释摆在常驻提示里（一首都没选时就看得到），
+      // 不在已选条上重复一遍
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('bgm-multi-hint')),
+              matching: find.textContaining('轮流用')),
+          findsOneWidget);
     });
 
     testWidgets('换了关键词、整页结果都变了，已选条还在', (tester) async {

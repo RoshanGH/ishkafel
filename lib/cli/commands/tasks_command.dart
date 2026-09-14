@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_copy.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 
@@ -120,4 +121,60 @@ Future<int> runTaskRenameCommand({
   emitJson({'ok': true, 'id': task.id, 'name': next, 'was': task.name},
       out: out);
   return 0;
+}
+
+/// `ishkafel task-copy <id> [--name "新名字"]` —— 复制一条任务。
+///
+/// **界面上人能复制，Agent 就得能复制。** 典型用法：同一条原片想试两套
+/// 完全不同的替换思路，复制出来各走各的——两条任务此后完全隔离，
+/// 改一条不动另一条，删一条也不影响另一条（见 [TaskCopier]）。
+Future<int> runTaskCopyCommand({
+  required List<String> rest,
+  required Directory dataDir,
+  String? name,
+  StringSink? out,
+  StringSink? err,
+}) async {
+  final sink = err ?? stderr;
+  if (rest.isEmpty) {
+    sink.writeln('用法：ishkafel task-copy <任务 id> [--name "新名字"]');
+    return exitBadUsage;
+  }
+  final repository = FileTaskRepository(dataDir);
+  final task = await resolveTaskRef(repository, rest.first);
+  if (task == null) {
+    sink.writeln('没有这个任务：${rest.first}');
+    return exitNotFound;
+  }
+  // 还在分析的不给复制：那时产物只有一半，抄出来的副本不能用
+  if (taskCopyBlockedReason(task) case final blocked?) {
+    sink.writeln(blocked);
+    return exitBadUsage;
+  }
+  final all = await repository.findAll();
+  try {
+    final copy = await TaskCopier(dataDir).duplicate(
+      task,
+      newId: DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+      seq: await nextTaskSeq(repository),
+      now: DateTime.now(),
+      name: (name ?? '').trim().isEmpty
+          ? copiedTaskName(task.name, [for (final t in all) t.name])
+          : name!.trim(),
+    );
+    await repository.save(copy);
+    emitJson({
+      'ok': true,
+      'id': copy.id,
+      'name': copy.name,
+      if (copy.seq != null) 'seq': copy.seq,
+      'copiedFrom': task.id,
+      // 复制带走了多少字节：人和 Agent 都该知道这一下占了多少盘
+      'bytesCopied': TaskCopier(dataDir).estimatedBytes(task.id),
+    }, out: out);
+    return 0;
+  } catch (e) {
+    sink.writeln('复制失败：$e');
+    return exitFailed;
+  }
 }

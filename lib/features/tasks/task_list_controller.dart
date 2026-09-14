@@ -8,6 +8,8 @@ import '../../core/audio/vocal_separator.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/project_ref.dart';
+import '../../core/storage/task_copy.dart';
+import '../settings/settings_providers.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
@@ -198,6 +200,30 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 以磁盘上的当前记录为基线，而不是调用方传进来的 [task]：重命名对话框
   /// 可以长时间停留，期间后台分析可能已经写入了 units/新状态，拿旧快照
   /// copyWith 会把这些成果一并抹掉。记录已不存在时不落库（见 [_currentRecord]）。
+  /// 复制一条任务。返回新任务；源任务已被删掉时返回 null。
+  ///
+  /// **两条任务此后完全隔离**——该带走的产物一并复制、任务里存的路径全部
+  /// 改写到新任务名下（见 [TaskCopier]）。
+  Future<RenewTask?> copyTask(RenewTask task) async {
+    final current = await _currentRecord(task, action: '复制');
+    if (current == null) return null;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    final repository = ref.read(taskRepositoryProvider);
+    final all = await repository.findAll();
+    final copy = await TaskCopier(dataDir).duplicate(
+      current,
+      // 和导入那条路同一个身份生成方式（见 ImportService._defaultId）
+      newId: DateTime.now().microsecondsSinceEpoch.toRadixString(36),
+      seq: await nextTaskSeq(repository),
+      now: DateTime.now(),
+      name: copiedTaskName(current.name, [for (final t in all) t.name]),
+    );
+    await repository.save(copy);
+    await _refreshAfterSave(copy);
+    return copy;
+  }
+
   Future<RenameOutcome> renameTask(RenewTask task, String newName) async {
     final trimmed = newName.trim();
     if (trimmed.isEmpty) {

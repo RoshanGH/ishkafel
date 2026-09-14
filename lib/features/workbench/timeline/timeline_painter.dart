@@ -195,7 +195,8 @@ class TimelinePainter extends CustomPainter {
       (
         TimelineTracks.bgmLabelTop,
         '配乐',
-        '横向拖选一段连续的台词语义单元；拖两端改长度，点 × 删除'
+        '横向拖选一段连续的台词语义单元；拖两端改长度，点 × 删除。'
+            '一段可以选好几首互为备选，导出多条时轮流用（块上的数字就是几首）'
       ),
       (TimelineTracks.thumbsLabelTop, '画面', ''),
       (TimelineTracks.waveLabelTop, '音频', ''),

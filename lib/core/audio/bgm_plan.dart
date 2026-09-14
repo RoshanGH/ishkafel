@@ -133,10 +133,16 @@ class BgmSegment {
   BgmMaterial materialFor(int variantIndex) =>
       materials[variantIndex % materials.length];
 
-  /// 预览播的那一首。下标越界时夹回第一个——方案是存在盘上的，
-  /// 用户删掉几首备选之后下标可能就指不到了
-  BgmMaterial get previewMaterial =>
-      materials[previewIndex.clamp(0, materials.length - 1)];
+  /// 预览播的那一首。**下标越界时退回第一首**——方案是存在盘上的，
+  /// 用户删掉几首备选之后下标可能就指不到了。
+  ///
+  /// 退回第一首而不是夹到最后一首：选曲面板删曲子时修的也是 0
+  /// （见 `_toggle`），三处口径要一致。原来这里是 clamp 到末尾，
+  /// 和自己的注释、和面板都对不上（2026-09-14 写测试时发现）
+  BgmMaterial get previewMaterial => previewIndex >= 0 &&
+          previewIndex < materials.length
+      ? materials[previewIndex]
+      : materials.first;
 
   /// 夹回 0~1。构造函数是 const 的（很多地方直接 `const BgmSegment(...)`），
   /// 夹取只能放在入口：来自界面的滑块、来自存档的脏数据。

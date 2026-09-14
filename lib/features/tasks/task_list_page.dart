@@ -37,6 +37,7 @@ import 'new_task_wizard/wizard_providers.dart';
 import 'environment_banner.dart';
 import 'source_availability.dart';
 import 'task_card.dart';
+import '../../core/storage/task_copy.dart';
 import 'task_card_menu.dart';
 import 'task_filter.dart';
 import 'task_list_toolbar.dart';
@@ -755,7 +756,9 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         canReview: collectReviewItems(
                 task.replacementsFor(task.units ?? const []))
             .isNotEmpty,
-        canReanalyze: task.sourcePath != null);
+        canReanalyze: task.sourcePath != null,
+        // 还在分析的不给复制：那时产物只有一半，抄出来的副本不能用
+        canCopy: taskCopyBlockedReason(task) == null);
     if (action == null || !context.mounted) return;
     final controller = ref.read(taskListProvider.notifier);
     switch (action) {
@@ -772,6 +775,26 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         // 对话框可能停留很久，期间任务被删除时必须给一句反馈而不是静默无事发生
         if (outcome == RenameOutcome.taskMissing && context.mounted) {
           _showSnackBar(context, taskMissingMessage);
+        }
+      case TaskCardAction.copy:
+        // 先说清要多占多少盘：复制要把素材、配音、人声轨一并抄一份
+        final dataDir = ref.read(dataDirProvider);
+        final bytes =
+            dataDir == null ? 0 : TaskCopier(dataDir).estimatedBytes(task.id);
+        final all = await ref.read(taskRepositoryProvider).findAll();
+        final newName =
+            copiedTaskName(task.name, [for (final t in all) t.name]);
+        if (!context.mounted) return;
+        if (!await confirmCopyTask(context, task,
+            bytes: bytes, newName: newName)) {
+          return;
+        }
+        final copy = await controller.copyTask(task);
+        if (!context.mounted) return;
+        if (copy == null) {
+          _showSnackBar(context, taskMissingMessage);
+        } else {
+          _showSnackBar(context, '已复制成「${copy.name}」');
         }
       case TaskCardAction.reanalyze:
         await _retryAnalysis(context, ref, task);

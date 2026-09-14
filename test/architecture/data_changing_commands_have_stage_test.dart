@@ -21,6 +21,10 @@ void main() {
     // 管理与导航（不改成片内容）
     'runCleanCommand', 'runSkillCommand', 'runOpenCommand', 'runUiCommand',
     'runTaskDeleteCommand', 'runTaskRenameCommand',
+    // 复制任务：**不动任何已存在任务的内容**，只多出一条新的。
+    // 和建任务同类；界面按指纹一秒一刷（见 tasksFingerprint），
+    // 可视模式下那条副本会自己出现在列表里
+    'runTaskCopyCommand',
     // 分发器：真正干活的子命令自己有舞台
     'runVoiceCommand',
     // 建任务：可视模式下走 ui new-task（界面当着人的面建）

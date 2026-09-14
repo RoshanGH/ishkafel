@@ -38,6 +38,7 @@ void main() {
       'unit tags': '给手加的单元手填标签',
       'unit audio': '这一镜保留素材原声、调音量',
       'unit source-audio': '这一镜的**原片**声音放哪一路、多大声',
+      'task-copy': '复制一条任务（两条完全隔离）——界面上人能复制',
       'unit subtitle': '改这一镜要烧的字幕',
     };
     for (final e in knobs.entries) {

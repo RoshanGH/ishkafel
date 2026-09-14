@@ -26,6 +26,7 @@ const List<String> topLevelCommands = [
   'subtitle',
   'tag-groups',
   'task',
+  'task-copy',
   'task-delete',
   'task-rename',
   'tasks',

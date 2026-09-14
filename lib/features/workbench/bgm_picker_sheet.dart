@@ -300,6 +300,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
+              _multiHint(),
               _pickedStrip(),
               Expanded(child: _body()),
               _VolumeRow(
@@ -343,14 +344,38 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
                       previewIndex: _previewIndex,
                       volume: _volume,
                     )),
+            // 没选时写「至少选一首」而不是「选一首」——后者读起来像
+            // 「只能选一首」，而这条线本来就是多选的
             child: Text(widget.singleSelect
                 ? (_picked.isEmpty ? '先选一首' : '用这一首')
                 : _picked.isEmpty
-                ? '选一首'
+                ? '至少选一首'
                 : '用这 ${_picked.length} 首'),
           ),
         ],
       );
+
+  /// 「这一段可以选好几首」——**常驻**在列表上面，不是等选到第二首才说。
+  ///
+  /// 人是在选第二首**之前**需要知道这件事的。2026-09-14 真机：用户以为
+  /// 「现在只能选一个」，而多选一直是通的——他只是没有任何地方被告知。
+  /// 单选那条线（编导台）不出现这句。
+  Widget _multiHint() {
+    if (widget.singleSelect) return const SizedBox.shrink();
+    return Padding(
+      key: const Key('bgm-multi-hint'),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Text(
+        _picked.isEmpty
+            ? '可以选好几首互为备选：导出多条时按次序轮流用，标 ★ 的那首用于预览'
+            : '还可以再选：导出多条时按次序轮流用，标 ★ 的那首用于预览',
+        style: const TextStyle(
+            color: AppColors.textTertiary,
+            fontSize: AppFontSize.micro,
+            height: 1.5),
+      ),
+    );
+  }
 
   /// 「已选」条：选了哪几首一直摆在列表上面。
   ///
@@ -366,9 +391,9 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            _picked.length > 1
-                ? '已选 ${_picked.length} 首 · 导出时按这个次序轮流用，★ 的那首用于预览'
-                : '已选 1 首',
+            // 只报数：「轮流用」那句解释在上面那条常驻提示里，
+            // 两处都说等于把同一句话摆两遍
+            '已选 ${_picked.length} 首',
             style: const TextStyle(
                 color: AppColors.textTertiary, fontSize: AppFontSize.micro),
           ),
@@ -487,6 +512,7 @@ class _BgmPickerDialogState extends ConsumerState<_BgmPickerDialog> {
           onTap: () => _toggle(items[i]),
           onSetPreview:
               at < 0 ? null : () => setState(() => _previewIndex = at),
+          singleSelect: widget.singleSelect,
         );
       },
     );
@@ -570,6 +596,9 @@ class _Row extends StatelessWidget {
   /// 把这一首设为预览版；未选中时为 null
   final VoidCallback? onSetPreview;
 
+  /// 这一段只能选一首（编导台）。决定行首画圆点还是方框
+  final bool singleSelect;
+
   const _Row(
       {required this.material,
       required this.rangeMs,
@@ -577,7 +606,8 @@ class _Row extends StatelessWidget {
       required this.onTap,
       this.pickedOrder,
       this.isPreview = false,
-      this.onSetPreview});
+      this.onSetPreview,
+      this.singleSelect = false});
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -611,8 +641,15 @@ class _Row extends StatelessWidget {
                           color: AppColors.accentBlue,
                           fontSize: AppFontSize.caption,
                           fontWeight: FontWeight.w600))
-                  : const Icon(Icons.radio_button_unchecked,
-                      size: 13, color: AppColors.textTertiary),
+                  // **多选用方框、单选才用圆点**：空心圆是 radio 的语言，
+                  // 人一看就以为只能选一首（2026-09-14 真机：用户以为
+                  // 「现在只能选一个」，其实多选一直是通的）
+                  : Icon(
+                      singleSelect
+                          ? Icons.radio_button_unchecked
+                          : Icons.check_box_outline_blank,
+                      size: 14,
+                      color: AppColors.textTertiary),
             ),
             Expanded(
               child: Column(

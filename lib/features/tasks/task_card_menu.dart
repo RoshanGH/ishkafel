@@ -5,12 +5,14 @@ import '../../app/theme/app_typography.dart';
 import '../../core/models/renew_task.dart';
 
 /// 任务卡上下文菜单动作
-enum TaskCardAction { review, rename, reanalyze, delete }
+enum TaskCardAction { review, rename, copy, reanalyze, delete }
 
 /// 在指定屏幕坐标弹出任务卡菜单（右键或「更多」按钮触发）
 Future<TaskCardAction?> showTaskCardMenu(
     BuildContext context, Offset globalPosition,
-    {bool canReview = false, bool canReanalyze = true}) {
+    {bool canReview = false,
+    bool canReanalyze = true,
+    bool canCopy = true}) {
   final overlay =
       Overlay.of(context).context.findRenderObject() as RenderBox?;
   final overlaySize = overlay?.size ?? MediaQuery.of(context).size;
@@ -38,6 +40,13 @@ Future<TaskCardAction?> showTaskCardMenu(
         height: 34,
         child: Text('重命名', style: _itemStyle),
       ),
+      // 还在分析的不给复制：那时产物只有一半，抄出来的副本不能用
+      if (canCopy)
+        const PopupMenuItem(
+          value: TaskCardAction.copy,
+          height: 34,
+          child: Text('复制任务', style: _itemStyle),
+        ),
       // 没有原片的任务（拼片/脚本成片）无从分析，点了必失败的入口不给
       if (canReanalyze)
         const PopupMenuItem(
@@ -82,6 +91,45 @@ Future<bool> confirmDeleteTask(BuildContext context, RenewTask task) async {
           onPressed: () => Navigator.of(dialogContext).pop(true),
           style: TextButton.styleFrom(foregroundColor: AppColors.red),
           child: const Text('删除'),
+        ),
+      ],
+    ),
+  );
+  return confirmed ?? false;
+}
+
+/// 复制前问一句：说清会多占多少盘，以及两条任务此后互不相干。
+///
+/// 不是破坏性操作，但**要占几十上百兆**——不说清楚，人点完才发现盘满了。
+/// 返回 true 表示确认复制
+Future<bool> confirmCopyTask(
+  BuildContext context,
+  RenewTask task, {
+  required int bytes,
+  required String newName,
+}) async {
+  final mb = (bytes / 1048576).toStringAsFixed(bytes > 1048576 ? 0 : 1);
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      backgroundColor: AppColors.surfaceRaised,
+      title: const Text('复制任务',
+          style: TextStyle(fontSize: AppFontSize.title)),
+      content: Text(
+        '复制出「$newName」，切分、标签、已挑的素材、配乐、字幕、配音全都照搬。\n\n'
+        '两条任务此后完全隔离：改一条不动另一条，删一条也不影响另一条。'
+        '为此要把这条任务的素材、配音、人声轨一并复制一份，约占 $mb MB。',
+        style: const TextStyle(fontSize: AppFontSize.emphasis, height: 1.6),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(false),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          key: const Key('confirm-copy-task'),
+          onPressed: () => Navigator.of(dialogContext).pop(true),
+          child: const Text('复制'),
         ),
       ],
     ),

@@ -225,6 +225,8 @@ Future<void> main(List<String> args) async {
       ),
     'task-rename' => await runTaskRenameCommand(
         rest: rest, dataDir: dataDir, name: parsed['name'] as String?),
+    'task-copy' => await runTaskCopyCommand(
+        rest: rest, dataDir: dataDir, name: parsed['name'] as String?),
     'task-delete' => await runTaskDeleteCommand(
         rest: rest, dataDir: dataDir, yes: parsed['yes'] as bool),
     'ui' => await runUiCommand(
