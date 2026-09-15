@@ -1,3 +1,4 @@
+import '../analysis/providers.dart' show AsrSentence;
 import '../models/semantic_unit.dart';
 import '../models/shot.dart';
 import '../replacement/replacement_plan.dart';
@@ -67,6 +68,9 @@ abstract final class BasePinOps {
     int index, {
     required int candidateId,
     required List<Shot> shots,
+
+    /// 这条底片素材自己的转写（字幕从它取）。null = 没转成，那一段没字幕
+    List<AsrSentence>? sentences,
   }) {
     if (index < 0 || index >= units.length) return (units, replacements);
     final nextUnits = [
@@ -74,6 +78,7 @@ abstract final class BasePinOps {
         if (i == index)
           units[i].copyWith(
             baseCandidateId: candidateId,
+            baseSentences: sentences,
             shots: List.unmodifiable(shots),
             // 镜头是新切的，标签还没打——标成过期，重新打标会把它们捡起来
             tagsStale: true,
@@ -104,7 +109,9 @@ abstract final class BasePinOps {
             ...units[i].toJson(),
             'baseCandidateId': null,
             'shots': const <Map<String, dynamic>>[],
-          }..remove('baseCandidateId'))
+          }
+            ..remove('baseCandidateId')
+            ..remove('baseSentences'))
         else
           units[i],
     ];

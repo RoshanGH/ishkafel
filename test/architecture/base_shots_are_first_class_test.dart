@@ -54,7 +54,27 @@ void main() {
     expect(dialog, contains('花钱'), reason: '要花钱必须写出来');
   });
 
-  test('字幕：底片是素材时不拿 ASR 硬凑', () {
+  test('字幕：底片素材要自己转写一遍，词级时间戳只能从这儿来', () {
+    // 产品负责人在「按时长摊字数」和「真转写」之间选了后者：
+    // 这条产品线的字幕是要交付的，摊出来的时间点在成片里一看就飘
+    expect(read('lib/core/analysis/base_transcriber.dart'),
+        contains('transcribe'));
+    expect(read('lib/features/workbench/workbench_page.dart'),
+        contains('baseTranscriberProvider'),
+        reason: '切分那条路要顺手把这条素材转写一遍');
+    expect(read('lib/core/models/semantic_unit.dart'),
+        contains('baseSentences'),
+        reason: '转写结果要记在单元上，字幕从它取');
+    for (final caller in const [
+      'lib/core/export/export_runner.dart',
+      'lib/core/subtitle/preview_subtitle_at.dart',
+    ]) {
+      expect(read(caller), contains('baseSentences'),
+          reason: '$caller 没用底片自己的转写，字幕就还是空的（或是原片那句）');
+    }
+  });
+
+  test('字幕：底片是素材时不拿原片那份 ASR 硬凑', () {
     // 时间戳量的是原片，画面却换成了另一条片子——取出来的台词跟画面
     // 毫不相干，而它会被结结实实烧进成片
     expect(read('lib/core/subtitle/slot_subtitles.dart'),

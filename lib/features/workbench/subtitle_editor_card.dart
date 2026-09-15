@@ -31,13 +31,12 @@ class SubtitleEditorCard extends StatefulWidget {
   /// 是不是手改过（改过才给「改回自动」，并标出来）
   final bool edited;
 
-  /// 这一段**没有台词可取**：底片是挑来的素材（原片的台词跟这段画面无关），
-  /// 或者整条任务压根没有转写（拼片）。
+  /// 这一镜的字幕**取自底片素材自己的转写**（不是原片那份 ASR）。
   ///
-  /// 那时「自动」就是空的——文案要如实说，不能还写着「这里的字会重新烧
-  /// 上去」；「改回自动」也没有意义（改回去还是空）
-  /// （2026-09-15 真机：「还是没有字幕啊」「显示也不对」）
-  final bool noTranscript;
+  /// 文案要按**实际取到没取到**说话，不能只看来源：这一镜取到了就照常
+  /// 说明来源，取不到才说「没转出话来」。按来源一刀切的话，明明有字幕
+  /// 却写着「没有」（2026-09-15 真机撞到）
+  final bool onMaterialBase;
 
   /// 这一镜有多长（毫秒）。字幕的时间**存的是相对这一镜开头**的，
   /// 改时间时要靠它夹住上界——字幕不许拖出这一镜
@@ -62,7 +61,7 @@ class SubtitleEditorCard extends StatefulWidget {
   const SubtitleEditorCard({
     super.key,
     required this.replaced,
-    this.noTranscript = false,
+    this.onMaterialBase = false,
     required this.lines,
     required this.edited,
     required this.slotDurationMs,
@@ -248,12 +247,16 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
       ]),
       const SizedBox(height: 4),
       Text(
-          widget.noTranscript
-              ? '这一段没有台词可取——画面来自挑来的素材，原片那句跟它对不上'
-                  '（拼片任务则是压根没有转写）。要字幕就在这儿自己加，'
-                  '左边两个数是它在成片里的起止位置'
-              : '换过素材的镜头，原片的字跟着旧画面一起没了，这里的字会重新'
-                  '烧上去。左边两个数是这句话在成片里的起止位置，可以直接改',
+          !widget.onMaterialBase
+              ? '换过素材的镜头，原片的字跟着旧画面一起没了，这里的字会重新'
+                  '烧上去。左边两个数是这句话在成片里的起止位置，可以直接改'
+              : lines.isEmpty
+                  ? '这一段的字幕取自底片素材自己的转写，而这一镜里没转出话来'
+                      '（可能本来就没人说，也可能转写没成）——要字幕就在这儿'
+                      '自己加，左边两个数是它在成片里的起止位置'
+                  : '这一段的字幕取自底片素材自己的转写（原片那份跟这段画面'
+                      '对不上）。左边两个数是这句话在成片里的起止位置，'
+                      '可以直接改',
           style: const TextStyle(
               fontSize: AppFontSize.caption,
               height: 1.5,
@@ -272,10 +275,8 @@ class _SubtitleEditorCardState extends State<SubtitleEditorCard> {
               style: TextStyle(fontSize: AppFontSize.caption)),
         ),
         const Spacer(),
-        // 没改过就不摆——本来就是自动的，点了没意义。
-        // 没有台词可取的段落也不摆：「自动」是空的，改回去等于全删掉，
-        // 而按钮名字让人以为能变回某个有内容的版本
-        if (edited && !widget.noTranscript)
+        // 没改过就不摆——本来就是自动的，点了没意义
+        if (edited)
           TextButton(
             key: const ValueKey('subtitle-reset'),
             onPressed: onResetToAuto,

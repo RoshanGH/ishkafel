@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../core/audio/material_audio.dart';
 import '../../core/audio/source_audio.dart';
 import '../../app/service_wiring.dart';
+import '../../core/analysis/base_transcriber.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/analysis/unit_segmenter.dart';
 import '../../core/editing/base_pin_ops.dart';
@@ -631,8 +632,18 @@ Future<int> _segment(FileTaskRepository repository, RenewTask task, int? unit,
     return exitEnv;
   }
 
-  final (nextUnits, nextPlans) =
-      BasePinOps.pin(units, plans, unit, candidateId: candidateId, shots: shots);
+  // **顺手把这条素材转写一遍**：字幕要的词级时间戳只能从这儿来，原片那份
+  // 量的是原片、跟这段画面对不上。转不出来不挡切分——那一段就是没字幕
+  final sentences = pipeline == null
+      ? null
+      : await BaseTranscriber(
+              audio: pipeline.audio,
+              asr: pipeline.asr,
+              workDir: pipeline.workDir)
+          .transcribe(videoPath: basePath, key: '${task.id}_u${u.uid}');
+
+  final (nextUnits, nextPlans) = BasePinOps.pin(units, plans, unit,
+      candidateId: candidateId, shots: shots, sentences: sentences);
   final next = task.copyWith(
     units: nextUnits,
     replacementsByUid: {

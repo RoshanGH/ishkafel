@@ -51,9 +51,12 @@ String? previewSubtitleAt({
         slotStartMs: shots[s].startMs,
         slotEndMs: shots[s].endMs,
         // 预览要和导出看到同一份（见 [subtitleLinesForSlot]）：底片是素材
-        // 时不拿 ASR 硬凑，否则人在预览里看到一行跟画面无关的台词，
-        // 还以为导出也会是这样
+        // 时不拿原片那份 ASR 硬凑，字幕从**底片自己的转写**里取，
+        // 坑位也换成素材内偏移
         onMaterialBase: hasOwnBaseShots(units[u]),
+        baseSentences: units[u].baseSentences,
+        baseSlotStartMs: shots[s].startMs - units[u].startMs,
+        baseSlotEndMs: shots[s].endMs - units[u].startMs,
       );
       // 行的时间轴以坑位开头为 0（见 [subtitleLinesInSlot]）
       final rel = composedMs - start;

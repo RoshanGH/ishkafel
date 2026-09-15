@@ -703,8 +703,8 @@ class _InspectorPanelState extends State<InspectorPanel> {
           // 换过素材的镜头，原片的字跟着旧画面没了，这里的字会重新烧上去
           SubtitleEditorCard(
             replaced: widget.shotReplaced?.call(unitIndex, shotIndex) ?? false,
-            // 底片是素材的段落：原片那句台词跟这段画面对不上，自动那份是空的
-            noTranscript: onBase || unit.transcript.trim().isEmpty,
+            // 底片是素材的段落：字幕取自它自己的转写，不是原片那份 ASR
+            onMaterialBase: onBase,
             lines: widget.subtitleLinesOf?.call(unitIndex, shotIndex) ??
                 const [],
             edited: widget.subtitleEdited?.call(unitIndex, shotIndex) ?? false,

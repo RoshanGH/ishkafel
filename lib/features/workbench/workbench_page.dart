@@ -2191,9 +2191,16 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
             content: Text('这条素材读不出时长，切不了。换一条试试')));
         return;
       }
+      // **顺手把这条素材转写一遍**：字幕要的是词级时间戳，原片那份量的是
+      // 原片、跟这段画面毫无关系。转不出来不挡切分——那一段就是没字幕，
+      // 字幕卡上会如实说，人也可以自己排
+      final sentences = await ref.read(baseTranscriberProvider)?.transcribe(
+            videoPath: basePath,
+            key: '${_task.id}_u${unit.uid}',
+          );
       final (nextUnits, nextPlans) = BasePinOps.pin(
           editor.units, _replacements ?? const [], unitIndex,
-          candidateId: candidateId, shots: shots);
+          candidateId: candidateId, shots: shots, sentences: sentences);
       editor.replaceUnits(nextUnits);
       await _onReplacementsChanged(nextPlans);
       await _flushAutosave();
