@@ -1193,18 +1193,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// **手改过就给手改的，没改过就把自动算的那份算出来给人看** ——
   /// 直接给空列表的话，人一打开看到的是「没有字幕」，而导出时其实会烧上一份，
   /// 他改的第一步会变成「凭空敲一遍」。
+  /// 这一镜要烧哪几行字。**时间线、属性面板、字幕编辑卡都读它**——
+  /// 和预览、导出走的是同一份规则（见 [subtitleLinesForSlot]）。
+  ///
+  /// 底片固定过的单元从**它自己的转写**里取，坑位换成素材内偏移：原片那份
+  /// ASR 量的是原片，拿它算出来的行时间和这段画面对不上，画在时间线上就是
+  /// 一块位置和宽度都不对的灰条（2026-09-16 真机：字幕块和镜头块错开）
   List<SubtitleLine> _subtitleLinesOf(int unitIndex, int shotIndex) {
     final units = _editor?.units ?? const [];
     if (unitIndex >= units.length) return const [];
-    final shots = units[unitIndex].shots;
+    final unit = units[unitIndex];
+    final shots = unit.shots;
     if (shotIndex >= shots.length) return const [];
+    final onBase = hasOwnBaseShots(unit);
     return subtitleLinesForSlot(
       track: _task.subtitleTrack,
       sentences: _task.asrSentences ?? const [],
-      unitUid: units[unitIndex].uid,
+      unitUid: unit.uid,
       shotIndex: shotIndex,
       slotStartMs: shots[shotIndex].startMs,
       slotEndMs: shots[shotIndex].endMs,
+      onMaterialBase: onBase,
+      baseSentences: onBase ? unit.baseSentences : null,
+      baseSlotStartMs:
+          onBase ? shots[shotIndex].startMs - unit.startMs : null,
+      baseSlotEndMs: onBase ? shots[shotIndex].endMs - unit.startMs : null,
     );
   }
 

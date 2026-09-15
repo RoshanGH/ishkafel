@@ -65,10 +65,7 @@ void main() {
     expect(read('lib/core/models/semantic_unit.dart'),
         contains('baseSentences'),
         reason: '转写结果要记在单元上，字幕从它取');
-    for (final caller in const [
-      'lib/core/export/export_runner.dart',
-      'lib/core/subtitle/preview_subtitle_at.dart',
-    ]) {
+    for (final caller in _subtitleCallers()) {
       expect(read(caller), contains('baseSentences'),
           reason: '$caller 没用底片自己的转写，字幕就还是空的（或是原片那句）');
     }
@@ -81,13 +78,14 @@ void main() {
         contains('onMaterialBase'),
         reason: '这是全 app 唯一说了算的地方，判据要在这儿');
 
-    for (final caller in const [
-      'lib/core/export/export_runner.dart',
-      'lib/core/subtitle/preview_subtitle_at.dart',
-    ]) {
+    final callers = _subtitleCallers();
+    expect(callers, hasLength(greaterThanOrEqualTo(3)),
+        reason: '至少有预览、导出、时间线三处在取字幕；扫不到说明扫描写错了');
+
+    for (final caller in callers) {
       expect(read(caller), contains('onMaterialBase:'),
           reason: '$caller 没把底片这件事告诉 subtitleLinesForSlot，'
-              '预览和导出就会各看到一份不一样的字幕');
+              '预览、导出、时间线就会各看到一份不一样的字幕');
     }
   });
 
@@ -154,4 +152,23 @@ void main() {
         contains('shotsTagged'));
     expect(read('docs/AGENT_SKILL.md'), contains('shotsTagged'));
   });
+}
+/// 全仓扫一遍：谁在调 [subtitleLinesForSlot]，谁就在这份名单上。
+///
+/// 这里原先是手写的两个路径，结果时间线那处（`_subtitleLinesOf`）在名单外
+/// 躺了一整轮——界面上的字幕块按原片时间戳画，位置和镜头轨对不上，而守卫
+/// 全绿（2026-09-16 真机）。所以改成扫描：**新增第四个调用点会自动被管到**，
+/// 不用记得回来改名单。
+List<String> _subtitleCallers() {
+  final out = <String>[];
+  for (final e in Directory('lib').listSync(recursive: true)) {
+    if (e is! File || !e.path.endsWith('.dart')) continue;
+    // 定义它的那个文件本身不算调用方
+    if (e.path.endsWith('slot_subtitles.dart')) continue;
+    if (e.readAsStringSync().contains('subtitleLinesForSlot(')) {
+      out.add(e.path);
+    }
+  }
+  out.sort();
+  return out;
 }
