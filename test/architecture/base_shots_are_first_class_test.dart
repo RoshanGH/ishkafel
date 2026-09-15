@@ -89,6 +89,18 @@ void main() {
     }
   });
 
+  test('「整段替换」和「固定了底片」是两回事，别拿 isReplaced 当一块判', () {
+    // 固定过底片的单元 isReplaced 也为真（画面确实不是原片了），但它有
+    // 自己的镜头切分，每一镜都能单独换素材。拿 isReplaced 去跳过整段，
+    // 预览画面上一个字都不出，而时间线的字幕轨照画——「轨上有、画面上没有」
+    final preview = read('lib/core/subtitle/preview_subtitle_at.dart');
+
+    expect(preview, contains('isSolidBlock'),
+        reason: '要跳过的是「一整块」的那种，不是所有画面换过的');
+    expect(preview.contains('timeline.isReplaced('), isFalse,
+        reason: '这个判据会把底片单元整个吞掉');
+  });
+
   test('声音：底片是素材时分的是那条素材，不是原片', () {
     final audio = read('lib/core/audio/audio_track_builder.dart');
 

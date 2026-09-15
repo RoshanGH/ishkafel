@@ -26,8 +26,14 @@ String? previewSubtitleAt({
   final units = timeline.units;
   for (var u = 0; u < units.length; u++) {
     // 整体替换的那一段整个换成了另一条素材，原片的镜头切分已经不存在，
-    // 也没有我们烧的字幕（见 `docs/术语表.md` 的「整体替换」）
-    if (timeline.isReplaced(u)) continue;
+    // 也没有我们烧的字幕（见 `docs/术语表.md` 的「整体替换」）。
+    //
+    // **判据是 isSolidBlock 而不是 isReplaced**：固定过底片的单元
+    // `isReplaced` 也为真（画面确实已经不是原片了），但它**有自己的镜头
+    // 切分**，每一镜都能单独换素材、都该出字幕。用 isReplaced 的话整个
+    // 单元在这儿被跳过，预览画面上一个字都不出——时间线的字幕轨却照画，
+    // 于是「轨上有、画面上没有」（2026-09-16 真机）
+    if (timeline.isSolidBlock(u)) continue;
     final shots = units[u].shots;
     for (var s = 0; s < shots.length; s++) {
       final start = timeline.composedShotStart(u, s);
