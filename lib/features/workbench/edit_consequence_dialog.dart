@@ -4,6 +4,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_spacing.dart';
 import '../../app/theme/app_typography.dart';
 import '../../core/editing/edit_consequence.dart';
+import '../../core/replacement/replacement_plan.dart';
 
 /// 用户对「改完之后怎么办」的回答
 class EditConsequenceChoice {
@@ -25,16 +26,24 @@ class EditConsequenceChoice {
 /// 改得少时两项都不勾——一路回车就是「什么都不用动」。
 Future<EditConsequenceChoice?> showEditConsequenceDialog(
   BuildContext context,
-  EditConsequence consequence,
-) =>
+  EditConsequence consequence, {
+  List<UnitReplacement> replacements = const [],
+}) =>
     showDialog<EditConsequenceChoice>(
       context: context,
-      builder: (ctx) => _EditConsequenceDialog(consequence: consequence),
+      builder: (ctx) => _EditConsequenceDialog(
+          consequence: consequence, replacements: replacements),
     );
 
 class _EditConsequenceDialog extends StatefulWidget {
   final EditConsequence consequence;
-  const _EditConsequenceDialog({required this.consequence});
+
+  /// 用来算「这一下会取消掉几条素材」——只说「清除已选的替换素材」，
+  /// 人不知道自己要丢多少东西（他问过：点了之后影响范围有哪些）
+  final List<UnitReplacement> replacements;
+
+  const _EditConsequenceDialog(
+      {required this.consequence, this.replacements = const []});
 
   @override
   State<_EditConsequenceDialog> createState() => _EditConsequenceDialogState();
@@ -56,6 +65,30 @@ class _EditConsequenceDialogState extends State<_EditConsequenceDialog> {
       ? '切分结构变了（拆分/合并），原来的素材与标签多半已经对不上'
       : '改动幅度约 ${(widget.consequence.maxChangedRatio * 100).round()}%';
 
+  /// 这几个单元一共挑了几条素材——整体替换的和每一镜的都算
+  int get _pickedCount {
+    var n = 0;
+    for (final i in widget.consequence.unitIndexes) {
+      if (i < 0 || i >= widget.replacements.length) continue;
+      final r = widget.replacements[i];
+      n += r.wholeCandidateIds.length;
+      for (final ids in r.shotCandidateIds.values) {
+        n += ids.length;
+      }
+    }
+    return n;
+  }
+
+  /// 「清除替换素材」这一条到底会动什么。**把数字说出来**
+  String get _clearSubtitle {
+    final n = _pickedCount;
+    if (n == 0) {
+      return '$_who 现在没挑任何素材，勾不勾都一样';
+    }
+    return '把 $_who 挑的 $n 条素材全部取消（整体替换的、每一镜的都算），'
+        '这几个单元回到「保留原片」。不勾就原样留着';
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
         backgroundColor: AppColors.surfaceRaised,
@@ -68,20 +101,28 @@ class _EditConsequenceDialogState extends State<_EditConsequenceDialog> {
                 style: const TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: AppFontSize.body)),
+            const SizedBox(height: 2),
+            // **先把范围钉死**：人最想知道的是「会不会动到别的地方」
+            Text('下面两项只作用在 $_who 上，别的单元一个都不碰。',
+                key: const Key('consequence-scope'),
+                style: const TextStyle(
+                    color: AppColors.textTertiary,
+                    fontSize: AppFontSize.caption)),
             const SizedBox(height: AppSpacing.md),
             _Option(
               key: const Key('consequence-clear'),
               value: _clear,
               onChanged: (v) => setState(() => _clear = v),
-              title: '清除这几个单元已选的替换素材',
-              subtitle: '画面变了，原来挑的素材可能对不上；不清就保持现状',
+              title: '取消 $_who 已挑的素材',
+              subtitle: _clearSubtitle,
             ),
             _Option(
               key: const Key('consequence-retag'),
               value: _retag,
               onChanged: (v) => setState(() => _retag = v),
-              title: '重新打标',
-              subtitle: '标记为待重打并立即送去打标；不重打就沿用现有标签',
+              title: '给 $_who 重新打标',
+              subtitle: '点完就送去云端逐个看图打标，要花钱、要等一会儿。'
+                  '不勾就先标成「待重打」，沿用现有标签，以后再打',
             ),
           ],
         ),

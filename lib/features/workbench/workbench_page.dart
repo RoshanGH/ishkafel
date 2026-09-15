@@ -1561,7 +1561,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
     _askingConsequence = true;
     try {
-      final choice = await showEditConsequenceDialog(context, consequence);
+      final choice = await showEditConsequenceDialog(context, consequence,
+          replacements: _replacements ?? const []);
       if (choice == null || choice.nothingToDo || !mounted) return;
       if (choice.clearCandidates) {
         await _onReplacementsChanged(
@@ -2127,14 +2128,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       return;
     }
 
-    // 点之前把作废什么说清楚——不是破坏性操作，但会掉东西
+    // **每次都问**：这一下不只是切，切完还接着送云端逐镜打标——
+    // 花钱的动作不许点一下就跑起来。作废什么也一并说清
     final cost = BasePinOps.costOf(
         unit: unit, replacement: plan, candidateId: candidateId);
-    if (!cost.isFree || hasOwnBaseShots(unit)) {
-      final ok = await confirmPinBase(context,
-          unitLabel: 'U${unit.index + 1}', cost: cost, repin: hasOwnBaseShots(unit));
-      if (!ok || !mounted) return;
-    }
+    final ok = await confirmPinBase(context,
+        unitLabel: 'U${unit.index + 1}',
+        cost: cost,
+        repin: hasOwnBaseShots(unit));
+    if (!ok || !mounted) return;
 
     setState(() => _segmentingUnit = unitIndex);
     try {
@@ -2166,9 +2168,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       await _flushAutosave();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头。'
-              '这些镜头还没打标——在左边卡片上点「给这些镜头打标」，'
-              '按画面搜素材才有结果')));
+          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头，'
+              '接着给它们打标…')));
     } catch (e) {
       AppLog.warn('切分这一段的底片失败（taskId=${_task.id}, U$unitIndex）：$e');
       if (!mounted) return;
@@ -2178,6 +2179,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       ));
     } finally {
       if (mounted) setState(() => _segmentingUnit = null);
+    }
+
+    // **切完就接着打标**：原片切出来的镜头是分析时顺带打好标的，底片切出来
+    // 的也得一样——不打标，按画面/标签搜素材一条都搜不出来，这一段等于只切
+    // 不能用。放在 finally 之后是为了让「正在切」的转圈先收掉，
+    // 接着亮的是「正在打标」
+    if (mounted && hasOwnBaseShots(_editor?.units[unitIndex] ?? unit)) {
+      await _retagBaseUnit(unitIndex);
     }
   }
 

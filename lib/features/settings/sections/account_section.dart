@@ -95,7 +95,7 @@ class _LoggedIn extends ConsumerWidget {
             ref,
             key: const Key('settings-switch-tenant'),
             title: '切换企业',
-            description: '**标签组是按企业分的**。在错的企业下，新建任务时会选不到'
+            description: '标签组是按企业分的。在错的企业下，新建任务时会选不到'
                 '标签组，画面也就打不出标签、挑替换素材时没有标签可用。',
             load: (auth) => auth.listTenants(),
             select: (auth, id) => auth.selectTenant(id),

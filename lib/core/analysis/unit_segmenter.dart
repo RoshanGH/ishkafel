@@ -3,6 +3,7 @@ import '../models/semantic_unit.dart';
 import '../models/shot.dart';
 import '../replacement/unit_base.dart';
 import '../time/timecode.dart';
+import 'boundary_trace_index.dart';
 import 'scene_detector.dart';
 import 'shot_boundary_finder.dart';
 
@@ -36,12 +37,39 @@ class UnitSegmenter {
     required double fps,
   }) async {
     final cuts = await _detect(base.path, '${taskId}_u${unit.uid}', fps);
-    return shotsFromCuts(
+    final shots = shotsFromCuts(
       unit: unit,
       baseDurationMs: base.durationMs,
       cutsMs: cuts,
       fps: fps,
     );
+    // **这一刀是怎么定出来的也要记下来**，跟全片切分一样
+    // （见 `AnalysisPipeline._withBoundaryTrace`）：画面差异分数、
+    // 是直接确认的还是灰区经画面复核保留的。属性面板靠它回看这一刀的依据，
+    // 不记的话底片切出来的镜头就比原片切出来的少一样东西
+    return _withBoundaryTrace(shots, unit: unit, fps: fps);
+  }
+
+  /// 把切点判定明细贴到镜头上。
+  ///
+  /// 两处对不齐要当心：[ShotBoundaryFinder.lastDetails] 的键是**底片内的
+  /// 原始毫秒**，而镜头坐标是「单元起点 + 帧对齐后的偏移」。所以查表前
+  /// 既要减回单元起点，键那边也要先对齐（见 [boundaryTracesByFrame]）
+  static List<Shot> _withBoundaryTrace(
+    List<Shot> shots, {
+    required SemanticUnit unit,
+    required double fps,
+  }) {
+    final traces =
+        boundaryTracesByFrame(ShotBoundaryFinder.lastDetails, fps);
+    if (traces.isEmpty) return shots;
+    return List.unmodifiable([
+      for (final s in shots)
+        if (traces[s.startMs - unit.startMs] case final t?)
+          s.copyWith(boundaryTrace: t)
+        else
+          s,
+    ]);
   }
 
   Future<List<int>> _detect(String videoPath, String key, double fps) async {

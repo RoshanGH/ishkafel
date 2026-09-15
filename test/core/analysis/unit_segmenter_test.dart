@@ -1,5 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/core/analysis/scene_detector.dart';
+import 'package:ishkafel/core/analysis/shot_boundary_detector.dart';
+import 'package:ishkafel/core/analysis/shot_boundary_finder.dart';
 import 'package:ishkafel/core/analysis/unit_segmenter.dart';
+import 'package:ishkafel/core/replacement/unit_base.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 
 SemanticUnit _unit({int startMs = 4000}) => SemanticUnit(
@@ -110,4 +114,106 @@ void main() {
       expect(shots, isEmpty);
     });
   });
+
+  group('底片切出来的镜头，该有的一样不少', () {
+    test('这一刀怎么定出来的也要记下来——属性面板靠它回看依据', () async {
+      // 全片切分会把画面差异分数、是否经复核贴到镜头上
+      // （AnalysisPipeline._withBoundaryTrace）。底片切出来的镜头不能少这一样，
+      // 否则同样是一刀，原片切的能回看、底片切的点开是空的
+      ShotBoundaryFinder.lastDetails = {
+        3000: const ShotBoundaryCandidate(
+            ms: 3000,
+            sceneScore: 0.62,
+            histDistance: 0.41,
+            confidence: BoundaryConfidence.confirmed),
+      };
+      addTearDown(() => ShotBoundaryFinder.lastDetails = const {});
+
+      final segmenter = UnitSegmenter(scenes: _FixedScenes([3000]));
+      final shots = await segmenter.segment(
+        unit: _unit(startMs: 4000),
+        base: const UnitBase(
+            path: '/m/7.mp4', startMs: 0, endMs: 6000, candidateId: 7),
+        taskId: 't1',
+        fps: 25,
+      );
+
+      // 第二镜的起点就是那一刀（单元起点 4000 + 底片内 3000）
+      expect(shots[1].startMs, 7000);
+      expect(shots[1].boundaryTrace?.sceneScore, 0.62);
+      expect(shots[1].boundaryTrace?.decision, 'confirmed');
+    });
+
+    test('查表用的是底片内毫秒，不是单元坐标——查错就一条都贴不上', () async {
+      ShotBoundaryFinder.lastDetails = {
+        3000: const ShotBoundaryCandidate(
+            ms: 3000,
+            sceneScore: 0.5,
+            histDistance: 0.3,
+            confidence: BoundaryConfidence.uncertain),
+      };
+      addTearDown(() => ShotBoundaryFinder.lastDetails = const {});
+
+      final shots = await UnitSegmenter(scenes: _FixedScenes([3000])).segment(
+        unit: _unit(startMs: 12345),
+        base: const UnitBase(
+            path: '/m/7.mp4', startMs: 0, endMs: 6000, candidateId: 7),
+        taskId: 't1',
+        fps: 25,
+      );
+
+      expect(shots[1].boundaryTrace, isNotNull,
+          reason: '单元起点不为 0 时也要贴得上');
+      expect(shots[1].boundaryTrace?.decision, 'reviewed');
+    });
+
+    test('切点没落在帧上也要贴得上——这是查不中的那个老坑', () async {
+      // 检出来的是 3435，帧对齐后镜头边界是 3433。不做对齐就一条都贴不上
+      ShotBoundaryFinder.lastDetails = {
+        3435: const ShotBoundaryCandidate(
+            ms: 3435,
+            sceneScore: 0.7,
+            histDistance: 0.6,
+            confidence: BoundaryConfidence.confirmed),
+      };
+      addTearDown(() => ShotBoundaryFinder.lastDetails = const {});
+
+      final shots = await UnitSegmenter(scenes: _FixedScenes([3435])).segment(
+        unit: _unit(startMs: 0),
+        base: const UnitBase(
+            path: '/m/7.mp4', startMs: 0, endMs: 9000, candidateId: 7),
+        taskId: 't1',
+        fps: 30,
+      );
+
+      expect(shots[1].startMs, isNot(3435), reason: '镜头边界是吸到帧上的');
+      expect(shots[1].boundaryTrace?.sceneScore, 0.7,
+          reason: '照样要贴得上——查表前两边都对齐过');
+    });
+
+    test('没有判定明细（退回了基础场景检测）：不硬造，留空', () async {
+      ShotBoundaryFinder.lastDetails = const {};
+      final shots = await UnitSegmenter(scenes: _FixedScenes([3000])).segment(
+        unit: _unit(startMs: 0),
+        base: const UnitBase(
+            path: '/m/7.mp4', startMs: 0, endMs: 6000, candidateId: 7),
+        taskId: 't1',
+        fps: 25,
+      );
+
+      expect(shots.every((s) => s.boundaryTrace == null), isTrue);
+    });
+  });
+}
+
+/// 固定切点的场景检测：不碰 ffmpeg
+class _FixedScenes implements SceneDetector {
+  final List<int> cuts;
+  const _FixedScenes(this.cuts);
+
+  @override
+  Future<List<int>> detect(String videoPath) async => cuts;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

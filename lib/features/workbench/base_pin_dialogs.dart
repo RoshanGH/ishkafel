@@ -28,7 +28,9 @@ Future<bool> confirmPinBase(
     if (cost.droppedShotPicks > 0)
       '已经挑过的 ${cost.droppedShotPicks} 处镜头替换会被清掉——'
           '镜头是重新划的，旧的选择没有地方安放。',
-    '切分要读一遍这条素材再判断切点，得等一会儿。',
+    '这一下做两件事：读一遍这条素材判断切点，然后逐镜看图打标'
+        '（标签和画面描述是按画面搜素材的检索键，不打就搜不出东西）。'
+        '两步都要等，打标还要花钱。',
   ];
   final confirmed = await showDialog<bool>(
     context: context,
@@ -48,7 +50,7 @@ Future<bool> confirmPinBase(
         FilledButton(
           key: const Key('confirm-pin-base'),
           onPressed: () => Navigator.of(dialogContext).pop(true),
-          child: Text(repin ? '重新切分' : '开始切分'),
+          child: Text(repin ? '重新切分并打标' : '切分并打标'),
         ),
       ],
     ),

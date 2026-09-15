@@ -2723,7 +2723,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           if (canVoice)
             '· 用「$defaultVoice」配上声音（${voiced.length} 次语音合成，之后每句可换）',
           '· 看懂参考片的每一镜，去妙啊找像的画面——'
-              '**参考里这一句有几个分镜就铺几个**，时长按参考的比例切'
+              '参考里这一句有几个分镜就铺几个，时长按参考的比例切'
               '（一共 $extractSegCount 个分镜，同样次数的 AI 识图）',
           '铺完直接播出来，不满意的随手换。',
         ].join('\n')),
@@ -2868,7 +2868,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
                 '（${needVoice.length} 次语音合成，每句之后可单独换）',
           if (needShots.isNotEmpty)
             '· 照着参考片的画面，给 ${needShots.length} 句铺上镜头——'
-                '**参考里这一句有几个分镜就铺几个**，时长按参考的比例切'
+                '参考里这一句有几个分镜就铺几个，时长按参考的比例切'
                 '（一共 $draftSegCount 个分镜；没打过标的要先看懂，'
                 '$draftUntagged 次 AI 识图）',
           if (noRef.isNotEmpty)
@@ -2923,7 +2923,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           '有 ${need.length} 句配音是早期生成的，没带每个字的时间戳，',
           '所以字幕只能按字数摊时间，也改不了切点。',
           '',
-          '· 这 ${need.length} 句会用**原来的音色和台词**重配一次'
+          '· 这 ${need.length} 句会用原来的音色和台词重配一次'
               '（${need.length} 次语音合成），声音听不出差别',
           '· 行的时长可能有毫秒级变化，镜头分配会跟着重算',
           '· 补完就能手工分屏、按播放位置打轴',

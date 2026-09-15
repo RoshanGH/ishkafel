@@ -11,10 +11,10 @@ import 'prepared_cache.dart';
 import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
 import 'tag_merge.dart';
-import '../models/tag_trace.dart';
 import '../models/semantic_unit.dart';
 import '../storage/task_repository.dart';
 import 'analysis_progress.dart';
+import 'boundary_trace_index.dart';
 import 'batch_frame_extractor.dart';
 import 'audio_extractor.dart';
 import 'providers.dart';
@@ -363,7 +363,7 @@ class AnalysisPipeline {
     required PreparedAnalysis prepared,
   }) {
     final info = task.videoInfo!;
-    return _withBoundaryTrace(builder.build(
+    return _withBoundaryTrace(fps: info.fps, builder.build(
       drafts: drafts,
       shotBoundaryMs: prepared.shotBounds,
       silenceValleyMs: prepared.valleys,
@@ -421,7 +421,7 @@ class AnalysisPipeline {
     // 切分好就先落库、先放人进去干活——打标（实测占总时长七成）不该挡着。
     // 用户进工作台第一件事是看切分对不对、拖边界，那些都不需要标签。
     final ready = task.copyWith(
-      units: _withBoundaryTrace(units),
+      units: _withBoundaryTrace(units, fps: info.fps),
       status: RenewTaskStatus.ready,
       updatedAt: clock(),
       asrSentences: sentences,
@@ -513,24 +513,23 @@ class AnalysisPipeline {
 
   /// 把切点判定明细贴到镜头上：每个镜头的**起点**就是那一刀，画面差异分数
   /// 与「直接确认 / 灰区经画面复核保留」都记在这里，事后能回看这一刀的依据。
-  List<SemanticUnit> _withBoundaryTrace(List<SemanticUnit> units) {
-    final details = ShotBoundaryFinder.lastDetails;
-    if (details.isEmpty) return units;
-    BoundaryTrace? traceAt(int ms) {
-      final c = details[ms];
-      if (c == null) return null;
-      return BoundaryTrace(
-        sceneScore: c.sceneScore,
-        histDistance: c.histDistance,
-        decision: c.isConfirmed ? 'confirmed' : 'reviewed',
-      );
-    }
-
+  List<SemanticUnit> _withBoundaryTrace(List<SemanticUnit> units,
+      {double fps = 0}) {
+    // **键要先对齐**：切点是原始毫秒，而镜头边界一律吸到帧上
+    // （见 `SegmentationBuilder` 的 alignedShotBoundaries）。原来直接拿
+    // shot.startMs 去查原始键，绝大多数查不中——「这一刀怎么定出来的」
+    // 长期大面积缺失，而缺了不报错，所以一直没人发现
+    // （2026-09-15 给底片切分补这一项时量出 7 镜只贴上 2 条，才摸到这里）
+    final traces = boundaryTracesByFrame(ShotBoundaryFinder.lastDetails, fps);
+    if (traces.isEmpty) return units;
     return List.unmodifiable([
       for (final u in units)
         u.copyWith(shots: [
           for (final s in u.shots)
-            if (traceAt(s.startMs) case final t?) s.copyWith(boundaryTrace: t) else s,
+            if (traces[s.startMs] case final t?)
+              s.copyWith(boundaryTrace: t)
+            else
+              s,
         ]),
     ]);
   }
