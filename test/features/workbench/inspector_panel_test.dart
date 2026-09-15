@@ -363,6 +363,27 @@ void _baseOriginLine() {
     expect(find.text('取自原片'), findsNothing);
   });
 
+  testWidgets('时长按底片那几镜算，别和上面的「成片 0~16.09」打架', (tester) async {
+    // 16.09s 的底片挂在一个 10s 的原片坑位上：unit.durationMs 还是 10s
+    await pumpUnit(
+        tester,
+        const SemanticUnit(
+          uid: 'u0',
+          index: 0,
+          startMs: 0,
+          endMs: 10000,
+          transcript: '主卖点解决方案',
+          baseCandidateId: 114799,
+          shots: [
+            Shot(startMs: 0, endMs: 8000),
+            Shot(startMs: 8000, endMs: 16090),
+          ],
+        ));
+
+    expect(find.text('16.09s'), findsOneWidget);
+    expect(find.text('10.00s'), findsNothing);
+  });
+
   testWidgets('没固定底片的照旧写「取自原片」', (tester) async {
     // copyWith 清不掉 baseCandidateId（null 是「不改」），重建一个
     await pumpUnit(

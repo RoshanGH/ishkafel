@@ -515,7 +515,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 '时长',
                 unitDurationLabel(
                   placeholderMs: unit.durationMs,
-                  composedMs: widget.composedDurationOf?.call(unitIndex),
+                  // **固定过底片的走同一条轴**：这一段的真实长度是底片切出来
+                  // 那几镜的跨度，而 unit.startMs/endMs 还是原来那个原片
+                  // 坑位。真机上一条 16.09s 的底片挂在 10s 的坑位上，
+                  // 这里写「10.00s」，上面两行却写着「成片 0~16.09」
+                  // ——同一张卡片自相矛盾
+                  composedMs: hasOwnBaseShots(unit)
+                      ? _axis.durationOf(unitIndex)
+                      : widget.composedDurationOf?.call(unitIndex),
                   hasSource: unit.hasSource,
                 )),
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
