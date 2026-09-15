@@ -105,6 +105,7 @@ import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/task_media.dart';
 import 'task_lock_banner.dart';
 import 'subtitle_popover.dart';
@@ -1492,6 +1493,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (ok != true) return;
     }
 
+    // 这个单元名下的画面/波形（固定过底片才有）跟它一起走——它没了，
+    // 那几份就再也没人读（「不留孤儿数据」）
+    final goneUid = editor.units[unitIndex].uid;
+    _discardUnitArtifacts(goneUid);
+    _baseMedia = {..._baseMedia}..remove(goneUid);
+
     // **有原片的任务只重排下标，不重铺时间轴**：单元的起止是原片坐标，
     // 单元里的视觉镜头也是。把单元重新铺成连续的一条、镜头留在原地，
     // 两层就此对不上（见 [removeUnitAt]）
@@ -2026,6 +2033,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     return out;
   }
 
+  /// 把这个单元名下的画面/波形产物清掉。
+  ///
+  /// 它们是按**那一张底片**抽的，换一张、或者这个单元没了，就再也没人读
+  /// ——不清的话反复试几次底片就是几十兆躺在盘上（「不留孤儿数据」）
+  void _discardUnitArtifacts(String uid) {
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null || uid.isEmpty) return;
+    final artifacts = TaskArtifacts(dataDir);
+    artifacts.delete(artifacts.ofUnit(_task.id, uid));
+  }
+
   /// 属性面板里的「这一段的底片」卡片
   Widget? _baseCard(int unitIndex, SemanticUnit unit) {
     final plans = _replacements ?? const <UnitReplacement>[];
@@ -2205,7 +2223,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       await _onReplacementsChanged(nextPlans);
       await _flushAutosave();
       if (!mounted) return;
-      // 新底片的画面和波形要现建一份，不然时间线上那一格是空的
+      // 新底片的画面和波形要现建一份，不然时间线上那一格是空的。
+      // 上一张底片那几份先清掉——它们按那张片子抽的，换一张就不作数了
+      _discardUnitArtifacts(unit.uid);
       _baseMedia = {..._baseMedia}..remove(unit.uid);
       unawaited(_loadBaseMedia());
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -2242,6 +2262,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         unitLabel: 'U${unit.index + 1}', shotCount: unit.shots.length);
     if (!ok || !mounted) return;
     _baseMedia = {..._baseMedia}..remove(unit.uid);
+    _discardUnitArtifacts(unit.uid);
     final (nextUnits, nextPlans) =
         BasePinOps.unpin(editor.units, _replacements ?? const [], unitIndex);
     editor.replaceUnits(nextUnits);
