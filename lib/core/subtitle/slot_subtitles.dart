@@ -20,13 +20,23 @@ List<SubtitleLine> subtitleLinesForSlot({
   required int shotIndex,
   required int slotStartMs,
   required int slotEndMs,
+
+  /// 这一镜的底片是**挑来的素材**，不是原片
+  /// （见 `docs/superpowers/specs/2026-09-14-底片-design.md`）。
+  ///
+  /// 那时 ASR 那份现算的**一个字都不能用**：时间戳量的是原片，画面却换成了
+  /// 另一条片子，取出来的台词跟画面毫不相干——而它会被结结实实烧进成片。
+  /// 手改过的照样认（人自己排的时间，他知道自己在干什么）。
+  bool onMaterialBase = false,
 }) =>
     track.linesOf(SubtitleSlot(unitUid: unitUid, shotIndex: shotIndex)) ??
-    subtitleLinesInSlot(
-      sentences: sentences,
-      slotStartMs: slotStartMs,
-      slotEndMs: slotEndMs,
-    );
+    (onMaterialBase
+        ? const []
+        : subtitleLinesInSlot(
+            sentences: sentences,
+            slotStartMs: slotStartMs,
+            slotEndMs: slotEndMs,
+          ));
 
 /// 这几行字的内容指纹，进渲染缓存的 key。
 ///

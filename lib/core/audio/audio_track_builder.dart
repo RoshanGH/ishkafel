@@ -593,18 +593,35 @@ class AudioTrackBuilder {
             replacement: UnitReplacement.keepOriginal(),
             hasOriginal: sourcePath != null,
           ) is OriginalBase;
+      final where = 'U${unit.index + 1}'
+          '${shotIndex < 0 ? '' : ' 的 S${shotIndex + 1}'}';
+      // 底片是素材、又选了要分离的那一档：**分的是这条素材**，不是原片。
+      // 走原片那条会拿 null 去比，抛出来的话还叫人「去重新分离原片」——
+      // 而原片跟这一段的画面已经毫无关系了
+      String? baseStem;
+      if (basePath != null && (picked?.mode?.needsSeparation ?? false)) {
+        final stems = await separateMaterialStems?.call(basePath);
+        if (stems == null) {
+          throw StateError('$where 选了「${picked!.mode!.label}」，'
+              '但这一段的底片（挑来的素材）分离失败。重试一次，'
+              '或者把它改成「原声」/「不播放」');
+        }
+        baseStem = picked!.mode == MaterialAudioMode.vocals
+            ? stems.vocalsPath
+            : stems.backgroundPath;
+      }
       final source = !hasBase
           ? null
-          : picked != null
-              ? _sourceTrackFor(
-                  mode: picked.mode!,
-                  sourcePath: basePath ?? sourcePath,
-                  vocalsPath: unitVocals,
-                  backgroundPath: unitBackground,
-                  where: 'U${unit.index + 1}'
-                      '${shotIndex < 0 ? '' : ' 的 S${shotIndex + 1}'}',
-                )
-              : (needsClean ? unitVocals : (basePath ?? sourcePath));
+          : baseStem ??
+              (picked != null
+                  ? _sourceTrackFor(
+                      mode: picked.mode!,
+                      sourcePath: basePath ?? sourcePath,
+                      vocalsPath: unitVocals,
+                      backgroundPath: unitBackground,
+                      where: where,
+                    )
+                  : (needsClean ? unitVocals : (basePath ?? sourcePath)));
       if (source == null) {
         // 空白任务里每个单元都是整体替换，走不到这儿。走到了就是有一段
         // 既没有素材也没有原片——不许拿静音顶上，那会让成片少一段声音

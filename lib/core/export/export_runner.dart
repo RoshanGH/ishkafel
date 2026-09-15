@@ -206,6 +206,10 @@ class ExportRunner {
     for (var u = 0; u < units.length; u++) {
       final replacement = u < replacements.length ? replacements[u] : null;
       if (replacement?.mode != ReplacementMode.perShot) continue;
+      // **底片是素材的那几镜不看原片分离轨**：它们要分的是那条素材，
+      // 由 [AudioTrackBuilder] 按需分、分不出来自己点名。拿原片的分离轨
+      // 判这里，原片有就放行、没有就叫人「去重新分离原片」——两种都不对
+      if (units[u].baseCandidateId != null) continue;
       for (var sh = 0; sh < units[u].shots.length; sh++) {
         final picked = resolveSourceAudio(
           replaced: replacement!.shotCandidateIds[sh]?.isNotEmpty ?? false,
@@ -682,6 +686,9 @@ class ExportRunner {
             shotIndex: segment.shotIndex!,
             slotStartMs: segment.startMs,
             slotEndMs: segment.endMs,
+            // 底片是素材的那几镜：ASR 那份量的是原片，跟这段画面毫不相干，
+            // 只认人手排过的
+            onMaterialBase: segment.baseCandidateId != null,
           );
     final subFingerprint = subtitleFingerprint(subtitleLines);
     final subKey = subFingerprint.isEmpty

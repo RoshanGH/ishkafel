@@ -1,3 +1,4 @@
+import '../replacement/unit_base.dart';
 import '../analysis/providers.dart' show AsrSentence;
 import '../export/composed_timeline.dart';
 import '../replacement/replacement_plan.dart';
@@ -49,6 +50,10 @@ String? previewSubtitleAt({
         shotIndex: s,
         slotStartMs: shots[s].startMs,
         slotEndMs: shots[s].endMs,
+        // 预览要和导出看到同一份（见 [subtitleLinesForSlot]）：底片是素材
+        // 时不拿 ASR 硬凑，否则人在预览里看到一行跟画面无关的台词，
+        // 还以为导出也会是这样
+        onMaterialBase: hasOwnBaseShots(units[u]),
       );
       // 行的时间轴以坑位开头为 0（见 [subtitleLinesInSlot]）
       final rel = composedMs - start;

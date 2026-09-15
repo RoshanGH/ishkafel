@@ -20,6 +20,8 @@ import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
+import '../../core/replacement/unit_base.dart';
+import '../../core/storage/task_media.dart';
 import '../../core/storage/task_lock.dart';
 import '../director/tag_picker.dart';
 import '../picking/picking_providers.dart';
@@ -56,7 +58,11 @@ class ReviewPage extends ConsumerStatefulWidget {
   /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
   final ReviewHoverPlayer? hoverPlayer;
   final Future<String> Function(int materialId)? resolveMedia;
-  final Future<String?> Function(int startMs, int endMs)? extractOriginalThumb;
+  /// 抽「本来的样子」那一张。第三个参数是**取自哪条素材**（底片固定过的
+  /// 单元），null 表示取自任务原片——签名里带着它，是因为 `??` 两边类型
+  /// 对不上时 Dart 会推断成裸 `Function`，参数个数错要到运行时才炸
+  final Future<String?> Function(int startMs, int endMs, int? candidateId)?
+      extractOriginalThumb;
 
   const ReviewPage({
     super.key,
@@ -299,14 +305,18 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 给每个位置组的原片段落抽一张首帧图（取中点：两端常踩在转场上，
   /// 抽出来是糊的）。按任务缓存，抽过的直接用
   Future<void> _loadOriginThumbs() async {
-    if (widget.task.sourcePath == null) return;
     for (final section in _sections) {
       final start = section.originStartMs;
       final end = section.originEndMs;
       if (start == null || end == null) continue;
+      // 取自原片的那些要有原片；取自素材的（底片固定过）不需要
+      if (section.originCandidateId == null &&
+          widget.task.sourcePath == null) {
+        continue;
+      }
       try {
         final path = await (widget.extractOriginalThumb ?? _extractThumb)(
-            start, end);
+            start, end, section.originCandidateId);
         if (!mounted) return;
         if (path != null && File(path).existsSync()) {
           setState(() => _originThumbs[section.id] = path);
@@ -317,14 +327,18 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     }
   }
 
-  Future<String?> _extractThumb(int startMs, int endMs) async {
+  Future<String?> _extractThumb(
+      int startMs, int endMs, int? candidateId) async {
     final dataDir = ref.read(dataDirProvider);
-    final source = widget.task.sourcePath;
+    final source = _originPathOf(candidateId);
     if (dataDir == null || source == null) return null;
     final dir = Directory(
         p.join(dataDir.path, 'review_thumbs', widget.task.id))
       ..createSync(recursive: true);
-    final out = p.join(dir.path, 'orig_${startMs}_$endMs.jpg');
+    // 素材那张要单独存：不带 id 的话，原片同一个时间点的缓存会被当成
+    // 它的，抽出来是别的画面
+    final tag = candidateId == null ? 'orig' : 'base$candidateId';
+    final out = p.join(dir.path, '${tag}_${startMs}_$endMs.jpg');
     if (File(out).existsSync()) return out;
     await ThumbnailService(run: const ResolvingProcessRunner().call)
         .extractCover(
@@ -373,6 +387,15 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     return keys;
   }();
 
+  /// 「本来的样子」该读哪个文件：底片固定过的单元读那条素材，其余读原片
+  String? _originPathOf(int? candidateId) {
+    if (candidateId == null) return widget.task.sourcePath;
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) return null;
+    return TaskMedia(dataDir: dataDir, taskId: widget.task.id)
+        .localMaterial(candidateId);
+  }
+
   /// 位置分组（保持出现顺序）
   late final List<_Section> _sections = () {
     final map = <String, _Section>{};
@@ -386,9 +409,18 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                 item.shot! < unit.shots.length
             ? unit.shots[item.shot!]
             : null;
-        // 原片这一段的区间：整段替换是整个单元，镜头替换是那个镜头
-        final originStart = item.shot == null ? unit?.startMs : shot?.startMs;
-        final originEnd = item.shot == null ? unit?.endMs : shot?.endMs;
+        // 「这一段本来的样子」取自哪个文件的哪一段：整段替换是整个单元，
+        // 镜头替换是那个镜头。
+        //
+        // **底片固定过的单元取的是那条素材**，不是原片——它的镜头坐标是
+        // 「单元起点 + 素材内偏移」，照原片那个时间点抽出来的是一段毫不
+        // 相干的画面，而这张卡的用处正是「拿它当参照物比对候选」
+        final onBase = unit != null && hasOwnBaseShots(unit);
+        final shift = onBase ? -unit.startMs : 0;
+        final originStart =
+            (item.shot == null ? unit?.startMs : shot?.startMs).plusOrNull(shift);
+        final originEnd =
+            (item.shot == null ? unit?.endMs : shot?.endMs).plusOrNull(shift);
         return _Section(
           id: id,
           unitIndex: item.unit,
@@ -400,6 +432,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           slotMs: item.shot == null ? null : shot?.durationMs,
           originStartMs: originStart,
           originEndMs: originEnd,
+          originCandidateId: onBase ? unit.baseCandidateId : null,
           items: [],
         );
       });
@@ -774,7 +807,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   Widget _originalCard(_Section section) {
     final key = 'orig/${section.id}';
     final hovering = _hoveringKey == key;
-    final source = widget.task.sourcePath!;
+    final source = _originPathOf(section.originCandidateId);
+    if (source == null) return const SizedBox.shrink();
     final start = section.originStartMs!;
     final end = section.originEndMs!;
     return MouseRegion(
@@ -1178,9 +1212,15 @@ class _Section {
   /// 镜头替换的固定坑位时长；整段替换为 null（时长跟素材走）
   final int? slotMs;
 
-  /// 原片这一段的区间（悬停原片卡播的就是它）。空白任务没有原片时为 null
+  /// 「本来的样子」那一段的区间（悬停原片卡播的就是它）。
+  /// 空白任务没有原片时为 null
   final int? originStartMs;
   final int? originEndMs;
+
+  /// 这一段取自哪条**素材**（底片固定过的单元）。null = 取自任务原片。
+  /// 不记的话原片卡会去原片的同一个时间点抽一段毫不相干的画面，
+  /// 而这张卡的用处正是「拿它当参照物比对候选」
+  final int? originCandidateId;
   final List<ReviewItem> items;
 
   _Section({
@@ -1192,6 +1232,7 @@ class _Section {
     required this.slotMs,
     this.originStartMs,
     this.originEndMs,
+    this.originCandidateId,
     required this.items,
   });
 }
@@ -1245,4 +1286,9 @@ class _EmptyState extends StatelessWidget {
         child: Text('这条任务还没有挑过任何候选，没有可审核的。',
             style: TextStyle(color: AppColors.textTertiary)),
       );
+}
+
+/// `null + n` 还是 null——底片偏移只对算得出来的那些生效
+extension _NullableShift on int? {
+  int? plusOrNull(int delta) => this == null ? null : this! + delta;
 }

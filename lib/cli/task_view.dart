@@ -185,6 +185,12 @@ Map<String, dynamic> _unitToJson(
       // 打标，标签只能手填），也没有原片画面可放（不挑素材就导不出来）。
       // 不报的话你会以为它和别的单元一样，照着一个错的前提往下干
       'hasSource': unit.hasSource,
+      // **这一段的底片被固定成哪条素材**（见 `unit segment`）。非空表示
+      // 下面那些镜头是按它切出来的，画面取自它而不是原片——不报的话你会
+      // 拿原片的时间线去理解这一段，而它早就不是原片了；也不知道这一段
+      // 已经切过、每一镜都能单独挑素材
+      if (unit.baseCandidateId != null)
+        'baseCandidateId': unit.baseCandidateId,
       'tags': unit.tags,
       // 人手改过的标签：重新打标会跳过它。不报的话你会以为打标漏了这个单元，
       // 跑一遍发现它纹丝不动，也不知道为什么
@@ -196,8 +202,15 @@ Map<String, dynamic> _unitToJson(
             'startMs': unit.shots[i].startMs,
             'endMs': unit.shots[i].endMs,
             'durationMs': unit.shots[i].endMs - unit.shots[i].startMs,
-            'sourceStartMs': unit.shots[i].startMs,
-            'sourceEndMs': unit.shots[i].endMs,
+            // 取自哪个文件的哪一段。底片固定过的单元，这两个数是**素材内的
+            // 偏移**（镜头坐标减掉单元起点），不是原片位置——照原片去对
+            // 会对到一段毫不相干的画面
+            'sourceStartMs': unit.baseCandidateId == null
+                ? unit.shots[i].startMs
+                : unit.shots[i].startMs - unit.startMs,
+            'sourceEndMs': unit.baseCandidateId == null
+                ? unit.shots[i].endMs
+                : unit.shots[i].endMs - unit.startMs,
             // 整体替换的单元这里是 null：那一段整个换成了另一条素材，
             // 原片的镜头切分在成片里已经不存在，编一个数出来是假精度
             'composedStartMs': ?composed?.composedShotStart(at, i),

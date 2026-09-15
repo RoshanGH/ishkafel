@@ -53,4 +53,49 @@ void main() {
     expect(dialog, contains('打标'), reason: '确认框要说这一下还会打标');
     expect(dialog, contains('花钱'), reason: '要花钱必须写出来');
   });
+
+  test('字幕：底片是素材时不拿 ASR 硬凑', () {
+    // 时间戳量的是原片，画面却换成了另一条片子——取出来的台词跟画面
+    // 毫不相干，而它会被结结实实烧进成片
+    expect(read('lib/core/subtitle/slot_subtitles.dart'),
+        contains('onMaterialBase'),
+        reason: '这是全 app 唯一说了算的地方，判据要在这儿');
+
+    for (final caller in const [
+      'lib/core/export/export_runner.dart',
+      'lib/core/subtitle/preview_subtitle_at.dart',
+    ]) {
+      expect(read(caller), contains('onMaterialBase:'),
+          reason: '$caller 没把底片这件事告诉 subtitleLinesForSlot，'
+              '预览和导出就会各看到一份不一样的字幕');
+    }
+  });
+
+  test('声音：底片是素材时分的是那条素材，不是原片', () {
+    final audio = read('lib/core/audio/audio_track_builder.dart');
+
+    expect(audio, contains('separateMaterialStems'),
+        reason: '选了人声/背景声那两档，要分的是这一段的底片');
+    // 前置检查不该拿原片的分离轨去判底片单元——原片有就放行、没有就叫人
+    // 「去重新分离原片」，两种都不对
+    expect(read('lib/core/export/export_runner.dart'),
+        contains('units[u].baseCandidateId != null'),
+        reason: '门口那道检查要把固定过底片的单元排除掉');
+  });
+
+  test('审核页的「本来的样子」要读底片，不是原片同一个时间点', () {
+    final review = read('lib/features/review/review_page.dart');
+
+    expect(review, contains('originCandidateId'),
+        reason: '这张卡是拿来跟候选比对的参照物。读错文件，人就是照着'
+            '一段毫不相干的画面在做取舍');
+    expect(review, contains('hasOwnBaseShots'),
+        reason: '判据要走那一份，别在这儿自己拼');
+  });
+
+  test('Agent 看得见底片——看不见的能力等于不存在', () {
+    expect(read('lib/cli/task_view.dart'), contains('baseCandidateId'),
+        reason: '存了却不报，Agent 会拿原片的时间线去理解这一段，'
+            '也不知道它已经切过、每一镜都能单独挑素材');
+  });
 }

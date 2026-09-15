@@ -99,8 +99,12 @@ void main() {
     0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
   ];
 
-  Future<String?> extractThumb(int startMs, int endMs) async {
-    final file = File('${dataDir.path}/thumb_${startMs}_$endMs.png')
+  Future<String?> extractThumb(
+      int startMs, int endMs, int? candidateId) async {
+    // 底片固定过的单元抽的是那条素材，文件名要分开——不分的话原片同一个
+    // 时间点的那张会被当成它的
+    final tag = candidateId == null ? 'orig' : 'base$candidateId';
+    final file = File('${dataDir.path}/thumb_${tag}_${startMs}_$endMs.png')
       ..writeAsBytesSync(png);
     return file.path;
   }
