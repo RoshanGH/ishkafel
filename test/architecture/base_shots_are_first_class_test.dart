@@ -136,4 +136,22 @@ void main() {
         contains('segment.isOriginal && segment.baseCandidateId == null'),
         reason: '它们没挑替换素材，但画面取自底片，不是「没东西可放」');
   });
+
+  test('两条切分路做的事必须一样多——界面切完打标，命令行也得打', () {
+    // 少一步，Agent 切出来的镜头就没有标签也没有画面描述，
+    // `candidates --shot` 按标签/画面一条都搜不出来，而它会以为
+    // 素材库里真的没有（2026-09-15 核查 Agent 侧时发现）
+    final cli = read('lib/cli/commands/unit_command.dart');
+
+    expect(cli, contains('BaseTranscriber'), reason: '命令行也要转写');
+    expect(cli, contains('tagging.tag('), reason: '命令行也要打标');
+    expect(cli, contains('baseVideoPaths'),
+        reason: '打标抽帧要从底片上抽，不是原片同一个时间点');
+  });
+
+  test('Agent 看得见「切了但还没打标」——不然它会以为素材库里没东西', () {
+    expect(read('lib/cli/commands/unit_command.dart'),
+        contains('shotsTagged'));
+    expect(read('docs/AGENT_SKILL.md'), contains('shotsTagged'));
+  });
 }

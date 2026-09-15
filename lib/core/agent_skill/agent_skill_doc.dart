@@ -256,6 +256,9 @@ ishkafel unit unpin <task> --unit 1       # 换一张底片（旧的镜头全部
 | `shots` | 切出来几个镜头 |
 | `canSegment` | 能不能切；不能时看 `blockedReason` |
 | `segmentWouldDrop` | 切下去会掉什么：`otherCandidates`（多余的候选）、`shotPicks`（已挑的镜头替换） |
+| `shotsTagged` | 这几镜里打过标的有几个。**没打就别急着按标签/画面搜**——检索键就是它们 |
+| `baseSentenceCount` | 底片转写出几句（字幕从这一份取）。null = 还没转过，0 = 转过、这条素材没人说话 |
+| `transcript` | 这一段的台词（转写接起来的）。它也是单元层打标的输入 |
 
 三条要记住的规则：
 
