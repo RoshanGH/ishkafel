@@ -118,4 +118,22 @@ void main() {
         reason: '存了却不报，Agent 会拿原片的时间线去理解这一段，'
             '也不知道它已经切过、每一镜都能单独挑素材');
   });
+
+  test('命令行那条导出路不许自己抄一份组段落的逻辑', () {
+    // plan_submission 里有第二份「把方案摊成段落」——它一度不带底片，
+    // 于是 Agent 导出来的片子：拼片任务直接判成「还没挑素材」导不出去，
+    // 能导的也没有字幕（2026-09-15 端到端导一条才发现）
+    final cli = read('lib/cli/plan_submission.dart');
+
+    expect(cli, contains('unitBaseCandidateId'),
+        reason: '字幕要靠它——换过素材的那一镜替代的正是底片的那一段');
+    expect(cli, contains('hasOwnBaseShots'),
+        reason: '固定过底片的单元照旧逐镜产段，规则和 ExportPlanner 同源');
+  });
+
+  test('空白任务的「还没挑素材」不许把底片那几镜算进去', () {
+    expect(read('lib/core/export/export_runner.dart'),
+        contains('segment.isOriginal && segment.baseCandidateId == null'),
+        reason: '它们没挑替换素材，但画面取自底片，不是「没东西可放」');
+  });
 }

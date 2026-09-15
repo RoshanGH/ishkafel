@@ -657,7 +657,13 @@ class ExportRunner {
     final empty = <int>{};
     for (final combo in combos) {
       for (final segment in combo.segments) {
-        if (segment.isOriginal) empty.add(segment.unitIndex);
+        // **底片那几镜不算空**：它们没挑替换素材，但画面取自这个单元的
+        // 底片（`baseCandidateId`），不是「没东西可放」。不认这一条的话，
+        // 拼片任务里切过底片的段落一律导不出去，报的还是「还没挑素材」
+        // ——而人明明挑了、还切了、还打了标（2026-09-15 真机撞到）
+        if (segment.isOriginal && segment.baseCandidateId == null) {
+          empty.add(segment.unitIndex);
+        }
       }
     }
     if (empty.isEmpty) return null;
@@ -696,7 +702,7 @@ class ExportRunner {
             slotEndMs: segment.endMs,
             // 底片是素材的那几镜：原片那份 ASR 量的是原片，跟这段画面毫不
             // 相干；字幕从**底片自己的转写**里取，坑位也换成素材内偏移
-            onMaterialBase: segment.baseCandidateId != null,
+            onMaterialBase: segment.unitBaseCandidateId != null,
             baseSentences: baseSentencesOf?.call(segment.unitIndex),
             baseSlotStartMs: segment.baseStartMs,
             baseSlotEndMs: segment.baseStartMs + segment.sourceDurationMs,
