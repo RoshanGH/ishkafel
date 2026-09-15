@@ -19,6 +19,19 @@ class TimelineMedia {
   TimelineMedia({required List<String?> thumbPaths, required List<double> waveEnvelope})
       : thumbPaths = List.unmodifiable(thumbPaths),
         waveEnvelope = List.unmodifiable(waveEnvelope);
+
+  /// 几张没抽出来。**界面要照着它说话**
+  int get thumbsMissing => thumbPaths.where((p) => p == null).length;
+
+  /// 一张都没抽出来——那条轨是空的，不能当成「已就绪」画一片空白
+  bool get thumbsAllMissing =>
+      thumbPaths.isEmpty || thumbPaths.every((p) => p == null);
+
+  /// 波形没算出来。失败时兜底返回的是**全 0 的列表**（不是空列表），
+  /// 只判 isEmpty 会漏掉：画出来是贴着底的一条直线，看着像「这段没声音」，
+  /// 而实际是没算成（2026-09-15 真机：「这个音频和画面轨是空的？」）
+  bool get waveAllSilent =>
+      waveEnvelope.isEmpty || waveEnvelope.every((v) => v == 0);
 }
 
 /// 时间线媒体构建器：抽取等间隔缩略图 + 计算音频波形包络

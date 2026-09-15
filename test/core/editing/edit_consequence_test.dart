@@ -232,4 +232,108 @@ void main() {
           reason: '产品决策：A 合并到 B，标签就直接用 B 的');
     });
   });
+
+  group('单元数变了，不等于每个单元都变了', () {
+    SemanticUnit u(String uid, int i, int a, int b) => SemanticUnit(
+          uid: uid,
+          index: i,
+          startMs: a,
+          endMs: b,
+          transcript: 'U$i',
+          tags: const ['促单'],
+          shots: [Shot(startMs: a, endMs: b)],
+        );
+
+    test('在末尾加一个空单元：前面那些一个都不该被报成受影响', () {
+      final before = [u('a', 0, 0, 1000), u('b', 1, 1000, 2000)];
+      final after = [
+        ...before,
+        const SemanticUnit(
+            uid: 'new',
+            index: 2,
+            startMs: 2000,
+            endMs: 12000,
+            transcript: '',
+            hasSource: false),
+      ];
+
+      expect(
+        EditConsequence.evaluate(
+            before: before,
+            after: after,
+            replacements: [
+              UnitReplacement.whole([7]),
+              UnitReplacement.whole([8]),
+              UnitReplacement.keepOriginal(),
+            ]),
+        isNull,
+        reason: '加一个空单元不动别人。报了的话，默认勾选会白清一遍素材、'
+            '白花一次打标的钱（2026-09-15 真机撞到）',
+      );
+    });
+
+    test('真的拆分：被拆的那个要报到', () {
+      final before = [u('a', 0, 0, 2000)];
+      // 拆分：左半留原 uid、右半发新的
+      final after = [
+        u('a', 0, 0, 1200),
+        u('new', 1, 1200, 2000),
+      ];
+
+      final c = EditConsequence.evaluate(
+          before: before,
+          after: after,
+          replacements: [
+            UnitReplacement.whole([7]),
+            UnitReplacement.keepOriginal(),
+          ]);
+
+      expect(c, isNotNull);
+      expect(c!.unitIndexes, [0], reason: '左半变短了，它挑的素材可能对不上');
+      expect(c.structural, isTrue);
+    });
+
+    test('删掉一个：剩下的没变就不问', () {
+      final before = [u('a', 0, 0, 1000), u('b', 1, 1000, 2000)];
+      final after = [u('a', 0, 0, 1000)];
+
+      expect(
+        EditConsequence.evaluate(
+            before: before,
+            after: after,
+            replacements: [UnitReplacement.whole([7])]),
+        isNull,
+      );
+    });
+
+    test('老存档没有 uid：退回「凡是有东西可丢的都问到」，宁可多问', () {
+      const noUid = SemanticUnit(
+          index: 0,
+          startMs: 0,
+          endMs: 1000,
+          transcript: 'U0',
+          tags: ['促单'],
+          shots: [Shot(startMs: 0, endMs: 1000)]);
+      final after = [
+        noUid,
+        const SemanticUnit(
+            index: 1,
+            startMs: 1000,
+            endMs: 11000,
+            transcript: '',
+            hasSource: false),
+      ];
+
+      final c = EditConsequence.evaluate(
+          before: [noUid],
+          after: after,
+          replacements: [
+            UnitReplacement.whole([7]),
+            UnitReplacement.keepOriginal(),
+          ]);
+
+      expect(c, isNotNull, reason: '对不上身份时不能赌，多问一次也不能悄悄丢');
+      expect(c!.unitIndexes, contains(0));
+    });
+  });
 }

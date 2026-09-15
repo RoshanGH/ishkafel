@@ -63,6 +63,10 @@ class TimelineView extends StatefulWidget {
 
   /// 抽帧/波形就绪状态，未就绪时时间线画占位而不是留白
   final TimelineMediaStatus mediaStatus;
+
+  /// 画面轨 / 音频轨各自的状态（两条轨会各坏各的）
+  final TimelineMediaStatus? thumbStatus;
+  final TimelineMediaStatus? waveStatus;
   final ValueChanged<int> onSeek;
   final ValueChanged<TimelineGeometry> onGeometryChanged;
 
@@ -158,6 +162,8 @@ class TimelineView extends StatefulWidget {
     this.media,
     required this.playhead,
     this.mediaStatus = TimelineMediaStatus.ready,
+    this.thumbStatus,
+    this.waveStatus,
     required this.onSeek,
     required this.onGeometryChanged,
     this.onScrubStart,
@@ -874,6 +880,8 @@ class _TimelineViewState extends State<TimelineView> {
                     waveEnvelope: widget.media?.waveEnvelope,
                     playheadMs: playheadMs,
                     mediaStatus: widget.mediaStatus,
+                    thumbStatus: widget.thumbStatus,
+                    waveStatus: widget.waveStatus,
                     bgm: widget.bgm,
                     bgmSelecting: _bgmSelecting,
                     voices: widget.voices,

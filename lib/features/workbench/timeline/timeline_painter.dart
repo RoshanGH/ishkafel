@@ -114,6 +114,12 @@ class TimelinePainter extends CustomPainter {
   /// 抽帧/波形的就绪状态，决定未就绪时画什么占位
   final TimelineMediaStatus mediaStatus;
 
+  /// 画面轨 / 音频轨各自的就绪状态。**两条轨会各坏各的**——抽帧全失败而
+  /// 波形算得好好的，只用一个总状态就只能二选一地说谎。不给时沿用
+  /// [mediaStatus]
+  final TimelineMediaStatus? thumbStatus;
+  final TimelineMediaStatus? waveStatus;
+
   /// 文字排版缓存。由 [TimelineView] 持有并跨帧复用——时间线每帧要画几十段
   /// 文字，而它们在两帧之间几乎从不变化（播放头移动不改变任何一段文字）。
   final TextLayoutCache textCache;
@@ -160,6 +166,8 @@ class TimelinePainter extends CustomPainter {
     required this.playheadMs,
     this.replacements = const [],
     this.mediaStatus = TimelineMediaStatus.ready,
+    this.thumbStatus,
+    this.waveStatus,
     this.hoveredLabelTop,
     required this.textCache,
   });
@@ -794,9 +802,14 @@ class TimelinePainter extends CustomPainter {
 
   void _paintThumbsTrack(Canvas canvas, Size size) {
     final images = thumbImages;
-    if (images == null || images.isEmpty) {
+    // **全是 null 也算空**：抽帧全失败时列表长度照旧，只判 isEmpty 会让
+    // 这条轨画成一片没有任何说明的空白
+    if (images == null ||
+        images.isEmpty ||
+        images.every((img) => img == null)) {
       _paintTrackPlaceholder(canvas, size, TimelineTracks.thumbsTop,
-          TimelineTracks.thumbsBottom, '画面缩略图');
+          TimelineTracks.thumbsBottom, '画面缩略图',
+          status: thumbStatus);
       return;
     }
 
@@ -829,6 +842,8 @@ class TimelinePainter extends CustomPainter {
       }
       canvas.drawImageRect(image, _coverSrcRect(image, dst), dst, imagePaint);
     }
+    _paintNoSourceSpans(
+        canvas, size, TimelineTracks.thumbsTop, TimelineTracks.thumbsBottom);
     canvas.restore();
   }
 
@@ -855,14 +870,48 @@ class TimelinePainter extends CustomPainter {
     return Rect.fromLTWH(0, (srcH - keepH) / 2, srcW, keepH);
   }
 
+  /// 把**原片里没有的那几段**在画面/音频轨上标出来。
+  ///
+  /// 插入段（手动加的单元）在原片上不存在，这两条轨在那一段本来就是空的
+  /// ——但空着不说话，人看到的是「这一大片是不是坏了」。同事第一次用就问
+  /// 了这句（2026-09-15：「这个音频和画面轨是空的？分析完之后是不是应该
+  /// 补上」）。答案是不该补，那儿没有原片可放；该做的是**把这件事写在
+  /// 那一段上**。
+  void _paintNoSourceSpans(
+      Canvas canvas, Size size, double top, double bottom) {
+    for (var i = 0; i < units.length; i++) {
+      if (units[i].hasSource) continue;
+      final (left, right) = unitPx(i, units, geometry);
+      if (right < 0 || left > size.width) continue;
+      final rect = Rect.fromLTRB(left, top, right, bottom);
+      canvas.drawRect(
+        rect,
+        Paint()..color = AppColors.textTertiary.withValues(alpha: 0.06),
+      );
+      // 窄到放不下字就只留底色——硬塞会糊成一团，反而更看不懂
+      final width = right - left;
+      if (width < 76) continue;
+      _drawText(
+        canvas,
+        '插入段 · 原片里没有',
+        Offset(left + AppSpacing.xs, top + (bottom - top) / 2 - 6),
+        AppColors.textTertiary,
+        fontSize: AppFontSize.micro,
+        maxWidth: width - AppSpacing.xs * 2,
+      );
+    }
+  }
+
   /// 媒体未就绪时的轨道占位：避免整条轨一片空白被误认为"这栏坏了"。
   /// 加载中与失败给不同的措辞与颜色，让用户能区分「在算」与「算失败了」。
   void _paintTrackPlaceholder(
-      Canvas canvas, Size size, double top, double bottom, String what) {
-    if (mediaStatus == TimelineMediaStatus.ready) return;
+      Canvas canvas, Size size, double top, double bottom, String what,
+      {TimelineMediaStatus? status}) {
+    final st = status ?? mediaStatus;
+    if (st == TimelineMediaStatus.ready) return;
     final rect = Rect.fromLTRB(0, top, size.width, bottom);
-    final failed = mediaStatus == TimelineMediaStatus.failed;
-    final noSource = mediaStatus == TimelineMediaStatus.noSource;
+    final failed = st == TimelineMediaStatus.failed;
+    final noSource = st == TimelineMediaStatus.noSource;
     canvas.drawRect(
       rect,
       Paint()
@@ -885,9 +934,14 @@ class TimelinePainter extends CustomPainter {
 
   void _paintWaveTrack(Canvas canvas, Size size) {
     final envelope = waveEnvelope;
-    if (envelope == null || envelope.isEmpty) {
+    // **全 0 也算空**：音频提取失败时兜底返回的正是全 0，画出来是贴着底的
+    // 一条直线，看着像「这一段本来就没声音」
+    if (envelope == null ||
+        envelope.isEmpty ||
+        envelope.every((v) => v == 0)) {
       _paintTrackPlaceholder(canvas, size, TimelineTracks.waveTop,
-          TimelineTracks.waveBottom, '音频波形');
+          TimelineTracks.waveBottom, '音频波形',
+          status: waveStatus);
       return;
     }
 
@@ -930,6 +984,9 @@ class TimelinePainter extends CustomPainter {
         barPaint,
       );
     }
+    // 插入段那几段同样要标出来——不标的话那片空白看着像「波形没算出来」
+    _paintNoSourceSpans(
+        canvas, size, TimelineTracks.waveTop, TimelineTracks.waveBottom);
   }
 
   void _paintPlayhead(Canvas canvas, Size size) {

@@ -47,15 +47,36 @@ class EditConsequence {
     final affected = <int>[];
     var maxRatio = 0.0;
 
-    if (structural) {
-      // 下标已经对不上了，无法逐个比对。凡是有内容可丢的单元都要问到——
-      // 拆分/合并会让方案整体错位，漏问一个就是悄悄丢东西。
+    // **按身份（uid）比，不按下标比。**
+    //
+    // 单元数变了不等于每个单元都变了：在末尾加一个空单元，前面那些一个字节
+    // 都没动，而原来会把它们全部报成「受影响」——默认勾上「取消已挑的素材」
+    // 和「重新打标」，手快点下去就是白清一遍素材、白花一次打标的钱
+    // （2026-09-15 真机：加一个插入段，弹出来说「改到了 U1…等 7 个」）。
+    //
+    // uid 是单元的身份，拆分时左半保留、右半发新的，合并时留下前者的
+    // ——拿它对得上的就逐个比，对不上的（新加的）本来就没东西可丢。
+    final byUid = {
+      for (final u in before)
+        if (u.uid.isNotEmpty) u.uid: u,
+    };
+    // 老存档没发过 uid：退回原来那套「凡是有内容可丢的都问到」，
+    // 宁可多问一次，也不能悄悄把东西丢了
+    final canMatchByUid =
+        byUid.length == before.length && after.every((u) => u.uid.isNotEmpty);
+
+    if (structural && !canMatchByUid) {
       for (var i = 0; i < after.length; i++) {
         if (_hasSomethingToLose(after, replacements, i)) affected.add(i);
       }
     } else {
       for (var i = 0; i < after.length; i++) {
-        final ratio = _changedRatio(before[i], after[i]);
+        final was = canMatchByUid
+            ? byUid[after[i].uid]
+            : (i < before.length ? before[i] : null);
+        // 这一个是新加进来的：它自己还什么都没有，谈不上丢
+        if (was == null) continue;
+        final ratio = _changedRatio(was, after[i]);
         if (ratio <= 0) continue;
         if (!_hasSomethingToLose(after, replacements, i)) continue;
         affected.add(i);

@@ -884,6 +884,26 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         : TimelineMediaStatus.loading;
   }
 
+  /// 画面轨自己的状态：抽出来一张都没有就是失败，不能报 ready 让它画成
+  /// 一片没有任何说明的空白（2026-09-15 真机撞到）
+  TimelineMediaStatus get _thumbStatus {
+    final media = _media;
+    if (media == null) return _mediaStatus;
+    return media.thumbsAllMissing
+        ? TimelineMediaStatus.failed
+        : TimelineMediaStatus.ready;
+  }
+
+  /// 音频轨同理。失败时兜底返回的是**全 0**，画出来是贴底的一条直线，
+  /// 看着像「这段本来就没声音」
+  TimelineMediaStatus get _waveStatus {
+    final media = _media;
+    if (media == null) return _mediaStatus;
+    return media.waveAllSilent
+        ? TimelineMediaStatus.failed
+        : TimelineMediaStatus.ready;
+  }
+
   /// 编辑器变化时**只在 dirty 真正翻转时**重建页面。
   ///
   /// 页面本身唯一依赖编辑器状态的地方是 [PopScope.canPop]（决定返回时是否
@@ -2310,25 +2330,39 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
   }
 
+  /// 正在加载画面/音频轨，别重复起一份
+  bool _loadingMedia = false;
+
+  /// 加载时间线的画面缩略图与音频波形。
+  ///
+  /// **读 [_task] 而不是 [widget.task]**：进页面那一刻任务可能还在分析，
+  /// `videoInfo` 要等分析完才有。拿进门时的快照判一次就再也不看，那两条轨
+  /// 会一直空着，要退出去重进才出来（2026-09-15 真机：「这个音频和画面轨
+  /// 是空的？分析完之后是不是应该补上」）。
   Future<void> _loadMedia() async {
-    final videoInfo = widget.task.videoInfo;
-    final sourcePath = widget.task.sourcePath;
-    // 空白任务没有原片，也就没有原片缩略图这一条轨
+    if (_loadingMedia || _media != null) return;
+    final videoInfo = _task.videoInfo;
+    final sourcePath = _task.sourcePath;
+    // 空白任务没有原片，也就没有原片缩略图这一条轨；
+    // 有原片但还没分析出元信息的，等 [_adoptAnalysis] 收到之后再来
     if (videoInfo == null || sourcePath == null) return;
+    _loadingMedia = true;
     try {
       final resolved = await _resolveMedia();
       final media = await resolved.builder.build(
         videoPath: sourcePath,
-        taskId: widget.task.id,
+        taskId: _task.id,
         durationMs: videoInfo.duration.inMilliseconds,
         workDir: resolved.workDir,
       );
       if (!mounted) return;
       setState(() => _media = media);
     } catch (e) {
-      AppLog.warn('时间线媒体加载失败（taskId=${widget.task.id}）：$e');
+      AppLog.warn('时间线媒体加载失败（taskId=${_task.id}）：$e');
       if (!mounted) return;
       setState(() => _mediaFailed = true);
+    } finally {
+      _loadingMedia = false;
     }
   }
 
@@ -2973,12 +3007,32 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _adoptTags(List<RenewTask>? tasks) {
     final editor = _editor;
     if (editor == null || tasks == null) return;
-    final stored =
-        tasks.where((t) => t.id == widget.task.id).firstOrNull?.units;
+    final fresh = tasks.where((t) => t.id == widget.task.id).firstOrNull;
+    if (fresh == null) return;
+    _adoptAnalysis(fresh);
+    final stored = fresh.units;
     if (stored == null) return;
     final merged = mergeTagsInto(editor.units, stored);
     if (identical(merged, editor.units)) return;
     editor.replaceUnits(merged);
+  }
+
+  /// 分析跑完补上来的**原片元信息**（时长、帧率）要接住。
+  ///
+  /// 人是切分一好就被放进这一页的，那时分析还没跑完、`videoInfo` 还是空的
+  /// ——画面轨和音频轨于是一直空着，而它们要等的东西早就在盘上了。
+  /// 只补一次：拿到之后就去把那两条轨建起来
+  void _adoptAnalysis(RenewTask fresh) {
+    if (_task.videoInfo != null || fresh.videoInfo == null) return;
+    _task = _task.copyWith(
+      videoInfo: fresh.videoInfo,
+      // 人声/背景轨也是分析产出的，同一趟接过来——「这一镜的声音」选
+      // 人声/背景声那两档要靠它
+      vocalsPath: fresh.vocalsPath ?? _task.vocalsPath,
+      backgroundPath: fresh.backgroundPath ?? _task.backgroundPath,
+      asrSentences: fresh.asrSentences ?? _task.asrSentences,
+    );
+    unawaited(_loadMedia());
   }
 
   @override
@@ -3169,6 +3223,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 onSubtitleDragEnd: _isEditable ? _dragSubtitleTo : null,
                 media: _media,
                 mediaStatus: _mediaStatus,
+                thumbStatus: _thumbStatus,
+                waveStatus: _waveStatus,
                 playhead: _playhead,
                 readOnly: !_isEditable || _lock != null,
                 clock: widget.clock,
