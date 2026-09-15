@@ -519,22 +519,27 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   hasSource: unit.hasSource,
                 )),
             inspectorInfoRow('镜头数', '${unit.shots.length}'),
+            // 这一行回答的是**这一段的画面从哪儿来**，所以顺序和
+            // `baseChoiceOf` 一致：固定过底片的先认底片。
+            //
+            // 真机上的反例：拼片任务的分子 hasSource 为真（它是从别的任务
+            // 搬过来的一段），可这条任务根本没有原片文件，画面早就换成了
+            // 底片那条素材——先判 hasSource 的话，这里写的是「取自原片
+            // 00:00.00–00:10.00」，一条并不存在的原片上的坐标
+            if (hasOwnBaseShots(unit))
+              inspectorSubRow(
+                  '取自底片',
+                  '${formatTimecode(0, widget.fps)} – '
+                      '${formatTimecode(unit.shots.last.endMs - unit.startMs, widget.fps)}')
             // 手加的单元原片里根本没有它——它的 startMs/endMs 只是塞在原片
             // 末尾的占位。给出来就是个纯假数字（真机上它写着
             // 01:36.07–01:46.07，而原片只有 96.2s），所以这一行只对
             // 真的取自原片的单元出现
-            if (unit.hasSource)
+            else if (unit.hasSource)
               inspectorSubRow(
                   '取自原片',
                   '${formatTimecode(unit.startMs, widget.fps)}'
-                      ' – ${formatTimecode(unit.endMs, widget.fps)}')
-            // 固定过底片的：它也「取自」某处，只不过是那条素材。
-            // 不写的话这一行凭空少一项，人不知道这一段的画面从哪儿来
-            else if (hasOwnBaseShots(unit))
-              inspectorSubRow(
-                  '取自底片',
-                  '${formatTimecode(0, widget.fps)} – '
-                      '${formatTimecode(unit.shots.last.endMs - unit.startMs, widget.fps)}'),
+                      ' – ${formatTimecode(unit.endMs, widget.fps)}'),
             inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,

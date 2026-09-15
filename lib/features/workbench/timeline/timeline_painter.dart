@@ -13,6 +13,7 @@ import 'package:ishkafel/app/theme/app_spacing.dart';
 import 'package:ishkafel/app/theme/app_typography.dart';
 import 'package:ishkafel/core/editing/segmentation_editor_controller.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
+import 'package:ishkafel/core/replacement/unit_base.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'bgm_edge_hit.dart';
@@ -970,7 +971,12 @@ class TimelinePainter extends CustomPainter {
     for (var i = 0; i < units.length; i++) {
       if (units[i].hasSource) continue;
       // 底片固定过的那几段有画面、有声音（来自那条素材），刚刚已经铺上了
-      // ——再盖一层「原片里没有」就是睁眼说瞎话
+      // ——再盖一层「原片里没有」就是睁眼说瞎话。
+      //
+      // **先看固定没固定，再看图加载出来没有**：缩略图是异步解出来的，
+      // 只认 baseThumbImages 的话，切完到图出来之间那几秒，这一段会先
+      // 被扣上「原片里没有」再自己消失
+      if (hasOwnBaseShots(units[i])) continue;
       if (baseThumbImages.containsKey(units[i].uid) ||
           baseWaveEnvelopes.containsKey(units[i].uid)) {
         continue;
