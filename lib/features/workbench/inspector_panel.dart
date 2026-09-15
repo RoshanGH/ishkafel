@@ -478,11 +478,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 手加的单元没有台词，它是插进来的一段纯画面——标出来，
-          // 不然混在真台词单元里看不出区别
+          // 手加的单元原片里没有它——标出来，不然混在真台词单元里看不出
+          // 区别。但固定过底片的已经不是「纯画面」了：那条素材转写过，
+          // 它有台词、有字幕、镜头也打过标
           inspectorTitle(unit.hasSource
               ? '台词语义单元 — U${unit.index + 1}'
-              : '插入段 — U${unit.index + 1}（原片里没有，纯画面）'),
+              : hasOwnBaseShots(unit)
+                  ? '插入段 — U${unit.index + 1}（画面与台词都来自底片素材）'
+                  : '插入段 — U${unit.index + 1}（原片里没有，纯画面）'),
           const SizedBox(height: 10),
           inspectorCard([
             inspectorTimeRow(
@@ -543,8 +546,11 @@ class _InspectorPanelState extends State<InspectorPanel> {
                     : () => widget.onEditUnitTags!(unitIndex),
               ),
           // 没有原片来源的单元没有台词：换音色没得念、台词框永远是空的。
-          // **按单元判而不是按任务判**——有原片的任务里也会有手加的单元
-          if (unit.hasSource) ...[
+          // **按单元判而不是按任务判**——有原片的任务里也会有手加的单元。
+          //
+          // 固定过底片的除外：它的台词是从那条素材转写出来的，跟原片单元
+          // 一样有话可念、有词可改（2026-09-15 真机：「该有的都要有」）
+          if (unit.hasSource || hasOwnBaseShots(unit)) ...[
             const SizedBox(height: 10),
             VoiceCard(
               voice: widget.voiceOf?.call(unitIndex),
