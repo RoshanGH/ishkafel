@@ -2073,7 +2073,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           content: Text('尚未配置 AI 服务，打不了标；补齐凭据后重启再试')));
       return;
     }
-    setState(() => _retaggingBaseUnit = unitIndex);
+    // 顶栏那条横幅也要亮起来：底片卡片上那行小字得滚到才看得见，
+    // 人在时间线/预览区域看不到任何东西在动，只会以为卡住了
+    // （2026-09-15 真机：「得等到什么时候才可以预览啊，我一度以为是出 bug」）
+    setState(() {
+      _retaggingBaseUnit = unitIndex;
+      _retaggingCount = 1;
+    });
     try {
       late List<SemanticUnit> tagged;
       final usage = await AiUsageScope.collect(
@@ -2102,7 +2108,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         backgroundColor: AppColors.red,
       ));
     } finally {
-      if (mounted) setState(() => _retaggingBaseUnit = null);
+      if (mounted) {
+        setState(() {
+          _retaggingBaseUnit = null;
+          _retaggingCount = 0;
+        });
+      }
     }
   }
 
@@ -2187,9 +2198,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       await _onReplacementsChanged(nextPlans);
       await _flushAutosave();
       if (!mounted) return;
+      // 新底片的画面和波形要现建一份，不然时间线上那一格是空的
+      _baseMedia = {..._baseMedia}..remove(unit.uid);
+      unawaited(_loadBaseMedia());
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头，'
-              '接着给它们打标…')));
+          content: Text('U${unit.index + 1} 切成了 ${shots.length} 个镜头。'
+              '画面现在就能预览，标签在后台接着打')));
     } catch (e) {
       AppLog.warn('切分这一段的底片失败（taskId=${_task.id}, U$unitIndex）：$e');
       if (!mounted) return;
@@ -2220,6 +2234,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final ok = await confirmUnpinBase(context,
         unitLabel: 'U${unit.index + 1}', shotCount: unit.shots.length);
     if (!ok || !mounted) return;
+    _baseMedia = {..._baseMedia}..remove(unit.uid);
     final (nextUnits, nextPlans) =
         BasePinOps.unpin(editor.units, _replacements ?? const [], unitIndex);
     editor.replaceUnits(nextUnits);
@@ -2333,6 +2348,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 正在加载画面/音频轨，别重复起一份
   bool _loadingMedia = false;
 
+  /// **底片固定过的单元各自的画面与波形**（单元 uid → 它那条素材的）。
+  ///
+  /// 这几段的画面来自素材而不是原片，原片那份缩略图里根本没有它们。
+  /// 不单独建一份，时间线上那一格就永远是空的——而它明明有画面有声音
+  /// （2026-09-15 真机：「画面和音频还是空的」）
+  ///
+  /// **每次换成新 Map**：原地改同一个实例的话，下游拿到的 old/new 是同一个
+  /// 对象，`didUpdateWidget` 比不出变化，解码永远不会重跑——图抽好了躺在
+  /// 盘上，时间线上那一格照旧是空的（2026-09-15 真机就卡在这一步）
+  Map<String, TimelineMedia> _baseMedia = const {};
+
   /// 加载时间线的画面缩略图与音频波形。
   ///
   /// **读 [_task] 而不是 [widget.task]**：进页面那一刻任务可能还在分析，
@@ -2340,6 +2366,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 会一直空着，要退出去重进才出来（2026-09-15 真机：「这个音频和画面轨
   /// 是空的？分析完之后是不是应该补上」）。
   Future<void> _loadMedia() async {
+    // **底片那几段先建**：它们跟有没有原片毫无关系（拼片任务一条原片都
+    // 没有，照样每一段都有画面）。放在下面那个 return 后头的话，
+    // 没有原片的任务永远走不到，那几格就一直空着
+    unawaited(_loadBaseMedia());
     if (_loadingMedia || _media != null) return;
     final videoInfo = _task.videoInfo;
     final sourcePath = _task.sourcePath;
@@ -2363,6 +2393,44 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       setState(() => _mediaFailed = true);
     } finally {
       _loadingMedia = false;
+    }
+  }
+
+  /// 给每个固定过底片的单元建一份它自己的画面与波形。
+  ///
+  /// 缓存文件名带上单元身份（`<taskId>_u<uid>`），既和原片那份分开，
+  /// 又仍然算在这条任务名下（[artifactBelongsTo] 认 `taskId_` 前缀），
+  /// 删任务时跟着一起清
+  Future<void> _loadBaseMedia() async {
+    final editor = _editor;
+    final dataDir = ref.read(dataDirProvider);
+    if (editor == null || dataDir == null) return;
+    final media = TaskMedia(dataDir: dataDir, taskId: _task.id);
+    for (final unit in editor.units) {
+      final id = unit.baseCandidateId;
+      if (id == null || unit.uid.isEmpty) continue;
+      if (_baseMedia.containsKey(unit.uid)) continue;
+      final path = media.localMaterial(id);
+      if (path == null) continue;
+      // 这一段在成片里多长，就按多长去抽帧和算波形
+      final durationMs = unit.shots.isEmpty
+          ? unit.durationMs
+          : unit.shots.last.endMs - unit.startMs;
+      if (durationMs <= 0) continue;
+      try {
+        final resolved = await _resolveMedia();
+        final built = await resolved.builder.build(
+          videoPath: path,
+          taskId: '${_task.id}_u${unit.uid}',
+          durationMs: durationMs,
+          workDir: resolved.workDir,
+        );
+        if (!mounted) return;
+        setState(() => _baseMedia = {..._baseMedia, unit.uid: built});
+      } catch (e) {
+        // 这一格画不出来不该拖垮整条时间线；轨道上那一段会照旧标出来
+        AppLog.warn('底片画面/波形加载失败（U${unit.index + 1}）：$e');
+      }
     }
   }
 
@@ -3225,6 +3293,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 mediaStatus: _mediaStatus,
                 thumbStatus: _thumbStatus,
                 waveStatus: _waveStatus,
+                baseMedia: _baseMedia,
                 playhead: _playhead,
                 readOnly: !_isEditable || _lock != null,
                 clock: widget.clock,
