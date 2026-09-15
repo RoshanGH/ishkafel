@@ -527,7 +527,14 @@ class _InspectorPanelState extends State<InspectorPanel> {
               inspectorSubRow(
                   '取自原片',
                   '${formatTimecode(unit.startMs, widget.fps)}'
-                      ' – ${formatTimecode(unit.endMs, widget.fps)}'),
+                      ' – ${formatTimecode(unit.endMs, widget.fps)}')
+            // 固定过底片的：它也「取自」某处，只不过是那条素材。
+            // 不写的话这一行凭空少一项，人不知道这一段的画面从哪儿来
+            else if (hasOwnBaseShots(unit))
+              inspectorSubRow(
+                  '取自底片',
+                  '${formatTimecode(0, widget.fps)} – '
+                      '${formatTimecode(unit.shots.last.endMs - unit.startMs, widget.fps)}'),
             inspectorTimecodeLegend(widget.fps),
           ]),
           ?lockedNote,
@@ -605,8 +612,10 @@ class _InspectorPanelState extends State<InspectorPanel> {
     final units = widget.controller.units;
     if (unitIndex < 0 || unitIndex >= units.length) return null;
     final unit = units[unitIndex];
-    // 拆分/并入是「在一条固定的原片时间轴上换个切法」。手加的单元
-    // 是加出来的，没有台词可拆、也没有原片区间可并
+    // 拆分/并入是「在一条固定的原片时间轴上换个切法」。手加的单元是加出来
+    // 的，没有原片区间可并；**固定过底片的也不行**——拆开之后两半各自的
+    // 镜头还挂着同一张底片的偏移，对不上任何一边（SegmentationEditOps
+    // 那边同样拒绝，两处口径一致）。要改这一段的切法，用「重新切分」
     if (!unit.hasSource) return null;
     final locks = widget.controller.locks;
     final structureLocked = locks.unitHasAnyLock(unitIndex);
