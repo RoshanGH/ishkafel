@@ -72,7 +72,6 @@ import '../../core/audio/audio_preview.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/vocal_separator.dart';
 import 'bgm_picker_sheet.dart';
-import 'candidate_badge.dart';
 import 'voice_picker_sheet.dart';
 import 'voice_swap_runner.dart';
 import 'timeline/bgm_track.dart';
@@ -3357,10 +3356,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                       ? () => _previewVoice(i)
                       : null;
                 },
-                // 角标跟着这个 tab 里摆的东西走：当前选中的那个单元
-                // 挑了几条（见 [candidateBadgeText]）
-                candidateBadge: candidateBadgeText(_replacements ?? const [],
-                    unitIndex: _editor?.selection?.unitIndex),
                 bgm: _task.bgm,
                 onBgmRangeSelected: _isEditable ? _pickBgmForRange : null,
                 onBgmSegmentTap: _isEditable ? _editBgmSegment : null,
