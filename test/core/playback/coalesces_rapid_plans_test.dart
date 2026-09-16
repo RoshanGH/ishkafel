@@ -29,6 +29,12 @@ class _Fake implements FollowerTrack {
   Future<void> seekMs(int ms) async => _positionMs = ms;
   @override
   Future<void> setVolume(double v) async {}
+
+  /// 追赶用的速率。测试记下来，验「不再硬 seek 而是微调速率」
+  double rate = 1.0;
+
+  @override
+  Future<void> setRate(double value) async => rate = value;
   @override
   int get positionMs => _positionMs;
   @override

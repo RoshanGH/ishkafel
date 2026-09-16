@@ -121,4 +121,21 @@ void main() {
       expect(body, contains(field), reason: 'withSource 漏了 $field');
     }
   });
+
+  test('跟随轨用调速追，不再硬 seek——否则接缝顿挫还是会变成可闻的重复', () {
+    // 产品负责人的症状：「是谁说的，哎，是谁说的，说两遍」——那是硬 seek
+    // 往回跳的声音。规格化把接缝顿挫压小了，但只要还用硬 seek，任何一次
+    // 偶发的长停顿就还会变成一次可闻的重复。两层防护缺一不可
+    final playback = read('lib/core/playback/multitrack_playback.dart');
+
+    expect(playback, contains('chaseRate('),
+        reason: '小偏差要用调速追平，不是跳');
+    expect(playback, contains('seekInsteadOfChaseMs'),
+        reason: '大偏差（换了地方）才跳');
+
+    // 死区必须比硬阈值小得多，否则会留下一个永远不纠的恒定偏差
+    // （真机量到 65ms：够不着 150ms，所以从来没被纠过）
+    final follower = read('lib/core/playback/follower_track.dart');
+    expect(follower, contains('chaseDeadZoneMs'));
+  });
 }
