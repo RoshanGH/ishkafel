@@ -861,9 +861,13 @@ class _ExportDialogState extends ConsumerState<_ExportDialog> {
     // **停止不是失败**：人自己按的，别把它算进失败数让他去查原因。
     // 已经导完的那几条就是能交付的物料，先把这个数说出来
     final headline = stopped.isNotEmpty
-        ? (failed.isEmpty
-            ? '已停止——${results.length} 条里导完 $done 条，都在输出目录里'
-            : '已停止——${results.length} 条里导完 $done 条，失败 ${failed.length} 条')
+        ? (done == 0
+            // 一条都没导完时不能说「都在输出目录里」——那儿空空如也
+            ? '已停止——${results.length} 条一条都还没导完'
+            : failed.isEmpty
+                ? '已停止——${results.length} 条里导完 $done 条，都在输出目录里'
+                : '已停止——${results.length} 条里导完 $done 条，'
+                    '失败 ${failed.length} 条')
         : failed.isEmpty
             ? '${results.length} 条全部导出完成'
             : '成功 $done 条，失败 ${failed.length} 条';

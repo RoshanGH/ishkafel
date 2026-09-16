@@ -816,7 +816,9 @@ void _elapsedShown() {
       gate.complete();
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('已停止'), findsOneWidget);
+      // 一条都没导完时不能说「都在输出目录里」——那儿空空如也
+      // （2026-09-16 真机：停在人声分离那一步，输出目录是空的）
+      expect(find.text('已停止——3 条一条都还没导完'), findsOneWidget);
       // 停止不是失败：别把它算进失败数让人去查原因
       expect(find.textContaining('条失败'), findsNothing);
 
