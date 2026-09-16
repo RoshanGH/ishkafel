@@ -6,6 +6,7 @@ import '../log/app_log.dart';
 import 'edl.dart';
 import 'follower_track.dart';
 import 'media_kit_playback.dart';
+import 'preview_normalizer.dart';
 import 'playback_controller.dart';
 import 'track_plan.dart';
 
@@ -112,7 +113,17 @@ class MultitrackPlayback implements PlaybackController {
   /// 中间那几版在被播出来之前就已经过时了，直接丢掉。
   TrackPlan? _queued;
 
-  Future<void> setPlan(TrackPlan plan) {
+  /// 换一套轨。
+  ///
+  /// **只接受规格化过的计划**（见 [PreviewNormalizer]）：画面轨的段与段
+  /// 规格不一致时，播放器在接缝处要重建解码器和视频输出——画面闪一下、
+  /// 主时钟停一拍，跟随轨随即被往回拽，听感是「一句话说了两遍」。
+  ///
+  /// 这条规则以前靠各处自觉，反复失效（8-10 诊断、8-25 只修了口播轨、
+  /// 9-16 画面轨又破）。现在把它钉在类型上：拿不到一个没验过的
+  /// [NormalizedTrackPlan]，新来源想绕过去**编译不过**
+  Future<void> setPlan(NormalizedTrackPlan normalized) {
+    final plan = normalized.plan;
     _queued = plan;
     final next = _pending.then((_) async {
       final pending = _queued;

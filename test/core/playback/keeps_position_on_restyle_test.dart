@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/playback/follower_track.dart';
 import 'package:ishkafel/core/playback/multitrack_playback.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
+import 'package:ishkafel/core/playback/preview_normalizer.dart';
 import 'package:ishkafel/core/playback/track_plan.dart';
 
 /// **换一段切片，人正看着的那一帧不能丢。**
@@ -61,11 +62,11 @@ void main() {
       );
 
   test('只是重烧了字幕：人看的那一刻留在原处', () async {
-    await playback.setPlan(planWith('/fit/old.mp4'));
+    await playback.setPlanForTest(planWith('/fit/old.mp4'));
     master.emitPosition(6800); // 人停在第二镜上调字幕
     await Future<void>.delayed(const Duration(milliseconds: 10));
 
-    await playback.setPlan(planWith('/fit/new.mp4'));
+    await playback.setPlanForTest(planWith('/fit/new.mp4'));
 
     expect(master.positionMs, 6800,
         reason: '跳回片头的话，人正对着调的那一帧就没了——'
@@ -77,12 +78,12 @@ void main() {
   /// 件事（「参考弹窗每个分镜都从头播就是这么来的」），只是换方案这条路
   /// 没等。
   test('换源之后要等文件真加载完再跳——不等的话那一下会被吞掉', () async {
-    await playback.setPlan(planWith('/fit/old.mp4'));
+    await playback.setPlanForTest(planWith('/fit/old.mp4'));
     master.emitPosition(6800);
     await Future<void>.delayed(const Duration(milliseconds: 10));
     master.calls.clear();
 
-    await playback.setPlan(planWith('/fit/new.mp4'));
+    await playback.setPlanForTest(planWith('/fit/new.mp4'));
 
     final waited = master.calls.indexOf('waitUntilLoaded');
     final sought = master.calls.indexWhere((c) => c.startsWith('seek'));
@@ -91,12 +92,20 @@ void main() {
   });
 
   test('片长没变时是原样搬过去，不是按比例挪一点', () async {
-    await playback.setPlan(planWith('/fit/old.mp4'));
+    await playback.setPlanForTest(planWith('/fit/old.mp4'));
     master.emitPosition(12345);
     await Future<void>.delayed(const Duration(milliseconds: 10));
 
-    await playback.setPlan(planWith('/fit/new.mp4'));
+    await playback.setPlanForTest(planWith('/fit/new.mp4'));
 
     expect(master.positionMs, 12345);
   });
+}
+
+/// 测试里推方案：走**和生产同一道闸**，只是挂在「原样放行」档上
+/// （见 [PreviewNormalizer.passthrough]）。这些用例验的是播放器的行为，
+/// 不是规格化本身——规格化有自己的用例
+extension _PushPlan on MultitrackPlayback {
+  Future<void> setPlanForTest(TrackPlan plan) async =>
+      setPlan(await PreviewNormalizer.passthrough().normalize(plan));
 }
