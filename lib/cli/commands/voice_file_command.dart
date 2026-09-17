@@ -6,6 +6,8 @@ import '../../core/script/script_service_wiring.dart';
 import '../../core/script/uploaded_voice.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_lock_holder.dart';
@@ -137,20 +139,51 @@ Future<int> runScriptVoiceFileCommand({
       sink.writeln('这段录音没听清（$e）——时长照用，但断不了句。');
     }
 
-    final before = target.text.trim();
-    final next = applyUploadedVoice(
-      doc: doc,
-      lineIndex: index,
-      audioPath: kept.path,
-      durationMs: durationMs,
-      words: words,
-      heardText: heard,
+    final beforeText = target.text.trim();
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'voice.upload',
+      where: {'line': line},
+      edit: (fresh) {
+        final freshDoc = fresh.script;
+        if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+        final applied = applyUploadedVoice(
+          doc: freshDoc,
+          lineIndex: index,
+          audioPath: kept.path,
+          durationMs: durationMs,
+          words: words,
+          heardText: heard,
+        );
+        return TaskEdit(
+          task: fresh.copyWith(script: applied),
+          before: {
+            'text': freshDoc.lines.length > index
+                ? freshDoc.lines[index].text.trim()
+                : beforeText,
+            'durationMs': freshDoc.lines.length > index
+                ? freshDoc.lines[index].voiceover?.durationMs
+                : null,
+          },
+          after: {'text': applied.lines[index].text.trim(), 'durationMs': durationMs},
+        );
+      },
     );
-    await repository.save(task.copyWith(script: next, updatedAt: DateTime.now()));
+    if (updated == null) {
+      sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     // 这一行的时长换了根，镜头分配跟着变——让人当场看见落到哪一行
     await stage.show('第 $line 行换成你自己的录音了（${durationMs}ms）',
         focus: focus);
 
+    final next = updated.script!;
+    final before = beforeText;
     final after = next.lines[index].text.trim();
     if (after != before) {
       // 台词一改，按字划出来的分镜就不成立了（字的位置全变了）——说出来
