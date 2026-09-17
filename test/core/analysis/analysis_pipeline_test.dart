@@ -299,6 +299,10 @@ void main() {
       await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
           .analyze(a);
       final vocabA = tagger.vocabularies.last;
+      // **b 也要先落盘**：管线现在按 `TaskMutation` 写，切分落库读的是盘上
+      // 那一份（人在分析这几分钟里改过的标签组、任务名要算数），打标跟着
+      // 用它的标签组。不落盘的话盘上还是 a，词表自然也还是 a 的
+      await repo.save(b);
       await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
           .analyze(b);
 

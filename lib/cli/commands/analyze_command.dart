@@ -115,6 +115,9 @@ Future<int> runAnalyzeCommand({
     if (external0.isEmpty) {
       final analyzed = await pipeline.analyze(
         task,
+        // 这一趟是 Agent 叫起来的——管线两边共用，谁触发算谁的
+        by: ActorKind.agent,
+        actor: 'Agent',
         onProgress: (progress) {
           sink.writeln('· ${progress.stage.name}');
           stage.note('正在分析原片：${progress.stage.name}',

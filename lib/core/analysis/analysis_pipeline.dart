@@ -12,6 +12,8 @@ import '../audio/vocal_separator.dart';
 import '../models/renew_task.dart';
 import 'tag_merge.dart';
 import '../models/semantic_unit.dart';
+import '../storage/task_log.dart';
+import '../storage/task_mutation.dart';
 import '../storage/task_repository.dart';
 import 'analysis_progress.dart';
 import 'boundary_trace_index.dart';
@@ -119,6 +121,13 @@ class AnalysisPipeline {
   final SegmentationBuilder builder;
   final TaskRepository repository;
   final Directory workDir;
+
+  /// 数据目录：改动日志落在 `<dataDir>/logs/<taskId>.jsonl`。
+  ///
+  /// 缺省是 [workDir] 的上一级——接线时 `workDir` 就是
+  /// `<dataDir>/analysis_work`（见 `service_wiring.dart`），和
+  /// `PreparedCache(workDir.parent)` 是同一个约定。
+  final Directory dataDir;
   final int sampleRate;
   final DateTime Function() clock;
   final UnitTagger? unitTagger;
@@ -148,6 +157,7 @@ class AnalysisPipeline {
     required this.builder,
     required this.repository,
     required this.workDir,
+    Directory? dataDir,
     this.sampleRate = 16000,
     DateTime Function()? clock,
     this.unitTagger,
@@ -155,7 +165,8 @@ class AnalysisPipeline {
     this.thumbnails,
     this.batchFrames,
     this.vocabulary,
-  })  : clock = clock ?? DateTime.now,
+  })  : dataDir = dataDir ?? workDir.parent,
+        clock = clock ?? DateTime.now,
         tagging = TaggingService(
           unitTagger: unitTagger,
           shotTagger: shotTagger,
@@ -239,26 +250,47 @@ class AnalysisPipeline {
   /// 记账包住整个分析（见 [AiUsageScope]）：语义切分、切点复核、两层打标的
   /// 调用都埋在下面几层里，且几十个并发同时在跑，只有 Zone 拦得住全部。
   /// 分析失败时也要结账——花掉的 token 不会因为失败退回来。
+  ///
+  /// [by] / [actor] 说的是**谁触发了这一趟分析**，不是「谁在跑」——同一条
+  /// 管线，人在界面上点「分析」是人的，`ishkafel analyze` 调起来是 Agent 的。
+  /// 管线自己无从知道，所以做成参数由触发点传下来，别在这里写死。缺省给
+  /// Agent 那一档：没人认领的后台活儿算 Agent 的（见 [ActorKind]）。
   Future<RenewTask> analyze(RenewTask task,
       {AnalysisProgressSink? onProgress,
-      void Function(RenewTask ready)? onUnitsReady}) async {
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    final writer = TaskMutation(
+        repo: repository, dataDir: dataDir, by: by, actor: actor);
     RenewTask? result;
     final usage = await AiUsageScope.collect(
       () async {
         result = await _analyze(task,
-            onProgress: onProgress, onUnitsReady: onUnitsReady);
+            writer: writer, onProgress: onProgress, onUnitsReady: onUnitsReady);
       },
-      onPartial: (partial) => unawaited(_billFailed(task.id, partial)),
+      onPartial: (partial) => unawaited(_billFailed(writer, task.id, partial)),
     );
-    return _bill(result!, usage);
+    return _bill(writer, result!, usage);
   }
 
-  /// 把用量并进任务并落库
-  Future<RenewTask> _bill(RenewTask task, AiUsage usage) async {
+  /// 把用量并进任务并落库。
+  ///
+  /// **并进 `fresh` 的账本，不是手上这份的**：分析跑了几分钟，这期间人可能
+  /// 在工作台里改过同一条任务，拿手上这份整个写回去会把他的改动抹掉。
+  Future<RenewTask> _bill(
+      TaskMutation writer, RenewTask task, AiUsage usage) async {
     if (usage.calls == 0) return task;
-    final billed = task.copyWith(
-        aiUsage: task.aiUsage.merge(usage), updatedAt: clock());
-    await repository.save(billed);
+    final billed = await writer.apply(
+      taskId: task.id,
+      op: 'ai.usage',
+      note: '这一趟分析花掉的 AI 用量',
+      edit: (fresh) => _billed(fresh, usage),
+    );
+    if (billed == null) {
+      // 任务在分析途中被删了。结账无处可记，但分析结果本身还要交回上层
+      AppLog.warn('任务 ${task.id} 在结账前被删了，这一趟的 AI 用量没记上。');
+      return task;
+    }
     return billed;
   }
 
@@ -266,16 +298,42 @@ class AnalysisPipeline {
   ///
   /// **尽力而为，绝不抛**：这条路上真正要交给上层的是分析失败的原因，
   /// 结账再抛一个错只会把它盖掉——实测就盖掉过一次 StateError。
-  Future<void> _billFailed(String id, AiUsage usage) async {
+  Future<void> _billFailed(
+      TaskMutation writer, String id, AiUsage usage) async {
     if (usage.calls == 0) return;
     try {
-      final current = await repository.findById(id);
-      if (current == null) return;
-      await repository.save(current.copyWith(
-          aiUsage: current.aiUsage.merge(usage), updatedAt: clock()));
+      await writer.apply(
+        taskId: id,
+        op: 'ai.usage',
+        note: '分析失败前已经花掉的 AI 用量',
+        edit: (fresh) => _billed(fresh, usage, analysisFailed: true),
+      );
     } catch (e) {
       AppLog.warn('任务 $id 分析失败后的用量结账没写成（不影响报错）：$e');
     }
+  }
+
+  /// 结账这一笔的纯变换：把这一趟的用量并进 [fresh] 的账本。
+  ///
+  /// `before`/`after` 记的是**调用次数与花费**，不是一串 token 明细——
+  /// 查账的人要判断的是「这一趟值不值、是不是跑重了」。
+  static TaskEdit _billed(RenewTask fresh, AiUsage usage,
+      {bool analysisFailed = false}) {
+    final merged = fresh.aiUsage.merge(usage);
+    return TaskEdit(
+      task: fresh.copyWith(aiUsage: merged),
+      before: {
+        'calls': fresh.aiUsage.calls,
+        'costYuan': fresh.aiUsage.costYuan,
+      },
+      after: {
+        'calls': merged.calls,
+        'costYuan': merged.costYuan,
+        'thisRunCalls': usage.calls,
+        'thisRunCostYuan': usage.costYuan,
+        if (analysisFailed) 'analysisFailed': true,
+      },
+    );
   }
 
   /// 分析的**前半程**：抽音频 → 分离 / 镜头切点 / ASR（三条并行）。
@@ -373,7 +431,8 @@ class AnalysisPipeline {
   }
 
   Future<RenewTask> _analyze(RenewTask task,
-      {AnalysisProgressSink? onProgress,
+      {required TaskMutation writer,
+      AnalysisProgressSink? onProgress,
       void Function(RenewTask ready)? onUnitsReady}) async {
     final startedAt = clock();
     // 空白任务没有原片，整条分析都无从谈起（同 prepare 的守卫）
@@ -420,18 +479,44 @@ class AnalysisPipeline {
 
     // 切分好就先落库、先放人进去干活——打标（实测占总时长七成）不该挡着。
     // 用户进工作台第一件事是看切分对不对、拖边界，那些都不需要标签。
-    final ready = task.copyWith(
-      units: _withBoundaryTrace(units, fps: info.fps),
-      status: RenewTaskStatus.ready,
-      updatedAt: clock(),
-      asrSentences: sentences,
-      vocalsPath: prepared.vocalsPath,
-      backgroundPath: prepared.backgroundPath,
-      // 人真正等到这一刻就能进去干活了；只记第一次
-      firstReadyMs: task.firstReadyMs ??
-          clock().difference(startedAt).inMilliseconds,
+    //
+    // **写的是 `fresh`，不是手上那份 `task`**：前半程（抽音频、ASR、语义切分）
+    // 要跑好几分钟，这期间任务可能被改过名、换过标签组。整份写回去会把那些
+    // 一起抹掉，而且哪儿都不报错
+    final assembled = _withBoundaryTrace(units, fps: info.fps);
+    final elapsedMs = clock().difference(startedAt).inMilliseconds;
+    final ready = await writer.apply(
+      taskId: task.id,
+      op: 'units.assemble',
+      note: '分析切出了单元，先落库放人进去干活，打标转后台',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(
+          units: assembled,
+          status: RenewTaskStatus.ready,
+          asrSentences: sentences,
+          vocalsPath: prepared.vocalsPath,
+          backgroundPath: prepared.backgroundPath,
+          // 人真正等到这一刻就能进去干活了；只记第一次
+          firstReadyMs: fresh.firstReadyMs ?? elapsedMs,
+        ),
+        before: {
+          'status': fresh.status.name,
+          'unitCount': fresh.units?.length,
+        },
+        after: {
+          'status': RenewTaskStatus.ready.name,
+          'unitCount': assembled.length,
+          'sentenceCount': sentences.length,
+          'hasVocals': prepared.vocalsPath != null,
+        },
+        // **不盖戳**：这一整份单元都是机器切出来的，盖上「谁改过」的戳会
+        // 让后面的人和 Agent 以为这些边界是有人亲手定的。戳留给点名改过
+        // 某一段的那种操作
+      ),
     );
-    await repository.save(ready);
+    if (ready == null) {
+      throw StateError('任务 ${task.id} 在分析途中被删掉了，切分结果没地方落。');
+    }
     onUnitsReady?.call(ready);
     AppLog.info('切分已就绪（${units.length} 个单元），打标转入后台');
 
@@ -451,14 +536,41 @@ class AnalysisPipeline {
     // 改过的台词此刻在盘上，而 ready 是打标开始那一刻的样子——整份写回去
     // 等于把他这几分钟的活悄没声儿地抹掉。
     //
-    // 所以重读一次，只把标签合并到**当前**的单元上（边界变过的不认，
-    // 见 [mergeTagsInto]）。
-    final latest = await repository.findById(ready.id) ?? ready;
-    final updated = latest.copyWith(
-      units: mergeTagsInto(latest.units ?? const [], taggedUnits),
-      updatedAt: clock(),
+    // 所以只把标签合并到 `fresh` 的单元上（边界变过的不认，见 [mergeTagsInto]）。
+    // 打标本身是分钟级的网络活儿，已经在 edit 之外做完了——edit 里只剩合并
+    // 这一步纯变换，被重跑一次也不会把打标又算一遍。
+    final updated = await writer.apply(
+      taskId: ready.id,
+      op: 'units.tag.auto',
+      note: '内置打标的结果合并进当前的单元',
+      edit: (fresh) {
+        final freshUnits = fresh.units;
+        // units 本来是 null（没分析过）时绝不能悄悄变成 []——那是另一个事实。
+        // 正常流程走不到这里（上面那次 apply 已经把 units 落成非空列表），纯防御
+        if (freshUnits == null) {
+          return TaskEdit(
+            task: fresh,
+            before: {'unitCount': 0},
+            after: {'unitCount': 0, 'note': 'units 是 null（没分析过），无标签可合并'},
+          );
+        }
+        final merged = mergeTagsInto(freshUnits, taggedUnits);
+        // 真正变了标签的 uid：跟 mergeTagsInto 判定「要不要真的动一下」用
+        // 同一条判据（tag_merge.dart 导出的 unitTagsChanged）
+        final taggedUids = [
+          for (var i = 0; i < freshUnits.length && i < merged.length; i++)
+            if (unitTagsChanged(freshUnits[i], merged[i])) merged[i].uid,
+        ];
+        return TaskEdit(
+          task: fresh.copyWith(units: merged),
+          before: {'unitCount': freshUnits.length},
+          after: {'unitCount': merged.length, 'taggedUnits': taggedUids},
+        );
+      },
     );
-    await repository.save(updated);
+    if (updated == null) {
+      throw StateError('任务 ${ready.id} 在打标的过程中被删掉了，标签没地方落。');
+    }
     return updated;
   }
 
