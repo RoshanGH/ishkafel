@@ -58,3 +58,18 @@ class EditStamp {
   @override
   int get hashCode => Object.hash(by, at);
 }
+
+/// 一次改动里，某一镜要盖戳的临时坐标：靠单元 uid + 镜头下标在**同一次**
+/// `TaskMutation.apply` 里定位到那个 `Shot` 对象。
+///
+/// **用完即弃，不落盘**：下标只用来在这一次同步操作内找到对象，戳盖上去之后
+/// 这份坐标就不再需要——真正记住「谁盖的」的是 [Shot.editedBy] 本身。
+/// 把下标当 key 持久化正是这个文件头注释里踩过的坑：`splitShotAt` /
+/// `mergeShotWithPrevious` 会让同单元后续镜头的下标整体漂移，第一次拆镜头
+/// 就会把戳错记到相邻镜头上，而且不报错。
+class ShotRef {
+  final String unitUid;
+  final int shotIndex;
+
+  const ShotRef(this.unitUid, this.shotIndex);
+}
