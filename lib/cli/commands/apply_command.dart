@@ -210,10 +210,13 @@ Future<int> _applyWithLock({
 
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
   // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）。
-  // 这份投影天然是**整份提交的完整画面**（方案校验时就是对着 task.units
-  // 这份快照过的，replacements 与它逐位对齐）——所以落盘时仍是整份替换
-  // replacementsByUid / pickedMaterials，不是按 uid 增量合并；TaskMutation
-  // 带来的收益是别的字段（音色、配乐、字幕手改……）不会被这一笔顺手抹掉
+  //
+  // **按 uid 合并，不整份替换**（2026-09-17 评审纠正：整份替换的理由
+  // 「按 uid 合并会让人删过的方案复活」站不住——整份替换同样会让它复活
+  // （byUid 里那条旧方案照样在），而且额外还会抹掉人在这段窗口里给
+  // 新单元建的方案。按 uid 合并再按 fresh 的活 uid 过滤，在每一种情形下
+  // 都不劣于整份替换，严格更好）：merge 完之后把 fresh 里已经不存在的
+  // uid 过滤掉，不留孤儿方案。pickedMaterials 同理按素材 id 合并。
   final byUid = RenewTask.byUid(units, replacements);
   final updated = await TaskMutation(
     repo: repository,
@@ -223,24 +226,39 @@ Future<int> _applyWithLock({
   ).apply(
     taskId: task.id,
     op: 'plans.apply',
-    edit: (fresh) => TaskEdit(
-      task: fresh.copyWith(replacementsByUid: byUid, pickedMaterials: picked),
-      before: {'replacedUnits': fresh.replacementsByUid.length},
-      after: {
-        'replacedUnits': byUid.length,
-        'materials': [
-          for (final m in picked)
-            {
-              'id': m.id,
-              'name': m.name,
-              'sceneDescription': m.sceneDescription,
-              'durationMs': m.durationMs,
-              'burnedText': m.burnedText,
-              'productBrand': m.productBrand,
-            },
-        ],
-      },
-    ),
+    edit: (fresh) {
+      final liveUids = {for (final u in fresh.units ?? const []) u.uid};
+      final mergedReplacements = {...fresh.replacementsByUid, ...byUid}
+        ..removeWhere((uid, _) => !liveUids.contains(uid));
+      final mergedPicked = {
+        for (final m in fresh.pickedMaterials) m.id: m,
+        for (final m in picked) m.id: m,
+      }.values.toList();
+      return TaskEdit(
+        task: fresh.copyWith(
+          replacementsByUid: mergedReplacements,
+          pickedMaterials: mergedPicked,
+        ),
+        before: {
+          'replacedUnits': fresh.replacementsByUid.length,
+          'materials': fresh.pickedMaterials.length,
+        },
+        after: {
+          'replacedUnits': mergedReplacements.length,
+          'materials': [
+            for (final m in picked)
+              {
+                'id': m.id,
+                'name': m.name,
+                'sceneDescription': m.sceneDescription,
+                'durationMs': m.durationMs,
+                'burnedText': m.burnedText,
+                'productBrand': m.productBrand,
+              },
+          ],
+        },
+      );
+    },
   );
   if (updated == null) {
     sink.writeln('这条任务在提交方案的过程中被删掉了：${task.id}');
@@ -410,7 +428,7 @@ Future<int> _applySegment(
       repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
   final ready = await mutation.apply(
     taskId: task.id,
-    op: 'unit.segment.apply',
+    op: 'units.assemble',
     edit: (fresh) => TaskEdit(
       task: fresh.copyWith(
         units: units,
@@ -452,12 +470,36 @@ Future<int> _applySegment(
   final tagged = await pipeline.tagging.tag(ready, units);
   final done = await mutation.apply(
     taskId: task.id,
-    op: 'unit.tag.auto',
-    edit: (fresh) => TaskEdit(
-      task: fresh.copyWith(units: tagged),
-      before: {'unitCount': fresh.units?.length ?? 0},
-      after: {'unitCount': tagged.length},
-    ),
+    op: 'units.tag.auto',
+    edit: (fresh) {
+      // **按 uid 合并，不整份替换**：tagged 是打标开始那一刻（ready）的
+      // 快照打出来的结果，打标是分钟级的网络活儿——这段窗口里人在界面上
+      // 拖过的边界、手改过的标签，如果整份换成 tagged 就会被悄悄抹掉。
+      // 这正是 one_task_writer_test.dart 文档里五次事故的第一条：
+      // 「管线打标 vs 工作台编辑：打标结束整份存回打标开始那一刻的快照，
+      // 人在这七成时间里拖的边界全没了」——这里就是那个原型场景。
+      //
+      // fresh 里已经不存在的 uid（人删过那个单元）直接丢弃打标结果；
+      // fresh 里这一轮新增的 uid（人手动加的单元）原样保留，不受影响。
+      final freshUnits = fresh.units ?? const [];
+      final taggedByUid = {for (final u in tagged) u.uid: u};
+      final merged = <SemanticUnit>[];
+      final taggedUids = <String>[];
+      for (final u in freshUnits) {
+        final t = taggedByUid[u.uid];
+        if (t == null) {
+          merged.add(u);
+        } else {
+          merged.add(t);
+          taggedUids.add(u.uid);
+        }
+      }
+      return TaskEdit(
+        task: fresh.copyWith(units: merged),
+        before: {'unitCount': freshUnits.length},
+        after: {'unitCount': merged.length, 'taggedUnits': taggedUids},
+      );
+    },
   );
   if (done == null) {
     err.writeln('这条任务在打标的过程中被删掉了：${task.id}');
@@ -503,7 +545,7 @@ Future<int> _applyTags(
     actor: 'Agent',
   ).apply(
     taskId: task.id,
-    op: 'unit.tags.apply',
+    op: 'units.tag.import',
     edit: (fresh) => TaskEdit(
       task: fresh.copyWith(units: parsed.units),
       before: {'unitCount': fresh.units?.length ?? 0},
