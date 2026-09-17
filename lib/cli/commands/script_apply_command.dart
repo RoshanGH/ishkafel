@@ -638,15 +638,34 @@ Map<String, dynamic> _applyPureFacts(
         'speechRate': doc.defaultSpeechRate,
       },
     'mix' => {'mix': doc.mix.toJson()},
+    // insert/remove 会改行数，光看某一行的文本看不出发生了什么——
+    // insert 那一行本身的文本压根没变（插的是它后面那一行），remove
+    // 之后同一下标上冒出来的是被顶上来的下一行文本，看着像是「这一行
+    // 的台词被改成了别人的」。带上 lineCount，insert 再带上插入之后
+    // 那个位置的文本（2026-09-17 复审指出这里 before==after）
     'lines' => {
+        'lineCount': doc.lines.length,
         'lines': [
-          for (final e in _lineEdits(payload).map((e) => e.lineIndex).toSet())
-            if (e >= 0 && e < doc.lines.length)
-              {'lineIndex': e, 'text': doc.lines[e].text},
+          for (final e in _lineEdits(payload))
+            {
+              'lineIndex': e.lineIndex,
+              'op': e.op,
+              'text': e.lineIndex >= 0 && e.lineIndex < doc.lines.length
+                  ? doc.lines[e.lineIndex].text
+                  : null,
+              if (e.op == 'insert')
+                'insertedText': e.lineIndex + 1 >= 0 && e.lineIndex + 1 < doc.lines.length
+                    ? doc.lines[e.lineIndex + 1].text
+                    : null,
+            },
         ],
       },
     'alloc' => {
-        'lines': [for (final a in _allocs(payload)) _allocFacts(doc, a.lineIndex)],
+        // 同一个 lineIndex 提交多条时去重——不去重日志里会出现重复项
+        'lines': [
+          for (final i in _allocs(payload).map((a) => a.lineIndex).toSet())
+            _allocFacts(doc, i),
+        ],
       },
     'shot-edit' => {
         'shots': [for (final e in _shotEdits(payload)) _shotEditFacts(doc, e)],
