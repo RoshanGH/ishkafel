@@ -580,10 +580,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     try {
       await pipeline.analyze(
         task,
-        // 这一趟是人在界面上要的（导入时自动排的，或点了「重试分析」）——
-        // 同一条管线 Agent 也在用，所以谁触发算谁的，管线里不写死
-        by: ActorKind.human,
-        actor: actorTaskList,
+        // **切出来的单元、打上的标签都是机器产的**，不是人的判断——
+        // 人点的那一下有它自己那一笔（analyze.retry，human / 人（任务列表））。
+        // 标成人会让 Agent 以为这些边界是有人亲手定的，从此不敢动
+        by: ActorKind.agent,
+        actor: actorAnalysisReport,
         onProgress: (p) => progress.report(task.id, p),
         // 切分一好就刷新列表：那一刻任务已经能打开干活了，剩下的打标
         // 在后台补。让人对着「分析中」多等三倍时间没道理。

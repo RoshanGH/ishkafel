@@ -6,6 +6,7 @@ import 'package:ishkafel/core/ai/ai_usage_scope.dart';
 import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -103,7 +104,7 @@ void main() {
     final task = _task();
     await repo.save(task);
 
-    final done = await _pipeline(temp, repo).analyze(task);
+    final done = await _pipeline(temp, repo).analyze(task, by: ActorKind.agent, actor: 'Agent',);
 
     expect(done.firstReadyMs, isNotNull);
     expect(done.firstReadyMs, greaterThanOrEqualTo(0));
@@ -115,7 +116,7 @@ void main() {
     final task = _task().copyWith(firstReadyMs: 12345);
     await repo.save(task);
 
-    final done = await _pipeline(temp, repo).analyze(task);
+    final done = await _pipeline(temp, repo).analyze(task, by: ActorKind.agent, actor: 'Agent',);
 
     expect(done.firstReadyMs, 12345);
   });
@@ -125,7 +126,7 @@ void main() {
     await repo.save(task);
 
     final done =
-        await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(task);
+        await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(task, by: ActorKind.agent, actor: 'Agent',);
 
     expect(done.aiUsage.calls, 1);
     expect(done.aiUsage.promptTokens, 1000);
@@ -138,10 +139,10 @@ void main() {
     final task = _task();
     await repo.save(task);
 
-    await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(task);
+    await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(task, by: ActorKind.agent, actor: 'Agent',);
     final again = await repo.findById('A1');
     final done =
-        await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(again!);
+        await _pipeline(temp, repo, tagger: _BillingTagger()).analyze(again!, by: ActorKind.agent, actor: 'Agent',);
 
     expect(done.aiUsage.calls, 2,
         reason: '用户在工作台里不停重打标，花费要一直涨');
@@ -160,7 +161,7 @@ void main() {
     );
 
     await expectLater(
-      _pipeline(temp, repo).analyze(task),
+      _pipeline(temp, repo).analyze(task, by: ActorKind.agent, actor: 'Agent',),
       throwsA(isA<StateError>().having(
           (e) => e.message, 'message', contains('缺少视频元信息'))),
       reason: '结账再抛一个错会把真正的失败原因盖掉',

@@ -251,15 +251,20 @@ class AnalysisPipeline {
   /// 调用都埋在下面几层里，且几十个并发同时在跑，只有 Zone 拦得住全部。
   /// 分析失败时也要结账——花掉的 token 不会因为失败退回来。
   ///
-  /// [by] / [actor] 说的是**谁触发了这一趟分析**，不是「谁在跑」——同一条
-  /// 管线，人在界面上点「分析」是人的，`ishkafel analyze` 调起来是 Agent 的。
-  /// 管线自己无从知道，所以做成参数由触发点传下来，别在这里写死。缺省给
-  /// Agent 那一档：没人认领的后台活儿算 Agent 的（见 [ActorKind]）。
+  /// [by] / [actor] 说的是**这一趟分析记在谁头上**。管线自己无从知道，
+  /// 所以由调用点传下来，**两个都必填、没有缺省**：缺省一旦被新调用点
+  /// 漏传，日志会在最关键的那一格上说谎，而且不报错。
+  ///
+  /// 现在两条路都传 `agent`——切出来的单元、打上的标签都是机器产的，
+  /// 标成「人」会让 Agent 让步于一个不存在的人类决定（见 `softwareMutation`）。
+  /// 区别在 [actor]：`ishkafel analyze` 传 `Agent`（真的是 Agent 在指挥），
+  /// 界面那条传 `软件（分析）`（人点的，软件在跑）。**人点这一下本身是有
+  /// 记录的**——`analyze.retry` 那一笔就是 `human` / `人（任务列表）`。
   Future<RenewTask> analyze(RenewTask task,
-      {AnalysisProgressSink? onProgress,
-      void Function(RenewTask ready)? onUnitsReady,
-      ActorKind by = ActorKind.agent,
-      String actor = 'Agent'}) async {
+      {required ActorKind by,
+      required String actor,
+      AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady}) async {
     final writer = TaskMutation(
         repo: repository, dataDir: dataDir, by: by, actor: actor);
     RenewTask? result;

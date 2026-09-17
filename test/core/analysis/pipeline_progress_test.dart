@@ -6,6 +6,7 @@ import 'package:ishkafel/core/ai/ark_chat_client.dart';
 import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/core/analysis/analysis_progress.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
@@ -132,7 +133,7 @@ void main() {
       await repo.save(_task());
       final seen = <AnalysisStage>[];
 
-      await _pipeline(repo).analyze(_task(), onProgress: (p) => seen.add(p.stage));
+      await _pipeline(repo).analyze(_task(), by: ActorKind.agent, actor: 'Agent', onProgress: (p) => seen.add(p.stage));
 
       for (final stage in [
         AnalysisStage.extractingAudio,
@@ -150,7 +151,7 @@ void main() {
       await repo.save(_task());
       final seen = <AnalysisStage>[];
 
-      await _pipeline(repo).analyze(_task(), onProgress: (p) => seen.add(p.stage));
+      await _pipeline(repo).analyze(_task(), by: ActorKind.agent, actor: 'Agent', onProgress: (p) => seen.add(p.stage));
 
       final indices = seen.map((s) => s.index).toList();
       for (var i = 1; i < indices.length; i++) {
@@ -164,7 +165,7 @@ void main() {
       await repo.save(_task());
       final seen = <AnalysisStage>[];
 
-      await _pipeline(repo).analyze(_task(), onProgress: (p) => seen.add(p.stage));
+      await _pipeline(repo).analyze(_task(), by: ActorKind.agent, actor: 'Agent', onProgress: (p) => seen.add(p.stage));
 
       expect(seen, isNot(contains(AnalysisStage.taggingShots)));
       expect(seen, isNot(contains(AnalysisStage.taggingUnits)));
@@ -174,7 +175,7 @@ void main() {
       final repo = FileTaskRepository(_temp);
       await repo.save(_task());
 
-      final result = await _pipeline(repo).analyze(_task());
+      final result = await _pipeline(repo).analyze(_task(), by: ActorKind.agent, actor: 'Agent',);
 
       expect(result.status, RenewTaskStatus.ready);
     });
@@ -187,7 +188,7 @@ void main() {
       await repo.save(task);
       final shotReports = <AnalysisProgress>[];
 
-      await _pipeline(repo, tagging: true).analyze(task, onProgress: (p) {
+      await _pipeline(repo, tagging: true).analyze(task, by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
         if (p.stage == AnalysisStage.taggingShots) shotReports.add(p);
       });
 
@@ -204,7 +205,7 @@ void main() {
       await repo.save(task);
       final done = <int>[];
 
-      await _pipeline(repo, tagging: true).analyze(task, onProgress: (p) {
+      await _pipeline(repo, tagging: true).analyze(task, by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
         if (p.stage == AnalysisStage.taggingShots && p.done != null) {
           done.add(p.done!);
         }
@@ -222,7 +223,7 @@ void main() {
       await repo.save(task);
       final unitReports = <AnalysisProgress>[];
 
-      await _pipeline(repo, tagging: true).analyze(task, onProgress: (p) {
+      await _pipeline(repo, tagging: true).analyze(task, by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
         if (p.stage == AnalysisStage.taggingUnits) unitReports.add(p);
       });
 
@@ -236,7 +237,7 @@ void main() {
       final repo = FileTaskRepository(_temp);
       await repo.save(_task());
 
-      final result = await _pipeline(repo).analyze(_task(), onProgress: (_) {
+      final result = await _pipeline(repo).analyze(_task(), by: ActorKind.agent, actor: 'Agent', onProgress: (_) {
         throw StateError('界面已销毁');
       });
 
