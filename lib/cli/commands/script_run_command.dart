@@ -24,7 +24,9 @@ import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
@@ -176,11 +178,32 @@ Future<int> runScriptExtractCommand({
     // 所以这里先落一个默认音色（人和 Agent 都能改），而不是留空等着谁想起来
     final baseline = task.script?.defaultVoiceId ?? VoiceCatalog.all.first.ref.id;
     final baselineName = VoiceCatalog.byId(baseline)?.ref.name ?? baseline;
-    final doc = ScriptDoc(lines,
-        subtitle: task.script?.subtitle ?? const SubtitleStyle(),
-        refVideoPath: video,
-        defaultVoiceId: baseline);
-    await repository.save(task.copyWith(script: doc));
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.extract',
+      edit: (fresh) {
+        // baseline 沿用外层算好的那个值：转写这个 IO 花了几分钟，重跑一遍
+        // 挑音色没有意义，只需要用 fresh 现有的音色/字幕样式起草文档
+        final doc = ScriptDoc(lines,
+            subtitle: fresh.script?.subtitle ?? const SubtitleStyle(),
+            refVideoPath: video,
+            defaultVoiceId: fresh.script?.defaultVoiceId ?? baseline);
+        return TaskEdit(
+          task: fresh.copyWith(script: doc),
+          before: {'lineCount': fresh.script?.lines.length ?? 0},
+          after: {'lineCount': doc.lines.length, 'defaultVoiceId': doc.defaultVoiceId},
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在提取脚本的过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     if (task.script?.defaultVoiceId == null) {
       sink.writeln('· 本片音色先定为「$baselineName」'
           '——这条线的时间根是配音时长，没有它后面挑画面就不知道每一镜多长。'
@@ -352,13 +375,46 @@ Future<int> runScriptVoiceCommand({
   final degraded = <String>[];
   var instructed = 0;
   try {
+    // --voice 给的音色写成本片基调（不钉进每一行）：这一笔单独持久化一次，
+    // 免得跟下面逐行配音的写入搅在一起
+    var latest = task;
+    if (voiceId != null && task.script?.defaultVoiceId != voiceId) {
+      final baselineUpdated = await TaskMutation(
+        repo: repository,
+        dataDir: dataDir,
+        by: ActorKind.agent,
+        actor: 'Agent',
+      ).apply(
+        taskId: task.id,
+        op: 'script.voice.baseline',
+        edit: (fresh) {
+          final freshDoc = fresh.script;
+          if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+          return TaskEdit(
+            task: fresh.copyWith(script: freshDoc.withDefaultVoiceId(voiceId)),
+            before: {'defaultVoiceId': freshDoc.defaultVoiceId},
+            after: {'defaultVoiceId': voiceId},
+          );
+        },
+      );
+      if (baselineUpdated == null) {
+        sink.writeln('这条任务在配音过程中被删掉了：${task.id}');
+        return exitNotFound;
+      }
+      latest = baselineUpdated;
+    }
+
     for (var k = 0; k < targets.length; k++) {
       final i = targets[k];
-      final lineId = doc!.lines[i].id;
-      final target = doc.lines[i];
+      // 每轮从上一轮真正落盘之后的状态取值，不读循环外累积的旧快照——
+      // 原来这里复用同一份任务快照几分钟（TTS 是分钟级的活），这段窗口里
+      // 人在界面上的任何改动都会被下一轮 save 整片抹掉、且不报错
+      final currentDoc = latest.script!;
+      final lineId = currentDoc.lines[i].id;
+      final target = currentDoc.lines[i];
       // 先听一遍参考片这一句是怎么念的。听过的走缓存（按内容指纹），
       // 重配同一句不再花钱；听不了就降级成默认语气，但要点名
-      final request = deliveryRequestOf(doc, target);
+      final request = deliveryRequestOf(currentDoc, target);
       if (delivery != null && request != null) {
         await voiceStage.show(
             '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
@@ -377,25 +433,55 @@ Future<int> runScriptVoiceCommand({
           focus: AgentFocus(
               module: 'director', lineIndex: i, panel: AgentPanel.voice));
       try {
+        // 网络请求：做完拿到结果再进 apply，edit 里绝不能再发一次
         final vo = await service.generate(
           lineId: lineId,
           text: target.text,
-          voiceId: doc.voiceIdOf(target) ?? defaultVoice,
-          speechRate: doc.speechRateOf(target),
+          voiceId: currentDoc.voiceIdOf(target) ?? defaultVoice,
+          speechRate: currentDoc.speechRateOf(target),
           instruction: how.instruction,
         );
         if (how.hasInstruction) instructed++;
-        doc = doc.setVoiceoverById(lineId, vo);
-        // 配音时长是这一行的根：根变了，镜头分配跟着重算
-        final updated = doc.lines.firstWhere((l) => l.id == lineId);
-        if (updated.shots.isNotEmpty) {
-          doc = doc.setShotsById(
-              lineId,
-              ShotAllocation.fillBySlowdown(
-                  reallocShots(updated, updated.shots),
-                  vo.durationMs));
+
+        final updated = await TaskMutation(
+          repo: repository,
+          dataDir: dataDir,
+          by: ActorKind.agent,
+          actor: 'Agent',
+        ).apply(
+          taskId: task.id,
+          op: 'script.voice.generate',
+          where: {'lineIndex': i},
+          edit: (fresh) {
+            final freshDoc = fresh.script;
+            if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+            final before = freshDoc.lines.firstWhere((l) => l.id == lineId,
+                orElse: () => target);
+            var nextDoc = freshDoc.setVoiceoverById(lineId, vo);
+            // 配音时长是这一行的根：根变了，镜头分配跟着重算
+            final afterSet = nextDoc.lines.firstWhere((l) => l.id == lineId);
+            if (afterSet.shots.isNotEmpty) {
+              nextDoc = nextDoc.setShotsById(
+                  lineId,
+                  ShotAllocation.fillBySlowdown(
+                      reallocShots(afterSet, afterSet.shots), vo.durationMs));
+            }
+            return TaskEdit(
+              task: fresh.copyWith(script: nextDoc),
+              before: {'text': before.text, 'durationMs': before.voiceover?.durationMs},
+              after: {
+                'text': target.text,
+                'durationMs': vo.durationMs,
+                if (how.hasInstruction) 'instruction': how.instruction,
+              },
+            );
+          },
+        );
+        if (updated == null) {
+          failed.add('第 ${i + 1} 句：这条任务在配音过程中被删掉了');
+          continue;
         }
-        await repository.save(task.copyWith(script: doc));
+        latest = updated;
         sink.writeln('· 第 ${i + 1} 句好了（${vo.durationMs}ms'
             '${how.hasInstruction ? '，念法：${how.instruction}' : ''}）');
       } catch (e) {
@@ -543,11 +629,24 @@ Future<int> runScriptExportCommand({
       },
     );
     exportStage.end();
-    await repository.save(task.copyWith(exports: [
-      ...task.exports,
-      ExportRecord(
-          at: DateTime.now(), total: 1, succeeded: 1, outputDir: dir),
-    ]));
+    // 导出历史进任务：只是往列表末尾追加一条记录，不依赖 fresh 其它字段，
+    // 天然对并发安全
+    final record =
+        ExportRecord(at: DateTime.now(), total: 1, succeeded: 1, outputDir: dir);
+    await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.export.run',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(exports: [...fresh.exports, record]),
+        before: {'exportCount': fresh.exports.length},
+        after: {'exportCount': fresh.exports.length + 1, 'outputDir': dir},
+      ),
+    );
     emitJson({'ok': true, 'output': output}, out: out);
     return 0;
   } on ScriptExportException catch (e) {
