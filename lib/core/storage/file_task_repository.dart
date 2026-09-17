@@ -113,7 +113,19 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
     if (!await file.exists()) return null;
     try {
       final json = jsonDecode(await file.readAsString());
-      return RenewTask.fromJson(json as Map<String, dynamic>);
+      final task = RenewTask.fromJson(json as Map<String, dynamic>);
+      // 单元身份（uid）在读档这一刻由 ensureUnitUids 补发——老存档、或者
+      // 刚拆分/新建出来还没建立身份的单元，盘上这个字段是空的。**只在内存
+      // 里补是不够的**：下一次独立的 findById 会再补一次，补出**不一样**
+      // 的随机值（ensureUnitUids 每次都重新掷号），两次读永远对不上号。
+      // TaskMutation 的 edit 闭包靠 uid 在 fresh 里重新定位单元——如果身份
+      // 只存在于这一次的内存里、不落盘，这条定位每次都会落空，等价于
+      // 「单元刚被删掉了」，改动因此白做。检测到这次读档补发了身份，
+      // 立刻写回去，让它从这一刻起稳定
+      if (_unitUidsWereJustAssigned(json, task)) {
+        await save(task);
+      }
+      return task;
     } on FormatException catch (e) {
       // JSON 格式错误：文件损坏返回 null，语义与 findAll 的跳过一致
       AppLog.warn('读取任务文件失败（格式错误） ${file.path}：$e');
@@ -144,5 +156,25 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
   Future<void> delete(String id) async {
     final file = _fileOf(id);
     if (await file.exists()) await file.delete();
+  }
+
+  /// 这一次 `fromJson` 有没有给某个单元现掷了一个身份——**逐个比对盘上
+  /// 原样写的 uid 和解析出来的 uid**，不信任何「变没变」的旁路信号。
+  ///
+  /// 结构对不上（单元数不一致）时不处理，交给别处的校验去报——这里只
+  /// 管「同一批单元，身份是不是这一次才现掷的」这一件事。
+  static bool _unitUidsWereJustAssigned(
+      Map<String, dynamic> json, RenewTask task) {
+    final rawUnits = json['units'];
+    final units = task.units;
+    if (rawUnits is! List || units == null || rawUnits.length != units.length) {
+      return false;
+    }
+    for (var i = 0; i < units.length; i++) {
+      final raw = rawUnits[i];
+      final rawUid = raw is Map ? raw['uid'] : null;
+      if (rawUid != units[i].uid) return true;
+    }
+    return false;
   }
 }
