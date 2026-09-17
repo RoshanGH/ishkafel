@@ -70,8 +70,19 @@ void main() {
       };
 
       // receiver 和 .save( 之间允许任意空白（含换行）——`repository\n
-      // .save(` 这种跨行写法不能漏过。整份文件文本一起匹配，不再逐行扫
-      for (final m in RegExp(r'\b(\w+)\s*\.\s*save\s*\(').allMatches(content)) {
+      // .save(` 这种跨行写法不能漏过。整份文件文本一起匹配，不再逐行扫。
+      //
+      // **接收者不一定是裸标识符**：GUI 那边真实的写法是
+      // `ref.read(taskRepositoryProvider).save(...)`——接收者是一整条
+      // 「标识符.方法(参数)」调用链，`.save(` 前面紧挨着的是 `)` 不是
+      // 变量名，旧版 `\b(\w+)\.save\(` 在这种形状上完全不匹配（2026-09-17
+      // 复审指出：这会让下一个任务把 scanRoot 扩到全 lib 之后，14 处真实
+      // 的界面写入点全部静悄悄放过，验收门形同虚设）。改成允许接收者是
+      // 「(标识符 或 标识符(参数))」用点号串起来的一条链，`([^()]*` 不处理
+      // 参数里嵌套括号——这批代码里没有这种写法，够用
+      final saveCallPattern = RegExp(
+          r'((?:\w+(?:\([^()]*\))?\s*\.\s*)*\w+(?:\([^()]*\))?)\s*\.\s*save\s*\(');
+      for (final m in saveCallPattern.allMatches(content)) {
         final receiver = m.group(1)!;
         if (!_looksLikeRepoName(receiver) && !typedRepoNames.contains(receiver)) {
           continue;
