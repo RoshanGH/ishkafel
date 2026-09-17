@@ -5,6 +5,7 @@ import '../../core/storage/task_media.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_copy.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 
@@ -79,6 +80,8 @@ Future<int> runTaskDeleteCommand({
       if (d.existsSync()) d.deleteSync(recursive: true);
     }
     await repository.delete(task.id);
+    // 改动日志跟着任务走：任务没了，日志再没人会去看，留着就是孤儿数据
+    TaskLogFile(dataDir: dataDir, taskId: task.id).deleteAll();
   } catch (e) {
     sink.writeln('删除失败：$e');
     return exitFailed;

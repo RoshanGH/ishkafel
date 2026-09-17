@@ -17,6 +17,7 @@ import '../../core/models/export_record.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../import_flow/import_service.dart';
@@ -211,6 +212,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       // 再也无法重命名/重试（等于把 Critical 2 那类死锁换个地方复现）
       _deletedTaskIds.remove(task.id);
       rethrow;
+    }
+    // 改动日志跟着任务走：任务没了，日志再没人会去看，留着就是孤儿数据
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir != null) {
+      TaskLogFile(dataDir: dataDir, taskId: task.id).deleteAll();
     }
     if (!_removeLocally(task.id)) await reload();
   }
