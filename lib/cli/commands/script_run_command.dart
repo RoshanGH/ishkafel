@@ -340,6 +340,8 @@ Future<int> runScriptVoiceCommand({
     emitJson({'ok': true, 'generated': 0, 'note': '没有需要配音的行'}, out: out);
     return 0;
   }
+  // 行的**身份**先固定下来：循环里每轮重读盘，下标会漂，id 不会
+  final targetIds = [for (final i in targets) doc.lines[i].id];
 
   final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
   if (!await acquireYieldingFromUi(
@@ -403,10 +405,13 @@ Future<int> runScriptVoiceCommand({
   final failed = <String>[];
   final degraded = <String>[];
   var instructed = 0;
+  // 真生成了几句、跳过了几句。**两个数都要报**：只报「配了 20 句」的话，
+  // 一轮全跳过和一轮全新配长得一模一样，人分不出有没有白烧钱
+  var generated = 0;
+  var skipped = 0;
   try {
     // --voice 给的音色写成本片基调（不钉进每一行）：这一笔单独持久化一次，
     // 免得跟下面逐行配音的写入搅在一起
-    var latest = task;
     if (voiceId != null && task.script?.defaultVoiceId != voiceId) {
       final baselineUpdated = await TaskMutation(
         repo: repository,
@@ -430,17 +435,43 @@ Future<int> runScriptVoiceCommand({
         sink.writeln('这条任务在配音过程中被删掉了：${task.id}');
         return exitNotFound;
       }
-      latest = baselineUpdated;
     }
 
     for (var k = 0; k < targets.length; k++) {
       final i = targets[k];
-      // 每轮从上一轮真正落盘之后的状态取值，不读循环外累积的旧快照——
-      // 原来这里复用同一份任务快照几分钟（TTS 是分钟级的活），这段窗口里
-      // 人在界面上的任何改动都会被下一轮 save 整片抹掉、且不报错
-      final currentDoc = latest.script!;
-      final lineId = currentDoc.lines[i].id;
-      final target = currentDoc.lines[i];
+      final lineId = targetIds[k];
+      // **每一句开工前重读一次盘**，而不是只信循环外那份 targets。
+      //
+      // TTS 按字符计费，而「调用方命令超时了、以为失败又起一个」是常态
+      // （25 句要跑好几分钟）。第二个进程开工时算出来的 targets 是它那一刻
+      // 的快照，第一个进程后来配好的那些句它看不见——不重读就把同一句
+      // 再念一遍、再收一次费。此前替这件事挡枪的是任务锁（第二个进程撞锁
+      // 干等，等完发现「没有需要配音的行」），锁没了，幂等得落到每一句上。
+      //
+      // 顺带也解决了老问题：复用同一份快照几分钟，人在界面上的改动会被
+      // 下一轮 save 整片抹掉。
+      final reread = await repository.findById(task.id);
+      final currentDoc = reread?.script;
+      if (reread == null || currentDoc == null) {
+        failed.add('第 ${i + 1} 句：这条任务在配音过程中被删掉了');
+        break;
+      }
+      // 按 id 找，不按下标：这期间行可能被加被删，下标早就不指向同一句了
+      final hits = currentDoc.lines.where((l) => l.id == lineId);
+      if (hits.isEmpty) {
+        sink.writeln('· 第 ${i + 1} 句在这期间被删掉了，跳过');
+        skipped++;
+        continue;
+      }
+      final target = hits.first;
+      // 显式 `--line N` 是「把这一句重配一遍」，照做；批量模式下已经配好的
+      // 一律跳过——那是另一个进程（多半是超时重试前的自己）刚配完的
+      if (line == null &&
+          currentDoc.voiceStateOf(target) == LineVoiceState.fresh) {
+        sink.writeln('· 第 ${i + 1} 句已经有配音了，跳过（不重复花钱）');
+        skipped++;
+        continue;
+      }
       // 先听一遍参考片这一句是怎么念的。听过的走缓存（按内容指纹），
       // 重配同一句不再花钱；听不了就降级成默认语气，但要点名
       final request = deliveryRequestOf(currentDoc, target);
@@ -510,7 +541,7 @@ Future<int> runScriptVoiceCommand({
           failed.add('第 ${i + 1} 句：这条任务在配音过程中被删掉了');
           continue;
         }
-        latest = updated;
+        generated++;
         sink.writeln('· 第 ${i + 1} 句好了（${vo.durationMs}ms'
             '${how.hasInstruction ? '，念法：${how.instruction}' : ''}）');
       } catch (e) {
@@ -519,7 +550,11 @@ Future<int> runScriptVoiceCommand({
     }
     emitJson({
       'ok': failed.isEmpty,
-      'generated': targets.length - failed.length,
+      'generated': generated,
+      if (skipped > 0) 'skipped': skipped,
+      if (skipped > 0)
+        'skippedNote': '这 $skipped 句开工前重读时已经有配音了'
+            '（多半是另一个进程刚配完），没有重复生成、没有重复计费',
       // **带没带上「怎么念」直接决定成片有没有情绪**，所以要报出来：
       // 只报「配了 20 句」的话，一片扁平的配音看起来跟正常的一模一样
       'withDelivery': instructed,

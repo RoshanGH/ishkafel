@@ -17,6 +17,7 @@ import '../../core/storage/task_media.dart';
 import '../../core/miaoa/candidate_probe.dart';
 import '../../core/audio/bgm_library.dart';
 import '../../core/ai/tag_dimension.dart';
+import '../../core/ai/taggers.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
@@ -756,6 +757,12 @@ Future<int> runScriptTagRefCommand({
   String? holder,
   StringSink? out,
   StringSink? err,
+
+  /// 测试注入：不给就按凭据装配真实的识图服务
+  ShotTagger? tagger,
+
+  /// 测试注入：抽帧用的子进程执行器
+  ProcessRunner? run,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -806,8 +813,8 @@ Future<int> runScriptTagRefCommand({
 
   // 走 CLI 那份凭据加载：它会去 <dataDir>/credentials 找，
   // 而不是只看编译期注入的（命令行跑的时候没有那一份）
-  final tagger = buildRefShotTagger(loadCliCredentials(dataDir));
-  if (tagger == null) {
+  final shotTagger = tagger ?? buildRefShotTagger(loadCliCredentials(dataDir));
+  if (shotTagger == null) {
     sink.writeln('尚未配置 AI 服务（视觉理解），打不了标。'
         '让用户在 app 的设置里补上凭据');
     return exitEnv;
@@ -817,17 +824,21 @@ Future<int> runScriptTagRefCommand({
       ? task.shotTagGroups
       : task.unitTagGroups;
   final vocab = <TagDimension>[];
-  try {
-    final all = await MiaoaTagService().listGroups();
-    for (final g in groups) {
-      final hit = all.where((x) => x.id == g.id).firstOrNull;
-      if (hit != null && hit.tags.isNotEmpty) {
-        vocab.add(TagDimension(name: hit.name, vocabulary: hit.tags));
+  // 一个标签组都没有就不必去问词表：那一趟是 miaoa CLI 的子进程，
+  // 白等一次，而结果注定是空的
+  if (groups.isNotEmpty) {
+    try {
+      final all = await MiaoaTagService().listGroups();
+      for (final g in groups) {
+        final hit = all.where((x) => x.id == g.id).firstOrNull;
+        if (hit != null && hit.tags.isNotEmpty) {
+          vocab.add(TagDimension(name: hit.name, vocabulary: hit.tags));
+        }
       }
+    } catch (e) {
+      // 拉不到词表也要打——画面描述不依赖词表，而它正是检索键
+      AppLog.warn('拉标签词表失败（只出画面描述）：$e');
     }
-  } catch (e) {
-    // 拉不到词表也要打——画面描述不依赖词表，而它正是检索键
-    AppLog.warn('拉标签词表失败（只出画面描述）：$e');
   }
 
   // **打标是全流程里最慢最贵的一段**：25 句、47 个参考镜、十几分钟、
@@ -852,9 +863,38 @@ Future<int> runScriptTagRefCommand({
           module: 'director', lineIndex: index, panel: AgentPanel.findShots));
 
   final done = <Map<String, dynamic>>[];
+  final lineId = target.id;
+  var skipped = 0;
   for (var k = 0; k < ref.segments.length; k++) {
-    if ((ref.metaAt(ref.segments[k].$1)?.description ?? '').isNotEmpty) {
-      continue; // 打过的跳过：这一步花钱
+    final segStartMs = ref.segments[k].$1;
+    // **每一镜开工前重读一次盘**，已经打过的跳过——识图按次计费。
+    //
+    // 判断「这一镜打没打过」只能看盘上此刻的样子，不能看循环外那份快照：
+    // 一行 47 镜要跑十几分钟，调用方超时重试再起一个是常态，第二个进程
+    // 拿到的快照里那些镜全是空的，照着它走就把每一镜再识一次图、再收
+    // 一次费。此前替这件事挡枪的是任务锁，锁没了，幂等得落到每一镜上。
+    final reread = await repository.findById(task.id);
+    final rereadDoc = reread?.script;
+    if (reread == null || rereadDoc == null) {
+      sink.writeln('这条任务在打标过程中被删掉了：${task.id}');
+      stage.end();
+      return exitNotFound;
+    }
+    // 按 id 找行，不按下标：这期间行可能被加被删
+    final freshHits = rereadDoc.lines.where((l) => l.id == lineId);
+    final freshRefNow = freshHits.isEmpty ? null : freshHits.first.reference;
+    if (freshRefNow == null) {
+      sink.writeln('第 $line 行的参考镜在打标过程中没了：${task.id}');
+      stage.end();
+      return exitNotFound;
+    }
+    if ((freshRefNow.metaAt(segStartMs)?.description ?? '').isNotEmpty) {
+      // 打过的跳过：这一步花钱。**出声说**，不然「跳过 47 镜」
+      // 和「重打 47 镜」在屏幕上长得一模一样
+      sink.writeln('· 第 $line 句的第 ${k + 1} 个参考镜已经打过标了，'
+          '跳过（不重复花钱）');
+      skipped++;
+      continue;
     }
     await stage.show(
         '正在看第 $line 句的第 ${k + 1} 个参考镜'
@@ -866,13 +906,14 @@ Future<int> runScriptTagRefCommand({
             panel: AgentPanel.findShots));
     // 识图是网络请求，做完拿到结果再进 apply——edit 里绝不能再发一次
     final meta = await tagRefShot(
-      line: doc.lines[index],
+      line: freshHits.first,
       videoPath: video,
       segIndex: k,
       workDir: Directory(p.join(dataDir.path, 'script_refs', task.id)),
-      tagger: tagger,
+      tagger: shotTagger,
       vocabulary: vocab,
       constraint: task.shotTagPrompt.isEmpty ? null : task.shotTagPrompt,
+      run: run,
     );
     if (meta == null) continue;
     taggedSoFar++;
@@ -883,7 +924,6 @@ Future<int> runScriptTagRefCommand({
     // 循环下一轮的 save 整片抹掉、且不报错——这正是这批改造要杀的那个 bug
     // 的最恶劣版本。改成每轮独立 apply：edit 只读这一刻的 fresh，
     // 不读循环外的 doc，界面还是「一步一步长出来」，但不再清对方的改动
-    final segStartMs = ref.segments[k].$1;
     final updated = await TaskMutation(
       repo: repository,
       dataDir: dataDir,
@@ -896,7 +936,12 @@ Future<int> runScriptTagRefCommand({
       edit: (fresh) {
         final freshDoc = fresh.script;
         if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
-        final freshLine = freshDoc.lines[index];
+        // 同样按 id 定位，不按下标
+        final lineHits = freshDoc.lines.where((l) => l.id == lineId);
+        if (lineHits.isEmpty) {
+          throw StateError('第 $line 行没了：${task.id}');
+        }
+        final freshLine = lineHits.first;
         final freshRef = freshLine.reference;
         if (freshRef == null) {
           throw StateError('第 $line 行的参考镜没了：${task.id}');
@@ -931,6 +976,10 @@ Future<int> runScriptTagRefCommand({
     'ok': true,
     'lineIndex': index,
     'tagged': done.length,
+    if (skipped > 0) 'skipped': skipped,
+    if (skipped > 0)
+      'skippedNote': '这 $skipped 个参考镜开工前重读时已经打过标了，'
+          '没有重复识图、没有重复计费',
     'shots': done,
     'next': '现在可以挑镜头了：ishkafel script shots ${task.id} --line $line',
   }, out: out);
