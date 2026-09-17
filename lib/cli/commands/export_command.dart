@@ -21,7 +21,9 @@ import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../agent_lock_holder.dart';
@@ -247,16 +249,33 @@ Future<int> runExportCommand({
   );
 
   final succeeded = outcomes.where((o) => o.failure == null).length;
-  // 导出历史进任务：人在 app 里要能看到「哪天导了几条、在哪儿」
-  await repository.save(task.copyWith(exports: [
-    ...task.exports,
-    ExportRecord(
-      at: DateTime.now(),
-      total: outcomes.length,
-      succeeded: succeeded,
-      outputDir: dest.path,
+  // 导出历史进任务：人在 app 里要能看到「哪天导了几条、在哪儿」。
+  // 只是往列表末尾追加一条记录，不依赖 fresh 的其它字段，天然对并发安全
+  final record = ExportRecord(
+    at: DateTime.now(),
+    total: outcomes.length,
+    succeeded: succeeded,
+    outputDir: dest.path,
+  );
+  await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'export.run',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(exports: [...fresh.exports, record]),
+      before: {'exportCount': fresh.exports.length},
+      after: {
+        'exportCount': fresh.exports.length + 1,
+        'total': outcomes.length,
+        'succeeded': succeeded,
+        'outputDir': dest.path,
+      },
     ),
-  ]));
+  );
   stage.end();
   lock.release(holder ?? agentLockHolder);
 
