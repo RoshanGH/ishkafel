@@ -74,6 +74,9 @@ Future<int> runScriptCommand({
   /// 给 `--tags ""`（空串）就是这一次不带任何标签约束
   String? searchTags,
 
+  /// `new` 用：建任务时打标要用的标签组 id（逗号分隔）
+  String? tagGroups,
+
   /// `export` 用：输出目录
   String? outputDir,
 
@@ -89,7 +92,7 @@ Future<int> runScriptCommand({
   final sink = err ?? stderr;
   if (rest.isEmpty) {
     sink.writeln('用法：ishkafel script <子命令> …\n'
-        '  new <名字>                      建一个脚本任务\n'
+        '  new <名字> --tag-groups <id,id>  建一个脚本任务\n'
         '  extract <任务> <参考视频>        识别台词，生成脚本行\n'
         '  voice <任务> [--line N]         生成配音\n'
         '  voice-file <任务> --line N <音频>  用我自己录的配音（时长与台词都以它为准）\n'
@@ -117,7 +120,11 @@ Future<int> runScriptCommand({
   switch (sub) {
     case 'new':
       return runScriptNewCommand(
-          rest: rest.sublist(1), dataDir: dataDir, out: out, err: err);
+          rest: rest.sublist(1),
+          dataDir: dataDir,
+          tagGroups: tagGroups,
+          out: out,
+          err: err);
     case 'extract':
       return runScriptExtractCommand(
           rest: rest.sublist(1),

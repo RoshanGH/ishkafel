@@ -27,9 +27,16 @@ void main() {
   }
 
   test('两条路给的是同一份报告，不是各写一份', () {
+    // 2026-09-17 第一批 任务 8 之后：_applyWithLock 的直写分支和
+    // _applyPlansViaUi 的委派兜底分支都改call 同一个 _commitPlans
+    // （见下一条测试），不再各自拼 planApplyReport——比「两处都调用
+    // planApplyReport」更严格：现在物理上只有一处调用点
+    expect(bodyOf('_commitPlans'), contains('planApplyReport'),
+        reason: '两条路共用的落盘函数丢了 planApplyReport，报告就不完整');
     for (final name in ['_applyWithLock', '_applyPlansViaUi']) {
-      expect(bodyOf(name), contains('planApplyReport'),
-          reason: '$name 自己拼返回。两条路各拼一份的话迟早只有一份是全的'
+      expect(bodyOf(name), anyOf(contains('planApplyReport'), contains('_commitPlans')),
+          reason: '$name 自己拼返回，或者没有走共用的 _commitPlans。'
+              '两条路各拼一份的话迟早只有一份是全的'
               '——委派那份一度只有 {ok, via, message, plans, units}');
     }
   });
@@ -50,8 +57,10 @@ void main() {
 
   test('返回结构不许因为走哪条路而变——那样调用方没法写逻辑', () {
     // 委派那条路要能报出 plans：它一度只回 result.payload，
-    // 而界面那头压根不知道有几条方案
-    expect(bodyOf('_applyPlansViaUi'), contains('plans = validation.plans'),
+    // 而界面那头压根不知道有几条方案。2026-09-17 第一批 任务 8 之后
+    // 不再另赋值一个 plans 变量，直接把 validation.plans 递给
+    // planApplyReport / _commitPlans——一样是解析出来的真方案，不是空的
+    expect(bodyOf('_applyPlansViaUi'), contains('plans: validation.plans'),
         reason: '委派路径不解析方案的话，报告里的 plans 永远是空');
   });
 }

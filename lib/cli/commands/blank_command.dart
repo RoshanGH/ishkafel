@@ -5,7 +5,6 @@ import '../../core/editing/blank_unit_removal.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
-import '../../core/models/tag_group_ref.dart';
 import '../../core/models/unit_uid.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
@@ -14,6 +13,7 @@ import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../tag_group_lookup.dart';
 import '../task_view.dart';
 import 'analyze_command.dart';
 
@@ -30,6 +30,9 @@ Future<int> runBlankCommand({
   int? unit,
   String? tags,
   String? holder,
+
+  /// 测试注入：标签组查询用假实现，真机走 miaoa CLI
+  MiaoaTagService? tagService,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -46,7 +49,7 @@ Future<int> runBlankCommand({
 
   if (what == 'create') {
     return _create(repository, sink, out ?? stdout,
-        name: name, tagGroups: tagGroups);
+        name: name, tagGroups: tagGroups, tagService: tagService);
   }
 
   if (rest.length < 2) {
@@ -93,10 +96,9 @@ Future<int> _create(
   StringSink out, {
   String? name,
   String? tagGroups,
+  MiaoaTagService? tagService,
 }) async {
-  final ids = [
-    for (final piece in (tagGroups ?? '').split(',')) ?int.tryParse(piece.trim()),
-  ];
+  final ids = parseTagGroupIds(tagGroups);
   if (ids.isEmpty) {
     // 标签组是打标的受控词表，也是后面按标签检索素材的检索键。
     // 没有它这条任务什么素材都搜不出来——建出来也是个残废
@@ -104,16 +106,12 @@ Future<int> _create(
         '可用 ishkafel tag-groups 查看可选项');
     return exitBadUsage;
   }
-  final all = await MiaoaTagService().listGroups();
-  final groups = [
-    for (final g in all)
-      if (ids.contains(g.id)) TagGroupRef(id: g.id, name: g.name),
-  ];
-  final missing = ids.where((id) => !groups.any((g) => g.id == id)).toList();
-  if (missing.isNotEmpty) {
-    sink.writeln('这些标签组在当前企业下找不到：${missing.join('、')}');
+  final lookup = await lookupTagGroups(ids, service: tagService);
+  if (!lookup.ok) {
+    sink.writeln('这些标签组在当前企业下找不到：${lookup.missing.join('、')}');
     return exitNotFound;
   }
+  final groups = lookup.groups;
 
   var laid = BlankUnitOps.append(const []);
   while (laid.length < blankMinUnits) {

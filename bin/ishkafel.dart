@@ -275,6 +275,7 @@ Future<void> main(List<String> args) async {
         rest: rest,
         dataDir: dataDir,
         searchTags: parsed['tags'] as String?,
+        tagGroups: parsed['tag-groups'] as String?,
         line: int.tryParse(parsed['line'] as String? ?? ''),
         file: parsed['file'] as String?,
         voiceId: parsed['voice'] as String?,

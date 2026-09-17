@@ -16,6 +16,7 @@ import '../agent_stage.dart';
 import '../app_locator.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../delegate.dart';
 import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
 
@@ -49,8 +50,9 @@ Future<int> runReviewCommand({
   String? holder,
   bool? visual,
 
-  /// 界面开着时等它代办多久。超时算失败——活儿没干
-  Duration waitForUi = const Duration(seconds: 20),
+  /// 界面在这条任务上时等它代办多久——委派是首选路径，不是必经之路，
+  /// 秒级兜底就好（见 delegate.dart）。没应不算失败：自己直写顶上
+  Duration waitForUi = const Duration(seconds: 2),
   StringSink? out,
   StringSink? err,
 }) async {
@@ -220,9 +222,11 @@ Future<int> _changeCandidates({
     if (isGuiHolder(current?.holder)) {
       return _delegateToUi(
         taskId: task.id,
+        task: task,
         decisions: decisions,
         keep: keep,
         dataDir: dataDir,
+        repository: repository,
         out: out,
         sink: sink,
         waitFor: waitForUi,
@@ -262,59 +266,15 @@ Future<int> _changeCandidates({
       if (!stage.visual) stage.note(action, focus: focus);
     }
 
-    RenewTask? updated;
-    try {
-      updated = await TaskMutation(
-        repo: repository,
-        dataDir: dataDir,
-        by: ActorKind.agent,
-        actor: 'Agent',
-      ).apply(
-        taskId: task.id,
-        op: 'review.prune',
-        where: {
-          'decisions': [
-            for (final d in decisions) {'unit': d.unit, 'shot': d.shot, 'material': d.material},
-          ],
-        },
-        // 拿锁期间人可能自己点过：edit 拿到的 fresh 就是重读过的那一份，
-        // 校验也要在这份新鲜数据上重来一遍，别拿旧前提写新数据。
-        // 校验没过就抛出去——没落盘就不该记日志，edit 必须是纯的，
-        // 用抛异常而不是改外层变量来带出「拒绝」这个结果
-        edit: (fresh) {
-          final freshUnits = fresh.units ?? const <SemanticUnit>[];
-          final freshItems = collectReviewItems(fresh.replacementsFor(freshUnits));
-          final second =
-              validateReviewSubmission(items: freshItems, decisions: decisions);
-          if (second.isNotEmpty) throw _ReviewRejected(second);
-          final pruned =
-              applyReviewDecisions(fresh.replacementsFor(freshUnits), decisions);
-          final materials = {for (final m in fresh.pickedMaterials) m.id: m};
-          return TaskEdit(
-            task: fresh.copyWith(replacementsByUid: RenewTask.byUid(freshUnits, pruned)),
-            before: {
-              'decisions': [for (final d in decisions) reviewDecisionFacts(d, materials)],
-            },
-            after: {'left': collectReviewItems(pruned).length},
-          );
-        },
-      );
-    } on _ReviewRejected catch (e) {
-      sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
-      _reject(e.problems, sink);
-      return exitBadUsage;
-    }
-    if (updated == null) {
-      sink.writeln('任务在写入前被删了：${task.id}');
-      return exitNotFound;
-    }
-    emitJson({
-      'ok': true,
-      'taskId': task.id,
-      if (keep) 'kept': decisions.length else 'dropped': decisions.length,
-      'left': collectReviewItems(updated.replacementsFor(updated.units ?? const [])).length,
-    }, out: out);
-    return 0;
+    return await _commitReviewDecisions(
+      task: task,
+      decisions: decisions,
+      keep: keep,
+      dataDir: dataDir,
+      repository: repository,
+      sink: sink,
+      out: out,
+    );
   } finally {
     stage.end();
     // 静默模式下 heartbeat 不写文件，但保险起见一并撤掉
@@ -323,47 +283,137 @@ Future<int> _changeCandidates({
   }
 }
 
-/// 把剔除/恢复交给正开着的界面去做。
-///
-/// 回报要说清**它还没落盘**：人得自己按确认。这不是啰嗦——Agent 报一句
-/// 「已剔除」，人以为完事了，实际关掉窗口就白干了
-Future<int> _delegateToUi({
-  required String taskId,
+/// 落盘剔除/恢复决定：**有锁时的直写**（`_changeCandidates`）和**委派
+/// 没跟上时的自己动手**（`_delegateToUi` 的 `myself`）共用同一份——
+/// 避免同一件事两处算
+Future<int> _commitReviewDecisions({
+  required RenewTask task,
   required List<ReviewDecision> decisions,
   required bool keep,
   required Directory dataDir,
+  required FileTaskRepository repository,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  RenewTask? updated;
+  try {
+    updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'review.prune',
+      where: {
+        'decisions': [
+          for (final d in decisions) {'unit': d.unit, 'shot': d.shot, 'material': d.material},
+        ],
+      },
+      // 拿锁期间人可能自己点过：edit 拿到的 fresh 就是重读过的那一份，
+      // 校验也要在这份新鲜数据上重来一遍，别拿旧前提写新数据。
+      // 校验没过就抛出去——没落盘就不该记日志，edit 必须是纯的，
+      // 用抛异常而不是改外层变量来带出「拒绝」这个结果
+      edit: (fresh) {
+        final freshUnits = fresh.units ?? const <SemanticUnit>[];
+        final freshItems = collectReviewItems(fresh.replacementsFor(freshUnits));
+        final second =
+            validateReviewSubmission(items: freshItems, decisions: decisions);
+        if (second.isNotEmpty) throw _ReviewRejected(second);
+        final pruned =
+            applyReviewDecisions(fresh.replacementsFor(freshUnits), decisions);
+        final materials = {for (final m in fresh.pickedMaterials) m.id: m};
+        return TaskEdit(
+          task: fresh.copyWith(replacementsByUid: RenewTask.byUid(freshUnits, pruned)),
+          before: {
+            'decisions': [for (final d in decisions) reviewDecisionFacts(d, materials)],
+          },
+          after: {'left': collectReviewItems(pruned).length},
+        );
+      },
+    );
+  } on _ReviewRejected catch (e) {
+    sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
+    _reject(e.problems, sink);
+    return exitBadUsage;
+  }
+  if (updated == null) {
+    sink.writeln('任务在写入前被删了：${task.id}');
+    return exitNotFound;
+  }
+  emitJson({
+    'ok': true,
+    'taskId': task.id,
+    if (keep) 'kept': decisions.length else 'dropped': decisions.length,
+    'left': collectReviewItems(updated.replacementsFor(updated.units ?? const [])).length,
+  }, out: out);
+  return 0;
+}
+
+/// 把剔除/恢复交给正开着的界面去做——**委派是首选路径，不是必经之路**
+/// （见 `delegate.dart`）。界面确实停在这条任务上才试；接了单但没应，
+/// 或者压根不在这条任务上，就自己直写，不等它。
+///
+/// 界面接单成功时**回报要说清它还没落盘**：人得自己按确认，这不是啰嗦
+/// ——Agent 报一句「已剔除」，人以为完事了，实际关掉窗口就白干了。
+/// 但这只在**界面真的应了**的时候成立：没应、或者界面不在场，
+/// 就没有「等人确认」这回事——自己直写才是老实的，不能假装还在等谁
+Future<int> _delegateToUi({
+  required String taskId,
+  required RenewTask task,
+  required List<ReviewDecision> decisions,
+  required bool keep,
+  required Directory dataDir,
+  required FileTaskRepository repository,
   required StringSink? out,
   required StringSink sink,
   required Duration waitFor,
 }) async {
-  final id = writeAgentRequest(
+  return delegateOrDoItYourself<int>(
     dataDir: dataDir,
     taskId: taskId,
-    kind: keep ? 'review.keep' : 'review.drop',
-    payload: {'decisions': [for (final d in decisions) d.toJson()]},
+    timeout: waitFor,
+    viaUi: () async {
+      final id = writeAgentRequest(
+        dataDir: dataDir,
+        taskId: taskId,
+        kind: keep ? 'review.keep' : 'review.drop',
+        payload: {'decisions': [for (final d in decisions) d.toJson()]},
+      );
+      final result =
+          await waitForAgentRequest(dataDir: dataDir, taskId: taskId, id: id);
+      if (result == null) return null; // 没应，交给自己直写
+      if (!result.ok) {
+        // 界面**真的答复了**、只是没做成——不是「没应」，不兜底，
+        // 原样把拒绝理由带回去
+        sink.writeln('界面没做成：${result.message}');
+        return exitBadUsage;
+      }
+      emitJson({
+        'ok': true,
+        'taskId': taskId,
+        'delegated': true,
+        if (keep) 'kept': decisions.length else 'dropped': decisions.length,
+        'message': result.message,
+        // 说清这一步还没落盘——人不按确认就等于没改
+        'next': '已经在界面上标好了，等用户按「确认」才会落进任务',
+      }, out: out);
+      return 0;
+    },
+    myself: () async {
+      sink.writeln('界面不在这条任务上（或没跟上），直接自己'
+          '${keep ? '恢复' : '剔除'}…');
+      return _commitReviewDecisions(
+        task: task,
+        decisions: decisions,
+        keep: keep,
+        dataDir: dataDir,
+        repository: repository,
+        sink: sink,
+        out: out,
+      );
+    },
   );
-  final result = await waitForAgentRequest(
-      dataDir: dataDir, taskId: taskId, id: id, timeout: waitFor);
-  if (result == null) {
-    // 超时是真失败：活儿没干。报成功的话人会以为界面上已经改了
-    sink.writeln('界面开着但没有回应（等了 ${waitFor.inSeconds} 秒）。'
-        '可能它不在审核页上——让用户看一眼，或者等它关掉再重试');
-    return exitEnv;
-  }
-  if (!result.ok) {
-    sink.writeln('界面没做成：${result.message}');
-    return exitBadUsage;
-  }
-  emitJson({
-    'ok': true,
-    'taskId': taskId,
-    'delegated': true,
-    if (keep) 'kept': decisions.length else 'dropped': decisions.length,
-    'message': result.message,
-    // 说清这一步还没落盘——人不按确认就等于没改
-    'next': '已经在界面上标好了，等用户按「确认」才会落进任务',
-  }, out: out);
-  return 0;
 }
 
 void _reject(List<String> issues, StringSink sink) {

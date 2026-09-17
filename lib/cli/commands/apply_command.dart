@@ -31,9 +31,8 @@ import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
-import '../../core/storage/ui_wake.dart';
-import '../../core/storage/ui_where.dart';
 import '../cli_output.dart';
+import '../delegate.dart';
 import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
 
@@ -196,18 +195,42 @@ Future<int> _applyWithLock({
     return exitBadUsage;
   }
 
-  _writePlans(dataDir, id, raw);
   final units = task.units ?? const <SemanticUnit>[];
-  final replacements = projectPlansToReplacements(validation.plans, units);
-
   final picked = await gatherPickedMaterials(
-    replacements: replacements,
+    replacements: projectPlansToReplacements(validation.plans, units),
     task: task,
     dataDir: dataDir,
     contentService: contentService,
     candidateProbe: candidateProbe,
     frameCheckOf: frameCheckOf,
   );
+  return _commitPlans(
+    dataDir: dataDir,
+    task: task,
+    repository: repository,
+    raw: raw,
+    plans: validation.plans,
+    picked: picked,
+    sink: sink,
+    out: out,
+  );
+}
+
+/// 落盘方案：**直写路径**（界面没占锁）和**委派兜底**（界面没跟上，
+/// Agent 自己写）共用同一份——避免同一件事两处算
+Future<int> _commitPlans({
+  required Directory dataDir,
+  required RenewTask task,
+  required FileTaskRepository repository,
+  required String raw,
+  required List<SubmittedPlan> plans,
+  required List<PickedMaterial> picked,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  _writePlans(dataDir, task.id, raw);
+  final units = task.units ?? const <SemanticUnit>[];
+  final replacements = projectPlansToReplacements(plans, units);
 
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
   // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）。
@@ -268,7 +291,7 @@ Future<int> _applyWithLock({
   emitJson({
     'ok': true,
     ...planApplyReport(
-        plans: validation.plans,
+        plans: plans,
         picked: picked,
         task: updated,
         shortSlots: shortSlotsOf(updated)),
@@ -594,10 +617,10 @@ Future<String> _readStdin() async =>
     await stdin.transform(utf8.decoder).join();
 
 
-/// 请界面去提交方案——**人不用挪开，还能眼看着方案落到时间线上**。
-///
-/// 与新建任务走同一条委派通道（`AgentRequest`）：下单 → 界面真的去做 →
-/// 回执配对。界面那头做的和人自己点是同一件事，不另造一套只读展示。
+/// 委派是首选路径，不是必经之路（见 `delegate.dart`）：界面确实停在这条
+/// 任务上就请它代办——**人不用挪开，还能眼看着方案落到时间线上**；
+/// 界面没跟上（不在这条任务上、或者接了单没应）就自己直写，零等待或
+/// 秒级兜底，绝不因为可视化掉线就卡住。
 Future<int> _applyPlansViaUi({
   required Directory dataDir,
   required RenewTask task,
@@ -619,18 +642,24 @@ Future<int> _applyPlansViaUi({
     return exitBadUsage;
   }
 
-  // **素材在这一头收，不在界面那头收**：探时长要 ffprobe、看画面要 AI 凭据，
-  // 这些都在命令行这边。界面只负责把方案投影出来给人看。
+  // **素材在这一头收，不管最后走哪条路**：探时长要 ffprobe、看画面要
+  // AI 凭据，这些都在命令行这边；委派给界面时投影给人看，自己直写时
+  // 直接用来落盘——同一份准备工作，不能因为走委派就漏、也不能因为
+  // 秒级兜底赶时间就重算一遍（gatherPickedMaterials 本身可能要跑
+  // 几十次 AI 调用，放进 2 秒超时的窗口里只会让委派形同虚设）。
   //
   // 一度只把 raw 递过去就完事——于是委派这条路上取段全失效（用不到素材
   // 时长）、画面自查一次不跑，出现了最难发现的组合：**人在旁边看着的时候，
   // 检查反而不做**，而那正是他最信任的一次。
+  //
+  // validation 拿不到有效结果时**不能悄悄当成空方案**——那会让秒级兜底
+  // 直写一份「什么都没改」的方案，报 ok:true，而真实原因是解析失败
+  PlanValidation validation =
+      const PlanValidation(errors: ['方案内容解析失败']);
   List<PickedMaterial> picked = task.pickedMaterials;
-  List<SubmittedPlan> plans = const [];
   try {
-    final validation = parsePlans(jsonDecode(raw), task);
+    validation = parsePlans(jsonDecode(raw), task);
     if (validation.ok) {
-      plans = validation.plans;
       picked = await gatherPickedMaterials(
         replacements:
             projectPlansToReplacements(validation.plans, task.units ?? const []),
@@ -642,69 +671,71 @@ Future<int> _applyPlansViaUi({
       );
     }
   } catch (e) {
-    // 方案本身有问题的话，界面那头会给出准确的报错——这里不抢话。
-    // 收不到素材也照样递过去：让界面报「哪一条不合格」比这里含糊地失败强
+    // 方案本身有问题的话，界面那头会给出准确的报错——这里不抢话，
+    // 委派那条路继续把 raw 递过去；走到自己直写那条路时，上面那个
+    // 占位的 validation 会让它老实拒绝，而不是当空方案悄悄写过去
     stderr.writeln('提交前没能把素材收齐（$e）——'
         '取段和画面自查这一轮会缺，方案本身照常提交');
   }
 
-  // **委派之前先确认界面真的停在这条任务上。**
-  //
-  // 界面的锁**不会自己放**：人打开过这个任务、后来退回了列表，锁还留着。
-  // 于是上面判定「界面占着锁」而走到这条委派路，但请求是发给**那条任务的
-  // 工作页**的——列表页不接，结果干等 90 秒超时，报「界面没有回应」。
-  // 先把界面叫回来，再递方案。
-  if (readUiWhere(dataDir)?.isOnTask(task.id) != true) {
-    sink.writeln('· 界面不在这条任务上，先把它叫回来');
-    writeUiWake(dataDir, task.id, review: false);
-    final deadline = DateTime.now().add(const Duration(seconds: 15));
-    while (DateTime.now().isBefore(deadline)) {
-      if (readUiWhere(dataDir)?.isOnTask(task.id) == true) break;
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-  }
-
-  sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
-  final id = writeAgentRequest(
+  return delegateOrDoItYourself<int>(
     dataDir: dataDir,
     taskId: task.id,
-    kind: UiAction.plansApply.wire,
-    payload: {
-      'raw': raw,
-      'pickedMaterials': [for (final m in picked) m.toJson()],
+    viaUi: () async {
+      sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
+      final id = writeAgentRequest(
+        dataDir: dataDir,
+        taskId: task.id,
+        kind: UiAction.plansApply.wire,
+        payload: {
+          'raw': raw,
+          'pickedMaterials': [for (final m in picked) m.toJson()],
+        },
+      );
+      final result =
+          await waitForAgentRequest(dataDir: dataDir, taskId: task.id, id: id);
+      if (result == null) return null; // 没应，交给自己直写
+      if (!result.ok) {
+        // 这是界面**真的答复了**、只是没做成——不是「没应」，不兜底，
+        // 原样把拒绝理由带回去
+        sink.writeln('没提交成功：${result.message}');
+        return exitFailed;
+      }
+      emitJson({
+        'ok': true,
+        'via': 'ui',
+        'message': result.message,
+        ...result.payload,
+        // **和直写给出同一份报告**。不给的话就出现了最别扭的一种缺口：
+        // 检查跑了、界面上那条橙色警告也报了，**只有 Agent 拿不到**——
+        // 而委派正是人在旁边看着时走的那条路，人扭头问「它刚才说啥了」，
+        // Agent 答不上来
+        ...planApplyReport(
+            plans: validation.plans,
+            picked: picked,
+            task: task,
+            shortSlots: shortSlotsOf(task)),
+      }, out: out);
+      return 0;
+    },
+    myself: () async {
+      if (!validation.ok) {
+        for (final problem in validation.errors) {
+          sink.writeln('· $problem');
+        }
+        return exitBadUsage;
+      }
+      sink.writeln('界面不在这条任务上（或没跟上），直接自己提交…');
+      return _commitPlans(
+        dataDir: dataDir,
+        task: task,
+        repository: FileTaskRepository(dataDir),
+        raw: raw,
+        plans: validation.plans,
+        picked: picked,
+        sink: sink,
+        out: out,
+      );
     },
   );
-  final result = await waitForAgentRequest(
-      dataDir: dataDir,
-      taskId: task.id,
-      id: id,
-      // 界面要真的把方案投影上去、人还得看得见，给足时间
-      timeout: const Duration(seconds: 90));
-  if (result == null) {
-    // 超时是真失败：活儿没干。报成功的话人会以为方案提交上去了
-    sink.writeln('界面没有回应（等了 90 秒）。'
-        '让用户看一眼那个页面；或者用 ishkafel ui open ${task.id} '
-        '把界面带回这条任务再跑一次');
-    return exitEnv;
-  }
-  if (!result.ok) {
-    sink.writeln('没提交成功：${result.message}');
-    return exitFailed;
-  }
-  emitJson({
-    'ok': true,
-    'via': 'ui',
-    'message': result.message,
-    ...result.payload,
-    // **和直写给出同一份报告**。不给的话就出现了最别扭的一种缺口：
-    // 检查跑了、界面上那条橙色警告也报了，**只有 Agent 拿不到**——
-    // 而委派正是人在旁边看着时走的那条路，人扭头问「它刚才说啥了」，
-    // Agent 答不上来
-    ...planApplyReport(
-        plans: plans,
-        picked: picked,
-        task: task,
-        shortSlots: shortSlotsOf(task)),
-  }, out: out);
-  return 0;
 }

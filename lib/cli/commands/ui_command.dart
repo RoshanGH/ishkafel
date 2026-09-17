@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
@@ -9,6 +11,9 @@ import '../../core/storage/ui_wake.dart';
 import '../../core/storage/ui_where.dart';
 import '../cli_output.dart';
 import '../app_locator.dart';
+import 'blank_command.dart' show runBlankCommand;
+import 'import_command.dart' show runImportCommand;
+import 'script_run_command.dart' show runScriptNewCommand;
 
 /// `ishkafel ui new-task --mode script --tag-groups 1261` ——
 /// **让界面当着人的面新建任务**。
@@ -39,10 +44,16 @@ Future<int> runUiCommand({
 
   /// 测试注入：app 在不在。真机走默认（看目录存不存在）
   bool Function(String path)? appExists,
-  Duration waitForUi = const Duration(seconds: 90),
+
+  /// 委派是首选路径，不是必经之路——秒级兜底，不是 90 秒必经之路
+  /// （见 `delegate.dart`）。界面没跟上就自己建/自己去，不等它
+  Duration waitForUi = const Duration(seconds: 2),
 
   /// 冷启动后等多久再下单。界面那头也有一道同样的缓冲
   Duration coldStartWait = const Duration(seconds: 6),
+
+  /// 测试注入：新建兜底（`_createTaskMyself`）用的标签组查询假实现
+  MiaoaTagService? tagService,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -143,10 +154,21 @@ Future<int> runUiCommand({
   final result = await waitForAgentRequest(
       dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
   if (result == null) {
-    // 这里超时是**真失败**：活儿没干。报成功的话人会以为任务建好了
-    sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。'
-        '可能它没开、或者停在别的页面上——让用户看一眼');
-    return exitEnv;
+    // 超时不再是失败：委派是首选路径，不是必经之路（见 delegate.dart）。
+    // 界面没跟上——没开、或者停在别的页面收不到这个请求——就自己建，
+    // 三种模式都有现成的、不经界面就能建任务的 CLI 命令
+    sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。界面没跟上，我自己建。');
+    return _createTaskMyself(
+      mode: parsed,
+      name: name,
+      file: file,
+      tagGroups: tagGroups,
+      dataDir: dataDir,
+      tagService: tagService,
+      sink: sink,
+      out: out,
+      err: err,
+    );
   }
   if (!result.ok) {
     sink.writeln('没有建成：${result.message}');
@@ -173,16 +195,91 @@ Future<int> runUiCommand({
     'kind': kind,
     // **下一步要跟着任务类型走**：以前恒定给 script show，
     // 而替换裂变任务照着跑会被 CLI 自己拒绝（验收 Agent 撞到）
-    // 界面这会儿正停在新任务上占着锁，而下一步多半要写这条任务。
-    // 不说的话 Agent 会直接撞上「人（编导台）正在操作这个任务」，
-    // 而它看不出这是常态、更看不出出路在哪（验收 Agent 卡在这儿过）
-    'note': '界面正停在这条任务上，它占着写锁。接下来要写这条任务的话'
-        '（script extract / analyze 这些），先让界面退回列表：'
-        'ishkafel ui tasks',
+    //
+    // 以前这里还带一句「先 ishkafel ui tasks 退回列表再写」——
+    // lock.yield 上线之后这条往返就多余了：撞锁的命令会自己请界面让位，
+    // 不需要 Agent 先手动把它支开，那一步纯粹是浪费一个来回
     'next': switch (kind) {
-      'script' => 'ishkafel ui tasks && ishkafel script extract $newId <参考片>',
+      'script' => 'ishkafel script extract $newId <参考片>',
       'blank' => 'ishkafel blank tags $newId --unit 0 --tags <标签>',
       _ => 'ishkafel task $newId',
+    },
+  }, out: out);
+  return 0;
+}
+
+/// 界面没跟上（没开、或者停在别的页面收不到这个请求）：**不是失败**。
+/// 三种模式都有现成的、不经界面就能建任务的 CLI 命令——直接调它们，
+/// 别让 Agent 因为可视化掉线就建不成任务。
+///
+/// `replace`（有原片）用 `import`：它不会像向导那样建完顺手把分析跑起来
+/// ——CLI 这条线一贯把「建」和「分析」拆成两步，Agent 自己控制每一步。
+/// 这个差别**必须说清楚**，不然人会以为这条任务已经在分析了
+/// （不静默降级：差别可以有，但不能闷着）
+Future<int> _createTaskMyself({
+  required WizardMode mode,
+  required String? name,
+  required String? file,
+  required String? tagGroups,
+  required Directory dataDir,
+  required MiaoaTagService? tagService,
+  required StringSink sink,
+  required StringSink? out,
+  required StringSink? err,
+}) async {
+  final captured = StringBuffer();
+  final code = await switch (mode) {
+    WizardMode.script => runScriptNewCommand(
+        rest: [
+          (name ?? '').trim().isNotEmpty
+              ? name!.trim()
+              : '脚本 ${DateTime.now().toString().substring(5, 16)}',
+        ],
+        dataDir: dataDir,
+        tagGroups: tagGroups,
+        tagService: tagService,
+        out: captured,
+        err: err,
+      ),
+    WizardMode.blank => runBlankCommand(
+        rest: const ['create'],
+        dataDir: dataDir,
+        name: name,
+        tagGroups: tagGroups,
+        tagService: tagService,
+        out: captured,
+        err: err,
+      ),
+    // validateWizardFill 已经在前面确认过 replace 模式一定给了 --file
+    WizardMode.replace => runImportCommand(
+        rest: [file!],
+        dataDir: dataDir,
+        tagGroups: tagGroups,
+        tagService: tagService,
+        out: captured,
+        err: err,
+      ),
+  };
+  if (code != 0) return code; // 子命令自己已经把原因写到 err 了，原样透传
+
+  final made = jsonDecode(captured.toString().trim()) as Map<String, dynamic>;
+  final newId = '${made['taskId'] ?? made['id'] ?? ''}';
+  emitJson({
+    'ok': true,
+    'via': 'agent',
+    'landed': false,
+    'id': newId,
+    if (made['seq'] != null) 'seq': made['seq'],
+    if (made['name'] != null) 'name': made['name'],
+    'kind': mode.wire,
+    'message': '界面没跟上，我自己建的',
+    if (mode == WizardMode.replace)
+      'note': '界面没跟上，我用 import 自己建的——'
+          '和界面建的区别是没有自动开始分析',
+    'next': switch (mode) {
+      WizardMode.script => 'ishkafel script extract $newId <参考片>',
+      WizardMode.blank => 'ishkafel blank tags $newId --unit 0 --tags <标签>',
+      WizardMode.replace => 'ishkafel analyze $newId',
     },
   }, out: out);
   return 0;
@@ -214,7 +311,7 @@ Future<int> _backToTaskList({
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
   bool Function(String path)? appExists,
-  Duration waitForUi = const Duration(seconds: 90),
+  Duration waitForUi = const Duration(seconds: 2),
   StringSink? out,
   StringSink? err,
 }) async {
@@ -234,9 +331,18 @@ Future<int> _backToTaskList({
   final result = await waitForAgentRequest(
       dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
   if (result == null) {
+    // 超时不是失败：它多半没开，那样也就没有锁挡着——写操作现在自己有
+    // 兜底（撞锁会自己请界面让位或直接落盘），不必在这儿干等它退出
     sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。'
-        '它可能没开——那样也就没有锁挡着，直接往下走试试');
-    return exitEnv;
+        '我没等它——它可能没开，也可能没在监听这个请求。'
+        '后续写操作撞锁会自己处理，不必卡在这一步');
+    emitJson({
+      'ok': true,
+      'via': 'agent',
+      'landed': false,
+      'message': '界面没回应，没等它退回列表',
+    }, out: out);
+    return 0;
   }
   if (!result.ok) {
     sink.writeln('退不回列表：${result.message}');
@@ -264,7 +370,7 @@ Future<int> _openTaskPage({
   Future<ProcessResult> Function(String, List<String>)? run,
   Map<String, String>? env,
   bool Function(String path)? appExists,
-  Duration waitForUi = const Duration(seconds: 90),
+  Duration waitForUi = const Duration(seconds: 2),
   StringSink? out,
   StringSink? err,
 }) async {

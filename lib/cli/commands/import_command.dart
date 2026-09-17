@@ -27,6 +27,9 @@ Future<int> runImportCommand({
 
   /// 可视模式：软件弹出来说「正在导入」，建好之后把人带到新任务上
   bool? visual,
+
+  /// 测试注入：标签组查询用假实现，真机走 miaoa CLI
+  MiaoaTagService? tagService,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -48,8 +51,7 @@ Future<int> runImportCommand({
   var groups = <TagGroupRef>[];
   if (ids.isNotEmpty) {
     try {
-      final all = await MiaoaTagService()
-          .listGroups();
+      final all = await (tagService ?? MiaoaTagService()).listGroups();
       groups = [
         for (final g in all)
           if (ids.contains(g.id)) TagGroupRef(id: g.id, name: g.name),

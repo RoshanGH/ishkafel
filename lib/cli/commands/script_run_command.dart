@@ -9,6 +9,7 @@ import '../../core/audio/voice_catalog.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/ai/ark_chat_client.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/ai/volcano_asr_provider.dart';
 import '../../core/ai/volcano_semantic_splitter.dart';
 import '../../core/ffmpeg/process_runner.dart';
@@ -35,6 +36,7 @@ import '../agent_stage.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../lock_yield.dart';
+import '../tag_group_lookup.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
 /// 脚本成片这条线的**执行类**命令：建任务、提取脚本、配音、导出。
@@ -45,17 +47,40 @@ import 'analyze_command.dart' show loadCliCredentials;
 ///
 /// 每一步都上报在场状态：人在界面上看得见它在干什么。
 
-/// `ishkafel script new <名字> [--project <id>]`
+/// `ishkafel script new <名字> --tag-groups <id,id>`
+///
+/// **标签组和 `blank create` 同一个判断**：一个都不给就当场拒绝，别等到
+/// 后面 `script shots` / `tag-ref` 打不出标签才发现。GUI 新建向导给脚本
+/// 成片任务也是这样定标签组的（见 `createScriptTask`）——人在界面上能拧的
+/// 这个旋钮，Agent 用 CLI 建任务时同样要能拧，不能少这一环
 Future<int> runScriptNewCommand({
   required List<String> rest,
   required Directory dataDir,
+  String? tagGroups,
+
+  /// 测试注入：标签组查询用假实现，真机走 miaoa CLI
+  MiaoaTagService? tagService,
   StringSink? out,
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
-    sink.writeln('用法：ishkafel script new <任务名>');
+    sink.writeln('用法：ishkafel script new <任务名> --tag-groups <id,id>');
     return exitBadUsage;
+  }
+  final ids = parseTagGroupIds(tagGroups);
+  if (ids.isEmpty) {
+    // 同一条静默失败链（CLAUDE.md 点名过）：没有标签组，AI 打不出标签，
+    // 后面 script shots / tag-ref 就没有词表可用——而那时已经走了好几步
+    sink.writeln('脚本成片任务也要给 --tag-groups（标签是打标的受控词表，'
+        '没有它后面找镜头、给分子打标签都没有词可用）。'
+        '可用 ishkafel tag-groups 查看可选项');
+    return exitBadUsage;
+  }
+  final lookup = await lookupTagGroups(ids, service: tagService);
+  if (!lookup.ok) {
+    sink.writeln('这些标签组在当前企业下找不到：${lookup.missing.join('、')}');
+    return exitNotFound;
   }
   final repository = FileTaskRepository(dataDir);
   final seq = await nextTaskSeq(repository);
@@ -69,6 +94,10 @@ Future<int> runScriptNewCommand({
     status: RenewTaskStatus.ready,
     createdAt: now,
     updatedAt: now,
+    // 语义单元层与视觉镜头层这两层用的是同一套标签组——和 GUI 向导
+    // 的 prefillUnitGroups / prefillShotGroups 同一份，见类文档
+    unitTagGroups: lookup.groups,
+    shotTagGroups: lookup.groups,
   );
   await repository.save(task);
   emitJson({'ok': true, 'taskId': task.id, 'seq': seq, 'name': task.name},

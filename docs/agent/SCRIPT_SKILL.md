@@ -36,7 +36,7 @@ ISHKAFEL_VISUAL=1 ishkafel script apply shots <任务> --file p.json
 ## 一点五、从零到一条片子
 
 ```bash
-ishkafel script new "8月新品口播"                    # 建任务
+ishkafel script new "8月新品口播" --tag-groups 1261  # 建任务（标签组是打标的受控词表，必须给）
 ishkafel script extract <任务> ~/参考片.mp4          # 识别台词，生成脚本行
 ishkafel script tag-ref <任务> --line N             # ★ 给参考镜打标（有参考片时必做）
 ishkafel script apply baseline <任务> --file b.json # ★ 先定本片音色，再配音
