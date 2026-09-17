@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
+import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/core/miaoa/miaoa_content_service.dart';
 import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
@@ -101,6 +102,59 @@ void main() {
     expect(json['via'], 'ui');
     expect(json['exported'], isFalse,
         reason: '对话框只是开着，人还没点——别让调用方以为导完了');
+  });
+
+  /// **人恰好开着「另一页」不是失败。**
+  ///
+  /// `delegateOrDoItYourself` 只问「界面在不在这条任务上」，问不了
+  /// 「这一页能不能接这个动作」。人在**审片台**看这条任务时，导出的委派
+  /// 会收到审片台那句「我不认识 export.open」——把它当真失败往上抛，
+  /// Agent 得到的就是「我做不了，因为软件那边不让」，理由竟然是人开着另一页。
+  ///
+  /// 而这条路在主流程上：「Agent 挑完素材 → 人在审片台过一遍 →
+  /// Agent 接着 export」正是手册推荐的走法。
+  test('界面在这条任务上、但是接不了的那一页：自己导，不报失败', () async {
+    writeUiWhere(dir, module: 'review', taskId: 't1');
+    TaskMedia(dataDir: dir, taskId: 't1').materialsDir.createSync(recursive: true);
+    File(p.join(
+        TaskMedia(dataDir: dir, taskId: 't1').materialsDir.path, '101.mp4'))
+      ..createSync()
+      ..writeAsStringSync('不是真视频');
+
+    // 扮演审片台：取单，回一句「我接不了」并带上 unsupported
+    final ui = Future<void>(() async {
+      for (var i = 0; i < 400; i++) {
+        final req = consumeAgentRequest(dataDir: dir, taskId: 't1');
+        if (req != null) {
+          writeAgentRequestResult(
+              dataDir: dir,
+              taskId: 't1',
+              id: req.id,
+              ok: false,
+              unsupported: true,
+              message: '审片台接不了「${req.kind}」这件事——你自己做就行');
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+
+    final err = StringBuffer();
+    final code = await runExportCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      outputDir: '${dir.path}/out',
+      out: StringBuffer(),
+      err: err,
+    );
+    await ui;
+
+    expect(err.toString(), contains('我自己导'),
+        reason: '「这一页接不了」要当成「没人接」，自己干');
+    expect(code, isNot(exitEnv),
+        reason: '绝不能因为人开着另一页就报环境错');
+    expect(err.toString(), isNot(contains('没能打开导出')),
+        reason: '那句话是给「界面真的试了、没做成」准备的');
   });
 
   test('界面开着但不在这条任务上：根本不委派，一单都不下', () async {

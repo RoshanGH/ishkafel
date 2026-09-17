@@ -26,6 +26,7 @@ import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
+import '../busy_guard.dart';
 import '../cli_output.dart';
 import '../line_evidence.dart';
 import '../search_narrowing.dart';
@@ -83,6 +84,10 @@ Future<int> runScriptCommand({
   /// 可视模式：把软件拉起来，一步一步演给人看
   bool? visual,
 
+  /// 已经有另一个进程在这条任务上干同一类活儿时照样再跑一遍。
+  /// voice / tag-ref 用，见 `busy_guard.dart`
+  bool force = false,
+
   /// 注入点：测试用假实现，真实环境走 miaoa CLI
   MiaoaContentService? content,
   MiaoaTagService? tags,
@@ -139,6 +144,7 @@ Future<int> runScriptCommand({
         line: line,
         voiceId: voiceId,
         visual: visual,
+        force: force,
         out: out,
         err: err,
       );
@@ -166,6 +172,7 @@ Future<int> runScriptCommand({
         dataDir: dataDir,
         line: line,
         visual: visual,
+        force: force,
         out: out,
         err: err,
       );
@@ -757,11 +764,17 @@ Future<int> runScriptTagRefCommand({
   StringSink? out,
   StringSink? err,
 
+  /// 已经有另一个进程在给这条任务打标时照样再跑一遍。见 `busy_guard.dart`
+  bool force = false,
+
   /// 测试注入：不给就按凭据装配真实的识图服务
   ShotTagger? tagger,
 
   /// 测试注入：抽帧用的子进程执行器
   ProcessRunner? run,
+
+  /// 测试注入：判「有没有人正在打标」时的当前时刻
+  DateTime? now,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -848,6 +861,19 @@ Future<int> runScriptTagRefCommand({
   // 进度要带**分母**，而且是**整片的分母**：人要的不是「正在打标」，
   // 是「看着数字在往前走」。tag-ref 是按行调用的，所以这里从整份脚本
   // 算总数与已完成数，跨调用也接得上
+  // **逐镜的重读守卫挡不住「同速」那一半**：两个进程同时起步、都看到
+  // 第 k 镜还没描述，就都去识一次图。而「命令超时了又起一个」恰恰是同速
+  // 场景——所以命令级还要有这一道。**劝告不是拒绝**，见 `busy_guard.dart`
+  if (!force) {
+    final busy = someoneElseBusyWith(
+        dataDir: dataDir, taskId: task.id, keywords: const ['打标'], now: now);
+    if (busy != null) {
+      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '打标'),
+          out: out);
+      return 0;
+    }
+  }
+
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
@@ -856,10 +882,15 @@ Future<int> runScriptTagRefCommand({
   );
   final totalShots = _refShotCount(doc);
   var taggedSoFar = _taggedRefShotCount(doc);
-  await stage.begin(
-      '正在看参考片的画面（第 $line 句，全片 $taggedSoFar/$totalShots 镜）',
-      focus: AgentFocus(
-          module: 'director', lineIndex: index, panel: AgentPanel.findShots));
+  final tagFocus = AgentFocus(
+      module: 'director', lineIndex: index, panel: AgentPanel.findShots);
+  // 播报里带上「打标」两个字不是文风问题：上面那道劝告认的就是它
+  final opening =
+      '正在给参考镜打标（第 $line 句，全片 $taggedSoFar/$totalShots 镜）';
+  await stage.begin(opening, focus: tagFocus);
+  // 静默模式下 begin 什么都不做，在场状态还是要立刻写——另一个进程
+  // 要靠它才知道「这条任务已经有人在打标了」
+  stage.note(opening, focus: tagFocus);
 
   final done = <Map<String, dynamic>>[];
   final lineId = target.id;
@@ -896,7 +927,7 @@ Future<int> runScriptTagRefCommand({
       continue;
     }
     await stage.show(
-        '正在看第 $line 句的第 ${k + 1} 个参考镜'
+        '正在给第 $line 句的第 ${k + 1} 个参考镜打标'
         '（全片 ${taggedSoFar + 1}/$totalShots 镜）',
         focus: AgentFocus(
             module: 'director',

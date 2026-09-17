@@ -1127,7 +1127,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 这一页目前接不了任何一种动作（提交方案、打开导出都是工作台的活），
       // 但「接不了」也要说出来，不能装死
       _serveAgentRequest(dataDir);
-      final now = readAgentPresence(dataDir: dataDir, taskId: _task.id);
+      // **人接过手就不再跟随**，哪怕 Agent 还在一秒一条地写在场状态。
+      //
+      // 不压住的话，「我来接手」许诺的「你马上就能改」只在几百毫秒内为真：
+      // 下一次 `stage.show` 把在场状态写回去（`script voice` 每句一两次、
+      // `tag-ref` 每镜一次，间隔以秒计），这一页立刻又变回跟随态，
+      // 人打了两个字就又被拦一次——真机上这个毛病挨过一次骂。
+      //
+      // **压住的只是「跟随」，不是 Agent**：它照写不误，人也照改不误，
+      // 两边的改动靠 TaskMutation 的重读 + 版本校验各自落盘。
+      // 人离开这一页（`dispose`）这面旗自然没了；他想接着看，重进一次就行。
+      final now = _humanTookOver
+          ? null
+          : readAgentPresence(dataDir: dataDir, taskId: _task.id);
       final was = _agent;
       final leaving = was != null && now == null;
       // **数据也要跟着走**：Agent 改了什么，这一页当场显示出来。
@@ -1256,9 +1268,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 界面自己在跑的自动铺片也要停：人按这个按钮的意思是「我来」，
     // 不是「你们俩一起来」
     _cancelDraft();
+    // **一直压到他离开这一页**：只清一次在场状态是不够的，Agent 下一条
+    // 播报（秒级）就把它写回来了，人打两个字就又被拦一次
+    _humanTookOver = true;
     setState(() => _agent = null);
     await _reloadAfterAgent();
   }
+
+  /// 人按过「我来接手」。
+  ///
+  /// **它压住的是这一页的「跟随」，不是 Agent**——软件不提供停掉 Agent 的
+  /// 能力（产品定的：人要停它，去 Agent 那头说）。立起来之后这一页不再读
+  /// 在场状态、不再拦人的编辑；Agent 那条命令照写，两边的改动各自落盘。
+  ///
+  /// 只活到人离开这一页为止（`State` 跟着 `dispose` 一起没）。
+  bool _humanTookOver = false;
 
   bool _servingRequest = false;
 
@@ -1271,18 +1295,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final req = consumeAgentRequest(dataDir: dataDir, taskId: _task.id);
     if (req == null) return;
     _servingRequest = true;
-    void reply(bool ok, String message) {
-      writeAgentRequestResult(
-          dataDir: dataDir,
-          taskId: _task.id,
-          id: req.id,
-          ok: ok,
-          message: message,
-          payload: const {});
-      _servingRequest = false;
-    }
-
-    reply(false, '这一页接不了这个动作：${req.kind}');
+    // **`unsupported: true` 不是客套，是一条要紧的区分**：它说的是
+    // 「人恰好开着这一页」，不是「这件事做不成」。调用方读到它会自己去干
+    // （见 `lib/cli/delegate.dart`）；不带这个标记的话，Agent 收到的就是
+    // 「我做不了，因为软件那边不让」——而理由竟然是人开着另一页。
+    writeAgentRequestResult(
+        dataDir: dataDir,
+        taskId: _task.id,
+        id: req.id,
+        ok: false,
+        unsupported: true,
+        message: '编导台接不了「${req.kind}」这件事——你自己做就行');
+    _servingRequest = false;
   }
 
   /// 页面已经在拆了。**`mounted` 在 dispose 里还是 true**（元素是 dispose

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 /// **同一个参考镜不许识两次图。**
@@ -85,6 +87,68 @@ void main() {
     expect(log.toString(), contains('第 1 个参考镜已经打过标了'));
     expect(log.toString(), contains('第 2 个参考镜已经打过标了'));
     expect(out.toString(), contains('"skipped":2'));
+  });
+
+  /// **逐镜的重读守卫只挡得住「对方跑在前面」那一半。**
+  /// 两个进程同时起步、都看到第 k 镜还没描述，就都去识一次图——而
+  /// 「命令超时了又起一个」恰恰是这个同速场景。所以命令级还要有一道
+  /// 劝告（退出码 0 + `--force`，决定权仍在 Agent 手上）。
+  test('另一个进程正在给这条任务打标：这一轮不跑，但退出码 0 并说清出路', () async {
+    await FileTaskRepository(dir).save(taskWith(threeShots()));
+    writeAgentPresence(
+      dataDir: dir,
+      taskId: 'sc1',
+      presence: AgentPresence(
+          holder: 'agent:另一个会话',
+          at: DateTime.now(),
+          action: '正在给第 1 句的第 2 个参考镜打标（全片 2/3 镜）'),
+    );
+
+    final tagger = _CountingTagger();
+    final out = StringBuffer();
+    final code = await runScriptTagRefCommand(
+      rest: const ['sc1'],
+      dataDir: dir,
+      line: 1,
+      tagger: tagger,
+      run: fakeFfmpeg,
+      out: out,
+      err: StringBuffer(),
+    );
+
+    expect(code, 0, reason: '这是劝告，不是拒绝');
+    expect(tagger.calls, 0, reason: '一镜都不许识——那是重复收费');
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json['skipped'], isTrue);
+    expect(json['reason'], contains('另一个进程正在打标'));
+    expect(json['hint'], contains('--force'));
+  });
+
+  test('给了 --force：照常打，不再跳过', () async {
+    await FileTaskRepository(dir).save(taskWith(threeShots()));
+    writeAgentPresence(
+      dataDir: dir,
+      taskId: 'sc1',
+      presence: AgentPresence(
+          holder: 'agent:另一个会话',
+          at: DateTime.now(),
+          action: '正在给第 1 句的第 2 个参考镜打标'),
+    );
+
+    final tagger = _CountingTagger();
+    final code = await runScriptTagRefCommand(
+      rest: const ['sc1'],
+      dataDir: dir,
+      line: 1,
+      force: true,
+      tagger: tagger,
+      run: fakeFfmpeg,
+      out: StringBuffer(),
+      err: StringBuffer(),
+    );
+
+    expect(code, 0);
+    expect(tagger.calls, 3, reason: '--force 就是照跑');
   });
 
   test('别的进程在这期间打完了后两镜——这一轮不再为它们付钱', () async {

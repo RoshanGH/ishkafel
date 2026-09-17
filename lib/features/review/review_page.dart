@@ -48,15 +48,15 @@ class ReviewPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
   /// 工作台内嵌模式：确认时把决定交回工作台，由它在自己的会话里应用
-  /// ——同一个人的同一次编辑会话，没有第二把锁。为 null 时是**独立模式**
-  /// （CLI 唤醒 / 任务列表进入）：进门持锁、确认自己写盘
+  /// ——同一个人的同一次编辑会话，不该有第二条落盘路径。为 null 时是
+  /// **独立模式**（CLI 唤醒 / 任务列表进入）：确认时自己写盘
   final void Function(List<ReviewDecision> decisions)? onApply;
 
   /// 标签在这一页被改过时回调（**内嵌模式必须接**）。
   ///
   /// 为什么不让审核页自己写盘：内嵌时工作台开着同一条任务，两边都是整份
   /// 任务对象落库，谁后写谁赢——不交回去的话，人在这里改的标签会被工作台
-  /// 的下一次保存抹掉。为 null 时是独立模式，自己持锁自己写。
+  /// 的下一次保存抹掉。为 null 时是独立模式，自己写。
   final void Function(List<SemanticUnit> units)? onTagsChanged;
 
   /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
@@ -153,12 +153,17 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     if (request == null) return;
     final keep = request.kind == 'review.keep';
     if (request.kind != 'review.drop' && !keep) {
+      // **带上 unsupported**：这句话说的是「人恰好开着审片台」，
+      // 不是「这件事做不成」。不带的话，`ishkafel export` 会因为
+      // 「人在审片台上看这条任务」而失败——那正是这一批要杀的那句
+      // 「我做不了，因为软件那边不让」（见 [AgentRequestResult.unsupported]）
       writeAgentRequestResult(
           dataDir: dataDir,
           taskId: widget.task.id,
           id: request.id,
           ok: false,
-          message: '审核页不认识「${request.kind}」这件事');
+          unsupported: true,
+          message: '审片台接不了「${request.kind}」这件事——你自己做就行');
       return;
     }
     final decisions = [
@@ -1129,8 +1134,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ),
       );
 
-  /// Agent 正在动这一页：说清它在做什么，以及为什么这会儿改标签的入口
-  /// 先收起来了。
+  /// Agent 正在动这一页：说清它在做什么，以及为什么这会儿改标签和
+  /// 「确认」都按不动。
+  ///
+  /// **两个都要说到**：只解释标签、不解释确认键，人点了确认没反应还是
+  /// 会以为软件坏了——那是「点了没反应」的另一种长相。
   ///
   /// 「它在做什么」这一句是可视模式的全部意义——只说「有人在」等于没说。
   ///
@@ -1151,8 +1159,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('${agent.holder} 正在这一页上干活'
-                    '——它动着的时候先别改标签，免得你改的被它下一次'
-                    '刷新盖掉。它一收工，入口自己回来',
+                    '——它动着的时候，改标签和「确认」先按不动，'
+                    '免得你改的被它下一次刷新盖掉。它一收工，两个都自己回来',
                     style: const TextStyle(
                         fontSize: AppFontSize.caption,
                         color: AppColors.textSecondary)),

@@ -75,11 +75,26 @@ class AgentRequestResult {
   /// CLI 却把上一次的任务报了出来还说「已经建好了」。
   final Map<String, dynamic> payload;
 
+  /// **这一页压根接不了这个动作**（不是「试了没做成」）。
+  ///
+  /// 这两件事在 [ok] 这一个布尔上分不开，而它们该走完全相反的两条路：
+  ///
+  /// - **内容类拒绝**（「这一页上没有这些候选」「方案对不上现在的切分」）
+  ///   是**真事实**，调用方该原样把理由带回去，不许兜底改成成功
+  /// - **在场类拒绝**（「审核页不认识 export.open」）说的只是
+  ///   「人恰好开着另一页」——那跟 Agent 能不能干这件事毫无关系。
+  ///   把它当失败，就又变成了「我做不了，因为软件那边不让」
+  ///
+  /// 所以各页面对**认不出的 kind** 一律带上这个标记，调用方读到它就当
+  /// 「没人接」处理：自己干（见 `lib/cli/delegate.dart`）。
+  final bool unsupported;
+
   const AgentRequestResult({
     required this.id,
     required this.ok,
     required this.message,
     this.payload = const {},
+    this.unsupported = false,
   });
 }
 
@@ -147,10 +162,17 @@ void writeAgentRequestResult({
   String? message,
   AgentRequestResult? result,
   Map<String, dynamic> payload = const {},
+
+  /// 这一页压根接不了这个动作。见 [AgentRequestResult.unsupported]
+  bool unsupported = false,
 }) {
   final r = result ??
       AgentRequestResult(
-          id: id!, ok: ok!, message: message!, payload: payload);
+          id: id!,
+          ok: ok!,
+          message: message!,
+          payload: payload,
+          unsupported: unsupported);
   try {
     final f = _resultFile(dataDir, taskId);
     f.parent.createSync(recursive: true);
@@ -159,6 +181,9 @@ void writeAgentRequestResult({
       'ok': r.ok,
       'message': r.message,
       if (r.payload.isNotEmpty) 'payload': r.payload,
+      // 默认值不写进文件：老版本的界面读到陌生的键也不会怎样，
+      // 但少写一个键就少一处要维护的兼容
+      if (r.unsupported) 'unsupported': true,
     }));
   } catch (e) {
     AppLog.warn('代办回执写入失败（$taskId）：$e');
@@ -200,10 +225,11 @@ AgentRequestResult? _readResult({
       id: raw['id'] as String,
       ok: raw['ok'] == true,
       message: raw['message'] is String ? raw['message'] as String : '',
-      // 老回执没有这个字段——不能因为多个字段就读不回来
+      // 老回执没有这几个字段——不能因为多个字段就读不回来
       payload: raw['payload'] is Map
           ? Map<String, dynamic>.from(raw['payload'] as Map)
           : const {},
+      unsupported: raw['unsupported'] == true,
     );
   } catch (_) {
     return null;

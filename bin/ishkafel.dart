@@ -98,8 +98,9 @@ Future<void> main(List<String> args) async {
     ..addOption('bottom', help: 'subtitle 用：字幕距画面底部的比例（如 0.22）')
     ..addOption('font', help: 'subtitle 用：字号占画面高度的比例（如 0.034）')
     ..addFlag('force',
-        help: 'analyze 用：已经有另一个进程在分析这条任务时照样再跑一遍'
-            '（默认不跑，只报一句「有人在做」——整条管线几分钟、花钱）')
+        help: 'analyze / script voice / script tag-ref 用：已经有另一个进程'
+            '在这条任务上干同一件事时照样再跑一遍（默认不跑，只报一句'
+            '「有人在做」并给出这个开关——这几步都是分钟级、按量计费的）')
     ..addFlag('probe',
         help: 'candidates 用：探一下每条候选多长、选它会变速多少（慢一些）')
     ..addOption('video', help: 'peek 用：要看哪个视频文件')
@@ -284,6 +285,7 @@ Future<void> main(List<String> args) async {
         voiceId: parsed['voice'] as String?,
         outputDir: parsed['out'] as String?,
         visual: parsed['visual'] as bool,
+        force: parsed['force'] as bool,
         keyword: parsed['keyword'] as String?,
         materials: parsed['materials'] as String?,
         by: parsed['by'] as String?,

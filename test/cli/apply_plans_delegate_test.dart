@@ -117,6 +117,42 @@ void main() {
     expect(updated!.replacementsByUid['u0']!.wholeCandidateIds, const [101]);
   });
 
+  /// **人恰好开着「另一页」不是失败。**
+  ///
+  /// 界面在这条任务上、但停在审片台——它不认识 `plans.apply`。
+  /// 那句「我接不了」说的是「人开着另一页」，不是「这件事做不成」，
+  /// 当真失败往上抛就又变回了「我做不了，因为软件那边不让」。
+  test('界面在这条任务上、但是接不了的那一页：自己直写，不报失败', () async {
+    writeUiWhere(dir, module: 'review', taskId: 't1');
+
+    final ui = Future<void>(() async {
+      for (var i = 0; i < 400; i++) {
+        final req = consumeAgentRequest(dataDir: dir, taskId: 't1');
+        if (req != null) {
+          writeAgentRequestResult(
+              dataDir: dir, taskId: 't1', id: req.id,
+              ok: false, unsupported: true,
+              message: '审片台接不了「${req.kind}」这件事——你自己做就行');
+          return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+
+    final out = StringBuffer();
+    final err = StringBuffer();
+    final code = await apply(out: out, err: err);
+    await ui;
+
+    expect(code, 0, reason: '人开着另一页不该让 Agent 失败');
+    expect(err.toString(), contains('我自己写'));
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json['via'], isNot('ui'), reason: '这条是自己直写落的盘');
+    final updated = await repo.findById('t1');
+    expect(updated!.replacementsByUid['u0']!.wholeCandidateIds, const [101],
+        reason: '活儿真的干了，不是报个成功了事');
+  });
+
   test('界面在，明确回了拒绝：不兜底，原样把拒绝理由带回去', () async {
     writeUiWhere(dir, module: 'workbench', taskId: 't1');
 

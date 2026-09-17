@@ -652,8 +652,22 @@ Future<int> _applyPlansViaUi({
       final result =
           await waitForAgentRequest(dataDir: dataDir, taskId: task.id, id: id);
       if (result == null) return null; // 没应，交给自己直写
+      // **「这一页接不了」不是失败，是「人恰好开着另一页」。**
+      //
+      // 判「该不该委派」的 `delegateOrDoItYourself` 只问「界面在不在这条
+      // 任务上」，问不了「这一页能不能接这个动作」。于是人开着审片台看这条
+      // 任务时，导出/提交方案会收到审片台那句「我不认识这件事」——把它当
+      // 真失败往上抛，Agent 得到的就是「我做不了，因为软件那边不让」，
+      // 而理由竟然是人开着另一页。那正是这一批要杀的那句话。
+      //
+      // 所以 unsupported 走和「没应」同一条路：自己干。
+      if (result.unsupported) {
+        sink.writeln('界面现在那一页接不了提交方案（${result.message}），'
+            '我自己写。');
+        return null;
+      }
       if (!result.ok) {
-        // 这是界面**真的答复了**、只是没做成——不是「没应」，不兜底，
+        // 这是界面**真的试了、只是没做成**——不是「没应」，不兜底，
         // 原样把拒绝理由带回去
         sink.writeln('没提交成功：${result.message}');
         return exitFailed;

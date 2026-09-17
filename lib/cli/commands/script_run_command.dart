@@ -31,6 +31,7 @@ import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
 import '../voice_baseline.dart';
 import '../agent_stage.dart';
+import '../busy_guard.dart';
 import '../cli_output.dart';
 import '../tag_group_lookup.dart';
 import 'analyze_command.dart' show loadCliCredentials;
@@ -230,7 +231,9 @@ Future<int> runScriptExtractCommand({
     sink.writeln(e.message);
     return exitFailed;
   } finally {
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
+    // 走 stage.end() 而不是裸 clearAgentPresence：它还要停掉在场状态的
+    // 心跳（见 AgentStage._pulse），漏掉的话撤下去的状态会被心跳写回来
+    visualStage.end();
   }
 }
 
@@ -253,12 +256,18 @@ Future<int> runScriptVoiceCommand({
   /// 可视模式：一句句配音时界面跟着滚到那一行。见
   /// [runScriptExtractCommand] 上的说明——这条命令此前同样收不到它
   bool? visual,
+
+  /// 已经有另一个进程在给这条任务配音时照样再跑一遍。见 `busy_guard.dart`
+  bool force = false,
   StringSink? out,
   StringSink? err,
 
   /// 测试注入：不给就按凭据装配真实服务
   LineVoiceFactory? voiceFactory,
   LineDeliveryFactory? deliveryFactory,
+
+  /// 测试注入：判「有没有人正在配音」时的当前时刻
+  DateTime? now,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -347,17 +356,36 @@ Future<int> runScriptVoiceCommand({
   // 看着：一句配好一句落格。此前这里裸写在场状态——横幅一句句念
   // 「正在给第 10 句配音（10/20）」，界面却停在任务列表，二十句没有
   // 一格出现在屏幕上（产品负责人当场问的就是这个）
+  // **逐句的重读守卫挡不住「同速」那一半**：两个进程同时起步、都看到
+  // 第 12 句还不是 fresh，就都去调一次 TTS，剩下十几句全部念两遍。
+  // 而「命令超时了又起一个」恰恰是同速场景——所以命令级还要有这一道。
+  // **这是劝告不是拒绝**（退出码 0 + `--force`），见 `busy_guard.dart`
+  if (!force) {
+    final busy = someoneElseBusyWith(
+        dataDir: dataDir, taskId: task.id, keywords: const ['配音'], now: now);
+    if (busy != null) {
+      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '配音'),
+          out: out);
+      return 0;
+    }
+  }
+
   final voiceStage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
     holder: holder ?? 'Agent',
   );
-  await voiceStage.begin('正在配 ${targets.length} 句',
-      focus: AgentFocus(
-          module: 'director',
-          lineIndex: targets.isEmpty ? 0 : targets.first,
-          panel: AgentPanel.voice));
+  final voiceFocus = AgentFocus(
+      module: 'director',
+      lineIndex: targets.isEmpty ? 0 : targets.first,
+      panel: AgentPanel.voice);
+  // 播报里带上「配音」两个字不是文风问题：上面那道劝告认的就是它
+  await voiceStage.begin('正在配音：这一轮 ${targets.length} 句',
+      focus: voiceFocus);
+  // 静默模式下 begin 什么都不做，在场状态还是要立刻写——人可能正开着
+  // 这一页，而另一个进程也要靠它才知道「这条任务已经有人在配音了」
+  voiceStage.note('正在配音：这一轮 ${targets.length} 句', focus: voiceFocus);
   final failed = <String>[];
   final degraded = <String>[];
   var instructed = 0;
@@ -433,7 +461,8 @@ Future<int> runScriptVoiceCommand({
       final request = deliveryRequestOf(currentDoc, target);
       if (delivery != null && request != null) {
         await voiceStage.show(
-            '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
+            '配音前先听参考片第 ${i + 1} 句是怎么念的'
+            '（${k + 1}/${targets.length}）',
             focus: AgentFocus(
                 module: 'director', lineIndex: i, panel: AgentPanel.voice));
       }
@@ -519,7 +548,7 @@ Future<int> runScriptVoiceCommand({
     }, out: out);
     return failed.isEmpty ? 0 : exitFailed;
   } finally {
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
+    voiceStage.end();
   }
 }
 
@@ -668,7 +697,7 @@ Future<int> runScriptExportCommand({
     }
     return exitFailed;
   } finally {
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
+    exportStage.end();
   }
 }
 

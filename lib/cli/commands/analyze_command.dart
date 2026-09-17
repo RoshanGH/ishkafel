@@ -18,6 +18,7 @@ import '../external_steps.dart';
 import '../todo_view.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
+import '../busy_guard.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 
@@ -37,7 +38,7 @@ Future<int> runAnalyzeCommand({
   /// 可视模式：分析要跑好几分钟，人得看着它一步步走到哪儿了
   bool? visual,
 
-  /// 已经有人在分析这条任务时照样再跑一遍。见 [_alreadyAnalyzing]
+  /// 已经有人在分析这条任务时照样再跑一遍。见 `busy_guard.dart`
   bool force = false,
   StringSink? out,
   StringSink? err,
@@ -112,18 +113,11 @@ Future<int> runAnalyzeCommand({
   // 产品负责人的原话：「任何它不应该做的事情，都应该是人告诉 Agent 的，
   // 而非是软件限制的。」给事实和出路，不给规则。
   if (!force) {
-    final busy = _alreadyAnalyzing(dataDir: dataDir, taskId: task.id, now: now);
+    final busy = someoneElseBusyWith(
+        dataDir: dataDir, taskId: task.id, keywords: const ['分析'], now: now);
     if (busy != null) {
-      emitJson({
-        'ok': true,
-        // **必须是 JSON 里的一个字段**：Agent 是按 JSON 判断的，
-        // 只在 stderr 说一句它读不到，照样会以为分析做完了
-        'skipped': true,
-        'taskId': task.id,
-        'reason': '另一个进程正在分析这条任务'
-            '（正在：${busy.action.isEmpty ? '没说' : busy.action}）',
-        'hint': '要强制重跑加 --force',
-      }, out: out);
+      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '分析'),
+          out: out);
       return 0;
     }
   }
@@ -243,24 +237,6 @@ Future<int> runAnalyzeCommand({
   } finally {
     stage.end();
   }
-}
-
-/// 这条任务上是不是已经有人在分析了。
-///
-/// 判据就是 Agent 的在场状态：谁在、在干什么。**心跳新不新鲜用现成的
-/// [defaultStaleAfter]**（`readAgentPresence` 自己就按它判），不另发明一个
-/// 时限——两套时限迟早对不上，而对不上的那一天没人看得出来。
-///
-/// 只认「正在分析」这一类活儿：同一条任务上 Agent 可能正在挑镜头、正在配乐，
-/// 那些跟重跑管线没关系，不该拦。
-AgentPresence? _alreadyAnalyzing({
-  required Directory dataDir,
-  required String taskId,
-  DateTime? now,
-}) {
-  final busy = readAgentPresence(dataDir: dataDir, taskId: taskId, now: now);
-  if (busy == null) return null;
-  return busy.action.contains('分析') ? busy : null;
 }
 
 /// 这些标签组下的**标签**（不是组名）。

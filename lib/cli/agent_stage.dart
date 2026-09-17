@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:meta/meta.dart';
@@ -67,6 +68,26 @@ class AgentStage {
   int _step = 0;
   bool _appLaunched = false;
 
+  /// 在场状态的心跳。
+  ///
+  /// **在场状态是有保质期的**（[defaultStaleAfter]，60 秒）：超过就当这个
+  /// Agent 不在了。而上报是**按步**发生的，不是按时间——人声分离那一步
+  /// 常跑几分钟一声不吭，于是「它还在干活」这个事实会在最该成立的那几分钟
+  /// 里过期。界面的横幅因此闪回「没人在」，`analyze` 的「别把同一条管线
+  /// 跑两遍」也会在那几分钟里失灵——而**调用方超时重试恰恰最容易发生在
+  /// 最长的那段等待里**。
+  ///
+  /// 这条心跳就是原来那把锁的 20 秒续命 Timer，换成以在场状态的名义跑。
+  /// **静默模式也要跑**：`analyze` 的那道劝告认的就是它。
+  Timer? _pulse;
+
+  /// 最后一次上报的内容——心跳按原样重发，只把时间刷新
+  AgentPresence? _lastReported;
+
+  /// 多久补一次。默认取 [defaultStaleAfter] 的三分之一：丢一两拍也不会过期。
+  /// 测试注入一个很短的值，不然要真等 20 秒
+  final Duration pulseEvery;
+
   /// 上一次问「界面在哪」是什么时候（见 [_ensureOnStage] 的节流）
   DateTime _lastCheckedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -82,6 +103,7 @@ class AgentStage {
     required this.taskId,
     this.holder = 'Agent',
     this.stepTimeout = const Duration(seconds: 5),
+    this.pulseEvery = const Duration(seconds: 20),
     Future<ProcessResult> Function(String, List<String>)? run,
     this.appExists,
   }) : _run = run ?? Process.run;
@@ -170,18 +192,14 @@ class AgentStage {
     if (!visual) return;
     _ensureOnStage(focus?.module);
     _step++;
-    writeAgentPresence(
-      dataDir: dataDir,
-      taskId: taskId,
-      presence: AgentPresence(
-        holder: holder,
-        at: DateTime.now(),
-        action: action,
-        step: _step,
-        kind: kind,
-        focus: focus,
-      ),
-    );
+    _report(AgentPresence(
+      holder: holder,
+      at: DateTime.now(),
+      action: action,
+      step: _step,
+      kind: kind,
+      focus: focus,
+    ));
     // 连着没人应就不再等：界面没开着的话，每步干等一个超时——
     // 一条命令报五步就白耗 25 秒，而人根本不在看
     if (_unanswered >= _giveUpAfter) return;
@@ -211,18 +229,14 @@ class AgentStage {
     // 配音、导出这类活儿一跑几分钟，中途人可能自己退出去了——
     // 心跳也要确认现场，不然「回来看看」就再也回不来
     _ensureOnStage(focus?.module, throttle: true);
-    writeAgentPresence(
-      dataDir: dataDir,
-      taskId: taskId,
-      presence: AgentPresence(
-        holder: holder,
-        at: DateTime.now(),
-        action: action,
-        step: _step,
-        kind: kind,
-        focus: focus,
-      ),
-    );
+    _report(AgentPresence(
+      holder: holder,
+      at: DateTime.now(),
+      action: action,
+      step: _step,
+      kind: kind,
+      focus: focus,
+    ));
   }
 
   /// 报一句「我在干什么」——**两种模式都写**。
@@ -235,25 +249,50 @@ class AgentStage {
   void note(String action,
       {AgentFocus? focus, BroadcastKind kind = BroadcastKind.step}) {
     if (visual) return heartbeat(action, focus: focus, kind: kind);
-    writeAgentPresence(
-      dataDir: dataDir,
-      taskId: taskId,
-      presence: AgentPresence(
-        holder: holder,
-        at: DateTime.now(),
-        action: action,
-        step: _step,
-        kind: kind,
-        focus: focus,
-      ),
-    );
+    _report(AgentPresence(
+      holder: holder,
+      at: DateTime.now(),
+      action: action,
+      step: _step,
+      kind: kind,
+      focus: focus,
+    ));
   }
 
   /// 收工：把在场状态撤掉，界面立刻恢复可操作。
   /// **被打断时也要走这里**——不然人要等一分钟心跳超时才能动手
   void end() {
+    _pulse?.cancel();
+    _pulse = null;
+    _lastReported = null;
     clearAgentPresence(dataDir: dataDir, taskId: taskId);
     clearAgentAck(dataDir: dataDir, taskId: taskId);
+  }
+
+  /// 上报一次，并把心跳接上。
+  ///
+  /// **所有写在场状态的路径都走这里**——散着写的话，总有一条会忘了续命，
+  /// 而忘了的那条恰好就是跑得最久的那一步（这类漏法这个项目栽过不止一次）。
+  void _report(AgentPresence presence) {
+    _lastReported = presence;
+    writeAgentPresence(dataDir: dataDir, taskId: taskId, presence: presence);
+    _pulse ??= Timer.periodic(pulseEvery, (_) {
+      final last = _lastReported;
+      if (last == null) return;
+      // 原样重发，只把时间刷新：心跳不该让界面以为它换了一步
+      writeAgentPresence(
+        dataDir: dataDir,
+        taskId: taskId,
+        presence: AgentPresence(
+          holder: last.holder,
+          at: DateTime.now(),
+          action: last.action,
+          step: last.step,
+          kind: last.kind,
+          focus: last.focus,
+        ),
+      );
+    });
   }
 
   Future<void> _launchApp({String? module}) async {

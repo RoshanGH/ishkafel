@@ -140,8 +140,12 @@ Future<int> runExportCommand({
     dataDir: dataDir,
     taskId: task.id,
     // 「对话框开了没」是界面几乎立刻能答的一件事，但它前面可能排着一次
-    // 页面跳转，所以给得比提交方案（秒级）宽一点
-    timeout: const Duration(seconds: 30),
+    // 页面跳转，所以给得比提交方案（秒级）宽一点。
+    //
+    // **比内层那个等回执的超时长 5 秒**（见 `_openExportInUi`）：两边一样长
+    // 的话，外层可能先到、直接走自己导，而内层还没来得及把那张单子收回来
+    // ——过一会儿界面弹出一个没人在等的导出对话框，人看到两份
+    timeout: const Duration(seconds: 35),
     viaUi: () => _openExportInUi(
       dataDir: dataDir,
       task: task,
@@ -440,6 +444,7 @@ Future<int?> _openExportInUi({
       dataDir: dataDir,
       taskId: task.id,
       id: id,
+      // 改这个值要连着改外层 delegateOrDoItYourself 的 timeout（多 5 秒）
       timeout: const Duration(seconds: 30));
   if (result == null) {
     // 界面没接这一单。**把请求收回来**，免得它过一会儿才弹出一个
@@ -448,7 +453,15 @@ Future<int?> _openExportInUi({
     sink.writeln('界面没接这一单（等了 30 秒），我自己导。');
     return null;
   }
+  if (result.unsupported) {
+    // 「这一页接不了」不是失败，是「人恰好开着另一页」（多半在审片台看
+    // 这条任务）。把它当真失败往上抛，Agent 得到的就是「我做不了，
+    // 因为软件那边不让」——而理由竟然是人开着另一页。自己导就是了
+    sink.writeln('界面现在那一页接不了打开导出（${result.message}），我自己导。');
+    return null;
+  }
   if (!result.ok) {
+    // 这才是界面**真的试了、没做成**：原样把理由带回去，不兜底
     sink.writeln('没能打开导出：${result.message}');
     return exitFailed;
   }

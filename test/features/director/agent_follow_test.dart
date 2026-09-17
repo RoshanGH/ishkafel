@@ -149,6 +149,48 @@ void main() {
         reason: '软件打断不了它');
   });
 
+  /// **「你马上就能改」不能只在几百毫秒内为真。**
+  ///
+  /// `_watchAgent` 每 500ms 从盘上重读在场状态。而点完接手，Agent 那条命令
+  /// 还在跑——`script voice` 每句一两条播报、`tag-ref` 每镜一条，间隔以秒计。
+  /// 不压住跟随的话，人点完接手、打两个字，同一句提示又弹出来，再点、再弹。
+  ///
+  /// 旧版靠「接手后重新上锁，Agent 之后的写入被拒」兑现这句承诺；锁拆了，
+  /// 那个保障得有替代品——**压住的是跟随，不是 Agent**。
+  testWidgets('接手之后 Agent 又播报了一条：这一页仍然让人改', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '挑镜头'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('agent-takeover')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const ValueKey('agent-takeover-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Agent 根本没停——它接着写在场状态（真机上这是秒级发生的）
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在给第 2 句挑镜头'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 人接着改：必须真的改得动
+    await tester.enterText(find.byType(TextField).first, '人接手后改的');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    final saved = await repo.findById('t1');
+    expect(saved!.script!.lines.first.text, '人接手后改的',
+        reason: '点完接手就该一直能改到他离开这一页为止——'
+            '不然那句「你马上就能改」只在几百毫秒内为真');
+    expect(find.textContaining('点上面的「我来接手」'), findsNothing,
+        reason: '已经接手了还弹同一句提示，就是在让人反复点同一个按钮');
+  });
+
   testWidgets('展示完这一步才回执——Agent 靠它决定什么时候走下一步',
       (tester) async {
     final repo = _MemoryRepo();

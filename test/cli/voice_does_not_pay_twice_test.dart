@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -7,6 +8,7 @@ import 'package:ishkafel/core/audio/tts_client.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/script/line_voice_service.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
 
 /// **同一句不许念两遍。**
@@ -89,6 +91,98 @@ void main() {
     expect(log.toString(), contains('第 3 句已经有配音了，跳过'));
     expect(out.toString(), contains('"skipped":2'),
         reason: '跳过几句要报给调用方——不然一轮全跳过和一轮全新配长得一模一样');
+  });
+
+  /// **逐句的重读守卫只挡得住「对方跑在前面」那一半。**
+  ///
+  /// 推演「命令超时了又起一个」这个主场景：进程 1 跑到第 12 句，进程 2 起来，
+  /// 跳过 1–11（那一半守住了），**从第 12 句开始**。两个都重读、都看到第 12
+  /// 句还不是 fresh（进程 1 还没合成完）→ **都调 TTS**；写完各自进第 13 句……
+  /// 剩下十几句全部念两遍。
+  ///
+  /// 所以命令级还要有一道：发现另一个进程正在给这条任务配音，就什么都不做、
+  /// 如实说一句、给出 `--force`。**这是劝告不是拒绝**——退出码 0，决定权
+  /// 仍在 Agent 手上。
+  test('另一个进程正在给这条任务配音：这一轮不跑，但退出码 0 并说清出路', () async {
+    await FileTaskRepository(dir).save(taskWith(threeLines()));
+    writeAgentPresence(
+      dataDir: dir,
+      taskId: 'sc1',
+      presence: AgentPresence(
+          holder: 'agent:另一个会话',
+          at: DateTime.now(),
+          action: '正在给第 2 句配音（2/3）'),
+    );
+
+    final spoken = <String>[];
+    final out = StringBuffer();
+    final code = await runScriptVoiceCommand(
+      rest: const ['sc1'],
+      dataDir: dir,
+      out: out,
+      err: StringBuffer(),
+      voiceFactory: (task) => LineVoiceService(
+        tts: _FakeTts(spoken), outputDir: voices, measureMs: (f) async => 1500),
+    );
+
+    expect(code, 0, reason: '这是劝告，不是拒绝——软件不对 Agent 说「不行」');
+    expect(spoken, isEmpty, reason: '一句都不许念——那是重复收费');
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json['skipped'], isTrue,
+        reason: 'Agent 是按 JSON 判断的，只在 stderr 说一句它读不到');
+    expect(json['reason'], contains('另一个进程正在配音'));
+    expect(json['hint'], contains('--force'), reason: '出路必须给出来');
+  });
+
+  test('给了 --force：照常配，不再跳过', () async {
+    await FileTaskRepository(dir).save(taskWith(threeLines()));
+    writeAgentPresence(
+      dataDir: dir,
+      taskId: 'sc1',
+      presence: AgentPresence(
+          holder: 'agent:另一个会话',
+          at: DateTime.now(),
+          action: '正在给第 2 句配音（2/3）'),
+    );
+
+    final spoken = <String>[];
+    final code = await runScriptVoiceCommand(
+      rest: const ['sc1'],
+      dataDir: dir,
+      force: true,
+      out: StringBuffer(),
+      err: StringBuffer(),
+      voiceFactory: (task) => LineVoiceService(
+        tts: _FakeTts(spoken), outputDir: voices, measureMs: (f) async => 1500),
+    );
+
+    expect(code, 0);
+    expect(spoken, ['第一句', '第二句', '第三句'], reason: '--force 就是照跑');
+  });
+
+  test('别人在这条任务上干的是别的活（挑镜头）：不拦', () async {
+    await FileTaskRepository(dir).save(taskWith(threeLines()));
+    writeAgentPresence(
+      dataDir: dir,
+      taskId: 'sc1',
+      presence: AgentPresence(
+          holder: 'agent:另一个会话',
+          at: DateTime.now(),
+          action: '正在给第 3 句挑镜头'),
+    );
+
+    final spoken = <String>[];
+    final code = await runScriptVoiceCommand(
+      rest: const ['sc1'],
+      dataDir: dir,
+      out: StringBuffer(),
+      err: StringBuffer(),
+      voiceFactory: (task) => LineVoiceService(
+        tts: _FakeTts(spoken), outputDir: voices, measureMs: (f) async => 1500),
+    );
+
+    expect(code, 0);
+    expect(spoken, hasLength(3), reason: '挑镜头跟配音撞不上，拦它是白拦');
   });
 
   test('重跑一整条命令：已经配好的那些一句都不会重念', () async {

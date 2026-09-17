@@ -213,9 +213,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
-      // Agent 请这一页代办的事（提交方案）。**界面占着锁不是冲突，
-      // 是委派的时机**：可视模式要求界面停在这个任务上，而写入要求界面
-      // 不能停在这个任务上——请界面去做，人就能眼看着方案落到时间线上
+      // Agent 请这一页代办的事（提交方案 / 打开导出）。**人开着这一页
+      // 不是冲突，是委派的时机**：请界面去做，人就能眼看着方案落到时间线上，
+      // 而且人看到的和落盘的同源。接不了的动作也要当场答复（带 unsupported），
+      // 不然 Agent 只能等到超时
       unawaited(_serveAgentRequest(dataDir));
       final now =
           readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
@@ -268,8 +269,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 代为提交方案：**校验和投影复用 CLI 那一份**（`plan_submission`），
   /// 不另写一套——两份实现迟早对不上，而这一步定的是成片长什么样。
   ///
-  /// 做完把方案投影到界面上：人眼看着三条方案落到时间线，这正是
-  /// 「界面占着锁」时最该发生的事。
+  /// 做完把方案投影到界面上：人眼看着三条方案落到时间线——
+  /// **人正开着这一页的时候，这才是最该发生的事**。
   Future<void> _applyPlansFromAgent(
     String raw,
     void Function(bool ok, String message, {Map<String, dynamic> payload})
@@ -342,8 +343,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// Agent 请我们把导出对话框打开、参数填好。
   ///
   /// 和提交方案的区别：那件事做完就是做完了，这件事**故意停在人手上**——
-  /// 导出跑几分钟、直接产出要交付的片子、而且花钱。界面占着锁说明人正在
-  /// 旁边看着，最后那一下让他自己点才对。
+  /// 导出跑几分钟、直接产出要交付的片子、而且花钱。委派只在人确实开着
+  /// 这一页时才发生（见 `delegate.dart`），最后那一下让他自己点才对。
   Future<void> _openExportForAgent(
     AgentRequest req,
     void Function(bool ok, String message, {Map<String, dynamic> payload})
@@ -398,26 +399,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (req == null) return;
     _servingRequest = true;
     void reply(bool ok, String message,
-            {Map<String, dynamic> payload = const {}}) =>
+            {Map<String, dynamic> payload = const {},
+            // 见 [AgentRequestResult.unsupported]：「这一页接不了」和
+            // 「试了没做成」要分开，前者只说明人恰好开着另一页
+            bool unsupported = false}) =>
         writeAgentRequestResult(
             dataDir: dataDir,
             taskId: widget.task.id,
             id: req.id,
             ok: ok,
             message: message,
-            payload: payload);
+            payload: payload,
+            unsupported: unsupported);
     try {
       switch (UiAction.parse(req.kind)) {
         case UiAction.plansApply:
           break;
         case UiAction.exportOpen:
           // **只打开、填好，不替人点导出**：导出跑几分钟、直接出交付物、
-          // 还花钱。人正在旁边看着（不然界面不会占着锁），
+          // 还花钱。委派只在人确实开着这一页时才发生，
           // 最后那一下让他自己点才对
           await _openExportForAgent(req, reply);
           return;
         default:
-          reply(false, '这一页接不了这个动作：${req.kind}');
+          reply(false, '工作台接不了「${req.kind}」这件事——你自己做就行',
+              unsupported: true);
           return;
       }
       await _applyPlansFromAgent(
@@ -2452,7 +2458,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 审核候选：人挑完（或 Agent 挑完）在这里过一遍再导。
   ///
   /// 内嵌模式：审核页把决定交回来，在**本会话**里应用并走既有的落库通路
-  /// ——同一个人的同一次编辑，没有第二把锁
+  /// ——同一个人的同一次编辑，不该有第二条落盘路径
   Future<void> _openReview() async {
     final outcome = await Navigator.of(context).push(
       MaterialPageRoute(

@@ -284,14 +284,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
   Future<void> _runUiAction(Directory dataDir, AgentRequest req) async {
     void reply(bool ok, String message,
-        {Map<String, dynamic> payload = const {}}) {
+        {Map<String, dynamic> payload = const {}, bool unsupported = false}) {
       writeAgentRequestResult(
           dataDir: dataDir,
           taskId: globalPresenceSlot,
           id: req.id,
           ok: ok,
           message: message,
-          payload: payload);
+          payload: payload,
+          unsupported: unsupported);
       // **回执一发出就放行下一个动作**，不等这个 Future 走完。
       //
       // 建脚本成片任务那条路会 `await` 进编导台的路由，而它要等**人退出
@@ -331,8 +332,10 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       case UiAction.plansApply:
       case UiAction.exportOpen:
         // 这两个动作是给那条任务的工作页的。列表页收到说明发错了地方——
-        // 说清楚，别让 Agent 等到超时
-        reply(false, '${action.label}要发给那条任务的工作页，不是任务列表');
+        // 说清楚，别让 Agent 等到超时。**带上 unsupported**：
+        // 这是「这一页接不了」，不是「这件事做不成」
+        reply(false, '${action.label}要发给那条任务的工作页，不是任务列表',
+            unsupported: true);
     }
   }
 

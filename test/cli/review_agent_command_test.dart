@@ -185,6 +185,38 @@ void main() {
       expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101]);
     });
 
+    /// **人恰好开着「另一页」不是失败。**
+    ///
+    /// 界面在这条任务上、但停在**工作台**——它不认识 `review.drop`。
+    /// 那句「我接不了」说的是「人开着另一页」，不是「这件事做不成」；
+    /// 当真失败往上抛，Agent 得到的就是「我做不了，因为软件那边不让」。
+    test('界面在这条任务上、但是接不了的那一页：自己直写，不报失败', () async {
+      final err = StringBuffer();
+      final out = StringBuffer();
+      final ui = Future<void>(() async {
+        for (var i = 0; i < 400; i++) {
+          final req = consumeAgentRequest(dataDir: dir, taskId: 'r1');
+          if (req != null) {
+            writeAgentRequestResult(
+                dataDir: dir, taskId: 'r1', id: req.id,
+                ok: false, unsupported: true,
+                message: '工作台接不了「${req.kind}」这件事——你自己做就行');
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      final code =
+          await run(['drop', 'r1'], items: '0:-:100', err: err, out: out);
+      await ui;
+
+      expect(code, 0, reason: '人开着另一页不该让 Agent 失败');
+      expect(err.toString(), contains('我自己剔除'));
+      final after = await repo.findById('r1');
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101],
+          reason: '活儿真的干了，不是报个成功了事');
+    });
+
     test('界面报失败就把原因原样带回来', () async {
       final err = StringBuffer();
       final ui = Future<void>(() async {
