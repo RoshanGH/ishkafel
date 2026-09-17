@@ -24,6 +24,8 @@ import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'package:ishkafel/features/tasks/analysis_error_message.dart';
 import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 /// 假 ASR/切分：不会被调用（_FakePipeline 覆写 analyze，不走真实管线）
@@ -46,6 +48,10 @@ class _FakePipeline extends AnalysisPipeline {
   final Object? failWith;
   int analyzeCallCount = 0;
 
+  /// 触发者是谁——管线不该自己决定，由调用方传下来
+  ActorKind? seenBy;
+  String? seenActor;
+
   _FakePipeline({
     required this.repo,
     this.shouldFail = false,
@@ -64,7 +70,11 @@ class _FakePipeline extends AnalysisPipeline {
   @override
   Future<RenewTask> analyze(RenewTask task,
       {AnalysisProgressSink? onProgress,
-      void Function(RenewTask ready)? onUnitsReady}) async {
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    seenBy = by;
+    seenActor = actor;
     analyzeCallCount++;
     onProgress?.call(
         const AnalysisProgress(stage: AnalysisStage.extractingAudio));
@@ -208,6 +218,8 @@ void main() {
     );
     container = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
     ]);
     addTearDown(container.dispose);
@@ -265,6 +277,8 @@ void main() {
   test('importFile 后自动触发分析并刷新为 awaitingCut', () async {
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo)),
@@ -288,6 +302,8 @@ void main() {
   test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
@@ -318,6 +334,8 @@ void main() {
     final longMessage = '错' * 500;
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
@@ -343,6 +361,8 @@ void main() {
     final longMessage = '${'a' * 299}${'😀' * 10}';
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
@@ -391,6 +411,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -451,6 +473,8 @@ void main() {
     test('本次运行中正在分析的任务不会被 reload 误标为中断', () async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -486,6 +510,8 @@ void main() {
       await repo.save(makeTask('d1'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(
             _RecordingCleaner(cleaned)),
@@ -506,6 +532,8 @@ void main() {
       await repo.save(makeTask('d2'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(_ThrowingCleaner()),
       ]);
@@ -603,6 +631,7 @@ void main() {
       await gated.save(makeAwaitingCut('b'));
       gatedContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(gated),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(gatedContainer.dispose);
@@ -664,6 +693,8 @@ void main() {
     Future<String> analysisErrorFor(Object error) async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, failWith: error)),
@@ -747,6 +778,7 @@ void main() {
       await failing.save(makeStored('keep'));
       final failContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(failContainer.dispose);
@@ -774,6 +806,7 @@ void main() {
       await failing.save(makeStored('keep'));
       final failContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(failContainer.dispose);
@@ -808,6 +841,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -846,6 +881,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
@@ -889,6 +926,8 @@ void main() {
 
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -924,6 +963,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -945,6 +986,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -974,6 +1017,7 @@ void main() {
       final pipeline = _FakePipeline(repo: failing);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -1066,6 +1110,7 @@ void main() {
       await counting.save(makeStored('c', DateTime.utc(2026, 7, 22)));
       localContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(counting),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(localContainer.dispose);
