@@ -1229,6 +1229,7 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 | `plans.apply` | 提交了替换方案；带每条素材的名字/画面描述/时长/烧字/品牌 |
 | `review.prune` | 审核剔除/保留了候选；每条决定带素材的判断依据 |
 | `units.assemble` | 组装单元（切分/analyze 内置打标的前半程） |
+| `units.edit` | 人在工作台改了切分（拖边界/拆合镜头/改台词）；`changed` 按 uid 列出真正变了的那几个单元的台词/起止/镜头数/标签 |
 | `units.tag.auto` | 内置打标合并进当前单元；`taggedUnits` 列出真正变了标签的 uid |
 | `units.tag.import` | 回填外包打好的标签 |
 | `analyze.prepare` | 分析的前半程（抽音频/分离/ASR）落盘 |

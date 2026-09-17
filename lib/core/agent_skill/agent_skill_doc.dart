@@ -1236,9 +1236,19 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 | `plans.apply` | 提交了替换方案；带每条素材的名字/画面描述/时长/烧字/品牌 |
 | `review.prune` | 审核剔除/保留了候选；每条决定带素材的判断依据 |
 | `units.assemble` | 组装单元（切分/analyze 内置打标的前半程） |
+| `units.edit` | 人在工作台改了切分（拖边界/拆合镜头/改台词）；`changed` 按 uid 列出真正变了的那几个单元的台词/起止/镜头数/标签 |
 | `units.tag.auto` | 内置打标合并进当前单元；`taggedUnits` 列出真正变了标签的 uid |
 | `units.tag.import` | 回填外包打好的标签 |
 | `analyze.prepare` | 分析的前半程（抽音频/分离/ASR）落盘 |
+| `analyze.stalled` | 启动自检：上次分析被中断（app 关了/崩了），标成可重试 |
+| `analyze.retry` | 重新发起分析；状态回到 analyzing、清掉上次的失败原因 |
+| `analyze.failed` | 分析失败落库；`after.error` 是给人看的原因 |
+| `ai.usage` | 这一趟分析花掉的 AI 用量记到任务头上；调用次数 + 花费（元） |
+| `units.tag.resume` | 启动后把上次没打完的标补上；`taggedUnits` 列出真正变了标签的 uid |
+| `materials.picked` | 已挑素材的落地记录变了；带每条的名字/画面描述/时长/烧字/品牌 |
+| `subtitle.track` | 手改了台词字幕轨（改字/断句）；改前改后的行数与改动的那几行 |
+| `task.tagGroups` | 改了这条任务用哪些标签组/打标约束/所属项目 |
+| `audio.vocals` | 换了这条任务自己的人声轨（重新分离） |
 | `task.rename` | 改了任务名 |
 | `export.run` | 导出成片；条数/成功数/输出目录 |
 
@@ -1247,6 +1257,7 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 | op | 记的是什么 |
 |---|---|
 | `script.extract` | 从参考片提取台词，建好脚本行 |
+| `script.edit` | 编导台里改了脚本（自动保存）；按行身份记台词/镜头数/有没有配音 |
 | `script.voice.baseline` | `script voice --voice` 定了本片配音基调（默认音色） |
 | `script.voice.generate` | 给某一行生成了配音；台词原文 + 配音时长（**每句一条**） |
 | `voice.upload` | `script voice-file`：用自己录的音频换掉某一行的配音；改前改后的台词文本、配音时长 |
