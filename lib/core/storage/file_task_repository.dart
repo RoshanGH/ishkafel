@@ -129,7 +129,17 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
       // 写失败（只读文件系统、磁盘满……）不影响这次读的正确性，只是丢了
       // 这次「顺手记一笔」的机会，下次读到同一份数据照样能推出同一个
       // uid——所以失败了就记一句警告，照常把这次读到的 task 返回，不算作
-      // 读失败
+      // 读失败。
+      //
+      // **这次写回保留的是原本读到的 updatedAt，不是 DateTime.now()**：
+      // 补的只是身份，不是一次有意义的改动，不该顶掉时间戳去抢
+      // `TaskMutation` 的乐观并发校验那条线——`TaskMutation.apply` 靠
+      // `updatedAt` 变没变来判断「写盘这段窗口里是不是被别人抢写了」，
+      // 这次写回如果推进了 `updatedAt`，会让它把「其实什么有意义的改动
+      // 都没发生」误判成一次抢写。反过来说：`TaskMutation` 的版本校验
+      // 天然看不见这一笔写回，但这不影响正确性——两条读路推出来的 uid
+      // 本来就一样，版本校验要保护的是「谁的改动被覆盖」，这里没有谁的
+      // 改动，无需被看见
       if (_unitUidsWereJustAssigned(json, task)) {
         try {
           await save(task);

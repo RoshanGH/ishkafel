@@ -499,10 +499,13 @@ Future<int> _applySegment(
         );
       }
       final merged = mergeTagsInto(freshUnits, tagged);
-      // 真正变了标签的 uid：跟 mergeTagsInto 用同一条判据（tags 不同）
+      // 真正变了标签的 uid：跟 mergeTagsInto 判定「要不要真的动一下」
+      // 用同一条判据（tag_merge.dart 导出的 unitTagsChanged）——不能只比
+      // 单元级 tags，镜头标签是这次填上的、单元级 tags 没动（人手打过、
+      // 不被覆盖）时也算「这个单元真的变了」，只看单元级会漏报
       final taggedUids = [
         for (var i = 0; i < freshUnits.length && i < merged.length; i++)
-          if (!_sameTags(freshUnits[i].tags, merged[i].tags)) merged[i].uid,
+          if (unitTagsChanged(freshUnits[i], merged[i])) merged[i].uid,
       ];
       return TaskEdit(
         task: fresh.copyWith(units: merged),
@@ -518,15 +521,6 @@ Future<int> _applySegment(
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
-}
-
-/// 跟 mergeTagsInto 判定「变没变」用同一条规矩：只看标签，不看别的字段
-bool _sameTags(List<String> a, List<String> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
 }
 
 /// 收下标签并落库。标签必须在受控词表内——词表外的一律拒绝，不做近似匹配

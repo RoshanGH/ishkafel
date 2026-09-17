@@ -147,4 +147,45 @@ void main() {
       expect(merged[1].tags, ['痛点']);
     });
   });
+
+  /// `unitTagsChanged` 是调用方（apply_command.dart 的 units.tag.auto）
+  /// 拿来判定「这个单元这一笔真的被打了标吗」的公开判据——跟
+  /// `mergeTagsInto` 自己内部判定「要不要真的去动界面」必须是同一条规矩，
+  /// 不能各算各的（2026-09-18 真机复审：单独拷贝一份会漏报"只改了镜头
+  /// 标签"的单元）
+  group('unitTagsChanged：调用方拿它判定这个单元这一笔真的变了没有', () {
+    test('单元级标签没变，但镜头标签是这次填上的——算变了', () {
+      final before = _unit(0, 0, 1000,
+          tags: ['人工改过'], shots: [_shot(0, 500)]); // 单元已有人手打的标签
+      final tagged = [
+        _unit(0, 0, 1000, tags: ['促单'], shots: [_shot(0, 500, tags: ['实拍'])]),
+      ];
+
+      final after = mergeTagsInto([before], tagged).single;
+
+      // 单元级标签确实没被覆盖（人工改过的不被打标结果盖掉）
+      expect(after.tags, ['人工改过']);
+      // 但镜头标签从空变成了 ['实拍']——这个单元真的变了
+      expect(after.shots.single.tags, ['实拍']);
+      expect(unitTagsChanged(before, after), isTrue,
+          reason: '只看单元级 tags 会漏报——镜头标签才是这次真正被打上的');
+    });
+
+    test('单元级和镜头级都没变——不算变', () {
+      final u = _unit(0, 0, 1000, tags: ['a'], shots: [_shot(0, 500, tags: ['b'])]);
+      // copyWith 即使值没变也会造一个新对象，identical 在这里靠不住
+      final copy = u.copyWith(tags: ['a']);
+
+      expect(identical(u, copy), isFalse,
+          reason: '这条断言本身就是在证明不能用 identical 判断有没有变');
+      expect(unitTagsChanged(u, copy), isFalse);
+    });
+
+    test('单元级标签变了——算变', () {
+      final before = _unit(0, 0, 1000, tags: const []);
+      final after = _unit(0, 0, 1000, tags: ['促单']);
+
+      expect(unitTagsChanged(before, after), isTrue);
+    });
+  });
 }

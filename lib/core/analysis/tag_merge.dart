@@ -40,15 +40,32 @@ List<SemanticUnit> mergeTagsInto(
 /// 只看标签有没有变——这个模块本来就只动标签
 bool _changed(List<SemanticUnit> a, List<SemanticUnit> b) {
   for (var i = 0; i < a.length; i++) {
-    if (!_sameTags(a[i].tags, b[i].tags)) return true;
-    for (var j = 0; j < a[i].shots.length; j++) {
-      if (!_sameTags(a[i].shots[j].tags, b[i].shots[j].tags)) return true;
-    }
+    if (unitTagsChanged(a[i], b[i])) return true;
   }
   return false;
 }
 
-bool _sameTags(List<String> a, List<String> b) {
+/// 这个单元（含它的镜头）标签有没有变。**导出给调用方复用**——
+/// `mergeTagsInto` 自己拿它判定「要不要真的去动界面」，调用方要按 uid
+/// 单独列出「这一笔真正打了标的单元」时也得用它，不能另起一份拷贝。
+///
+/// **只看单元级 `tags` 不够**：`mergeTagsInto` 还会给标签是空的镜头填
+/// `tags`（见 [_mergeShots]）——单元本身已经有人手打的标签（不被覆盖）、
+/// 但它下面某个镜头的标签是这次打标填上的，这种情况单元**确实变了**，
+/// 只比单元级会漏报（2026-09-18 真机复审揪出来的：「存了却不报」，
+/// 查到的空看起来正好像「没问题」）。
+///
+/// **不能用 `identical` 判断有没有变**：[_mergeUnit] 里的 `copyWith`
+/// 即使字段值没变也会造一个新对象，`identical` 在这里只会反过来多报。
+bool unitTagsChanged(SemanticUnit a, SemanticUnit b) {
+  if (!sameTags(a.tags, b.tags)) return true;
+  for (var j = 0; j < a.shots.length && j < b.shots.length; j++) {
+    if (!sameTags(a.shots[j].tags, b.shots[j].tags)) return true;
+  }
+  return false;
+}
+
+bool sameTags(List<String> a, List<String> b) {
   if (a.length != b.length) return false;
   for (var i = 0; i < a.length; i++) {
     if (a[i] != b[i]) return false;

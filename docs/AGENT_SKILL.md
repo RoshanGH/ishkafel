@@ -1242,6 +1242,7 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 | `script.extract` | 从参考片提取台词，建好脚本行 |
 | `script.voice.baseline` | `script voice --voice` 定了本片配音基调（默认音色） |
 | `script.voice.generate` | 给某一行生成了配音；台词原文 + 配音时长（**每句一条**） |
+| `voice.upload` | `script voice-file`：用自己录的音频换掉某一行的配音；改前改后的台词文本、配音时长 |
 | `script.refShot.tag` | 给某一镜参考镜打了标；画面描述 + 标签（**每镜一条**） |
 | `script.shots.pick` | `apply shots`：给某一行挑了镜头；素材 id/名字/画面描述（**每行一条**） |
 | `script.cover.set` | 封面路径变了 |
