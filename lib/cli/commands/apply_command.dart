@@ -486,7 +486,18 @@ Future<int> _applySegment(
       // 就是错的）、当前已经有标签的不覆盖（人手改的比这份旧结果新）。
       // 不在这里另写一份更弱的合并——那正是这批改造要消灭的「同一件事
       // 两处算」。
-      final freshUnits = fresh.units ?? const [];
+      final freshUnits = fresh.units;
+      // units 本来是 null（没分析过）时绝不能悄悄变成 []——那是另一个
+      // 事实（task_mutation.dart 的 _stamp 对同一条原则也有一句注释）。
+      // 正常流程走不到这里（上一次 apply 已经把 units 落成非空列表），
+      // 纯防御
+      if (freshUnits == null) {
+        return TaskEdit(
+          task: fresh,
+          before: {'unitCount': 0},
+          after: {'unitCount': 0, 'note': 'units 是 null（没分析过），无标签可合并'},
+        );
+      }
       final merged = mergeTagsInto(freshUnits, tagged);
       // 真正变了标签的 uid：跟 mergeTagsInto 用同一条判据（tags 不同）
       final taggedUids = [
