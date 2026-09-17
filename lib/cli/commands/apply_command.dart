@@ -9,6 +9,8 @@ import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../app/service_wiring.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../task_view.dart';
@@ -207,18 +209,50 @@ Future<int> _applyWithLock({
   );
 
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
-  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
-  await repository.save(task.copyWith(
-      // 按单元的身份落库：这份投影本来就是「哪个单元用哪几条素材」
-      replacementsByUid: RenewTask.byUid(units, replacements),
-      pickedMaterials: picked));
+  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）。
+  // 这份投影天然是**整份提交的完整画面**（方案校验时就是对着 task.units
+  // 这份快照过的，replacements 与它逐位对齐）——所以落盘时仍是整份替换
+  // replacementsByUid / pickedMaterials，不是按 uid 增量合并；TaskMutation
+  // 带来的收益是别的字段（音色、配乐、字幕手改……）不会被这一笔顺手抹掉
+  final byUid = RenewTask.byUid(units, replacements);
+  final updated = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'plans.apply',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(replacementsByUid: byUid, pickedMaterials: picked),
+      before: {'replacedUnits': fresh.replacementsByUid.length},
+      after: {
+        'replacedUnits': byUid.length,
+        'materials': [
+          for (final m in picked)
+            {
+              'id': m.id,
+              'name': m.name,
+              'sceneDescription': m.sceneDescription,
+              'durationMs': m.durationMs,
+              'burnedText': m.burnedText,
+              'productBrand': m.productBrand,
+            },
+        ],
+      },
+    ),
+  );
+  if (updated == null) {
+    sink.writeln('这条任务在提交方案的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   emitJson({
     'ok': true,
     ...planApplyReport(
         plans: validation.plans,
         picked: picked,
-        task: task,
-        shortSlots: shortSlotsOf(task)),
+        task: updated,
+        shortSlots: shortSlotsOf(updated)),
   }, out: out);
   return 0;
 }
@@ -368,16 +402,31 @@ Future<int> _applySegment(
     return 1;
   }
 
+  // 组装是纯计算：drafts/prepared 都是已经拿到手的数据，没有 IO——
+  // 可以放心整段塞进 TaskMutation 的 edit 闭包
   final units = pipeline.assemble(
       task: task, drafts: parsed.drafts, prepared: state.prepared);
-  final ready = task.copyWith(
-    units: units,
-    status: RenewTaskStatus.ready,
-    asrSentences: state.prepared.sentences,
-    vocalsPath: state.prepared.vocalsPath,
-    backgroundPath: state.prepared.backgroundPath,
+  final mutation = TaskMutation(
+      repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+  final ready = await mutation.apply(
+    taskId: task.id,
+    op: 'unit.segment.apply',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(
+        units: units,
+        status: RenewTaskStatus.ready,
+        asrSentences: state.prepared.sentences,
+        vocalsPath: state.prepared.vocalsPath,
+        backgroundPath: state.prepared.backgroundPath,
+      ),
+      before: {'unitCount': fresh.units?.length ?? 0, 'status': fresh.status.name},
+      after: {'unitCount': units.length, 'status': RenewTaskStatus.ready.name},
+    ),
   );
-  await repository.save(ready);
+  if (ready == null) {
+    err.writeln('这条任务在应用切分的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
 
   final stillPending = {...state.pending}..remove(ExternalStep.segment);
   saveAnalysisState(dataDir, task.id,
@@ -398,9 +447,22 @@ Future<int> _applySegment(
   }
 
   err.writeln('切分已应用（${units.length} 个单元），开始内置打标');
+  // 打标是网络请求：做完拿到结果再进第二次独立的 apply，
+  // 不能把它塞进上面那次 edit——重跑一次 edit 就是把打标又算一遍
   final tagged = await pipeline.tagging.tag(ready, units);
-  final done = ready.copyWith(units: tagged);
-  await repository.save(done);
+  final done = await mutation.apply(
+    taskId: task.id,
+    op: 'unit.tag.auto',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(units: tagged),
+      before: {'unitCount': fresh.units?.length ?? 0},
+      after: {'unitCount': tagged.length},
+    ),
+  );
+  if (done == null) {
+    err.writeln('这条任务在打标的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
@@ -434,8 +496,24 @@ Future<int> _applyTags(
     return exitBadUsage;
   }
 
-  final done = task.copyWith(units: parsed.units);
-  await repository.save(done);
+  final done = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'unit.tags.apply',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(units: parsed.units),
+      before: {'unitCount': fresh.units?.length ?? 0},
+      after: {'unitCount': parsed.units.length},
+    ),
+  );
+  if (done == null) {
+    err.writeln('这条任务在应用标签的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
