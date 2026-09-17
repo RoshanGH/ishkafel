@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/analysis/tag_merge.dart';
 import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 import '../frame_check_wiring.dart';
@@ -472,28 +473,26 @@ Future<int> _applySegment(
     taskId: task.id,
     op: 'units.tag.auto',
     edit: (fresh) {
-      // **按 uid 合并，不整份替换**：tagged 是打标开始那一刻（ready）的
+      // **合并标签，不整份替换单元**：tagged 是打标开始那一刻（ready）的
       // 快照打出来的结果，打标是分钟级的网络活儿——这段窗口里人在界面上
-      // 拖过的边界、手改过的标签，如果整份换成 tagged 就会被悄悄抹掉。
+      // 拖过的边界、改过的台词、动过的镜头、手打的标签，如果整份换成
+      // tagged 里对应的单元对象就会被悄悄盖回打标开始那一刻的旧版本。
       // 这正是 one_task_writer_test.dart 文档里五次事故的第一条：
       // 「管线打标 vs 工作台编辑：打标结束整份存回打标开始那一刻的快照，
       // 人在这七成时间里拖的边界全没了」——这里就是那个原型场景。
       //
-      // fresh 里已经不存在的 uid（人删过那个单元）直接丢弃打标结果；
-      // fresh 里这一轮新增的 uid（人手动加的单元）原样保留，不受影响。
+      // 项目里已经有一份为这个场景写的合并：mergeTagsInto——按 uid 配对、
+      // 边界一模一样才认（边界变过的单元这份标签是照旧边界打的，安上去
+      // 就是错的）、当前已经有标签的不覆盖（人手改的比这份旧结果新）。
+      // 不在这里另写一份更弱的合并——那正是这批改造要消灭的「同一件事
+      // 两处算」。
       final freshUnits = fresh.units ?? const [];
-      final taggedByUid = {for (final u in tagged) u.uid: u};
-      final merged = <SemanticUnit>[];
-      final taggedUids = <String>[];
-      for (final u in freshUnits) {
-        final t = taggedByUid[u.uid];
-        if (t == null) {
-          merged.add(u);
-        } else {
-          merged.add(t);
-          taggedUids.add(u.uid);
-        }
-      }
+      final merged = mergeTagsInto(freshUnits, tagged);
+      // 真正变了标签的 uid：跟 mergeTagsInto 用同一条判据（tags 不同）
+      final taggedUids = [
+        for (var i = 0; i < freshUnits.length && i < merged.length; i++)
+          if (!_sameTags(freshUnits[i].tags, merged[i].tags)) merged[i].uid,
+      ];
       return TaskEdit(
         task: fresh.copyWith(units: merged),
         before: {'unitCount': freshUnits.length},
@@ -508,6 +507,15 @@ Future<int> _applySegment(
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
+}
+
+/// 跟 mergeTagsInto 判定「变没变」用同一条规矩：只看标签，不看别的字段
+bool _sameTags(List<String> a, List<String> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 /// 收下标签并落库。标签必须在受控词表内——词表外的一律拒绝，不做近似匹配
