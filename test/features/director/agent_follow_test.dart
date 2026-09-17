@@ -85,6 +85,10 @@ void main() {
   /// 这条任务，人也随时能自己上手。但这一页把整份脚本捧在内存里、定时整份
   /// 落盘：Agent 正在一行行写盘的同时人在这儿打字，下一次「跟盘」会把他刚
   /// 打的字冲掉，而他看不见。所以这一刻先拦一下，**出路就在眼前那个按钮上**。
+  ///
+  /// **而那句提示必须说实话**：点「我来接手」只是让这一页不再跟随它，
+  /// Agent 那条命令照样在跑。软件不提供「停掉 Agent」这个能力——人要停它，
+  /// 去 Agent 那头说。说成「它就停手」既是假话，又许诺了产品明确不给的东西。
   testWidgets('Agent 干活时人先别动同一处，但出路就在眼前', (tester) async {
     final repo = _MemoryRepo();
     await pump(tester, repo);
@@ -103,8 +107,46 @@ void main() {
         reason: '两边同时写会把彼此的活覆盖掉');
     // 横幅上有「我来接手」按钮，拦截提示里也指向它——拦下来要给出路
     expect(find.byKey(const ValueKey('agent-takeover')), findsOneWidget);
-    expect(find.textContaining('点上面的「我来接手」，它就停手'), findsOneWidget,
+    expect(find.textContaining('点上面的「我来接手」'), findsOneWidget,
         reason: '拦下来要说清怎么办，不能只是点了没反应');
+    expect(find.textContaining('它那条命令还在跑'), findsOneWidget,
+        reason: '不许许诺「它就停手」——软件停不掉 Agent，说了就是假话');
+    expect(find.textContaining('去 Agent 那头说'), findsOneWidget,
+        reason: '真要它停，出路在 Agent 那头，得把这条说出来');
+  });
+
+  /// 「我来接手」的确认框曾经写着「它之后的写入会被拒绝」——那是锁还在的
+  /// 年代的事实。锁删掉之后那句话变成了**两重谎**：写入不会被拒绝，
+  /// 而且它根本不会停。
+  ///
+  /// 产品负责人定的：**人不能在软件上停止 Agent。人要停它，去 Agent 那头说。**
+  /// 所以这个框一个字都不许许诺「它会停」。
+  testWidgets('「我来接手」的确认框只说实话：停的是跟随，不是 Agent',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '挑镜头'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('agent-takeover')));
+    // 这一页有个 500ms 的轮询定时器，pumpAndSettle 永远等不到静止
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('停止跟随'), findsOneWidget,
+        reason: '这才是它真正做的事');
+    expect(find.textContaining('它那条命令还在跑'), findsOneWidget);
+    expect(find.textContaining('去 Agent 那头说'), findsOneWidget,
+        reason: '真正的出路要指出来，不然人会以为按了就没事了');
+    // 页面上本来就有一个「自动铺一版」按钮，所以这里是 findsWidgets
+    expect(find.textContaining('自动铺一版'), findsWidgets,
+        reason: '界面自己在跑的那个是真停得掉的——别和「停 Agent」混成一句');
+    expect(find.textContaining('会被拒绝'), findsNothing,
+        reason: '锁没了，没有任何东西会拒绝 Agent 的写入');
+    expect(find.textContaining('会被打断'), findsNothing,
+        reason: '软件打断不了它');
   });
 
   testWidgets('展示完这一步才回执——Agent 靠它决定什么时候走下一步',

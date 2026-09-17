@@ -686,7 +686,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   Widget _tagRow(_Section section) {
     final tags = _tagsOf(section);
     // Agent 正在动这一页时不让人同时改同一处：不是「没有权限」，
-    // 是两只手在同一个格子上互相抢。它一收工立刻恢复
+    // 是两只手在同一个格子上互相抢——人改的会被下一次刷新盖掉，而他
+    // 看不见。**横幅上把这件事说出来**（见 [_agentBanner]），不能只是
+    // 把按钮藏起来。它一收工立刻恢复。
+    //
+    // 根因是这两个工作页整份落盘；改成按字段合并之后这道闸就不必存在了
     final editable = _agent == null;
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.xs),
@@ -1125,9 +1129,13 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ),
       );
 
-  /// Agent 正在动这一页：说清它在做什么，并告诉人现在是只读。
+  /// Agent 正在动这一页：说清它在做什么，以及为什么这会儿改标签的入口
+  /// 先收起来了。
   ///
-  /// 「它在做什么」这一句是可视模式的全部意义——只说「有人占着」等于没说
+  /// 「它在做什么」这一句是可视模式的全部意义——只说「有人在」等于没说。
+  ///
+  /// **不许在这儿许诺「你能停掉它」**：软件不提供停掉 Agent 的能力，
+  /// 人要停它得去 Agent 那头说。这里只说事实：它一收工，入口自己回来。
   Widget _agentBanner(AgentPresence agent) => Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(
@@ -1142,7 +1150,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${agent.holder} 正在这一页上干活',
+                Text('${agent.holder} 正在这一页上干活'
+                    '——它动着的时候先别改标签，免得你改的被它下一次'
+                    '刷新盖掉。它一收工，入口自己回来',
                     style: const TextStyle(
                         fontSize: AppFontSize.caption,
                         color: AppColors.textSecondary)),

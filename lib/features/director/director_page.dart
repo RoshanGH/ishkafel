@@ -1219,18 +1219,28 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _toast('Agent 的改动已载入。');
   }
 
-  /// 人要抢回来：撤掉在场状态，Agent 之后的写入会被锁拒掉
+  /// 人要自己上手：这一页**停止跟随** Agent，人立刻能改。
+  ///
+  /// **它不停掉 Agent。** 这里做的是三件事——清掉在场状态（这一页不再显示、
+  /// 不再跟随它）、叫停界面自己在跑的自动铺片、把盘上最新的内容载进来。
+  /// Agent 那条 CLI 命令还在跑，它该写还是照写。
+  ///
+  /// 软件不提供「停掉 Agent」这个能力，这是产品定的：**人要停它，
+  /// 去 Agent 那头说。** 所以这个对话框一个字都不能许诺「它会停」。
   Future<void> _takeoverFromAgent() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('接手这个任务？'),
-        content: const Text('Agent 正在做的这一步会被打断，它之后的写入会被'
-            '拒绝。已经改好的部分会保留。'),
+        title: const Text('自己上手改？'),
+        content: const Text('这一页会停止跟随 Agent，你马上就能改。\n\n'
+            '但它那条命令还在跑——软件不会替你停掉 Agent，'
+            '真要它停，去 Agent 那头说一声。\n'
+            '界面自己在跑的「自动铺一版」会停下来。\n'
+            '已经改好的部分都保留。'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('让它继续')),
+              child: const Text('继续跟着看')),
           FilledButton(
               key: const ValueKey('agent-takeover-confirm'),
               onPressed: () => Navigator.of(context).pop(true),
@@ -2451,11 +2461,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 软件里已经没有任何一把锁：Agent 随时写得进这条任务，人也随时能
     // 自己上手。但这一页把整份脚本捧在内存里、定时整份落盘——Agent 正在
     // 一行行写盘的同时人在这儿打字，下一次「跟盘」会把他刚打的字冲掉，
-    // 而他看不见。所以这一刻先拦一下，**出路就在眼前那个按钮上**：
-    // 点「我来接手」，Agent 当场停手，这一页立刻可以改。
+    // 而他看不见。**那是静默丢数据，比拦一下更糟。**
+    //
+    // 出路就在眼前那个按钮上，但**话要说准**：点「我来接手」只是让这一页
+    // 不再跟随它（清掉在场状态），**Agent 那条命令照样在跑**。
+    // 软件不提供「停掉 Agent」这个能力——人要停它，去 Agent 那头说。
+    // 说成「它就停手」是假话，而且许诺了一个产品上明确不给的东西。
+    //
+    // 根因是「整份落盘」：这一页改成按字段合并之后，人和 Agent 就能真正
+    // 同时动同一页，这道闸也就不必存在了。那是另一件事（见报告的已知缺口）。
     final agent = _agent;
     if (agent != null) {
-      _toast('${agent.holder} 正在动这一页——想自己改，点上面的「我来接手」，它就停手。');
+      _toast('${agent.holder} 正在动这一页。要自己改，点上面的「我来接手」'
+          '——这一页会停止跟随它，但它那条命令还在跑；'
+          '真要它停，去 Agent 那头说一声。');
       return;
     }
     // 人正在改东西：自动展开这一轮让开。不让的话，他改着第 3 行，
@@ -3015,8 +3034,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 自动铺片被叫停了。
   ///
-  /// 它一次要跑几十句配音加几十次识图，十几分钟起步——**跑起来却没有任何
-  /// 停下来的办法**（真机上人按「我来接手」也停不掉，只能看着它把钱烧完）。
+  /// 它一次要跑几十句配音加几十次识图，十几分钟起步，而一度**跑起来就没有
+  /// 任何停下来的办法**（真机上人按「我来接手」也停不掉，只能看着它把钱
+  /// 烧完）。这个标志就是那条出路：按「我来接手」会叫停它。
+  ///
+  /// **注意别和「停掉 Agent」混为一谈**：这里停的是**界面自己**在跑的活儿，
+  /// 那个真停得掉；Agent 那条 CLI 命令软件停不了，也不该假装停得了。
   bool _draftCancelled = false;
 
   /// 叫停自动铺片。已经铺好的那几句留着，没轮到的不动
