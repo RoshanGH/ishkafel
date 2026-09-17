@@ -34,12 +34,35 @@ void main() {
     'lib/cli/commands/blank_command.dart': {'_create'},
     'lib/cli/commands/tasks_command.dart': {'runTaskCopyCommand'},
     'lib/cli/commands/script_run_command.dart': {'runScriptNewCommand'},
+    // 界面这一侧建新任务的三条路（新建向导的「空白拼片」「脚本成片」
+    // 与「导入视频」）——和上面三条 CLI 命令是同一件事的两个入口
+    'lib/features/import_flow/import_service.dart': {
+      'createBlank',
+      'createScript',
+      'importLocalFile',
+    },
+    // 复制任务：`TaskCopier.duplicate` 产出的是带新 id 的全新任务，
+    // 和 CLI 的 `task-copy` 同一件事
+    'lib/features/tasks/task_list_controller.dart': {'copyTask'},
+  };
+
+  /// 白名单三：**给老任务补短编号**那一处。
+  ///
+  /// 它确实是在改已存在的任务，但改的是「#12」这个只给人念的显示号，
+  /// 且是一次性的存档补丁（`seq` 字段是后加的，老存档没有）。走
+  /// `TaskMutation` 会有一个说不通的副作用：`apply` 统一把 `updatedAt`
+  /// 推到当下，于是升级后第一次打开，**所有老任务一起跳到列表最前面**
+  /// （列表按 updatedAt 倒序），人看到的是「我的任务全乱了」。
+  ///
+  /// 为一个显示号付这个代价不值。同样 narrow 到「文件 + 函数」。
+  const allowedSeqBackfill = {
+    'lib/core/storage/task_seq.dart': {'ensureTaskSeqs'},
   };
 
   /// 扫描范围分两步走：Task 6 先管住 CLI，Task 7 再扩到整个 lib。
   /// 一上来就扫全 lib 的话，Task 6 做完它照样是红的（界面还没迁），
-  /// 那这条测试就没法当 Task 6 的验收门。
-  const scanRoot = 'lib/cli'; // ← Task 7 改成 'lib'
+  /// 那这条测试就没法当 Task 6 的验收门。**Task 7 已经扩完**。
+  const scanRoot = 'lib';
 
   test('除了 TaskMutation，没有别的地方直接 save 已存在的任务', () {
     final offenders = <String>[];
@@ -49,7 +72,10 @@ void main() {
         .where((f) => f.path.endsWith('.dart'))) {
       final rel = f.path.replaceFirst('${Directory.current.path}/', '');
       if (allowedFiles.contains(rel)) continue;
-      final allowedFns = allowedNewTaskCreation[rel] ?? const <String>{};
+      final allowedFns = {
+        ...?allowedNewTaskCreation[rel],
+        ...?allowedSeqBackfill[rel],
+      };
       final content = f.readAsStringSync();
       final lines = content.split('\n');
 
@@ -88,7 +114,7 @@ void main() {
           continue;
         }
         final lineIndex = content.substring(0, m.start).split('\n').length - 1;
-        final fn = _enclosingTopLevelFunction(lines, lineIndex);
+        final fn = _enclosingFunction(lines, lineIndex);
         if (fn != null && allowedFns.contains(fn)) continue;
         offenders.add('$rel${fn == null ? '' : ' → $fn'} → $receiver.save(');
       }
@@ -108,19 +134,43 @@ bool _looksLikeRepoName(String receiver) =>
     RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
         .hasMatch(receiver);
 
-/// 往上找最近一行**顶层函数签名**（不缩进、形如 `ReturnType name(`），
-/// 返回函数名；找不到给 null。
+/// 往上找最近一行**函数签名**（顶层函数或类里的方法），返回函数名；
+/// 找不到给 null。
 ///
 /// 只是个规则扫描器的启发式判断，不是真的解析 Dart AST——这份代码的
-/// 顶层函数都是「返回类型 空格 函数名 (」这个形状（`Future<int> _create(`
-/// / `Future<int> runTaskCopyCommand(`），够用。
-String? _enclosingTopLevelFunction(List<String> lines, int callLineIndex) {
-  final sig = RegExp(r'^[A-Za-z_][\w<>,\.\s\?]*\s+(_[A-Za-z]\w*|run[A-Z]\w*)\s*\(');
+/// 函数都是「返回类型 空格 函数名 (」这个形状（`Future<int> _create(`
+/// / `Future<RenewTask> createBlank({`），够用。
+///
+/// **必须认得类里的方法**：白名单要 narrow 到「文件 + 函数」，而界面这一侧
+/// 建新任务的三处（`ImportService.createBlank` 等）全是方法，不是顶层函数。
+/// 旧版只认不缩进的签名，方法一律算「找不到」，于是只能整份文件豁免——
+/// 那等于以后有人往 `ImportService` 里加一处「改已存在任务」的写入，
+/// 这条测试再也拦不住。
+///
+/// 判据是**缩进**：签名一定比它函数体里的调用浅。这一条顺带滤掉了
+/// `if (…) {` / `} catch (e) {` / 多行参数列表这些干扰行（它们要么更深，
+/// 要么根本不是「名字 + 左括号」的形状）。
+String? _enclosingFunction(List<String> lines, int callLineIndex) {
+  final callIndent = _indentOf(lines[callLineIndex]);
+  final sig = RegExp(r'^\s*(?:@\w+\s+)*(?:static\s+)?'
+      r'[A-Za-z_][\w<>,\.\s\?\[\]]*\s+([A-Za-z_]\w*)\s*\(');
+  // 形状上撞得上签名的语句关键字，单独挡掉
+  const notFunctionNames = {'if', 'for', 'while', 'switch', 'catch', 'return'};
   for (var i = callLineIndex; i >= 0 && i < lines.length; i--) {
     final line = lines[i];
-    if (line.isEmpty || line.startsWith(' ') || line.startsWith('\t')) continue;
+    if (line.trim().isEmpty) continue;
+    // 比调用还深（或一样深）的行不可能是它的签名
+    if (_indentOf(line) >= callIndent) continue;
+    // 多行参数列表里的一行（`void Function(Progress)? onProgress,`）形状上
+    // 跟签名一模一样，会把函数名认成 `Function`。签名不会以逗号收尾
+    if (line.trimRight().endsWith(',')) continue;
     final m = sig.firstMatch(line);
-    if (m != null) return m.group(1);
+    if (m == null) continue;
+    final name = m.group(1)!;
+    if (notFunctionNames.contains(name)) continue;
+    return name;
   }
   return null;
 }
+
+int _indentOf(String line) => line.length - line.trimLeft().length;
