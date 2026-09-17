@@ -50,20 +50,36 @@ void main() {
       final rel = f.path.replaceFirst('${Directory.current.path}/', '');
       if (allowedFiles.contains(rel)) continue;
       final allowedFns = allowedNewTaskCreation[rel] ?? const <String>{};
-      final lines = f.readAsLinesSync();
-      for (var i = 0; i < lines.length; i++) {
-        for (final m
-            in RegExp(r'\b(\w+)\.save\(').allMatches(lines[i])) {
-          final receiver = m.group(1)!;
-          // 只认任务仓库那一类接收者，别把别的 save 误伤了
-          if (!RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
-              .hasMatch(receiver)) {
-            continue;
-          }
-          final fn = _enclosingTopLevelFunction(lines, i);
-          if (fn != null && allowedFns.contains(fn)) continue;
-          offenders.add('$rel${fn == null ? '' : ' → $fn'} → $receiver.save(');
+      final content = f.readAsStringSync();
+      final lines = content.split('\n');
+
+      // 谁被声明/赋值成任务仓库类型，就认它是仓库接收者——不管变量叫
+      // repo 还是 r、store、db。名字判据（下面 _looksLikeRepoName）
+      // 单独也算数，两个判据取「或」：一处漏了类型声明（比如函数参数
+      // 用了别的写法），名字判据兜底；一处起了个不带 repo 字样的名字，
+      // 类型判据兜底
+      final typedRepoNames = {
+        for (final m in RegExp(
+                r'\b(?:Task[A-Za-z]*Repository|FileTaskRepository)\s+(\w+)\b')
+            .allMatches(content))
+          m.group(1)!,
+        for (final m in RegExp(
+                r'\b(\w+)\s*=\s*(?:const\s+)?(?:Task[A-Za-z]*Repository|FileTaskRepository)\s*\(')
+            .allMatches(content))
+          m.group(1)!,
+      };
+
+      // receiver 和 .save( 之间允许任意空白（含换行）——`repository\n
+      // .save(` 这种跨行写法不能漏过。整份文件文本一起匹配，不再逐行扫
+      for (final m in RegExp(r'\b(\w+)\s*\.\s*save\s*\(').allMatches(content)) {
+        final receiver = m.group(1)!;
+        if (!_looksLikeRepoName(receiver) && !typedRepoNames.contains(receiver)) {
+          continue;
         }
+        final lineIndex = content.substring(0, m.start).split('\n').length - 1;
+        final fn = _enclosingTopLevelFunction(lines, lineIndex);
+        if (fn != null && allowedFns.contains(fn)) continue;
+        offenders.add('$rel${fn == null ? '' : ' → $fn'} → $receiver.save(');
       }
     }
     expect(offenders, isEmpty,
@@ -75,6 +91,12 @@ void main() {
   });
 }
 
+/// 只认任务仓库那一类接收者的**名字**判据——跟类型判据（见上）取「或」，
+/// 不是唯一防线
+bool _looksLikeRepoName(String receiver) =>
+    RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
+        .hasMatch(receiver);
+
 /// 往上找最近一行**顶层函数签名**（不缩进、形如 `ReturnType name(`），
 /// 返回函数名；找不到给 null。
 ///
@@ -83,7 +105,7 @@ void main() {
 /// / `Future<int> runTaskCopyCommand(`），够用。
 String? _enclosingTopLevelFunction(List<String> lines, int callLineIndex) {
   final sig = RegExp(r'^[A-Za-z_][\w<>,\.\s\?]*\s+(_[A-Za-z]\w*|run[A-Z]\w*)\s*\(');
-  for (var i = callLineIndex; i >= 0; i--) {
+  for (var i = callLineIndex; i >= 0 && i < lines.length; i--) {
     final line = lines[i];
     if (line.isEmpty || line.startsWith(' ') || line.startsWith('\t')) continue;
     final m = sig.firstMatch(line);
