@@ -66,6 +66,9 @@ ishkafel log <任务> --by human       # 只看人干了什么
 日志**只记改动**，人的和你的都记，`by` 字段分得开。只读的翻页、看候选一律不记
 ——那是「现状」，不是「历史」，这份日志不管这个。
 
+每条记录的 `op` 字段是干了什么、`before`/`after` 是改前改后的判断依据；
+可能出现的 `op` 有哪些、各自记了什么，见文末《日志里的 op 名对照表》。
+
 任务数据里每一处还带一个 `editedBy`：这一处是谁定的、什么时候定的。
 `task --json` 里就有，不用先去翻日志。
 
@@ -1197,3 +1200,63 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 
 界面上时间一律显示成 `分:秒.帧`（如 `01:36.07` = 1 分 36 秒第 7 帧），
 不是百分之一秒。
+
+---
+
+## 日志里的 op 名对照表
+
+`ishkafel log` 每条记录的 `op` 字段是干了什么、`before`/`after` 是改前改后
+的判断依据（不是光一个 id）。想筛某一类动作时，拿这份清单去对——它只存在于
+代码里，不是这里现造的，跟实现不同步的话去看命令源码里 `TaskMutation.apply`
+的 `op:` 参数。
+
+**替换裂变（单元/镜头）**
+
+| op | 记的是什么 |
+|---|---|
+| `unit.add` | 加了一个单元；`after.unitCount` |
+| `unit.remove` | 删了哪个单元；`before` 带它的台词/标签/时长 |
+| `unit.reorder` | 挪了顺序；`from`/`to` + 被挪单元的台词 |
+| `unit.tags` | 手填了这个单元的标签；改前改后的标签列表 |
+| `unit.segment` | 切分了这一段的底片；`baseCandidateId`/`shotCount` |
+| `unit.unpin` | 换底片、清掉旧的切分结果 |
+| `unit.subtitle` | 改了某一镜要烧的字幕；改前改后的字幕行文本 |
+| `audio.material` | 改了替换分镜放哪一路声音（全片或某一镜） |
+| `audio.source` | 改了原片这一镜放哪一路声音（全片或某一镜） |
+| `voice.assign` | 给某几句换了音色；带台词原文 + 改前改后的音色 |
+| `bgm.set` | 铺/改/删了一段配乐；带曲子 id/name/音量 |
+| `subtitle.set` | 改了全片字幕样式（预设/位置/字号） |
+| `plans.apply` | 提交了替换方案；带每条素材的名字/画面描述/时长/烧字/品牌 |
+| `review.prune` | 审核剔除/保留了候选；每条决定带素材的判断依据 |
+| `units.assemble` | 组装单元（切分/analyze 内置打标的前半程） |
+| `units.tag.auto` | 内置打标合并进当前单元；`taggedUnits` 列出真正变了标签的 uid |
+| `units.tag.import` | 回填外包打好的标签 |
+| `analyze.prepare` | 分析的前半程（抽音频/分离/ASR）落盘 |
+| `task.rename` | 改了任务名 |
+| `export.run` | 导出成片；条数/成功数/输出目录 |
+
+**脚本成片**
+
+| op | 记的是什么 |
+|---|---|
+| `script.extract` | 从参考片提取台词，建好脚本行 |
+| `script.voice.baseline` | `script voice --voice` 定了本片配音基调（默认音色） |
+| `script.voice.generate` | 给某一行生成了配音；台词原文 + 配音时长（**每句一条**） |
+| `script.refShot.tag` | 给某一镜参考镜打了标；画面描述 + 标签（**每镜一条**） |
+| `script.shots.pick` | `apply shots`：给某一行挑了镜头；素材 id/名字/画面描述（**每行一条**） |
+| `script.cover.set` | 封面路径变了 |
+| `script.export.run` | 导出成片 |
+| `script.apply.subtitles` | `apply subtitles`：给某几行断了句；字幕切点 |
+| `script.apply.alloc` | `apply alloc`：改了某几行的镜头时长；每镜的 allocMs |
+| `script.apply.bgm` | `apply bgm`：铺了配乐段；曲子 id/名字/音量 |
+| `script.apply.lines` | `apply lines`：改了台词（改字/插入/删除）；带 `lineCount` |
+| `script.apply.shotEdit` | `apply shot-edit`：改了镜头（取段/变速/原声音量/删除） |
+| `script.apply.screenText` | `apply screen-text`：改了某一屏的字幕文字覆盖 |
+| `script.apply.baseline` | `apply baseline`：外包判断定的本片基调（跟 `script.voice.baseline` 是两条不同的路） |
+| `script.apply.lineVoice` | `apply line-voice`：改了某几行的音色/语速覆盖 |
+| `script.apply.mix` | `apply mix`：改了三轨混音台（口播/配乐/原声音量） |
+| `script.apply.wordShots` | `apply word-shots`：划词建了镜头 |
+
+**建新任务不记**：`blank create` / `task-copy` / `script new` 建的是全新
+任务，不属于「这条任务上发生了什么」，`createdAt` 和任务字段本身已经记着，
+日志里查不到这一条是正常的。
