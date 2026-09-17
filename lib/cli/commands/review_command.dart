@@ -3,12 +3,15 @@ import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 
 import '../../core/models/renew_task.dart';
+import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_wake.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../app_locator.dart';
@@ -260,32 +263,57 @@ Future<int> _changeCandidates({
       if (!stage.visual) stage.note(action, focus: focus);
     }
 
-    // 拿锁期间人可能自己点过：重读一遍再校验，别拿旧前提写新数据
-    final fresh = await repository.findById(task.id);
-    if (fresh == null) {
+    RenewTask? updated;
+    try {
+      updated = await TaskMutation(
+        repo: repository,
+        dataDir: dataDir,
+        by: ActorKind.agent,
+        actor: 'Agent',
+      ).apply(
+        taskId: task.id,
+        op: 'review.prune',
+        where: {
+          'decisions': [
+            for (final d in decisions) {'unit': d.unit, 'shot': d.shot, 'material': d.material},
+          ],
+        },
+        // 拿锁期间人可能自己点过：edit 拿到的 fresh 就是重读过的那一份，
+        // 校验也要在这份新鲜数据上重来一遍，别拿旧前提写新数据。
+        // 校验没过就抛出去——没落盘就不该记日志，edit 必须是纯的，
+        // 用抛异常而不是改外层变量来带出「拒绝」这个结果
+        edit: (fresh) {
+          final freshUnits = fresh.units ?? const <SemanticUnit>[];
+          final freshItems = collectReviewItems(fresh.replacementsFor(freshUnits));
+          final second =
+              validateReviewSubmission(items: freshItems, decisions: decisions);
+          if (second.isNotEmpty) throw _ReviewRejected(second);
+          final pruned =
+              applyReviewDecisions(fresh.replacementsFor(freshUnits), decisions);
+          final materials = {for (final m in fresh.pickedMaterials) m.id: m};
+          return TaskEdit(
+            task: fresh.copyWith(replacementsByUid: RenewTask.byUid(freshUnits, pruned)),
+            before: {
+              'decisions': [for (final d in decisions) _decisionFacts(d, materials)],
+            },
+            after: {'left': collectReviewItems(pruned).length},
+          );
+        },
+      );
+    } on _ReviewRejected catch (e) {
+      sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
+      _reject(e.problems, sink);
+      return exitBadUsage;
+    }
+    if (updated == null) {
       sink.writeln('任务在写入前被删了：${task.id}');
       return exitNotFound;
     }
-    final freshUnits = fresh.units ?? const <SemanticUnit>[];
-    final freshItems = collectReviewItems(fresh.replacementsFor(freshUnits));
-    final second =
-        validateReviewSubmission(items: freshItems, decisions: decisions);
-    if (second.isNotEmpty) {
-      sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
-      _reject(second, sink);
-      return exitBadUsage;
-    }
-
-    final pruned =
-        applyReviewDecisions(fresh.replacementsFor(freshUnits), decisions);
-    await repository.save(fresh.copyWith(
-        replacementsByUid: RenewTask.byUid(freshUnits, pruned),
-        updatedAt: DateTime.now()));
     emitJson({
       'ok': true,
       'taskId': task.id,
       if (keep) 'kept': decisions.length else 'dropped': decisions.length,
-      'left': collectReviewItems(pruned).length,
+      'left': collectReviewItems(updated.replacementsFor(updated.units ?? const [])).length,
     }, out: out);
     return 0;
   } finally {
@@ -344,4 +372,34 @@ void _reject(List<String> issues, StringSink sink) {
   for (final i in issues) {
     sink.writeln('· $i');
   }
+}
+
+/// 拿到锁之后重新核对没通过——从 edit 闭包里抛出来，让 TaskMutation 不落盘
+/// 也不记日志（edit 必须是纯的，不能靠改外层变量带出「拒绝」这个结果）
+class _ReviewRejected implements Exception {
+  final List<String> problems;
+  const _ReviewRejected(this.problems);
+}
+
+/// 一条剔除/保留决定值得记进日志的事实：不是只记素材 id，
+/// 是这条素材的标签、画面描述、烧字、品牌——Agent 要能从这些看出
+/// 人剔除的是哪一类，即便人没说为什么
+Map<String, dynamic> _decisionFacts(
+  ReviewDecision d,
+  Map<int, PickedMaterial> materials,
+) {
+  final m = materials[d.material];
+  return {
+    'unit': d.unit,
+    'shot': d.shot,
+    'material': d.material,
+    'keep': d.keep,
+    if (m != null) ...{
+      'name': m.name,
+      'sceneDescription': m.sceneDescription,
+      'durationMs': m.durationMs,
+      'burnedText': m.burnedText,
+      'productBrand': m.productBrand,
+    },
+  };
 }
