@@ -42,7 +42,7 @@ const List<String> scriptApplyKinds = [
 /// 新增一种 `what` 会静默多出一个 op 名，没有地方能一眼看出这份日志
 /// 里到底可能出现哪些 op（2026-09-17 评审指出）。`shots` 不在这里——
 /// 它走 `_applyShotsPicks`，op 是固定的 `script.shots.pick`
-const Map<String, String> _scriptApplyOpNames = {
+const Map<String, String> scriptApplyOpNames = {
   'subtitles': 'script.apply.subtitles',
   'alloc': 'script.apply.alloc',
   'bgm': 'script.apply.bgm',
@@ -90,6 +90,16 @@ Future<int> runScriptApplyCommand({
   if (!supported.contains(what)) {
     sink.writeln('认不出「$what」。可用：${supported.join(' / ')}');
     return exitBadUsage;
+  }
+  // op 名清单必须跟 scriptApplyKinds 同步登记（shots 除外，它走
+  // _applyShotsPicks、op 是固定的 script.shots.pick）——没登记就在校验
+  // 阶段直接拒绝，不留一个「静默多出个 op 名」的口子。这条分支理论上
+  // 到不了：有 architecture 测试守着两份清单一一对应，但防御性地留着，
+  // 别指望那条测试是唯一防线
+  if (what != 'shots' && !scriptApplyOpNames.containsKey(what)) {
+    sink.writeln('内部错误：「$what」没有登记 op 名，无法落盘（这是代码的漏，'
+        '不是提交的问题）');
+    return exitFailed;
   }
   final id = rest[1];
 
@@ -441,7 +451,9 @@ Future<int> _applyPureKind({
       actor: 'Agent',
     ).apply(
       taskId: task.id,
-      op: _scriptApplyOpNames[what] ?? 'script.apply.$what',
+      // 到这里 what 已经在 runScriptApplyCommand 里校验过一定登记在
+      // scriptApplyOpNames 里（见那边的早退检查），! 不是在赌运气
+      op: scriptApplyOpNames[what]!,
       edit: (fresh) {
         final freshDoc = fresh.script;
         if (freshDoc == null) {
