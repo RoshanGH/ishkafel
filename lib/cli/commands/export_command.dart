@@ -257,7 +257,7 @@ Future<int> runExportCommand({
     succeeded: succeeded,
     outputDir: dest.path,
   );
-  await TaskMutation(
+  final recorded = await TaskMutation(
     repo: repository,
     dataDir: dataDir,
     by: ActorKind.agent,
@@ -276,6 +276,12 @@ Future<int> runExportCommand({
       },
     ),
   );
+  if (recorded == null) {
+    // 成片已经落到 dest 了，这条记录没写进任务不该让导出本身算失败——
+    // 但不能不吭声：这条任务在写入这一刻被删了，是事实，得点名
+    sink.writeln('注意：这条任务在记导出历史时已经被删掉了，'
+        '成片已经导出到 ${dest.path}，但任务里查不到这条导出记录了。');
+  }
   stage.end();
   lock.release(holder ?? agentLockHolder);
 

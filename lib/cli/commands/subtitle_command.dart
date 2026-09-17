@@ -132,7 +132,13 @@ Future<int> runSubtitleCommand({
       },
     );
     stage.end();
-    if (updated != null) style = updated.subtitle;
+    if (updated == null) {
+      // 没改成就不能把改之前的旧样式当结果打印出去、还退出码 0——
+      // 那是命令行在撒谎：说改了，其实盘上什么都没变
+      sink.writeln('这条任务在写入字幕样式的过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
+    style = updated.subtitle;
   }
 
   emitJson({

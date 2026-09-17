@@ -633,7 +633,7 @@ Future<int> runScriptExportCommand({
     // 天然对并发安全
     final record =
         ExportRecord(at: DateTime.now(), total: 1, succeeded: 1, outputDir: dir);
-    await TaskMutation(
+    final recorded = await TaskMutation(
       repo: repository,
       dataDir: dataDir,
       by: ActorKind.agent,
@@ -647,6 +647,12 @@ Future<int> runScriptExportCommand({
         after: {'exportCount': fresh.exports.length + 1, 'outputDir': dir},
       ),
     );
+    if (recorded == null) {
+      // 成片已经落到 dir 了，这条记录没写进任务不该让导出本身算失败——
+      // 但不能不吭声：这条任务在写入这一刻被删了，是事实，得点名
+      sink.writeln('注意：这条任务在记导出历史时已经被删掉了，'
+          '成片已经导出到 $dir，但任务里查不到这条导出记录了。');
+    }
     emitJson({'ok': true, 'output': output}, out: out);
     return 0;
   } on ScriptExportException catch (e) {
