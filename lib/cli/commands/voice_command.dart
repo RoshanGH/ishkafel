@@ -2,8 +2,11 @@ import 'dart:io';
 
 import '../../core/audio/voice_plan.dart';
 import '../../core/audio/voice_catalog.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
 import '../../core/audio/voice_swap_job.dart';
@@ -191,27 +194,58 @@ Future<int> runVoiceCommand({
     sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
     return exitLocked;
   }
-  try {
-    final VoicePlan next;
-    if (voiceId.trim().isEmpty) {
-      next = task.voices.clear([for (final i in targets) all[i].uid]);
-    } else {
-      final voice = VoiceCatalog.all
-          .where((v) => v.ref.id == voiceId.trim())
-          .map((v) => v.ref)
-          .firstOrNull;
-      if (voice == null) {
-        sink.writeln('没有这个音色：$voiceId。用 ishkafel voices 看有哪些');
-        return exitBadUsage;
-      }
-      next = task.voices.assign([for (final i in targets) all[i].uid], voice);
+  // 目标音色在这里就定好（校验一次即可），edit 里只做纯变换
+  VoiceRef? voice;
+  if (voiceId.trim().isNotEmpty) {
+    voice = VoiceCatalog.all
+        .where((v) => v.ref.id == voiceId.trim())
+        .map((v) => v.ref)
+        .firstOrNull;
+    if (voice == null) {
+      sink.writeln('没有这个音色：$voiceId。用 ishkafel voices 看有哪些');
+      return exitBadUsage;
     }
-    await repository.save(task.copyWith(voices: next, updatedAt: DateTime.now()));
+  }
+  try {
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'voice.assign',
+      where: {'units': targets},
+      edit: (fresh) {
+        final freshUnits = fresh.units ?? const [];
+        // targets 是下标，按 fresh 重新翻译成 uid——下标本身不落盘，
+        // 落盘的是 uid（VoicePlan.assign/clear 都按 uid 记）
+        final uids = [
+          for (final i in targets)
+            if (i >= 0 && i < freshUnits.length) freshUnits[i].uid,
+        ];
+        final before = _voiceFacts(fresh.voices, freshUnits, targets);
+        final next = voice == null
+            ? fresh.voices.clear(uids)
+            : fresh.voices.assign(uids, voice);
+        final after = _voiceFacts(next, freshUnits, targets);
+        return TaskEdit(
+          task: fresh.copyWith(voices: next),
+          before: {'units': before},
+          after: {'units': after},
+          stampUnits: uids,
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     emitJson({
       'ok': true,
       'assigned': [
         for (var i = 0; i < all.length; i++)
-          if (next.assignedUnits.contains(all[i].uid)) i,
+          if (updated.voices.assignedUnits.contains(all[i].uid)) i,
       ],
       'next': voiceId.trim().isEmpty
           ? '这几句改回原声了'
@@ -223,3 +257,21 @@ Future<int> runVoiceCommand({
     lock.release(who);
   }
 }
+
+/// 换音色这一笔值得记进日志的事实：哪几句、台词是什么、换前换后是哪个音色——
+/// 不是只记单元下标，Agent 要能从台词看出「这几句为什么要换音色」
+List<Map<String, dynamic>> _voiceFacts(
+  VoicePlan plan,
+  List<SemanticUnit> units,
+  List<int> targets,
+) =>
+    [
+      for (final i in targets)
+        if (i >= 0 && i < units.length)
+          {
+            'unit': i,
+            'transcript': units[i].transcript,
+            'voiceId': plan.voiceOf(units[i].uid)?.id,
+            'voiceName': plan.voiceOf(units[i].uid)?.name,
+          },
+    ];
