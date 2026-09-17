@@ -15,11 +15,15 @@ import '../../core/editing/blank_unit_removal.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/unit_reorder.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/subtitle/subtitle_track.dart';
 import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/storage/agent_presence.dart';
+import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
@@ -90,19 +94,22 @@ Future<int> runUnitCommand({
     await stage.begin(_stageWord(what),
         focus: const AgentFocus(module: 'workbench'));
     return switch (what) {
-      'add' => await _add(repository, task, o),
-      'remove' => await _remove(repository, task, unit, sink, o),
-      'move' => await _move(repository, task, unit, to, sink, o),
-      'tags' => await _tags(repository, task, unit, tags, sink, o),
-      'audio' =>
-        await _audio(repository, task, unit, shot, audio, volume, sink, o),
+      'add' => await _add(repository, dataDir, task, sink, o),
+      'remove' =>
+        await _remove(repository, dataDir, task, unit, sink, o),
+      'move' =>
+        await _move(repository, dataDir, task, unit, to, sink, o),
+      'tags' =>
+        await _tags(repository, dataDir, task, unit, tags, sink, o),
+      'audio' => await _audio(
+          repository, dataDir, task, unit, shot, audio, volume, sink, o),
       'source-audio' => await _sourceAudio(
-          repository, task, unit, shot, audio, volume, sink, o),
-      'subtitle' =>
-        await _subtitle(repository, task, unit, shot, text, auto, sink, o),
+          repository, dataDir, task, unit, shot, audio, volume, sink, o),
+      'subtitle' => await _subtitle(
+          repository, dataDir, task, unit, shot, text, auto, sink, o),
       'base' => await _base(task, unit, sink, o),
-      'segment' => await _segment(repository, task, unit, dataDir, sink, o),
-      'unpin' => await _unpin(repository, task, unit, sink, o),
+      'segment' => await _segment(repository, dataDir, task, unit, sink, o),
+      'unpin' => await _unpin(repository, dataDir, task, unit, sink, o),
       _ => () {
           sink.writeln('认不出「$what」。'
               '可用：add / remove / move / tags / audio / '
@@ -148,26 +155,48 @@ const String _usage = '用法：\n'
     '  ishkafel unit segment <任务 id> --unit N             切分这一段的底片\n'
     '  ishkafel unit unpin <任务 id> --unit N               换一张底片（清掉旧的）';
 
-Future<int> _add(
-    FileTaskRepository repository, RenewTask task, StringSink out) async {
-  final units = task.units ?? const [];
-  // 空白任务的分子和有原片任务里手加的单元，走各自那套（前者没有原片这个
-  // 概念，后者要标上「原片里没有它」）
-  final next = task.copyWith(
-    units: task.isBlank
-        ? BlankUnitOps.append(units)
-        // 帧率读不出来就给 0（appendUnit 那边会原样不动，不去瞎对齐）
-        : SegmentationEditOps.appendUnit(units,
-            fps: task.videoInfo?.fps ?? 0),
-    updatedAt: DateTime.now(),
+/// 这个命令文件里所有子命令共用同一个写入口：Agent 身份、同一份日志。
+TaskMutation _mutation(FileTaskRepository repository, Directory dataDir) =>
+    TaskMutation(
+        repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+
+Future<int> _add(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, StringSink sink, StringSink out) async {
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.add',
+    edit: (fresh) {
+      final units = fresh.units ?? const [];
+      // 空白任务的分子和有原片任务里手加的单元，走各自那套（前者没有原片这个
+      // 概念，后者要标上「原片里没有它」）
+      final nextUnits = fresh.isBlank
+          ? BlankUnitOps.append(units)
+          // 帧率读不出来就给 0（appendUnit 那边会原样不动，不去瞎对齐）
+          : SegmentationEditOps.appendUnit(units,
+              fps: fresh.videoInfo?.fps ?? 0);
+      return TaskEdit(
+        task: fresh.copyWith(units: nextUnits),
+        before: {'unitCount': units.length},
+        after: {'unitCount': nextUnits.length},
+        stampUnits: nextUnits.length > units.length
+            ? [nextUnits.last.uid]
+            : const [],
+      );
+    },
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
-Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
-    StringSink sink, StringSink out) async {
+/// 落盘途中任务被删掉了——那是事实，不是权限问题，照实报出来
+int _taskGoneDuring(String taskId, StringSink sink) {
+  sink.writeln('这条任务在操作过程中被删掉了：$taskId');
+  return exitNotFound;
+}
+
+Future<int> _remove(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, StringSink sink, StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
@@ -184,32 +213,55 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
         '这个入口只删手动加的单元');
     return exitBadUsage;
   }
-  final next = task.copyWith(
-    // 有原片的任务只重排下标：单元的起止和单元里的视觉镜头都是原片坐标，
-    // 重铺时间轴会让两层对不上（见 [removeUnitAt]）
-    units: task.isBlank
-        ? BlankUnitOps.removeAt(units, unit)
-        : removeUnitAt(units, unit),
-    // 替换方案按单元的身份记，只需要把没人认领的那条丢掉
-    replacementsByUid: {
-      for (final e in task.replacementsByUid.entries)
-        if (removeUnitAt(units, unit).any((u) => u.uid == e.key))
-          e.key: e.value,
+  final removedUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.remove',
+    where: {'unitUid': removedUid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      // 有原片的任务只重排下标：单元的起止和单元里的视觉镜头都是原片坐标，
+      // 重铺时间轴会让两层对不上（见 [removeUnitAt]）
+      final remaining = fresh.isBlank
+          ? BlankUnitOps.removeAt(freshUnits, unit)
+          : removeUnitAt(freshUnits, unit);
+      final keptUids = {for (final u in remaining) u.uid};
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: remaining,
+          // 替换方案按单元的身份记，只需要把没人认领的那条丢掉
+          replacementsByUid: {
+            for (final e in fresh.replacementsByUid.entries)
+              if (keptUids.contains(e.key)) e.key: e.value,
+          },
+          bgm: shiftBgmAfterRemoval(fresh.bgm, removed: unit),
+          voices: fresh.voices.keepingOnly(keptUids),
+          subtitleTrack: fresh.subtitleTrack.keepingOnly(keptUids),
+        ),
+        before: _unitFacts(freshUnits.length > unit ? freshUnits[unit] : null),
+        after: {'unitCount': remaining.length},
+      );
     },
-    bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
-    voices: task.voices
-        .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
-    subtitleTrack: task.subtitleTrack
-        .keepingOnly({for (final u in removeUnitAt(units, unit)) u.uid}),
-    updatedAt: DateTime.now(),
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
-Future<int> _move(FileTaskRepository repository, RenewTask task, int? unit,
-    int? to, StringSink sink, StringSink out) async {
+/// 单元被动过这一笔时值得记的事实：删了/挑了哪一句、标签是什么、多长——
+/// 不是只记 uid，Agent 要能从台词和标签看出人不想要的是哪一类
+Map<String, dynamic> _unitFacts(SemanticUnit? u) => u == null
+    ? {'present': false}
+    : {
+        'transcript': u.transcript,
+        'tags': u.tags,
+        'durationMs': u.endMs - u.startMs,
+        'hasSource': u.hasSource,
+      };
+
+Future<int> _move(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, int? to, StringSink sink,
+    StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
@@ -219,31 +271,49 @@ Future<int> _move(FileTaskRepository repository, RenewTask task, int? unit,
     sink.writeln('要给 --to <目标位置>（0 起，当前 ${units.length} 个）');
     return exitBadUsage;
   }
-  final moved = moveUnit(units, from: unit, to: to);
-  if (identical(moved, units)) {
+  if (unit == to) {
     sink.writeln('没挪动（--unit 和 --to 一样）');
     return exitBadUsage;
   }
-  final bgm = remapBgmAfterMove(task.bgm, from: unit, to: to);
-  final next = task.copyWith(
-    units: moved,
-    // 替换方案、配音、手改字幕都按身份记，挪顺序一份都不用动
-    bgm: bgm.plan,
-    updatedAt: DateTime.now(),
+  // 只是给人一句提前预警，不是落盘依据——真正落盘的判断在 edit 里按 fresh 重算。
+  // 这里就算跟 fresh 有一点点时间差，也只是提醒的准头稍打折扣，不影响数据本身
+  final previewBroken =
+      remapBgmAfterMove(task.bgm, from: unit, to: to).brokenSegments;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.reorder',
+    where: {'unitUid': units[unit].uid, 'from': unit, 'to': to},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final moved = moveUnit(freshUnits, from: unit, to: to);
+      final bgm = remapBgmAfterMove(fresh.bgm, from: unit, to: to);
+      return TaskEdit(
+        // 替换方案、配音、手改字幕都按身份记，挪顺序一份都不用动
+        task: fresh.copyWith(units: moved, bgm: bgm.plan),
+        before: {
+          'from': unit,
+          'to': to,
+          'transcript':
+              freshUnits.length > unit ? freshUnits[unit].transcript : null,
+        },
+        after: {'from': unit, 'to': to},
+      );
+    },
   );
-  await repository.save(next);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
   // 配乐盖的范围被打断了就说出来——用户当初是照着那几段的内容选的曲子，
   // 悄悄改成另一个范围是不行的
-  if (bgm.brokenSegments.isNotEmpty) {
+  if (previewBroken.isNotEmpty) {
     sink.writeln('注意：有配乐是按连续几段铺的，挪动之后盖的范围变了，'
         '请用 ishkafel bgm 复核');
   }
-  emitJson(taskToJson(next), out: out);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
-Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
-    String? tags, StringSink sink, StringSink out) async {
+Future<int> _tags(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, String? tags, StringSink sink,
+    StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
@@ -261,7 +331,8 @@ Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
       if (piece.trim().isNotEmpty) piece.trim(),
   ];
   // 与 GUI 同一条规矩：标签必须逐字命中词表。「厨房场景」和「厨房情景」
-  // 在检索时是两回事，而手打的那个搜不出任何东西、还看不出异常
+  // 在检索时是两回事，而手打的那个搜不出任何东西、还看不出异常。
+  // 这一步是网络请求，留在 edit 之外
   final vocabulary = (await vocabularyFor(task.unitTagGroups)).toSet();
   final unknown = wanted.where((t) => !vocabulary.contains(t)).toList();
   if (unknown.isNotEmpty) {
@@ -269,12 +340,23 @@ Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
         '词表见 ishkafel task ${task.id}');
     return exitBadUsage;
   }
-  final next = task.copyWith(
-    units: BlankUnitOps.setTags(units, unit, wanted),
-    updatedAt: DateTime.now(),
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.tags',
+    where: {'unitUid': units[unit].uid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final before = freshUnits.length > unit ? freshUnits[unit].tags : const <String>[];
+      return TaskEdit(
+        task: fresh.copyWith(units: BlankUnitOps.setTags(freshUnits, unit, wanted)),
+        before: {'tags': before},
+        after: {'tags': wanted},
+        stampUnits: freshUnits.length > unit ? [freshUnits[unit].uid] : const [],
+      );
+    },
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
@@ -285,6 +367,7 @@ Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
 /// / `original` 原样整条。镜头这一层还能给 `follow`，表示跟随全片。
 Future<int> _audio(
   FileTaskRepository repository,
+  Directory dataDir,
   RenewTask task,
   int? unit,
   int? shot,
@@ -314,13 +397,23 @@ Future<int> _audio(
       sink.writeln('全片这一层没有「跟随」可跟——--audio 要给一个具体的档位：$names');
       return exitBadUsage;
     }
-    final next = task.copyWith(
-      materialAudio: MaterialAudioSetting(
-          mode: mode, volume: volume ?? task.materialAudio.volume),
-      updatedAt: DateTime.now(),
+    final updated = await _mutation(repository, dataDir).apply(
+      taskId: task.id,
+      op: 'audio.material',
+      where: {'scope': 'film'},
+      edit: (fresh) {
+        final before = fresh.materialAudio;
+        final after = MaterialAudioSetting(
+            mode: mode, volume: volume ?? before.volume);
+        return TaskEdit(
+          task: fresh.copyWith(materialAudio: after),
+          before: {'mode': before.mode.name, 'volume': before.volume},
+          after: {'mode': after.mode.name, 'volume': after.volume},
+        );
+      },
     );
-    await repository.save(next);
-    emitJson(taskToJson(next), out: out);
+    if (updated == null) return _taskGoneDuring(task.id, sink);
+    emitJson(taskToJson(updated), out: out);
     return 0;
   }
 
@@ -334,28 +427,49 @@ Future<int> _audio(
     sink.writeln('要给 --shot <下标>（0 起，U${unit + 1} 有 ${shots.length} 个镜头）');
     return exitBadUsage;
   }
-  final next = task.copyWith(
-    units: [
-      for (var i = 0; i < units.length; i++)
-        if (i != unit)
-          units[i]
-        else
-          units[i].copyWith(shots: [
-            for (var j = 0; j < shots.length; j++)
-              if (j != shot)
-                shots[j]
+  final targetUnitUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'audio.material',
+    where: {'scope': 'shot', 'unitUid': targetUnitUid, 'shotIndex': shot},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final ui = freshUnits.indexWhere((u) => u.uid == targetUnitUid);
+      final freshShots = freshUnits[ui].shots;
+      final beforeShot = freshShots[shot];
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: [
+            for (var i = 0; i < freshUnits.length; i++)
+              if (i != ui)
+                freshUnits[i]
               else
-                // 走 withMaterialAudioOverride 而不是 copyWith：
-                // copyWith 的 `??` 传 null 等于「不改」，而 follow（跟随全片）
-                // 正是 null
-                shots[j]
-                    .withMaterialAudioOverride(mode: mode, volume: volume),
-          ]),
-    ],
-    updatedAt: DateTime.now(),
+                freshUnits[i].copyWith(shots: [
+                  for (var j = 0; j < freshShots.length; j++)
+                    if (j != shot)
+                      freshShots[j]
+                    else
+                      // 走 withMaterialAudioOverride 而不是 copyWith：
+                      // copyWith 的 `??` 传 null 等于「不改」，而 follow
+                      // （跟随全片）正是 null
+                      freshShots[j]
+                          .withMaterialAudioOverride(mode: mode, volume: volume),
+                ]),
+          ],
+        ),
+        before: {
+          'mode': beforeShot.materialAudioMode?.name,
+          'volume': beforeShot.materialAudioVolume,
+          'sceneDescription': beforeShot.description,
+          'tags': beforeShot.tags,
+        },
+        after: {'mode': mode?.name, 'volume': volume},
+        stampShots: [ShotRef(targetUnitUid, shot)],
+      );
+    },
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
@@ -370,6 +484,7 @@ Future<int> _audio(
 /// 这里设了也不起作用（和界面同一条规则）。
 Future<int> _sourceAudio(
   FileTaskRepository repository,
+  Directory dataDir,
   RenewTask task,
   int? unit,
   int? shot,
@@ -399,14 +514,24 @@ Future<int> _sourceAudio(
       sink.writeln('全片这一层没有「跟随」可跟——要回到默认请用 auto');
       return exitBadUsage;
     }
-    final next = task.copyWith(
-      sourceAudio: SourceAudioSetting(
-          mode: audio == 'auto' ? null : mode,
-          volume: volume ?? task.sourceAudio.volume),
-      updatedAt: DateTime.now(),
+    final updated = await _mutation(repository, dataDir).apply(
+      taskId: task.id,
+      op: 'audio.source',
+      where: {'scope': 'film'},
+      edit: (fresh) {
+        final before = fresh.sourceAudio;
+        final after = SourceAudioSetting(
+            mode: audio == 'auto' ? null : mode,
+            volume: volume ?? before.volume);
+        return TaskEdit(
+          task: fresh.copyWith(sourceAudio: after),
+          before: {'mode': before.mode?.name, 'volume': before.volume},
+          after: {'mode': after.mode?.name, 'volume': after.volume},
+        );
+      },
     );
-    await repository.save(next);
-    emitJson(taskToJson(next), out: out);
+    if (updated == null) return _taskGoneDuring(task.id, sink);
+    emitJson(taskToJson(updated), out: out);
     return 0;
   }
 
@@ -425,26 +550,48 @@ Future<int> _sourceAudio(
         '要回到跟随全片请用 follow');
     return exitBadUsage;
   }
-  final next = task.copyWith(
-    units: [
-      for (var i = 0; i < units.length; i++)
-        if (i != unit)
-          units[i]
-        else
-          units[i].copyWith(shots: [
-            for (var j = 0; j < shots.length; j++)
-              if (j != shot)
-                shots[j]
+  final targetUnitUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'audio.source',
+    where: {'scope': 'shot', 'unitUid': targetUnitUid, 'shotIndex': shot},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final ui = freshUnits.indexWhere((u) => u.uid == targetUnitUid);
+      final freshShots = freshUnits[ui].shots;
+      final beforeShot = freshShots[shot];
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: [
+            for (var i = 0; i < freshUnits.length; i++)
+              if (i != ui)
+                freshUnits[i]
               else
-                // 走 withSourceAudioOverride：copyWith 的 `??` 传 null 等于
-                // 「不改」，而 follow（跟随全片）正是 null
-                shots[j].withSourceAudioOverride(mode: mode, volume: volume),
-          ]),
-    ],
-    updatedAt: DateTime.now(),
+                freshUnits[i].copyWith(shots: [
+                  for (var j = 0; j < freshShots.length; j++)
+                    if (j != shot)
+                      freshShots[j]
+                    else
+                      // 走 withSourceAudioOverride：copyWith 的 `??` 传 null
+                      // 等于「不改」，而 follow（跟随全片）正是 null
+                      freshShots[j]
+                          .withSourceAudioOverride(mode: mode, volume: volume),
+                ]),
+          ],
+        ),
+        before: {
+          'mode': beforeShot.sourceAudioMode?.name,
+          'volume': beforeShot.sourceAudioVolume,
+          'sceneDescription': beforeShot.description,
+          'tags': beforeShot.tags,
+        },
+        after: {'mode': mode?.name, 'volume': volume},
+        stampShots: [ShotRef(targetUnitUid, shot)],
+      );
+    },
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
@@ -458,6 +605,7 @@ Future<int> _sourceAudio(
 /// **字幕是字幕，台词是台词**：改这里不动单元的 transcript。
 Future<int> _subtitle(
   FileTaskRepository repository,
+  Directory dataDir,
   RenewTask task,
   int? unit,
   int? shot,
@@ -476,44 +624,64 @@ Future<int> _subtitle(
     sink.writeln('要给 --shot <下标>（0 起，U${unit + 1} 有 ${shots.length} 个镜头）');
     return exitBadUsage;
   }
-  // 按单元的**身份**记：人在界面上说 U3，存的却是它自己那个编号，
-  // 挪过顺序也还认得回来
-  final slot = SubtitleSlot(unitUid: units[unit].uid, shotIndex: shot);
-
-  // --auto：清掉手改，回到按 ASR 现算
-  if (auto) {
-    final next = task.copyWith(
-        subtitleTrack: task.subtitleTrack.cleared(slot),
-        updatedAt: DateTime.now());
-    await repository.save(next);
-    emitJson(taskToJson(next), out: out);
-    return 0;
-  }
-  if (text == null) {
+  if (!auto && text == null) {
     sink.writeln('要给 --text "第一句|第二句"（用 | 分段），'
         '或者 --auto 改回自动。给 --text "" 表示这一镜不要字幕');
     return exitBadUsage;
   }
+  final targetUnitUid = units[unit].uid;
+  // 按单元的**身份**记：人在界面上说 U3，存的却是它自己那个编号，
+  // 挪过顺序也还认得回来
+  final slot = SubtitleSlot(unitUid: targetUnitUid, shotIndex: shot);
 
-  // 时间在坑位内平均分——精确到毫秒的调整在界面上做，命令行给一个够用的默认
-  final pieces = [
-    for (final p in text.split('|'))
-      if (p.trim().isNotEmpty) p.trim(),
-  ];
-  final span = shots[shot].endMs - shots[shot].startMs;
-  final lines = [
-    for (var i = 0; i < pieces.length; i++)
-      SubtitleLine(
-        startMs: (span * i / pieces.length).round(),
-        endMs: (span * (i + 1) / pieces.length).round(),
-        text: pieces[i],
-      ),
-  ];
-  final next = task.copyWith(
-      subtitleTrack: task.subtitleTrack.withLines(slot, lines),
-      updatedAt: DateTime.now());
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.subtitle',
+    where: {'unitUid': targetUnitUid, 'shotIndex': shot},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final beforeLines = fresh.subtitleTrack.linesOf(slot);
+      // --auto：清掉手改，回到按 ASR 现算
+      if (auto) {
+        return TaskEdit(
+          task: fresh.copyWith(subtitleTrack: fresh.subtitleTrack.cleared(slot)),
+          before: {
+            'lines': beforeLines == null
+                ? null
+                : [for (final l in beforeLines) l.text],
+          },
+          after: {'lines': null, 'note': '回到按 ASR 自动生成'},
+        );
+      }
+      // 时间在坑位内平均分——精确到毫秒的调整在界面上做，命令行给一个够用的默认
+      final pieces = [
+        for (final p in text!.split('|'))
+          if (p.trim().isNotEmpty) p.trim(),
+      ];
+      final ui = freshUnits.indexWhere((u) => u.uid == targetUnitUid);
+      final freshShot = freshUnits[ui].shots[shot];
+      final span = freshShot.endMs - freshShot.startMs;
+      final lines = [
+        for (var i = 0; i < pieces.length; i++)
+          SubtitleLine(
+            startMs: (span * i / pieces.length).round(),
+            endMs: (span * (i + 1) / pieces.length).round(),
+            text: pieces[i],
+          ),
+      ];
+      return TaskEdit(
+        task: fresh.copyWith(subtitleTrack: fresh.subtitleTrack.withLines(slot, lines)),
+        before: {
+          'lines': beforeLines == null
+              ? null
+              : [for (final l in beforeLines) l.text],
+        },
+        after: {'lines': pieces},
+      );
+    },
+  );
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
@@ -582,8 +750,8 @@ Future<int> _base(
 ///
 /// 跟界面上那个按钮同一条路：同样要跑 ffmpeg 采信号、同样会把其余候选
 /// 收敛掉。**会花时间也会花钱**，所以它是显式命令，不在挑素材时自动跑
-Future<int> _segment(FileTaskRepository repository, RenewTask task, int? unit,
-    Directory dataDir, StringSink sink, StringSink out) async {
+Future<int> _segment(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, StringSink sink, StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit N（0 开始，共 ${units.length} 个）');
@@ -654,8 +822,14 @@ Future<int> _segment(FileTaskRepository repository, RenewTask task, int? unit,
 
   // **切完接着打标**——界面上那条路是这么走的，这里少一步，Agent 切出来的
   // 镜头就没有标签也没有画面描述，`candidates --shot` 按标签/画面一条都
-  // 搜不出来。两条路做出来的必须是同一份东西
+  // 搜不出来。两条路做出来的必须是同一份东西。
+  //
+  // 采信号、转写、打标全是外部进程/网络调用，必须留在 edit 之外——edit 可能
+  // 被 TaskMutation 重跑一次，重跑这些就是把「切一次镜头、转写一次、打一次
+  // 标」都算两遍，真金白银的浪费。edit 里只做「把这一个单元的结果拼进当前
+  // 最新数据」这一步纯变换，其余单元、其余字段一概不碰，交给 fresh 自己
   final tagging = pipeline?.tagging;
+  String? tagError;
   if (tagging != null) {
     try {
       nextUnits = await tagging.tag(
@@ -668,27 +842,63 @@ Future<int> _segment(FileTaskRepository repository, RenewTask task, int? unit,
     } catch (e) {
       // 打标失败不回滚切分——切分本身有价值，标签可以之后再打
       // （单元上已经标了 tagsStale，重打标那条路会把它捡起来）
-      sink.writeln('切分好了，但打标没成：$e');
-      sink.writeln('跑 ishkafel analyze <任务> 或在界面上重打一次');
+      tagError = '切分好了，但打标没成：$e';
     }
   }
 
-  final next = task.copyWith(
-    units: nextUnits,
-    replacementsByUid: {
-      for (var i = 0; i < nextUnits.length && i < nextPlans.length; i++)
-        nextUnits[i].uid: nextPlans[i],
+  final targetUnitUid = u.uid;
+  final segmentedUnit = nextUnits[unit];
+  final segmentedPlan = nextPlans.length > unit ? nextPlans[unit] : null;
+
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.segment',
+    where: {'unitUid': targetUnitUid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final fi = freshUnits.indexWhere((x) => x.uid == targetUnitUid);
+      // 这段窗口里单元被删掉了：切好的结果没地方落，照实说清，不硬塞回去
+      if (fi < 0) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '切分完成前这个单元被删掉了，结果丢弃'},
+        );
+      }
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: [
+            for (var i = 0; i < freshUnits.length; i++)
+              if (i == fi) segmentedUnit else freshUnits[i],
+          ],
+          replacementsByUid: segmentedPlan == null
+              ? fresh.replacementsByUid
+              : {...fresh.replacementsByUid, targetUnitUid: segmentedPlan},
+        ),
+        before: {
+          'baseCandidateId': freshUnits[fi].baseCandidateId,
+          'shotCount': freshUnits[fi].shots.length,
+        },
+        after: {
+          'baseCandidateId': candidateId,
+          'shotCount': segmentedUnit.shots.length,
+        },
+        stampUnits: [targetUnitUid],
+      );
     },
-    updatedAt: DateTime.now(),
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  if (tagError != null) {
+    sink.writeln(tagError);
+    sink.writeln('跑 ishkafel analyze <任务> 或在界面上重打一次');
+  }
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
 /// `unit unpin` —— 换一张底片：旧底片切出来的镜头和挑在上面的素材全清掉
-Future<int> _unpin(FileTaskRepository repository, RenewTask task, int? unit,
-    StringSink sink, StringSink out) async {
+Future<int> _unpin(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, StringSink sink, StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit N（0 开始，共 ${units.length} 个）');
@@ -698,17 +908,35 @@ Future<int> _unpin(FileTaskRepository repository, RenewTask task, int? unit,
     sink.writeln('U${unit + 1} 的底片本来就没固定过，没有可清的');
     return exitBadUsage;
   }
-  final plans = task.replacementsFor(units);
-  final (nextUnits, nextPlans) = BasePinOps.unpin(units, plans, unit);
-  final next = task.copyWith(
-    units: nextUnits,
-    replacementsByUid: {
-      for (var i = 0; i < nextUnits.length && i < nextPlans.length; i++)
-        nextUnits[i].uid: nextPlans[i],
+  final targetUnitUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.unpin',
+    where: {'unitUid': targetUnitUid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final plans = fresh.replacementsFor(freshUnits);
+      final beforeCandidateId = freshUnits[unit].baseCandidateId;
+      final beforeShotCount = freshUnits[unit].shots.length;
+      final (nextUnits, nextPlans) = BasePinOps.unpin(freshUnits, plans, unit);
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: nextUnits,
+          replacementsByUid: {
+            for (var i = 0; i < nextUnits.length && i < nextPlans.length; i++)
+              nextUnits[i].uid: nextPlans[i],
+          },
+        ),
+        before: {
+          'baseCandidateId': beforeCandidateId,
+          'shotCount': beforeShotCount,
+        },
+        after: {'baseCandidateId': null, 'shotCount': 0},
+        stampUnits: [targetUnitUid],
+      );
     },
-    updatedAt: DateTime.now(),
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
