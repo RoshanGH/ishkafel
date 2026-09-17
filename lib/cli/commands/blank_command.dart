@@ -4,7 +4,9 @@ import '../../core/editing/blank_unit_ops.dart';
 import '../../core/editing/blank_unit_removal.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/models/unit_uid.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
@@ -144,6 +146,15 @@ int _taskGoneDuring(String taskId, StringSink sink) {
   return exitNotFound;
 }
 
+/// 按 uid 在 fresh 里重新定位这个单元；uid 是空串时退回外层算出来的下标。
+/// 与 unit_command.dart 的同名函数同一个理由，见那边的文档注释
+int _locateUnit(List<SemanticUnit> freshUnits, String uid, int fallbackIndex) {
+  if (isUnitUid(uid)) return freshUnits.indexWhere((u) => u.uid == uid);
+  return fallbackIndex >= 0 && fallbackIndex < freshUnits.length
+      ? fallbackIndex
+      : -1;
+}
+
 Future<int> _add(FileTaskRepository repository, Directory dataDir,
     RenewTask task, StringSink sink, StringSink out) async {
   final updated = await _mutation(repository, dataDir).apply(
@@ -183,9 +194,19 @@ Future<int> _remove(FileTaskRepository repository, Directory dataDir,
     where: {'unitUid': removedUid},
     edit: (fresh) {
       final freshUnits = fresh.units ?? const [];
+      // unit 是外层那份旧快照的下标，fresh 里单元顺序可能已经变了——
+      // 按 uid 重新定位，不能直接拿 unit 当 fresh 的下标用
+      final ui = _locateUnit(freshUnits, removedUid, unit);
+      if (ui < 0) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '这个单元在窗口内已经被删掉了'},
+        );
+      }
       // 配乐区间还是按下标记的，必须跟着挪。替换方案按单元的身份记，
       // 只需要把没人认领的那条丢掉
-      final left = BlankUnitOps.removeAt(freshUnits, unit);
+      final left = BlankUnitOps.removeAt(freshUnits, ui);
       final live = {for (final u in left) u.uid};
       return TaskEdit(
         task: fresh.copyWith(
@@ -194,14 +215,12 @@ Future<int> _remove(FileTaskRepository repository, Directory dataDir,
             for (final e in fresh.replacementsByUid.entries)
               if (live.contains(e.key)) e.key: e.value,
           },
-          bgm: shiftBgmAfterRemoval(fresh.bgm, removed: unit),
+          bgm: shiftBgmAfterRemoval(fresh.bgm, removed: ui),
         ),
-        before: freshUnits.length > unit
-            ? {
-                'transcript': freshUnits[unit].transcript,
-                'tags': freshUnits[unit].tags,
-              }
-            : {'present': false},
+        before: {
+          'transcript': freshUnits[ui].transcript,
+          'tags': freshUnits[ui].tags,
+        },
         after: {'unitCount': left.length},
       );
     },
@@ -240,12 +259,22 @@ Future<int> _tags(FileTaskRepository repository, Directory dataDir,
     where: {'unitUid': targetUid},
     edit: (fresh) {
       final freshUnits = fresh.units ?? const [];
-      final before = freshUnits.length > unit ? freshUnits[unit].tags : const <String>[];
+      // unit 是外层那份旧快照的下标——按 uid 重新定位，不能直接拿 unit
+      // 当 fresh 的下标用
+      final ui = _locateUnit(freshUnits, targetUid, unit);
+      if (ui < 0) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '这个单元在窗口内已经被删掉了'},
+        );
+      }
+      final before = freshUnits[ui].tags;
       return TaskEdit(
-        task: fresh.copyWith(units: BlankUnitOps.setTags(freshUnits, unit, wanted)),
+        task: fresh.copyWith(units: BlankUnitOps.setTags(freshUnits, ui, wanted)),
         before: {'tags': before},
         after: {'tags': wanted},
-        stampUnits: freshUnits.length > unit ? [freshUnits[unit].uid] : const [],
+        stampUnits: [targetUid],
       );
     },
   );
