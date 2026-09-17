@@ -3,13 +3,6 @@ import 'package:ishkafel/core/storage/edit_stamp.dart';
 import 'package:ishkafel/core/storage/task_log.dart';
 
 void main() {
-  test('key 按 uid 生成，删单元挪单元都不会漂', () {
-    expect(stampKeyForUnit('u-abc'), 'u:u-abc');
-    expect(stampKeyForShot('u-abc', 2), 'u:u-abc/s:2');
-    // 不含任何单元下标
-    expect(stampKeyForShot('u-abc', 2), isNot(contains('unit')));
-  });
-
   test('来回一趟不掉东西', () {
     final at = DateTime.parse('2026-09-17T14:22:07.412Z');
     final s = EditStamp(by: ActorKind.human, at: at);
@@ -22,5 +15,15 @@ void main() {
     expect(EditStamp.tryFromJson(null), isNull);
     expect(EditStamp.tryFromJson({'by': 'human'}), isNull); // 缺 at
     expect(EditStamp.tryFromJson({'at': '不是时间'}), isNull);
+  });
+
+  test('by 是垃圾值时不猜成某一方，整条戳按没有处理', () {
+    // 跟 TaskLogEntry.tryFromJson 同一条规矩：猜一个归属就是把
+    // 「人 / Agent / 不知道」这三态悄悄压成两态——Agent 看到「这是我自己
+    // 定的」很可能直接覆盖掉人的东西，猜错代价太大
+    expect(
+        EditStamp.tryFromJson(
+            {'by': 'nobody', 'at': '2026-09-17T14:22:07.412Z'}),
+        isNull);
   });
 }

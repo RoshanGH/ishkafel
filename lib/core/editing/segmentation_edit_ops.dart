@@ -298,6 +298,10 @@ abstract final class SegmentationEditOps {
   }
 
   /// 单元 u 并入前一单元（镜头列表拼接，原单元边界保留为镜头边界；台词拼接；tags 取并集）
+  ///
+  /// `editedBy` 戳同 [mergeShotWithPrevious] 一条规则：用前一个单元的。
+  /// 这里不用显式传——`prev.copyWith(...)` 没提 `editedBy` 时本来就沿用
+  /// `prev.editedBy`，被并入的 `curr.editedBy` 自然被丢弃，正是想要的行为。
   static List<SemanticUnit>? mergeUnitWithPrevious(
       List<SemanticUnit> units, int u) {
     if (u <= 0 || u >= units.length) return null;
@@ -365,6 +369,10 @@ abstract final class SegmentationEditOps {
   ///
   /// 合并出来的镜头标为待重打：画面变长了，原来那组标签未必还成立——但也
   /// 不抹掉，重打是异步的，中间抹空会让用户以为标签丢了。
+  ///
+  /// `editedBy` 戳同一条规则：用前一个镜头的。这不是随手带上的，是必须显式
+  /// 决定的一步——合并会让后一个镜头（连同它的下标）从此不存在，戳要是不
+  /// 显式接管就会跟着消失，之后再也看不出这一段是人改过的。
   static List<SemanticUnit>? mergeShotWithPrevious(
       List<SemanticUnit> units, int u, int s) {
     if (u < 0 || u >= units.length) return null;
@@ -379,6 +387,7 @@ abstract final class SegmentationEditOps {
       description: prevShot.description,
       trace: prevShot.trace,
       tagsStale: true,
+      editedBy: prevShot.editedBy,
     );
     final newShots = [
       ...unit.shots.sublist(0, s - 1),

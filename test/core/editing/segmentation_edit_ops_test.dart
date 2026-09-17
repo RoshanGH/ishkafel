@@ -3,6 +3,8 @@ import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/editing/segmentation_edit_ops.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/storage/edit_stamp.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 
 const fps = 30.0;
 
@@ -301,6 +303,49 @@ void main() {
 
     test('合并单元内首镜头返回 null', () {
       expect(SegmentationEditOps.mergeShotWithPrevious(fixture(), 0, 0), isNull);
+    });
+
+    group('editedBy 戳不会因为下标漂移错记（Critical：评审找出的下沉一层的旁挂表 bug）', () {
+      test('splitShotAt 之后：原来那个镜头的戳还在原来那个镜头上，新镜头没有戳', () {
+        final stamp = EditStamp(by: ActorKind.human, at: DateTime.utc(2026, 9, 17));
+        final stampedFixture = [
+          fixture()[0].copyWith(shots: [
+            fixture()[0].shots[0].copyWith(editedBy: stamp),
+            fixture()[0].shots[1],
+          ]),
+          fixture()[1],
+        ];
+
+        final out = SegmentationEditOps.splitShotAt(stampedFixture, 0, 1500,
+            fps: fps, shotIndex: 0)!;
+
+        // 拆的是 shotIndex=0（人改过的那个），拆完前半段还带着原来的戳，
+        // 新拆出来的后半段是真的没人定过，不该凭空冒出一个戳
+        expect(out[0].shots.length, 3);
+        expect(out[0].shots[0].editedBy, stamp, reason: '前半段沿用 copyWith，戳跟着走');
+        expect(out[0].shots[1].editedBy, isNull, reason: '后半段是新拆出来的，确实没人定过');
+        // 原来 shotIndex=1（未拆的那个镜头）没有戳，拆分不该凭空给它一个——
+        // 这正是「旁挂表按下标记会把戳错记到相邻镜头上」这个 bug 的直接回归
+        expect(out[0].shots[2].editedBy, isNull);
+      });
+
+      test('mergeShotWithPrevious 之后：合并结果带的是前一个镜头的戳', () {
+        final prevStamp = EditStamp(by: ActorKind.human, at: DateTime.utc(2026, 9, 17));
+        final currStamp = EditStamp(by: ActorKind.agent, at: DateTime.utc(2026, 9, 18));
+        final tagged = [
+          fixture()[0].copyWith(shots: [
+            fixture()[0].shots[0].copyWith(editedBy: prevStamp),
+            fixture()[0].shots[1].copyWith(editedBy: currStamp),
+          ]),
+          fixture()[1],
+        ];
+
+        final out = SegmentationEditOps.mergeShotWithPrevious(tagged, 0, 1)!;
+
+        expect(out[0].shots.single.editedBy, prevStamp,
+            reason: '跟标签/描述同一条规则：用被并入方（前一个镜头）的，'
+                '后一个镜头（连同它的戳）从此不存在');
+      });
     });
   });
 

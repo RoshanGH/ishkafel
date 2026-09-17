@@ -30,6 +30,7 @@ void main() {
       _file('export_work/ab/out.mp4');
       _file('voices/ab/u0.wav');
       _file('picked_thumbs/ab/100.jpg');
+      _file('logs/ab.jsonl');
 
       expect(
           _names(TaskArtifacts(_root).of('ab')),
@@ -40,6 +41,7 @@ void main() {
             'analysis_work/stems/ab',
             'covers/ab.jpg',
             'export_work/ab',
+            'logs/ab.jsonl',
             'picked_thumbs/ab',
             'speed_fit/ab',
             'voices/ab',
