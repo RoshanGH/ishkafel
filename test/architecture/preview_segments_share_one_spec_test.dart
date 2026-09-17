@@ -138,4 +138,22 @@ void main() {
     final follower = read('lib/core/playback/follower_track.dart');
     expect(follower, contains('chaseDeadZoneMs'));
   });
+
+  test('体检那条线还在——代码扫描看不出真实播放退化', () {
+    // 闸挡的是「有人绕过规则」，守卫挡的是「规则被拆」。都挡不住：
+    // 代理规格被改、新素材类型带来别的毛病、机器慢到接缝撑不住——
+    // 那些只有真播一遍才知道（产品负责人：「每次开发完这问题就又出现」）
+    expect(File('scripts/preview_health.sh').existsSync(), isTrue,
+        reason: '真播一遍的驱动脚本');
+    expect(File('tool/preview_health.dart').existsSync(), isTrue,
+        reason: '判定的入口');
+
+    final limits =
+        File('lib/core/playback/preview_health.dart').readAsStringSync();
+    // 这几条线是「他能不能感觉到」，不是内部指标。**画面闪和硬拽一次都
+    // 不许有**——规格统一之后它们就该是 0，谁把这两个数调大，
+    // 等于把今天这件事重新放回去
+    expect(limits, contains('maxVideoRebuilds = 0'));
+    expect(limits, contains('maxHardSeeks = 0'));
+  });
 }
