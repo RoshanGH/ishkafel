@@ -77,9 +77,16 @@ void main() {
       final body =
           src.substring(src.indexOf('Future<int> runScriptTagRefCommand'));
       final loop = body.substring(body.indexOf('taggedSoFar++'));
-      expect(loop.substring(0, 500), contains('repository.save'),
+      final window = loop.substring(0, 900);
+      // 落盘机制从直接 repository.save 改成了 TaskMutation（Task 6）：
+      // 原来这个循环复用同一份循环外的旧任务快照几十秒到几分钟，这段窗口里
+      // 人在界面上的改动会被下一轮 save 整片抹掉。TaskMutation 让每一镜的
+      // 落盘各自重读最新数据，但「打完一镜就写」这条行为本身没变
+      expect(window, contains('TaskMutation('),
           reason: '攒到整行才写，人看到的是「播报都到第 7 镜了，'
               '画面上一个都没出现」，然后忽然整行刷出来');
+      expect(window, contains('.apply('),
+          reason: '光 new 一个 TaskMutation 不够，得真的调用 apply 落盘');
     });
 
     test('挑镜头：每落一行就写一次盘', () {

@@ -5,6 +5,8 @@ import '../../core/miaoa/miaoa_gateway.dart';
 import '../../core/miaoa/query_frame_uploader.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../agent_frames.dart';
@@ -769,7 +771,7 @@ Future<int> runScriptTagRefCommand({
         '打标每镜一次识图、是花钱的一步，所以按行打');
     return exitBadUsage;
   }
-  var doc = script;
+  final doc = script;
   final index = line - 1;
   if (index < 0 || index >= doc.lines.length) {
     sink.writeln('没有第 $line 行（这个脚本共 ${doc.lines.length} 行）');
@@ -855,6 +857,7 @@ Future<int> runScriptTagRefCommand({
             lineIndex: index,
             shotIndex: k,
             panel: AgentPanel.findShots));
+    // 识图是网络请求，做完拿到结果再进 apply——edit 里绝不能再发一次
     final meta = await tagRefShot(
       line: doc.lines[index],
       videoPath: video,
@@ -865,15 +868,50 @@ Future<int> runScriptTagRefCommand({
       constraint: task.shotTagPrompt.isEmpty ? null : task.shotTagPrompt,
     );
     if (meta == null) continue;
-    doc = doc.setReferenceById(
-        doc.lines[index].id, doc.lines[index].reference!.withShotMeta(meta));
     taggedSoFar++;
-    // **每打完一镜就落盘**，不等整行做完。
-    //
-    // 界面是靠读盘跟上进度的：攒到整行才写一次，人看到的就是「播报都到
-    // 第 7 个参考镜了，画面上还一个都没出现」，然后忽然整行刷出来。
-    // 用户反复说的就是这件事——**一步一步长出来，不是全做完再刷一下**。
-    await repository.save(task.copyWith(script: doc, updatedAt: DateTime.now()));
+
+    // **每打完一镜就落盘**，不等整行做完，而且这一笔是独立的一次
+    // TaskMutation：原来这个循环复用同一份循环外的旧任务快照几十秒到
+    // 几分钟（打标是分钟级的活），这段窗口里人在界面上做的任何改动都会被
+    // 循环下一轮的 save 整片抹掉、且不报错——这正是这批改造要杀的那个 bug
+    // 的最恶劣版本。改成每轮独立 apply：edit 只读这一刻的 fresh，
+    // 不读循环外的 doc，界面还是「一步一步长出来」，但不再清对方的改动
+    final segStartMs = ref.segments[k].$1;
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.refShot.tag',
+      where: {'line': line, 'shotIndex': k},
+      edit: (fresh) {
+        final freshDoc = fresh.script;
+        if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+        final freshLine = freshDoc.lines[index];
+        final freshRef = freshLine.reference;
+        if (freshRef == null) {
+          throw StateError('第 $line 行的参考镜没了：${task.id}');
+        }
+        final before = freshRef.metaAt(segStartMs);
+        final appliedRef = freshRef.withShotMeta(meta);
+        return TaskEdit(
+          task: fresh.copyWith(script: freshDoc.setReferenceById(freshLine.id, appliedRef)),
+          before: {'description': before?.description, 'tags': before?.tags},
+          after: {
+            'description': meta.description,
+            'tags': meta.tags,
+            if (meta.framePath != null) 'framePath': meta.framePath,
+          },
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在打标过程中被删掉了：${task.id}');
+      stage.end();
+      return exitNotFound;
+    }
     done.add({
       'shotIndex': k,
       'description': meta.description,
@@ -881,7 +919,6 @@ Future<int> runScriptTagRefCommand({
       if (meta.framePath != null) 'framePath': meta.framePath,
     });
   }
-  await repository.save(task.copyWith(script: doc, updatedAt: DateTime.now()));
   stage.end();
   emitJson({
     'ok': true,
