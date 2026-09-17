@@ -364,7 +364,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 这一步到底成没成（和挑素材那处同一个毛病，见 _onReplacementsChanged）
       _syncPreviewAudio();
       _task = _task.copyWith(replacementsByUid: _byUid(replacements));
-      await _tasks!.savePickingPlan(_task, replacements);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, replacements));
       await voice?.sayAndHold(
           '投影完了：${replacements.length} 个单元的替换已经落在时间线上',
           focus: const AgentFocus(module: 'workbench'));
@@ -873,7 +873,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (notifier == null) return;
     unawaited(() async {
       try {
-        await notifier.saveSegmentationDraft(_task, units);
+        // 页面多半已经在退了，弹不出提示时 _warnIfTaskGone 自己会让开；
+        // 还在的话（防抖窗口里点了返回但还没 pop）照样要说出来
+        _warnIfTaskGone(await notifier.saveSegmentationDraft(_task, units));
       } catch (e) {
         // 页面已经没了，弹不出提示，只能进日志
         AppLog.warn('离开时的自动保存失败（taskId=${widget.task.id}）：$e');
@@ -1057,7 +1059,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         ));
     // 改了全片打底，预览要跟着换源
     _syncPreviewAudio();
-    await _tasks?.saveMaterialAudio(_task);
+    _warnIfTaskGone(await _tasks?.saveMaterialAudio(_task));
   }
 
   /// 对话框里的一栏：四个档位 + 音量。[onAuto] 非空表示这一栏还有
@@ -1298,7 +1300,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         subtitleTrack: _task.subtitleTrack.withLines(slot, lines)));
     // 预览里那一段是烧好字的切片，不重推就永远停在旧那一版
     _syncPreviewAudio();
-    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+    unawaited(_saveSubtitleTrack());
+  }
+
+  /// 字幕轨落盘。两处调用点都是不等结果的，所以失败要在这里说出来
+  Future<void> _saveSubtitleTrack() async {
+    final tasks = _tasks;
+    if (tasks == null) return;
+    try {
+      _warnIfTaskGone(await tasks.saveSubtitleTrack(_task));
+    } catch (e) {
+      AppLog.warn('字幕轨落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('字幕', retry: _saveSubtitleTrack);
+    }
   }
 
   void _resetSubtitle(int unitIndex, int shotIndex) {
@@ -1308,7 +1322,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() =>
         _task = _task.copyWith(subtitleTrack: _task.subtitleTrack.cleared(slot)));
     _syncPreviewAudio();
-    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+    unawaited(_saveSubtitleTrack());
   }
 
   /// 这一镜换过素材没有。没换就没有「素材的声音」可言，那张卡片不出现
@@ -1646,7 +1660,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _task = _task.copyWith(voices: next));
     _syncPreviewAudio();
     try {
-      await _tasks!.saveVoices(_task, next);
+      _warnIfTaskGone(await _tasks!.saveVoices(_task, next));
     } catch (e) {
       AppLog.warn('换音色方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('配音方案');
@@ -1831,7 +1845,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           vocalsPath: stems.vocalsPath, backgroundPath: stems.backgroundPath));
       // 有了纯人声，预览要重新混一遍——否则听到的还是原声叠着新配乐
       _syncPreviewAudio();
-      await _tasks!.saveVocals(_task, stems);
+      _warnIfTaskGone(await _tasks!.saveVocals(_task, stems));
     } on VocalSeparationException catch (e) {
       AppLog.warn('单独分离人声轨失败（taskId=${widget.task.id}）：${e.message}');
       if (mounted) _showVocalsFailure(e.message);
@@ -1961,7 +1975,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // 配乐变了，预览音轨要跟着重合——否则加完配乐播放还是原声
     _syncPreviewAudio();
     try {
-      await _tasks!.saveBgm(_task, next);
+      _warnIfTaskGone(await _tasks!.saveBgm(_task, next));
     } catch (e) {
       AppLog.warn('配乐方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('配乐方案');
@@ -2001,14 +2015,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       clearProject: picked.project == null,
     );
     try {
-      await _tasks!.saveTagGroups(
+      _warnIfTaskGone(await _tasks!.saveTagGroups(
         _task,
         unit: picked.unit,
         shot: picked.shot,
         unitPrompt: picked.unitPrompt,
         shotPrompt: picked.shotPrompt,
         project: picked.project,
-      );
+      ));
     } catch (e) {
       AppLog.warn('标签组落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('标签组');
@@ -2363,7 +2377,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       return;
     }
     try {
-      await _tasks!.saveSegmentationDraft(_task, units);
+      _warnIfTaskGone(await _tasks!.saveSegmentationDraft(_task, units));
       _task = _task.copyWith(units: units);
       _savedUnits = units;
     } catch (e) {
@@ -2601,13 +2615,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         },
       );
       // 画面上的字已经变了、盘上却没变——不说的话人关了窗才发现白调一遍
-      if (saved == null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('这条任务已经被删了，字幕样式没能存下。'),
-          backgroundColor: AppColors.red,
-          duration: Duration(seconds: 5),
-        ));
-      }
+      _warnIfTaskGone(saved != null);
     } catch (e) {
       AppLog.warn('字幕样式落库失败（taskId=${_task.id}）：$e');
       if (mounted) {
@@ -2855,7 +2863,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 一次导出——「哪天、导了几条、成了几条、在哪个目录」。
   Future<void> _recordExport(ExportRecord record) async {
     try {
-      await _tasks!.addExportRecord(_task, record);
+      _warnIfTaskGone(await _tasks!.addExportRecord(_task, record));
       if (mounted) {
         setState(() =>
             _task = _task.copyWith(exports: [..._task.exports, record]));
@@ -2881,6 +2889,20 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   static String _safeName(String name) =>
       name.replaceAll(RegExp(r'[/:\\]'), '_');
+
+  /// 落盘没成的统一出口。
+  ///
+  /// `false` = 这条任务在写的那一刻已经被删了（另一个窗口删的）。
+  /// **不说的话最危险**：画面上早就变了、盘上没变，人以为改动留住了，
+  /// 关了窗才发现全没了。用项目现成的那句话（[taskMissingMessage]）
+  void _warnIfTaskGone(bool? saved) {
+    if (saved != false || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(taskMissingMessage),
+      backgroundColor: AppColors.red,
+      duration: Duration(seconds: 6),
+    ));
+  }
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
   /// 不把原始异常文本摊给用户（详情已进日志）。
@@ -2919,7 +2941,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 失败要说出来，不然人只会在下次打开时发现素材跑到了别人身上
   Future<void> _savePickingPlanQuietly(List<UnitReplacement> next) async {
     try {
-      await _tasks!.savePickingPlan(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, next));
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('替换方案');
@@ -2938,7 +2960,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // ——产品负责人 2026-09-16 真机
     _syncPreviewAudio();
     try {
-      await _tasks!.savePickingPlan(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, next));
       _task = _task.copyWith(replacementsByUid: _byUid(next));
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
@@ -2956,7 +2978,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       return;
     }
     try {
-      await _tasks!.savePickedMaterials(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickedMaterials(_task, next));
       _task = _task.copyWith(pickedMaterials: next);
     } catch (e) {
       AppLog.warn('已选素材落库失败（taskId=${widget.task.id}）：$e');

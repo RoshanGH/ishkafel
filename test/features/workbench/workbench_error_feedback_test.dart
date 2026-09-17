@@ -121,5 +121,42 @@ void main() {
       expect(find.textContaining('保存失败'), findsOneWidget,
           reason: '提示要说清是保存失败，而不是抛原始异常文本给用户');
     });
+
+    testWidgets('任务在别处被删掉时也要说出来——不是抛异常，是「写不成」', (tester) async {
+      // 这一条和上面那条是两种不同的「没存上」：上面是 save 抛异常，
+      // 这里是 TaskMutation 重读不到这条任务、如实返回「没有这条」。
+      // 后者以前是静默的（`save` 会把删掉的任务复活，人根本不会察觉），
+      // 现在正确地不写，但**人也必须看得见**，否则画面上早就变了、
+      // 盘上没变，关了窗才发现全没了
+      final repo = _FailingRepo()..failSave = false;
+      await repo.save(_task());
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          taskRepositoryProvider.overrideWithValue(repo),
+          dataDirProvider.overrideWithValue(_logDir)
+        ],
+        child: MaterialApp(
+          home: WorkbenchPage(
+            task: _task(),
+            playbackFactory: FakePlaybackController.new,
+            mediaBuilder: _fakeMediaBuilder(),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // 另一个窗口把这条任务删了
+      await repo.delete('t1');
+
+      await tester.tap(find.byKey(const Key('unit-row-0')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('inspector-end-minus')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text(taskMissingMessage), findsOneWidget,
+          reason: '写不成和写失败一样要说出来，而且要说清是「任务被删了」');
+    });
   });
 }

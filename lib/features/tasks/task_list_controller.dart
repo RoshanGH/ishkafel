@@ -670,7 +670,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 提前改会让任务在列表里显示成已导出却拿不到成片。
   /// [replacements] 按位置排（界面就是这么摆的），落库时翻译成
   /// 「哪个单元的身份 → 哪份方案」
-  Future<void> savePickingPlan(
+  Future<bool> savePickingPlan(
       RenewTask task, List<UnitReplacement> replacements) async {
     // 位置→身份的翻译只能用**工作台手上那份单元**：`replacements` 是按
     // 界面上摆的顺序排的，拿盘上那份（可能已经被 Agent 加了单元）去对号，
@@ -678,7 +678,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     // 不受位置影响——这一步是纯计算，留在 edit 之外
     final byUid = RenewTask.byUid(task.units ?? const <SemanticUnit>[],
         replacements);
-    await _write(
+    return _write(
       task,
       op: 'plans.apply',
       edit: (fresh) => TaskEdit(
@@ -727,8 +727,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
   /// 记下一次导出。**追加**而不是覆盖：项目会被反复导出，每一次都是一条
   /// 独立的记录（哪天、导了几条、成了几条、在哪个目录）
-  Future<void> addExportRecord(RenewTask task, ExportRecord record) async {
-    await _write(
+  Future<bool> addExportRecord(RenewTask task, ExportRecord record) async {
+    return _write(
       task,
       op: 'export.run',
       edit: (fresh) => TaskEdit(
@@ -749,9 +749,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 已挑中素材的落地记录。和替换方案分开存：方案是「选了哪些 id」，
   /// 这里是「那些 id 到底是什么」——后者是为了让用户随时看得见自己选了什么，
   /// 和检索结果、翻到第几页、换没换项目组都无关。
-  Future<void> savePickedMaterials(
+  Future<bool> savePickedMaterials(
       RenewTask task, List<PickedMaterial> materials) async {
-    await _write(
+    return _write(
       task,
       op: 'materials.picked',
       edit: (fresh) {
@@ -787,9 +787,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
   /// 存「保留素材原声」的全片打底设置。传进来的 [task] 已经带上新值了——
   /// 只把**这一个字段**搬到 fresh 上，别的一律不碰
-  Future<void> saveMaterialAudio(RenewTask task) async {
+  Future<bool> saveMaterialAudio(RenewTask task) async {
     final setting = task.materialAudio;
-    await _write(
+    return _write(
       task,
       op: 'audio.material',
       edit: (fresh) => TaskEdit(
@@ -804,9 +804,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   }
 
   /// 存手改过的字幕轨。传进来的 [task] 已经带上新值了
-  Future<void> saveSubtitleTrack(RenewTask task) async {
+  Future<bool> saveSubtitleTrack(RenewTask task) async {
     final track = task.subtitleTrack;
-    await _write(
+    return _write(
       task,
       op: 'subtitle.track',
       edit: (fresh) => TaskEdit(
@@ -836,7 +836,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   ///
   /// 标签组本来只在新建向导里选一次；选漏了或选错了就再也改不了，那条任务
   /// 从此打不出标签、候选检索的标签主路径也就永远用不上。
-  Future<void> saveTagGroups(
+  Future<bool> saveTagGroups(
     RenewTask task, {
     required List<TagGroupRef> unit,
     required List<TagGroupRef> shot,
@@ -844,7 +844,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     String? shotPrompt,
     ProjectRef? project,
   }) async {
-    await _write(
+    return _write(
       task,
       op: 'task.tagGroups',
       edit: (fresh) => TaskEdit(
@@ -876,8 +876,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   }
 
   /// 保存配乐方案。与切分、替换方案同一条「随手落库」通路。
-  Future<void> saveBgm(RenewTask task, BgmPlan bgm) async {
-    await _write(
+  Future<bool> saveBgm(RenewTask task, BgmPlan bgm) async {
+    return _write(
       task,
       op: 'bgm.set',
       edit: (fresh) => TaskEdit(
@@ -905,8 +905,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 人声轨**归任务所有**，两条任务之间不共用（见 [PreparedCache]）：它被
   /// 别人删任务时一起清掉、或当初那次分离失败过，用户都能在工作台点
   /// 「重新分离」补一份，补完就落在这里
-  Future<void> saveVocals(RenewTask task, SeparatedAudio stems) async {
-    await _write(
+  Future<bool> saveVocals(RenewTask task, SeparatedAudio stems) async {
+    return _write(
       task,
       op: 'audio.vocals',
       note: '人在工作台点了「重新分离」',
@@ -928,8 +928,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   }
 
   /// 保存换音色方案。与切分、替换方案、配乐同一条「随手落库」通路。
-  Future<void> saveVoices(RenewTask task, VoicePlan voices) async {
-    await _write(
+  Future<bool> saveVoices(RenewTask task, VoicePlan voices) async {
+    return _write(
       task,
       op: 'voice.assign',
       edit: (fresh) => TaskEdit(
@@ -954,9 +954,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// **这一份 units 是人手上那份的整体**（拖边界、拆合镜头、改台词都在里面），
   /// 没有更细的粒度可拆；能做到的是只换 `units` 这一个字段，其余交给 fresh，
   /// 并把真正变了的那几个单元点名记下来、盖上「人改过」的戳。
-  Future<void> saveSegmentationDraft(
+  Future<bool> saveSegmentationDraft(
       RenewTask task, List<SemanticUnit> units) async {
-    await _write(
+    return _write(
       task,
       op: 'units.edit',
       edit: (fresh) {
@@ -1043,9 +1043,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
 
   /// 工作台那一批「随手落库」的共同形状：走唯一写入口、写完刷新列表。
   ///
-  /// 任务在这一刻被删掉时返回 null（**那是事实，不是失败**）——不重建它，
-  /// 也不悄悄装作写成了：列表照旧刷新，那条任务不会重新冒出来。
-  Future<RenewTask?> _write(
+  /// **返回「到底写没写成」**：任务在这一刻被删掉时返回 false
+  /// （那是事实，不是失败——不重建它，也不把删掉的任务复活）。
+  /// 调用方**必须把这个 false 说给人听**：画面上已经变了、盘上没变，
+  /// 不说的话人以为改动留住了，关了窗才发现全没了。
+  Future<bool> _write(
     RenewTask task, {
     required String op,
     String note = '',
@@ -1055,10 +1057,10 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         .apply(taskId: task.id, op: op, note: note, edit: edit);
     if (updated == null) {
       AppLog.warn('任务 ${task.id} 的「$op」没写成：这条任务已经被删了。');
-      return null;
+      return false;
     }
     await _refreshAfterSave(updated);
-    return updated;
+    return true;
   }
 }
 

@@ -2661,7 +2661,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         ),
       );
       if (saved == null) {
-        _reportSaveFailure('这条任务已经被删了，刚才的改动没能存下。');
+        _reportSaveFailure(taskMissingMessage);
         return;
       }
       // 写完把基线对齐到刚写出去的那一版，否则下一次会误判成「被人动过」
