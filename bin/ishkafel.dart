@@ -11,6 +11,7 @@ import 'package:ishkafel/cli/commands/doctor_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/jianying_command.dart';
+import 'package:ishkafel/cli/commands/log_command.dart';
 import 'package:ishkafel/cli/commands/peek_command.dart';
 import 'package:ishkafel/cli/commands/subtitle_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
@@ -66,7 +67,10 @@ Future<void> main(List<String> args) async {
     ..addFlag('yes',
         negatable: false, help: 'task-delete 用：确认删除（不可逆）')
     ..addOption('by',
-        help: 'script shots 用：检索方式 tags/content/image/voiceover/name')
+        help: 'script shots 用：检索方式 tags/content/image/voiceover/name；'
+            'log 用：只看 human/agent 谁干的')
+    ..addOption('since', help: 'log 用：游标，只看这个序号之后的改动')
+    ..addOption('limit', help: 'log 用：最多看多少条（默认 200）')
     ..addOption('materials',
         help: 'script peek 用：要看哪几条素材的画面，逗号分隔')
     ..addOption('mode',
@@ -285,6 +289,15 @@ Future<void> main(List<String> args) async {
     // 接手用：每条任务干到哪了、下一步敲什么、现场有没有别人在动
     'status' => await runStatusCommand(
         rest: rest, dataDir: dataDir, json: parsed['json'] as bool),
+    // 我不在的时候这条任务上发生了什么——接手前的另一条命令，看历史而非现状
+    'log' => await runLogCommand(
+        rest: rest,
+        dataDir: dataDir,
+        since: int.tryParse(parsed['since'] as String? ?? ''),
+        by: parsed['by'] as String?,
+        json: parsed['json'] as bool,
+        limit: int.tryParse(parsed['limit'] as String? ?? '') ?? 200,
+      ),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
         rest: rest,
@@ -330,6 +343,9 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   clean [--yes]    把盘上没主的东西清掉（不给 --yes 只报会删什么）
   status [<任务>]   **接手先看这条**：每条任务干到哪了、下一步敲什么、
                    现场有没有别人在动。打断之后接着干，全靠它
+  log <任务> [--since <游标>] [--by human|agent] [--no-json]
+                   我不在的时候这条任务上发生了什么：谁、什么时候、改了哪儿。
+                   只记写操作，翻页看候选这类只读的不算
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
   bgm <task> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]
