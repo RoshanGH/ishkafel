@@ -942,6 +942,15 @@ Future<int> _segment(FileTaskRepository repository, Directory dataDir,
     },
   );
   if (updated == null) return _taskGoneDuring(task.id, sink);
+  // edit 里发现单元没了会把结果丢弃、只在日志的 after 里点名——但命令本身
+  // 不能装作没事发生：几分钟的 ffmpeg + 转写 + 打标白跑了，Agent 得知道
+  final landedUnit =
+      (updated.units ?? const []).where((u) => u.uid == targetUnitUid).firstOrNull;
+  if (landedUnit == null || landedUnit.baseCandidateId != candidateId) {
+    sink.writeln('这一段在切分完成前被删掉了——切好的镜头、转写、标签'
+        '（几分钟的活）没地方落，全部丢弃了，不会出现在这条任务里。');
+    return exitNotFound;
+  }
   if (tagError != null) {
     sink.writeln(tagError);
     sink.writeln('跑 ishkafel analyze <任务> 或在界面上重打一次');
