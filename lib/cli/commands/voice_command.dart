@@ -4,11 +4,9 @@ import '../../core/audio/voice_plan.dart';
 import '../../core/audio/voice_catalog.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../../core/audio/voice_swap_job.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
@@ -33,7 +31,6 @@ import '../cli_output.dart';
 Future<int> runVoiceGenerateCommand({
   required List<String> rest,
   required Directory dataDir,
-  String? holder,
   bool? visual,
   StringSink? out,
   StringSink? err,
@@ -69,12 +66,6 @@ Future<int> runVoiceGenerateCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  final who = holder ?? agentLockHolder;
-  if (!lock.acquire(who)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
@@ -118,7 +109,6 @@ Future<int> runVoiceGenerateCommand({
     return exitFailed;
   } finally {
     stage.end();
-    lock.release(who);
   }
 }
 
@@ -127,7 +117,6 @@ Future<int> runVoiceCommand({
   required Directory dataDir,
   String? units,
   String? voiceId,
-  String? holder,
   StringSink? out,
   StringSink? err,
 }) async {
@@ -188,12 +177,6 @@ Future<int> runVoiceCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  final who = holder ?? agentLockHolder;
-  if (!lock.acquire(who)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
-    return exitLocked;
-  }
   // 目标音色在这里就定好（校验一次即可），edit 里只做纯变换
   VoiceRef? voice;
   if (voiceId.trim().isNotEmpty) {
@@ -206,56 +189,52 @@ Future<int> runVoiceCommand({
       return exitBadUsage;
     }
   }
-  try {
-    final updated = await TaskMutation(
-      repo: repository,
-      dataDir: dataDir,
-      by: ActorKind.agent,
-      actor: 'Agent',
-    ).apply(
-      taskId: task.id,
-      op: 'voice.assign',
-      where: {'units': targets},
-      edit: (fresh) {
-        final freshUnits = fresh.units ?? const [];
-        // targets 是下标，按 fresh 重新翻译成 uid——下标本身不落盘，
-        // 落盘的是 uid（VoicePlan.assign/clear 都按 uid 记）
-        final uids = [
-          for (final i in targets)
-            if (i >= 0 && i < freshUnits.length) freshUnits[i].uid,
-        ];
-        final before = _voiceFacts(fresh.voices, freshUnits, targets);
-        final next = voice == null
-            ? fresh.voices.clear(uids)
-            : fresh.voices.assign(uids, voice);
-        final after = _voiceFacts(next, freshUnits, targets);
-        return TaskEdit(
-          task: fresh.copyWith(voices: next),
-          before: {'units': before},
-          after: {'units': after},
-          stampUnits: uids,
-        );
-      },
-    );
-    if (updated == null) {
-      sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
-      return exitNotFound;
-    }
-    emitJson({
-      'ok': true,
-      'assigned': [
-        for (var i = 0; i < all.length; i++)
-          if (updated.voices.assignedUnits.contains(all[i].uid)) i,
-      ],
-      'next': voiceId.trim().isEmpty
-          ? '这几句改回原声了'
-          : '换好了，但还没合成。跑 ishkafel voice generate ${task.id} '
-              '真正生成配音——只选不生成的话，导出会被拦下',
-    }, out: out);
-    return 0;
-  } finally {
-    lock.release(who);
+  final updated = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'voice.assign',
+    where: {'units': targets},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      // targets 是下标，按 fresh 重新翻译成 uid——下标本身不落盘，
+      // 落盘的是 uid（VoicePlan.assign/clear 都按 uid 记）
+      final uids = [
+        for (final i in targets)
+          if (i >= 0 && i < freshUnits.length) freshUnits[i].uid,
+      ];
+      final before = _voiceFacts(fresh.voices, freshUnits, targets);
+      final next = voice == null
+          ? fresh.voices.clear(uids)
+          : fresh.voices.assign(uids, voice);
+      final after = _voiceFacts(next, freshUnits, targets);
+      return TaskEdit(
+        task: fresh.copyWith(voices: next),
+        before: {'units': before},
+        after: {'units': after},
+        stampUnits: uids,
+      );
+    },
+  );
+  if (updated == null) {
+    sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
+    return exitNotFound;
   }
+  emitJson({
+    'ok': true,
+    'assigned': [
+      for (var i = 0; i < all.length; i++)
+        if (updated.voices.assignedUnits.contains(all[i].uid)) i,
+    ],
+    'next': voiceId.trim().isEmpty
+        ? '这几句改回原声了'
+        : '换好了，但还没合成。跑 ishkafel voice generate ${task.id} '
+            '真正生成配音——只选不生成的话，导出会被拦下',
+  }, out: out);
+  return 0;
 }
 
 /// 换音色这一笔值得记进日志的事实：哪几句、台词是什么、换前换后是哪个音色——

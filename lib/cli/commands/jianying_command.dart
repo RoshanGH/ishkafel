@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import '../export_warnings.dart';
@@ -11,10 +10,8 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_media.dart';
 import '../agent_stage.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../../core/storage/task_seq.dart';
 
@@ -51,11 +48,6 @@ Future<int> runJianyingCommand({
   }
 
   // 占锁：素材落地期间人在界面上换素材，草稿会拿到一半新一半旧
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
-    return exitLocked;
-  }
   // 这批素材有什么问题先说清楚。剪映草稿也是一份要交付的东西——
   // 人打开草稿看到的每一条轨道上都是这些素材，烧着别家字幕、露着竞品的
   // 那几条不说出来，等于让他自己在几十条轨道里找
@@ -73,12 +65,10 @@ Future<int> runJianyingCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await stage.begin('正在生成剪映草稿',
       focus: const AgentFocus(module: 'workbench'));
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final media = TaskMedia(dataDir: dataDir, taskId: task.id);
 
@@ -151,9 +141,7 @@ Future<int> runJianyingCommand({
     sink.writeln('生成剪映草稿失败：$e');
     return exitFailed;
   } finally {
-    heartbeat.cancel();
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 

@@ -8,16 +8,13 @@ import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_wake.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../app_locator.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../delegate.dart';
-import '../gui_lock_guidance.dart';
 import '../review_apply.dart';
 
 /// `ishkafel review <task>` —— 把 app 拉起来进**审核模式**，人过一遍
@@ -124,7 +121,7 @@ Future<int> runReviewCommand({
     file: file,
     dataDir: dataDir,
     repository: repository,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
     visual: visual,
     waitForUi: waitForUi,
     out: out,
@@ -205,7 +202,7 @@ Future<int> _changeCandidates({
     decisions = parsed.decisions;
   }
 
-  // 先在锁外面校验一遍：不合格就别去打扰正在用界面的人
+  // 先校验一遍：不合格就别去打扰正在用界面的人
   final first =
       validateReviewSubmission(items: candidates, decisions: decisions);
   if (first.isNotEmpty) {
@@ -213,29 +210,42 @@ Future<int> _changeCandidates({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder)) {
-    final current = lock.read();
-    // 界面占着 ≠ 冲突：人正开着审片台看着指挥你，那就把活儿交给界面去做。
-    // 它剔掉的卡是界面里的临时状态，人按「确认」才落盘——你自己写盘会让
-    // 人还没确认盘上就变了
-    if (isGuiHolder(current?.holder)) {
-      return _delegateToUi(
-        taskId: task.id,
-        task: task,
-        decisions: decisions,
-        keep: keep,
-        dataDir: dataDir,
-        repository: repository,
-        out: out,
-        sink: sink,
-        waitFor: waitForUi,
-      );
-    }
-    sink.writeln(guiLockGuidance(
-        holder: current?.holder, taskId: task.id));
-    return exitLocked;
-  }
+  // **人正开着审片台看着指挥你，就把活儿交给界面去做。**
+  // 它剔掉的卡是界面里的临时状态，人按「确认」才落盘——自己写盘会让
+  // 人还没确认盘上就变了。界面不在这条任务上（或没跟上）就自己动手，
+  // 不等任何人。两条路落的是同一份 `_commitReviewDecisions`
+  return _delegateToUi(
+    taskId: task.id,
+    task: task,
+    decisions: decisions,
+    keep: keep,
+    what: what,
+    dataDir: dataDir,
+    repository: repository,
+    visual: visual,
+    holder: holder,
+    out: out,
+    sink: sink,
+    waitFor: waitForUi,
+  );
+}
+
+/// 自己动手：一条一条地走给人看，然后落盘。
+///
+/// **走给人看这一段只在这条路上**：委派那条路上界面自己会演，
+/// 不该由命令行再演一遍
+Future<int> _applyDecisionsMyself({
+  required RenewTask task,
+  required List<ReviewDecision> decisions,
+  required bool keep,
+  required String what,
+  required Directory dataDir,
+  required FileTaskRepository repository,
+  required bool? visual,
+  required String holder,
+  required StringSink? out,
+  required StringSink sink,
+}) async {
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
@@ -279,13 +289,11 @@ Future<int> _changeCandidates({
     stage.end();
     // 静默模式下 heartbeat 不写文件，但保险起见一并撤掉
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder);
   }
 }
 
-/// 落盘剔除/恢复决定：**有锁时的直写**（`_changeCandidates`）和**委派
-/// 没跟上时的自己动手**（`_delegateToUi` 的 `myself`）共用同一份——
-/// 避免同一件事两处算
+/// 落盘剔除/恢复决定：**自己动手**（`_applyDecisionsMyself`）这条路
+/// 唯一的落盘点——委派那条路由界面自己落，人按「确认」才算数
 Future<int> _commitReviewDecisions({
   required RenewTask task,
   required List<ReviewDecision> decisions,
@@ -363,8 +371,11 @@ Future<int> _delegateToUi({
   required RenewTask task,
   required List<ReviewDecision> decisions,
   required bool keep,
+  required String what,
   required Directory dataDir,
   required FileTaskRepository repository,
+  required bool? visual,
+  required String holder,
   required StringSink? out,
   required StringSink sink,
   required Duration waitFor,
@@ -403,12 +414,15 @@ Future<int> _delegateToUi({
     myself: () async {
       sink.writeln('界面不在这条任务上（或没跟上），直接自己'
           '${keep ? '恢复' : '剔除'}…');
-      return _commitReviewDecisions(
+      return _applyDecisionsMyself(
         task: task,
         decisions: decisions,
         keep: keep,
+        what: what,
         dataDir: dataDir,
         repository: repository,
+        visual: visual,
+        holder: holder,
         sink: sink,
         out: out,
       );

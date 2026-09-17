@@ -66,8 +66,8 @@ Future<int> runUiCommand({
         '  ishkafel ui open <任务> [--module director|workbench|review]\n'
         '      把界面叫到这条任务上。**可视模式下每一步开工前都该在现场**\n'
         '  ishkafel ui tasks\n'
-        '      把界面支开、退回任务列表。可视模式下一般用不着：撞上界面的锁\n'
-        '      时命令会自动请它让位（人留在那一页看着），不需要你先支开它。\n'
+        '      把界面支开、退回任务列表。可视模式下一般用不着：**人开着那一页\n'
+        '      从来不会挡住任何写操作**，不需要你先支开它。\n'
         '      支开了就等于关掉了可视化现场，要再用 ui open 才叫得回来');
     return exitBadUsage;
   }
@@ -157,7 +157,7 @@ Future<int> runUiCommand({
     // 超时不再是失败：委派是首选路径，不是必经之路（见 delegate.dart）。
     // 界面没跟上——没开、或者停在别的页面收不到这个请求——就自己建，
     // 三种模式都有现成的、不经界面就能建任务的 CLI 命令
-    sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。界面没跟上，我自己建。');
+    sink.writeln('界面没接这一单（等了 ${waitForUi.inSeconds} 秒），我自己建。');
     return _createTaskMyself(
       mode: parsed,
       name: name,
@@ -197,8 +197,8 @@ Future<int> runUiCommand({
     // 而替换裂变任务照着跑会被 CLI 自己拒绝（验收 Agent 撞到）
     //
     // 以前这里还带一句「先 ishkafel ui tasks 退回列表再写」——
-    // lock.yield 上线之后这条往返就多余了：撞锁的命令会自己请界面让位，
-    // 不需要 Agent 先手动把它支开，那一步纯粹是浪费一个来回
+    // 锁删掉之后这条往返彻底多余了：写操作从来不会因为人开着那一页
+    // 而写不进去，不需要 Agent 先手动把界面支开
     'next': switch (kind) {
       'script' => 'ishkafel script extract $newId <参考片>',
       'blank' => 'ishkafel blank tags $newId --unit 0 --tags <标签>',
@@ -298,14 +298,12 @@ Future<bool> _appIsRunning(
 }
 
 
-/// `ishkafel ui tasks` —— 让界面退回任务列表，**松开它占着的那把锁**。
+/// `ishkafel ui tasks` —— 让界面退回任务列表。
 ///
-/// 可视模式下这是 Agent 唯一的解锁出路。`ui new-task` 建完任务后界面就
-/// 停在那条任务上，而下一步（`script extract` / `analyze`）必须写它——
-/// 「建完立刻干活」这条最自然的路因此走不通。
-///
-/// 以前的绕法是 `open <另一条任务>` 把界面支开。那只在**恰好还有第二条
-/// 任务**时成立：验收 Agent 就是这么绕的，等它把老任务删光，就彻底卡死了。
+/// **这条命令曾经是「解锁的唯一出路」**：`ui new-task` 建完任务后界面停在
+/// 那条任务上，占着写锁，于是「建完立刻干活」这条最自然的路走不通，Agent
+/// 只能先把界面支开。锁没了，这条理由也随之消失——现在它就只是一句
+/// 「回列表看看」，想用就用，不用也不会挡住任何事。
 Future<int> _backToTaskList({
   required Directory dataDir,
   Future<ProcessResult> Function(String, List<String>)? run,
@@ -331,16 +329,15 @@ Future<int> _backToTaskList({
   final result = await waitForAgentRequest(
       dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
   if (result == null) {
-    // 超时不是失败：它多半没开，那样也就没有锁挡着——写操作现在自己有
-    // 兜底（撞锁会自己请界面让位或直接落盘），不必在这儿干等它退出
-    sink.writeln('界面没有回应（等了 ${waitForUi.inSeconds} 秒）。'
-        '我没等它——它可能没开，也可能没在监听这个请求。'
-        '后续写操作撞锁会自己处理，不必卡在这一步');
+    // 超时不是失败：它多半没开。而且退不退回列表本来就不影响任何写操作
+    sink.writeln('界面没接这一单（等了 ${waitForUi.inSeconds} 秒），我没等它——'
+        '它可能没开，也可能没在监听这个请求。'
+        '这不影响任何事，写操作照样进行');
     emitJson({
       'ok': true,
       'via': 'agent',
       'landed': false,
-      'message': '界面没回应，没等它退回列表',
+      'message': '界面没接这一单，没等它退回列表',
     }, out: out);
     return 0;
   }

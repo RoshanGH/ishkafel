@@ -26,7 +26,6 @@ import '../../core/log/app_log.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../line_evidence.dart';
 import '../search_narrowing.dart';
@@ -853,7 +852,7 @@ Future<int> runScriptTagRefCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   final totalShots = _refShotCount(doc);
   var taggedSoFar = _taggedRefShotCount(doc);

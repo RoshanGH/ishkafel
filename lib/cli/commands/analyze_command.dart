@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -11,14 +10,12 @@ import '../../core/analysis/tag_vocabulary.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
-import '../agent_lock_holder.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
@@ -91,25 +88,16 @@ Future<int> runAnalyzeCommand({
     return exitEnv;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，分析不了');
-    return exitLocked;
-  }
   // 分析要跑好几分钟，是这条线上最长的一段等待——**每一步都要说出来**，
   // 不然人对着一块不动的板子不知道它是在跑还是卡死了
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await stage.begin('正在分析原片',
       focus: const AgentFocus(module: 'workbench'));
-
-  // 分析要跑好几分钟，中途得续命，否则锁会在 60 秒后被判失效
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
 
   try {
     if (external0.isEmpty) {
@@ -208,9 +196,7 @@ Future<int> runAnalyzeCommand({
     sink.writeln('分析失败：$e');
     return 1;
   } finally {
-    heartbeat.cancel();
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 

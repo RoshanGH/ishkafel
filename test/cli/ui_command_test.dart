@@ -123,7 +123,7 @@ void main() {
     final code = await run(['new-task'],
         mode: 'script', tagGroups: '1', err: err, out: out);
     expect(code, 0, reason: '界面没跟上不该拖累 Agent——script new 现成能顶上');
-    expect(err.toString(), contains('没有回应'),
+    expect(err.toString(), contains('界面没接这一单'),
         reason: '还是要如实说界面没应，只是不再当成失败');
     final json = jsonDecode(out.toString()) as Map<String, dynamic>;
     expect(json['ok'], isTrue);

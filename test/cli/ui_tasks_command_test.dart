@@ -38,8 +38,8 @@ void main() {
     final out = StringBuffer();
     final err = StringBuffer();
     final code = await run(out: out, err: err);
-    expect(code, 0, reason: '界面可能压根没开——那样也没有锁挡着，不该报失败');
-    expect(err.toString(), contains('没有回应'));
+    expect(code, 0, reason: '界面可能压根没开，而这一步本来就不影响任何事');
+    expect(err.toString(), contains('界面没接这一单'));
     final json = jsonDecode(out.toString()) as Map<String, dynamic>;
     expect(json['ok'], isTrue);
     expect(json['via'], 'agent');

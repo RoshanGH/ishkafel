@@ -7,11 +7,9 @@ import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/unit_uid.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
 import '../tag_group_lookup.dart';
 import '../task_view.dart';
@@ -29,7 +27,6 @@ Future<int> runBlankCommand({
   String? tagGroups,
   int? unit,
   String? tags,
-  String? holder,
 
   /// 测试注入：标签组查询用假实现，真机走 miaoa CLI
   MiaoaTagService? tagService,
@@ -68,26 +65,17 @@ Future<int> runBlankCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，改不了');
-    return exitLocked;
-  }
-  try {
-    return switch (what) {
-      'add' => await _add(repository, dataDir, task, sink, out ?? stdout),
-      'remove' => await _remove(
-          repository, dataDir, task, unit, sink, out ?? stdout),
-      'tags' => await _tags(
-          repository, dataDir, task, unit, tags, sink, out ?? stdout),
-      _ => () {
-          sink.writeln('认不出「$what」。可用：create / add / remove / tags');
-          return exitBadUsage;
-        }(),
-    };
-  } finally {
-    lock.release(holder ?? agentLockHolder);
-  }
+  return switch (what) {
+    'add' => await _add(repository, dataDir, task, sink, out ?? stdout),
+    'remove' => await _remove(
+        repository, dataDir, task, unit, sink, out ?? stdout),
+    'tags' => await _tags(
+        repository, dataDir, task, unit, tags, sink, out ?? stdout),
+    _ => () {
+        sink.writeln('认不出「$what」。可用：create / add / remove / tags');
+        return exitBadUsage;
+      }(),
+  };
 }
 
 Future<int> _create(

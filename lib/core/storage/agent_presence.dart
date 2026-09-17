@@ -6,11 +6,16 @@ import 'agent_broadcast.dart';
 import 'package:path/path.dart' as p;
 
 import '../log/app_log.dart';
-import 'task_lock.dart';
+
+/// 心跳停多久算「不在场」。
+///
+/// **必须能自愈**：Agent 可能崩溃、被 kill、断电。没有这条，界面会一直
+/// 以为有人在动这个任务，横幅永远挂着。
+const Duration defaultStaleAfter = Duration(seconds: 60);
 
 /// Agent 此刻在这个任务上**干什么、看哪儿**。
 ///
-/// 任务锁只回答「谁占着」，不够——用户要的是看得懂它在动什么：
+/// 「谁在动这个任务」这一条不够——用户要的是看得懂它在动什么：
 ///
 /// > 它选中第 10 行，那就跟人一样把第 10 行放到界面中间；它去调某一镜的
 /// > 时长或变速，那个面板就打开，跟人自己点开去调的时候是一样的。
@@ -18,8 +23,8 @@ import 'task_lock.dart';
 /// **焦点必须由 Agent 主动上报**，不能靠界面从数据变化里猜：它可能读了半天
 /// 才动手，也可能一次改好几行——人在旁边看的是**过程**，不是结果差异。
 ///
-/// 与任务锁同一条自愈规矩：心跳停了就当它不在（见 [defaultStaleAfter]），
-/// 否则 Agent 一崩，界面会一直以为有人占着。
+/// 心跳停了就当它不在（见 [defaultStaleAfter]），否则 Agent 一崩，
+/// 界面会一直以为有人在动这个任务。
 class AgentPresence {
   /// 谁在（`Agent` / `人（编导台）`）——横幅上要说得出名字
   final String holder;

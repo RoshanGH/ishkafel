@@ -5,11 +5,9 @@ import 'package:collection/collection.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/bgm_range.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
@@ -96,14 +94,8 @@ Future<int> runBgmCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  final who = holder ?? agentLockHolder;
-  if (!lock.acquire(who)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
-    return exitLocked;
-  }
   try {
     // 取素材是网络请求，有副作用——不能放进 edit 闭包（edit 可能被
     // TaskMutation 重跑一次，重跑网络请求就是把「取一首曲子」算两遍）。
@@ -194,7 +186,6 @@ Future<int> runBgmCommand({
     return 0;
   } finally {
     stage.end();
-    lock.release(who);
   }
 }
 

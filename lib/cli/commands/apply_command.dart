@@ -7,7 +7,6 @@ import '../frame_check_wiring.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../app/service_wiring.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/storage/task_log.dart';
@@ -27,13 +26,11 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
 import '../cli_output.dart';
 import '../delegate.dart';
-import '../gui_lock_guidance.dart';
 import '../plan_submission.dart';
 
 /// `ishkafel apply plans <task> --file <json>`（也支持从 stdin 读）
@@ -78,53 +75,46 @@ Future<int> runApplyCommand({
     return exitNotFound;
   }
 
-  // 别人正持着锁就不写——两边同时写会互相覆盖，而且悄无声息
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    final current = lock.read();
-    // **界面占着锁不是冲突，是委派的时机**：可视模式要求界面停在这个任务上，
-    // 而写入要求界面不能停在这个任务上——于是最该让人看见的一步（提交方案，
-    // 成片长什么样就是这一步定的），恰恰因为「人在看」而做不了。
-    // 以前给的出路是「让界面挪开」，那等于让人别看。
-    if (what == 'plans' && isGuiHolder(current?.holder)) {
-      return await _applyPlansViaUi(
-        dataDir: dataDir,
-        task: task,
-        file: file,
-        readStdin: readStdin,
-        sink: sink,
-        out: out,
-      );
-    }
-    sink.writeln(guiLockGuidance(
-        holder: current?.holder, taskId: task.id));
-    return exitLocked;
-  }
-
-  try {
-    return await _applyWithLock(
-      contentService: contentService,
-      candidateProbe: candidateProbe,
-      what: what,
-      id: id,
+  // **提交方案一律走委派这条路。**
+  //
+  // 「人在界面上看着」曾经是这一步的障碍：界面占着锁，而提交方案恰恰是
+  // 最该让人看见的一步（成片长什么样就是它定的），于是最该看的时候反而
+  // 做不了，给出的出路还是「让人别看」。现在反过来——界面在这条任务上
+  // 就请它代办（人看着方案落进去），不在就零等待自己写。
+  // 两条路落的是同一份 `_commitPlans`，不会有第二套算法。
+  if (what == 'plans') {
+    return _applyPlansViaUi(
+      dataDir: dataDir,
       task: task,
       file: file,
       readStdin: readStdin,
-      dataDir: dataDir,
-      repository: repository,
       sink: sink,
       out: out,
-      visual: visual,
-      holder: holder,
+      contentService: contentService,
+      candidateProbe: candidateProbe,
     );
-  } finally {
-    // 命令跑完立刻还锁。不还的话要等心跳超时 60 秒，这期间人在 app 里
-    // 打开这个任务只能看不能改，还不知道为什么
-    lock.release(holder ?? agentLockHolder);
   }
+
+  return _applyDirect(
+    what: what,
+    id: id,
+    task: task,
+    file: file,
+    readStdin: readStdin,
+    dataDir: dataDir,
+    repository: repository,
+    sink: sink,
+    out: out,
+    visual: visual,
+    holder: holder,
+  );
 }
 
-Future<int> _applyWithLock({
+/// `segment` / `tags`：外包出去的**判断**回填进来。
+///
+/// `plans` 不走这里——它统一走 [_applyPlansViaUi]（界面在就委派、不在就
+/// 自己写），**收素材与画面自查因此物理上只有一处**
+Future<int> _applyDirect({
   required String what,
   required String id,
   required RenewTask task,
@@ -136,9 +126,6 @@ Future<int> _applyWithLock({
   required StringSink? out,
   bool? visual,
   String? holder,
-  MiaoaContentService? contentService,
-  CandidateProbe? candidateProbe,
-  Future<FrameCheck> Function(int id)? frameCheckOf,
 }) async {
   final String raw;
   try {
@@ -164,7 +151,7 @@ Future<int> _applyWithLock({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   if (what == 'segment') {
     await stage.begin('正在应用切分',
@@ -176,48 +163,18 @@ Future<int> _applyWithLock({
       stage.end();
     }
   }
-  if (what == 'tags') {
-    await stage.begin('正在应用标签',
-        focus: const AgentFocus(module: 'workbench'));
-    try {
-      return await _applyTags(
-          decoded, task, dataDir, repository, sink, out ?? stdout);
-    } finally {
-      stage.end();
-    }
+  await stage.begin('正在应用标签',
+      focus: const AgentFocus(module: 'workbench'));
+  try {
+    return await _applyTags(
+        decoded, task, dataDir, repository, sink, out ?? stdout);
+  } finally {
+    stage.end();
   }
-
-  final validation = parsePlans(decoded, task);
-  if (!validation.ok) {
-    for (final problem in validation.errors) {
-      sink.writeln('· $problem');
-    }
-    return exitBadUsage;
-  }
-
-  final units = task.units ?? const <SemanticUnit>[];
-  final picked = await gatherPickedMaterials(
-    replacements: projectPlansToReplacements(validation.plans, units),
-    task: task,
-    dataDir: dataDir,
-    contentService: contentService,
-    candidateProbe: candidateProbe,
-    frameCheckOf: frameCheckOf,
-  );
-  return _commitPlans(
-    dataDir: dataDir,
-    task: task,
-    repository: repository,
-    raw: raw,
-    plans: validation.plans,
-    picked: picked,
-    sink: sink,
-    out: out,
-  );
 }
 
-/// 落盘方案：**直写路径**（界面没占锁）和**委派兜底**（界面没跟上，
-/// Agent 自己写）共用同一份——避免同一件事两处算
+/// 落盘方案：**直写路径**（界面不在这条任务上）和**委派兜底**（界面在、
+/// 但没跟上）共用同一份——避免同一件事两处算
 Future<int> _commitPlans({
   required Directory dataDir,
   required RenewTask task,

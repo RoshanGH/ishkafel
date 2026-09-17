@@ -5,15 +5,12 @@ import '../../core/script/script_doc.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/uploaded_voice.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
 /// `ishkafel script voice-file <任务> --line N <音频文件>` ——
@@ -76,22 +73,11 @@ Future<int> runScriptVoiceFileCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」占着，'
-        '先不动它了。');
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   final focus =
       AgentFocus(module: 'director', lineIndex: index, panel: AgentPanel.voice);
@@ -209,6 +195,5 @@ Future<int> runScriptVoiceFileCommand({
   } finally {
     // 收工要撤在场状态，否则界面会一直显示「Agent 正在操作」，人动不了手
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }

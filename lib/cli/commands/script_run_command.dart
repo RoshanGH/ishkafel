@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -24,7 +23,6 @@ import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
@@ -33,9 +31,7 @@ import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
 import '../voice_baseline.dart';
 import '../agent_stage.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
 import '../tag_group_lookup.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
@@ -143,30 +139,11 @@ Future<int> runScriptExtractCommand({
         'speech_access_token 放到 <数据目录>/credentials 或 ./.secrets');
     return exitEnv;
   }
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   final visualStage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await visualStage.begin('正在识别参考片的台词',
       focus: const AgentFocus(module: 'director'));
@@ -253,9 +230,7 @@ Future<int> runScriptExtractCommand({
     sink.writeln(e.message);
     return exitFailed;
   } finally {
-    heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -343,25 +318,6 @@ Future<int> runScriptVoiceCommand({
   // 行的**身份**先固定下来：循环里每轮重读盘，下标会漂，id 不会
   final targetIds = [for (final i in targets) doc.lines[i].id];
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   // **开工先说清这一轮要配几句、已经好了几句**。
   //
   // 不说的话「续配」看起来和「重来」一模一样：真机上第一次配音被锁挡住
@@ -395,7 +351,7 @@ Future<int> runScriptVoiceCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await voiceStage.begin('正在配 ${targets.length} 句',
       focus: AgentFocus(
@@ -563,9 +519,7 @@ Future<int> runScriptVoiceCommand({
     }, out: out);
     return failed.isEmpty ? 0 : exitFailed;
   } finally {
-    heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -604,25 +558,6 @@ Future<int> runScriptExportCommand({
       '${stamp.hour.toString().padLeft(2, '0')}'
       '${stamp.minute.toString().padLeft(2, '0')}.mp4';
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   // 此前只写了一句话到在场状态：没有模块、没有焦点，于是界面根本不进
   // 那个任务，人盯着任务列表上一行滚动的字，画面纹丝不动
   // （用户当场问的就是这个：「可视化模式吗？为什么只有播报没有界面动效」）
@@ -633,7 +568,7 @@ Future<int> runScriptExportCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   try {
     await exportStage.begin('正在导出成片',
@@ -733,9 +668,7 @@ Future<int> runScriptExportCommand({
     }
     return exitFailed;
   } finally {
-    heartbeat.cancel();
     clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -772,30 +705,14 @@ Future<int> runScriptJianyingCommand({
     return exitBadUsage;
   }
 
-  // 生成草稿不写任务数据，但要占锁：素材落地期间人在界面上换素材，
-  // 草稿会拿到一半新一半旧
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。如果那是你自己起的进程，'
-        '用 ishkafel script show <任务> --json 看看活儿是不是已经干完了');
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await stage.begin('正在生成剪映草稿',
       focus: const AgentFocus(module: 'director'));
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final writer = JianyingWriter(
       sourceOf: (shot) {
@@ -841,8 +758,6 @@ Future<int> runScriptJianyingCommand({
     sink.writeln('生成剪映草稿失败：$e');
     return exitFailed;
   } finally {
-    heartbeat.cancel();
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }

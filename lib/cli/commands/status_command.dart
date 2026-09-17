@@ -2,7 +2,6 @@ import 'dart:io';
 
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../task_status.dart';
@@ -21,7 +20,8 @@ import '../task_status.dart';
 /// 所以这里报三样东西：
 /// 1. 每一步做完没有、做了多少（照流程排）
 /// 2. **下一步照着敲的那条命令**（带真实 id 和行号）
-/// 3. 现场情况：谁占着这条任务、它此刻在干什么、最后一次改动是什么时候
+/// 3. 现场情况：此刻谁在动这条任务、它在干什么、最后一次改动是什么时候。
+///    **这不是一道闸门**——看清了照样写得进去，只是别蒙着眼睛写
 Future<int> runStatusCommand({
   required List<String> rest,
   required Directory dataDir,
@@ -53,12 +53,12 @@ Future<int> runStatusCommand({
   final rows = <Map<String, dynamic>>[];
   for (final task in tasks) {
     final status = statusOf(task);
-    final lock = TaskLockFile(dataDir: dataDir, taskId: task.id).read();
     final busy = readAgentPresence(dataDir: dataDir, taskId: task.id);
     rows.add({
       ...status.toJson(),
-      // **现场情况**：有人占着就别硬写，先看清是谁
-      if (lock != null) 'heldBy': lock.holder,
+      // **现场情况**：有人正在动这条任务就说出来。这不是一道闸门——
+      // 谁都写得进去，只是别蒙着眼睛写
+      if (busy != null) 'busyWith': busy.holder,
       if (busy?.action != null) 'doingNow': busy!.action,
     });
   }
@@ -82,8 +82,8 @@ Future<int> runStatusCommand({
         w.writeln('  ⚠ $b');
       }
     }
-    if (row['heldBy'] != null) {
-      w.writeln('  现在被「${row['heldBy']}」占着'
+    if (row['busyWith'] != null) {
+      w.writeln('  现在「${row['busyWith']}」在动它'
           '${row['doingNow'] == null ? '' : '：${row['doingNow']}'}');
     }
     if (row['next'] != null) w.writeln('  下一步：${row['next']}');

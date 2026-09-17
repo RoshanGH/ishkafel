@@ -6,7 +6,6 @@ import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
 
@@ -96,7 +95,7 @@ Future<int> runSubtitleCommand({
       mode: AgentStageMode.from(visual: visual),
       dataDir: dataDir,
       taskId: task.id,
-      holder: holder ?? agentLockHolder,
+      holder: holder ?? 'Agent',
     );
     await stage.begin('正在改字幕样式（${parsedPreset?.name ?? style.preset.name}）',
         focus: const AgentFocus(module: 'director'));

@@ -9,14 +9,13 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/storage/agent_request.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/ui_where.dart';
 
-/// `apply plans` 撞上界面占着的锁时**委派是首选路径，不是必经之路**
-/// （2026-09-17 第一批 任务 8）。以前是「委派 → 等界面 90 秒 → 超时 →
-/// 报『界面没有回应』」；现在先看界面在不在这条任务上，不在就零等待
-/// 自己直写，在但没应就秒级兜底自己直写——两条路径落盘的都是同一份
-/// `_commitPlans`，人看到的和落盘的同源这条规矩没有破。
+/// `apply plans` **委派是首选路径，不是必经之路**（2026-09-17 第一批
+/// 任务 8）。以前是「委派 → 等界面 90 秒 → 超时 → 报『界面没有回应』」；
+/// 现在先看界面在不在这条任务上，不在就零等待自己直写，在但没应就秒级
+/// 兜底自己直写——两条路径落盘的都是同一份 `_commitPlans`，人看到的和
+/// 落盘的同源这条规矩没有破。
 void main() {
   late Directory dir;
   late FileTaskRepository repo;
@@ -64,9 +63,8 @@ void main() {
     );
   }
 
-  test('界面占着锁但不在这条任务上：零等待，自己直写', () async {
-    TaskLockFile(dataDir: dir, taskId: 't1').acquire('人（在别的任务上）');
-    // 故意不写 ui_where，或者写成别的任务——onScene 应该判定为 false
+  test('界面开着但不在这条任务上：零等待，自己直写', () async {
+    // 故意把 ui_where 写成别的任务——onScene 应该判定为 false
     writeUiWhere(dir, module: 'workbench', taskId: 't999');
 
     final sw = Stopwatch()..start();
@@ -81,7 +79,6 @@ void main() {
   });
 
   test('界面就在这条任务上：走委派，界面应了就用界面落盘的那份', () async {
-    TaskLockFile(dataDir: dir, taskId: 't1').acquire('人（在场）');
     writeUiWhere(dir, module: 'workbench', taskId: 't1');
 
     final ui = Future<void>(() async {
@@ -108,7 +105,6 @@ void main() {
   });
 
   test('界面在，但秒级超时没应：兜底自己直写，绝不报失败', () async {
-    TaskLockFile(dataDir: dir, taskId: 't1').acquire('人（在场，卡住了）');
     writeUiWhere(dir, module: 'workbench', taskId: 't1');
 
     final out = StringBuffer();
@@ -122,7 +118,6 @@ void main() {
   });
 
   test('界面在，明确回了拒绝：不兜底，原样把拒绝理由带回去', () async {
-    TaskLockFile(dataDir: dir, taskId: 't1').acquire('人（在场）');
     writeUiWhere(dir, module: 'workbench', taskId: 't1');
 
     final ui = Future<void>(() async {

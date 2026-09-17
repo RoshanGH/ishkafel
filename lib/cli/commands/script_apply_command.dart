@@ -14,15 +14,11 @@ import '../../core/script/word_shot_insert.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
-import '../gui_lock_guidance.dart';
 import '../agent_stage.dart';
 import '../script_apply.dart';
 
@@ -125,30 +121,18 @@ Future<int> runScriptApplyCommand({
     return exitBadUsage;
   }
 
-  // 先在锁外面校验一遍：不合格就别去打扰正在用界面的人
+  // 先校验一遍：不合格就别去打扰正在用界面的人
   final first = _validate(what, task.script!, payload);
   if (first.isNotEmpty) {
     _reject(first, sink);
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    final current = lock.read();
-    sink.writeln(guiLockGuidance(
-        holder: current?.holder, taskId: task.id));
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   // 可视模式下这一句会把软件拉起来、落到这个任务、等界面真的展示完
   await stage.begin(_actionOf(what, payload), focus: _focusOf(what, payload));
@@ -180,7 +164,6 @@ Future<int> runScriptApplyCommand({
           );
   } finally {
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 

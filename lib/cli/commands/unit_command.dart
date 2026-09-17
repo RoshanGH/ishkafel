@@ -22,11 +22,9 @@ import '../../core/subtitle/subtitle_overlay.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
@@ -81,13 +79,8 @@ Future<int> runUnitCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，改不了');
-    return exitLocked;
-  }
   try {
     final o = out ?? stdout;
     // 这几条都改成片的结构，可视模式下界面要跟过来——人正是为了看你怎么想
@@ -120,7 +113,6 @@ Future<int> runUnitCommand({
     };
   } finally {
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 

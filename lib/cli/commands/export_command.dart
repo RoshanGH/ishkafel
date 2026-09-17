@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../core/storage/ui_action.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/models/semantic_unit.dart';
 
 import '../export_warnings.dart';
 
@@ -12,6 +13,7 @@ import '../../core/audio/bgm_cache_factory.dart';
 import '../../core/audio/material_vocal_cache.dart';
 import '../../core/audio/vocal_separator.dart';
 import '../../core/export/export_runner.dart';
+import '../../core/export/export_plan.dart';
 import '../../core/export/export_spec.dart';
 import '../../core/ffmpeg/ffprobe_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
@@ -20,14 +22,13 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/models/export_record.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/agent_presence.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../delegate.dart';
 import '../plan_submission.dart';
 import 'apply_command.dart';
 
@@ -129,29 +130,63 @@ Future<int> runExportCommand({
           index: i, materialDurations: materialDurations),
   ];
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    final current = lock.read();
-    // **界面占着锁不是冲突，是委派的时机**——和提交方案同一个死结：
-    // 可视模式要求界面停在这个任务上，而导出要求界面不能停在这个任务上，
-    // 于是人最想看着的一步恰恰因为「人在看」而做不了。
-    //
-    // 但导出跑几分钟、又花钱，不适合一路替人点到底：委派的是
-    // 「把导出对话框打开、参数填好」，最后那一下由人点
-    if (isGuiHolder(current?.holder)) {
-      return _openExportInUi(
-        dataDir: dataDir,
-        task: task,
-        outputDir: dest.path,
-        spec: spec,
-        sink: sink,
-        out: out,
-      );
-    }
-    sink.writeln('${current?.holder ?? '别人'} 正在操作这个任务，导不了');
-    return exitLocked;
-  }
+  // **人在这条任务的页面上看着，就请界面把导出对话框打开、参数填好**——
+  // 最后那一下由他点（导出跑几分钟、直接出交付物、又花钱，不替他点）。
+  //
+  // 界面不在这条任务上就**根本不委派**：自己导，一秒都不等。此前这一段
+  // 深埋在「界面占着锁」里，于是人最想看着的一步恰恰因为「人在看」才走得通，
+  // 反过来人不在时又要先撞一次锁——因果是反的。
+  return delegateOrDoItYourself<int>(
+    dataDir: dataDir,
+    taskId: task.id,
+    // 「对话框开了没」是界面几乎立刻能答的一件事，但它前面可能排着一次
+    // 页面跳转，所以给得比提交方案（秒级）宽一点
+    timeout: const Duration(seconds: 30),
+    viaUi: () => _openExportInUi(
+      dataDir: dataDir,
+      task: task,
+      outputDir: dest.path,
+      spec: spec,
+      sink: sink,
+      out: out,
+    ),
+    myself: () => _exportMyself(
+      task: task,
+      units: units,
+      combos: combos,
+      plans: validation.plans,
+      spec: spec,
+      dest: dest,
+      dataDir: dataDir,
+      repository: repository,
+      id: id,
+      visual: visual,
+      holder: holder,
+      sink: sink,
+      out: out,
+    ),
+  );
+}
 
+/// 自己导：这条命令真正出成片的那一段。
+///
+/// 委派给界面那条路走不通（界面不在这条任务上、或者没接单）时走这里——
+/// **它永远走得通**，不会因为「有人占着」而失败。
+Future<int> _exportMyself({
+  required RenewTask task,
+  required List<SemanticUnit> units,
+  required List<ExportCombination> combos,
+  required List<SubmittedPlan> plans,
+  required ExportSpec spec,
+  required Directory dest,
+  required Directory dataDir,
+  required FileTaskRepository repository,
+  required String id,
+  required bool? visual,
+  required String? holder,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
   // 这批素材有什么问题先说清楚——**不拦，但绝不能不说**。
   // 界面上的导出确认页会点名，这条路一度一声不吭：Agent 查得到
   // （task --json 里有），导出时不提，等于把「要不要用这条素材」
@@ -176,7 +211,7 @@ Future<int> runExportCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await stage.begin('正在导出 ${combos.length} 条成片',
       focus: const AgentFocus(module: 'workbench'));
@@ -283,7 +318,6 @@ Future<int> runExportCommand({
         '成片已经导出到 ${dest.path}，但任务里查不到这条导出记录了。');
   }
   stage.end();
-  lock.release(holder ?? agentLockHolder);
 
   emitJson({
     'outputDir': dest.path,
@@ -292,7 +326,7 @@ Future<int> runExportCommand({
     'results': [
       for (var i = 0; i < outcomes.length; i++)
         {
-          'name': validation.plans[i].name,
+          'name': plans[i].name,
           'path': outcomes[i].path,
           'failure': outcomes[i].failure,
           // 导成了但有话要说（目前只有「这一段过载了」）。**存了就要报**：
@@ -380,7 +414,7 @@ ExportSpec? _parseSpec({
 /// 为什么不替人点到底：导出跑几分钟、直接产出交付物、而且花钱。
 /// 提交方案那种「下单 -> 界面做完 -> 回执」的节奏在这儿不合适，
 /// 人在旁边时让他确认一下反而是对的。
-Future<int> _openExportInUi({
+Future<int?> _openExportInUi({
   required Directory dataDir,
   required RenewTask task,
   required String outputDir,
@@ -408,9 +442,11 @@ Future<int> _openExportInUi({
       id: id,
       timeout: const Duration(seconds: 30));
   if (result == null) {
-    sink.writeln('界面没有回应（等了 30 秒）。让用户看一眼那个页面，'
-        '或者把界面挪开再跑一次');
-    return exitEnv;
+    // 界面没接这一单。**把请求收回来**，免得它过一会儿才弹出一个
+    // 谁也没在等的对话框；然后交给调用方自己导——绝不返回失败
+    consumeAgentRequest(dataDir: dataDir, taskId: task.id);
+    sink.writeln('界面没接这一单（等了 30 秒），我自己导。');
+    return null;
   }
   if (!result.ok) {
     sink.writeln('没能打开导出：${result.message}');

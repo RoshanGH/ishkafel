@@ -10,7 +10,6 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/agent_request.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/ui_where.dart';
 
 /// `ishkafel review list / drop / keep` —— **人在审片台看着，让 Agent 动手**。
@@ -111,15 +110,19 @@ void main() {
       expect(readAgentPresence(dataDir: dir, taskId: 'r1'), isNull);
     });
 
-    test('另一个 Agent 占着就写不进去，明说是谁', () async {
-      // 用**别的**进程号：同一个持有者不算冲突，会直接写进去。
-      // 不能拿 pid+1——并行跑测试时那个进程可能真的存在，
-      // 锁到底算不算失效就成了掷骰子（真机上全量跑时挂过）
-      final other = 'agent:$pid 的另一个会话';
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire(other);
-      final err = StringBuffer();
-      expect(await run(['drop', 'r1'], items: '0:-:100', err: err), exitLocked);
-      expect(err.toString(), contains(other));
+    test('另一个 Agent 正在动这条任务：照样写得进去，不会被挡住', () async {
+      // 锁删掉之后**没有任何一条路径会因为「有人占着」而失败**。
+      // 两边同时写不再互相抹掉：唯一写入口 TaskMutation 落盘前重读 + 版本
+      // 校验，被抢写就重跑一轮；谁改了什么，改动日志里都有
+      writeAgentPresence(
+        dataDir: dir,
+        taskId: 'r1',
+        presence: AgentPresence(
+            holder: 'agent:另一个会话',
+            at: DateTime.now(),
+            action: '正在剔素材'),
+      );
+      expect(await run(['drop', 'r1'], items: '0:-:100'), 0);
     });
   });
 
@@ -129,7 +132,6 @@ void main() {
   /// 不再报失败——可视化一出问题不该把 Agent 挡住。
   group('界面开着时委派给界面', () {
     setUp(() {
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('人（审核中）');
       // 委派只在界面确实停在这条任务上时才有意义——不写这一句，
       // delegateOrDoItYourself 会判定 onScene 为 false，直接零等待自己写
       writeUiWhere(dir, module: 'review', taskId: 'r1');
@@ -204,12 +206,11 @@ void main() {
     });
   });
 
-  /// 界面占着锁，但它并不在这条任务上（比如打开过又切走了，锁没跟着放）：
+  /// 界面开着，但它并不在这条任务上（比如打开过又切走了）：
   /// **零等待，直接自己直写**——委派只在人确实看着的时候才有意义，
   /// 少了这条判断，界面开着但没看这条任务时每条写命令都要白等一次超时
-  group('界面占着锁但不在这条任务上', () {
+  group('界面开着但不在这条任务上', () {
     setUp(() {
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('人（在别的任务上）');
       writeUiWhere(dir, module: 'review', taskId: 'r999');
     });
 

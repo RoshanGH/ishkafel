@@ -15,7 +15,6 @@ import 'package:ishkafel/cli/commands/log_command.dart';
 import 'package:ishkafel/cli/commands/peek_command.dart';
 import 'package:ishkafel/cli/commands/subtitle_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
@@ -151,7 +150,7 @@ Future<void> main(List<String> args) async {
     failWith(e.message, code: exitBadUsage);
   }
 
-  // 人在 Agent 那头喊停（Ctrl+C）时**立刻放手**：撤掉在场状态与锁。
+  // 人在 Agent 那头喊停（Ctrl+C）时**立刻放手**：撤掉在场状态。
   //
   // 不这么做的话，人按了停止还要干等一分钟心跳超时才能自己动手——
   // 「随时插手」就成了一句空话。这正是站在实习生旁边最要紧的那件事：
@@ -390,7 +389,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
                    在现场——命令自己也会确认，这条是给你的显式入口。
                    已经在那一页就直接返回，不会把页面弹来弹去
   ui tasks         把界面支开、退回任务列表。**可视模式下一般用不着**：
-                   撞上界面的锁时命令会自动请它让位（人留在那一页看着）。
+                   人开着那一页从来不会挡住任何写操作。
                    支开就等于关掉了可视化现场，得用 ui open 才叫得回来
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
   review drop <id> --items 0:-:100,1:2:202
@@ -411,7 +410,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 ${parser.usage}
 ''';
 
-/// Ctrl+C / kill 时把这个任务的在场状态与锁撤干净，人立刻能接手。
+/// Ctrl+C / kill 时把这个任务的在场状态撤干净，界面立刻不再显示「有人在动它」。
 ///
 /// 任务 id 从命令参数里认（`script apply shots <task>` 这类第二个位置），
 /// 认不出就只撤在场目录里跟本进程有关的那一份——宁可少撤，不要撤错别人的
@@ -424,10 +423,9 @@ void _installInterruptHandler({
       try {
         clearAgentPresence(dataDir: dataDir, taskId: id);
         clearAgentAck(dataDir: dataDir, taskId: id);
-        TaskLockFile(dataDir: dataDir, taskId: id).release('Agent');
       } catch (_) {}
     }
-    stderr.writeln('已停止，界面可以动了。');
+    stderr.writeln('已停止。');
     exit(130); // 130 = 被 SIGINT 中断，与 shell 的惯例一致
   }
 

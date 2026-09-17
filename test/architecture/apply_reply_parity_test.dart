@@ -27,18 +27,17 @@ void main() {
   }
 
   test('两条路给的是同一份报告，不是各写一份', () {
-    // 2026-09-17 第一批 任务 8 之后：_applyWithLock 的直写分支和
-    // _applyPlansViaUi 的委派兜底分支都改call 同一个 _commitPlans
-    // （见下一条测试），不再各自拼 planApplyReport——比「两处都调用
-    // planApplyReport」更严格：现在物理上只有一处调用点
+    // 2026-09-17 第一批 任务 8 之后：委派和兜底直写都走同一个
+    // _commitPlans（见下一条测试），不再各自拼 planApplyReport——
+    // 比「两处都调用 planApplyReport」更严格：物理上只有一处调用点。
+    // 任务 9 删掉锁之后，plans 这条线整个收进 _applyPlansViaUi
     expect(bodyOf('_commitPlans'), contains('planApplyReport'),
         reason: '两条路共用的落盘函数丢了 planApplyReport，报告就不完整');
-    for (final name in ['_applyWithLock', '_applyPlansViaUi']) {
-      expect(bodyOf(name), anyOf(contains('planApplyReport'), contains('_commitPlans')),
-          reason: '$name 自己拼返回，或者没有走共用的 _commitPlans。'
-              '两条路各拼一份的话迟早只有一份是全的'
-              '——委派那份一度只有 {ok, via, message, plans, units}');
-    }
+    expect(bodyOf('_applyPlansViaUi'),
+        anyOf(contains('planApplyReport'), contains('_commitPlans')),
+        reason: '_applyPlansViaUi 自己拼返回，或者没有走共用的 _commitPlans。'
+            '两条路各拼一份的话迟早只有一份是全的'
+            '——委派那份一度只有 {ok, via, message, plans, units}');
   });
 
   test('那份报告里，会毁掉整片的两条都要有', () {
