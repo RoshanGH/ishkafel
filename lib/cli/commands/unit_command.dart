@@ -489,6 +489,17 @@ Future<int> _audio(
     edit: (fresh) {
       final freshUnits = fresh.units ?? const [];
       final ui = _locateUnit(freshUnits, targetUnitUid, unit);
+      // 单元没了、或者这一刻这个单元的镜头数比提交时少了（镜头数量变了
+      // 也算数——shot 下标不再指向同一个东西）：照实说清，不硬塞、
+      // 不让 [] 越界直接把 RangeError 从 edit 里甩出去（2026-09-17
+      // 复审指出：那样退出的是个未捕获异常，不属于命令该有的三类失败）
+      if (ui < 0 || shot < 0 || shot >= freshUnits[ui].shots.length) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '这个单元或镜头在窗口内已经不在了'},
+        );
+      }
       final freshShots = freshUnits[ui].shots;
       final beforeShot = freshShots[shot];
       return TaskEdit(
@@ -612,6 +623,15 @@ Future<int> _sourceAudio(
     edit: (fresh) {
       final freshUnits = fresh.units ?? const [];
       final ui = _locateUnit(freshUnits, targetUnitUid, unit);
+      // 单元没了、或者镜头数比提交时少了：照实说清，不硬塞、不让越界
+      // 直接把 RangeError 从 edit 里甩出去
+      if (ui < 0 || shot < 0 || shot >= freshUnits[ui].shots.length) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '这个单元或镜头在窗口内已经不在了'},
+        );
+      }
       final freshShots = freshUnits[ui].shots;
       final beforeShot = freshShots[shot];
       return TaskEdit(
@@ -713,6 +733,15 @@ Future<int> _subtitle(
           if (p.trim().isNotEmpty) p.trim(),
       ];
       final ui = _locateUnit(freshUnits, targetUnitUid, unit);
+      // 单元没了、或者镜头数比提交时少了：照实说清，不让越界直接把
+      // RangeError 从 edit 里甩出去
+      if (ui < 0 || shot < 0 || shot >= freshUnits[ui].shots.length) {
+        return TaskEdit(
+          task: fresh,
+          before: {'present': false},
+          after: {'present': false, 'note': '这个单元或镜头在窗口内已经不在了'},
+        );
+      }
       final freshShot = freshUnits[ui].shots[shot];
       final span = freshShot.endMs - freshShot.startMs;
       final lines = [
