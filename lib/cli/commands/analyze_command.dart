@@ -174,7 +174,7 @@ Future<int> runAnalyzeCommand({
         pipeline.assemble(task: task, drafts: drafts, prepared: prepared);
     final ready = await mutation.apply(
       taskId: task.id,
-      op: 'unit.segment.apply',
+      op: 'units.assemble',
       edit: (fresh) => TaskEdit(
         task: fresh.copyWith(
           units: units,
