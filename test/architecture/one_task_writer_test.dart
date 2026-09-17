@@ -57,7 +57,9 @@ void main() {
           final receiver = m.group(1)!;
           // 只认任务仓库那一类接收者，别把别的 save 误伤了
           if (!RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
-              .hasMatch(receiver)) continue;
+              .hasMatch(receiver)) {
+            continue;
+          }
           final fn = _enclosingTopLevelFunction(lines, i);
           if (fn != null && allowedFns.contains(fn)) continue;
           offenders.add('$rel${fn == null ? '' : ' → $fn'} → $receiver.save(');
