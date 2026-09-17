@@ -35,6 +35,8 @@ import '../../core/storage/doc_watch.dart';
 import '../../core/ui/text_editing_keys.dart';
 import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
+import '../tasks/gui_task_mutation.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
@@ -125,6 +127,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   Timer? _autosave;
   bool _saving = false;
+
+  /// 上一次自动保存没存成的原因；null = 一切正常。
+  ///
+  /// **不能只写日志**：这一页的保存是不等结果的（`unawaited`），失败了顶上
+  /// 那句「更改已自动保存」照旧挂着，人以为存好了就关窗走人，改的东西就没了
+  String? _saveError;
   TaskLockFile? _lock;
   Timer? _lockHeartbeat;
   String? _blockedBy;
@@ -337,6 +345,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   void initState() {
     super.initState();
     _repo = ref.read(taskRepositoryProvider);
+    // **数据目录在这里就取好**：它不是预览的东西——落盘、内容指纹闸、
+    // 改动日志都靠它。原来只在 `_setupPreview` 里设，而那个方法在建不出
+    // 播放器时会提前 return（机器上没 mpv、测试里 playbackFactory 给 null
+    // 都会走到），于是 `_dataDir` 一直是 null：指纹闸形同虚设，这一页
+    // 整份盖回去也没人拦
+    final dataDir = ref.read(dataDirProvider);
+    _dataDir = dataDir;
+    _docPrint = dataDir == null ? null : taskFingerprint(dataDir, _task.id);
     _acquireLock();
     _mediaCache = _buildMediaCache();
     _mediaCache?.addListener(_onMediaCache);
@@ -453,8 +469,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
             path: path, frameRate: frameRateArg(_exportSpec.fps.toDouble())),
       );
     }
-    _dataDir = dataDir;
-    _docPrint = dataDir == null ? null : taskFingerprint(dataDir, _task.id);
     _schedulePreviewRebuild();
     // 进门顺手收一次无主配音：换过音色的旧 mp3 没人引用了，但任务还活着，
     // 孤儿清扫碰不到它们。**只能在这一刻收**——撤销栈这时必然是空的，
@@ -1372,8 +1386,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
   }
 
+  /// 页面已经在拆了。**`mounted` 在 dispose 里还是 true**（元素是 dispose
+  /// 返回之后才解绑的），而这一刻 setState 会直接断言崩掉——dispose 里
+  /// 还要落最后一次盘，那条路上的任何一句「说出来」都得先看这面旗
+  bool _disposed = false;
+
   @override
   void dispose() {
+    _disposed = true;
     _autosave?.cancel();
     _flushNow();
     _lockHeartbeat?.cancel();
@@ -2609,19 +2629,82 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 它自己会发现指纹变了
       return;
     }
-    _task = _task.copyWith(script: _doc, updatedAt: DateTime.now());
-    unawaited(_repo.save(_task).then((_) {
+    // **从这一刻起把 doc 定死**：`TaskMutation.apply` 的 edit 可能被重跑
+    // 一次（写盘前发现被抢写），闭包里再去读 `_doc` 的话，人这会儿又敲了
+    // 两个字，两次跑出来的就是两份不同的东西
+    final doc = _doc;
+    _task = _task.copyWith(script: doc, updatedAt: DateTime.now());
+    unawaited(_saveDoc(doc));
+  }
+
+  /// 把脚本落盘。
+  ///
+  /// **只换 `script` 这一个字段，其余交给盘上那份**：这一页手上这份 `_task`
+  /// 是打开那一刻的样子，Agent 这期间改过的名字、标签组、挑过的素材都在盘上，
+  /// 整份写回去会把它们抹掉。上面那道内容指纹闸挡的是「脚本本身被外面改过」，
+  /// 和这里是两件事，两道都要有。
+  ///
+  /// **不等结果的写入更要有人说话**：调用方 `unawaited` 掉了，失败只写日志的话
+  /// 顶上那句「更改已自动保存」还挂着，人以为存好了就关窗走人。
+  Future<void> _saveDoc(ScriptDoc doc) async {
+    final taskId = _task.id;
+    try {
+      final saved = await humanMutation(
+              repo: _repo, dataDir: _dataDir, actor: actorDirector)
+          .apply(
+        taskId: taskId,
+        op: 'script.edit',
+        edit: (fresh) => TaskEdit(
+          task: fresh.copyWith(script: doc),
+          before: {'lines': _lineFacts(fresh.script)},
+          after: {'lines': _lineFacts(doc)},
+        ),
+      );
+      if (saved == null) {
+        _reportSaveFailure('这条任务已经被删了，刚才的改动没能存下。');
+        return;
+      }
       // 写完把基线对齐到刚写出去的那一版，否则下一次会误判成「被人动过」
       final d = _dataDir;
-      if (d != null) _docPrint = taskFingerprint(d, _task.id);
-      if (mounted) setState(() => _saving = false);
+      if (d != null) _docPrint = taskFingerprint(d, taskId);
+      if (mounted && !_disposed) {
+        setState(() {
+          _saving = false;
+          _saveError = null;
+        });
+      }
       // 顺手把封面对上：脚本任务的封面是成片第一帧（第一行第一镜）。
       // 没有它，列表页上一条排好的片子和一个空任务长得一模一样
       unawaited(_refreshCover());
-    }).catchError((Object e) {
-      AppLog.warn('脚本落库失败（taskId=${_task.id}）：$e');
-    }));
+    } catch (e) {
+      AppLog.warn('脚本落库失败（taskId=$taskId）：$e');
+      _reportSaveFailure('保存失败：$e');
+    }
   }
+
+  /// 保存没成的话，顶上那句「更改已自动保存」必须换成说实话的那一句。
+  /// 页面已经销毁就只剩日志（上面已经写过了）——那时人也看不见任何东西了
+  void _reportSaveFailure(String message) {
+    if (!mounted || _disposed) return;
+    setState(() {
+      _saving = false;
+      _saveError = message;
+    });
+  }
+
+  /// 一份脚本的判断依据：每一行的台词、挑了几镜、有没有配音。
+  ///
+  /// **按行的身份记**（`ScriptLine.id`）：行会被重排、被删，按位置记的话
+  /// 「第 3 行改了」下次就指向别人了
+  static List<Map<String, dynamic>> _lineFacts(ScriptDoc? doc) => [
+        for (final line in doc?.lines ?? const <ScriptLine>[])
+          {
+            'lineId': line.id,
+            'text': line.text,
+            'shotCount': line.shots.length,
+            'hasVoiceover': line.voiceover != null,
+          },
+      ];
 
   /// 更新封面。按内容指纹缓存，第一镜没换就不重抽。
   ///
@@ -2639,7 +2722,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
     if (cover == null || cover == _task.coverPath || !mounted) return;
     _task = _task.copyWith(coverPath: cover);
-    unawaited(_repo.save(_task));
+    try {
+      final saved = await humanMutation(
+              repo: _repo, dataDir: dataDir, actor: actorDirector)
+          .apply(
+        taskId: _task.id,
+        op: 'script.cover.set',
+        note: '脚本改过之后，封面跟着换成新的第一镜',
+        edit: (fresh) => TaskEdit(
+          task: fresh.copyWith(coverPath: cover),
+          before: {'coverPath': fresh.coverPath},
+          after: {'coverPath': cover},
+        ),
+      );
+      // 封面没存上不影响人继续干活（列表页上那张图旧一点而已），
+      // 但不能不吭声——查起来会以为封面逻辑坏了
+      if (saved == null) {
+        AppLog.warn('封面没存上：任务 ${_task.id} 已经被删了。');
+      }
+    } catch (e) {
+      AppLog.warn('封面落库失败（taskId=${_task.id}）：$e');
+    }
   }
 
   bool get _scriptIsPristine =>
@@ -3905,10 +4008,22 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           const Spacer(),
           _voiceBaselineChip(),
           const SizedBox(width: AppSpacing.sm),
-          Text(_saving ? '保存中…' : '更改已自动保存',
-              style: const TextStyle(
-                  fontSize: AppFontSize.caption,
-                  color: AppColors.textTertiary)),
+          // 保存没成就在这儿说实话。挂着「更改已自动保存」而盘上其实没存，
+          // 人关了窗才发现东西没了——那是最糟的一种失败
+          Tooltip(
+            message: _saveError ?? '',
+            child: Text(
+                _saveError != null
+                    ? '没保存上：$_saveError'
+                    : (_saving ? '保存中…' : '更改已自动保存'),
+                key: const ValueKey('director-save-status'),
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                    fontSize: AppFontSize.caption,
+                    color: _saveError != null
+                        ? AppColors.red
+                        : AppColors.textTertiary)),
+          ),
           const SizedBox(width: AppSpacing.sm),
           IconButton(
             key: const ValueKey('director-bgm'),

@@ -1249,6 +1249,7 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 | op | 记的是什么 |
 |---|---|
 | `script.extract` | 从参考片提取台词，建好脚本行 |
+| `script.edit` | 编导台里改了脚本（自动保存）；按行身份记台词/镜头数/有没有配音 |
 | `script.voice.baseline` | `script voice --voice` 定了本片配音基调（默认音色） |
 | `script.voice.generate` | 给某一行生成了配音；台词原文 + 配音时长（**每句一条**） |
 | `voice.upload` | `script voice-file`：用自己录的音频换掉某一行的配音；改前改后的台词文本、配音时长 |
