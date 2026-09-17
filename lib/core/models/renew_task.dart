@@ -13,6 +13,7 @@ import '../audio/voice_plan.dart';
 import '../replacement/picked_material.dart';
 import '../script/script_doc.dart';
 import '../replacement/replacement_plan.dart';
+import '../storage/edit_stamp.dart';
 import 'project_ref.dart';
 import 'tag_group_ref.dart';
 import 'video_info.dart';
@@ -132,6 +133,10 @@ class RenewTask {
   /// 要按位置拿（画时间线、导出）时用 [replacementsFor]。
   final Map<String, UnitReplacement> replacementsByUid;
 
+  /// 每一处是谁定的、什么时候定的。key 见 `edit_stamp.dart` 的约定（按 uid）。
+  /// Agent 看 `task --json` 时当场就知道自己要动的是谁的东西
+  final Map<String, EditStamp> editedBy;
+
   /// 每一次导出的记录（时间倒序由读取方决定，这里按发生顺序追加）。
   /// 项目没有终态，**导出才是那件有始有终的事**——见 [ExportRecord]
   final List<ExportRecord> exports;
@@ -214,6 +219,7 @@ class RenewTask {
     this.shotTagPrompt = '',
     this.analysisError,
     Map<String, UnitReplacement> replacementsByUid = const {},
+    this.editedBy = const {},
     List<PickedMaterial> pickedMaterials = const [],
     List<ExportRecord> exports = const [],
     this.bgm = BgmPlan.empty,
@@ -298,6 +304,7 @@ class RenewTask {
     String? analysisError,
     bool clearAnalysisError = false,
     Map<String, UnitReplacement>? replacementsByUid,
+    Map<String, EditStamp>? editedBy,
     List<PickedMaterial>? pickedMaterials,
     List<ExportRecord>? exports,
     BgmPlan? bgm,
@@ -344,6 +351,7 @@ class RenewTask {
                     ? null
                     : this.analysisError),
         replacementsByUid: replacementsByUid ?? this.replacementsByUid,
+        editedBy: editedBy ?? this.editedBy,
         pickedMaterials: pickedMaterials ?? this.pickedMaterials,
         exports: exports ?? this.exports,
         bgm: bgm ?? this.bgm,
@@ -398,6 +406,8 @@ class RenewTask {
                   (replacementsByUid[u.uid] ?? UnitReplacement.keepOriginal())
                       .toJson(unitUid: u.uid),
               ],
+        if (editedBy.isNotEmpty)
+          'editedBy': {for (final e in editedBy.entries) e.key: e.value.toJson()},
         'pickedMaterials': pickedMaterials.map((m) => m.toJson()).toList(),
         'exports': exports.map((e) => e.toJson()).toList(),
         'bgm': bgm.toJson(),
@@ -453,6 +463,12 @@ class RenewTask {
             parsePrompt(json['shotTagPrompt'], json['shotTagGroups']),
         analysisError: json['analysisError'] as String?,
         replacementsByUid: parseReplacements(json['replacements'], units),
+        editedBy: json['editedBy'] is Map
+            ? {
+                for (final e in (json['editedBy'] as Map).entries)
+                  '${e.key}': ?EditStamp.tryFromJson(e.value),
+              }
+            : const {},
         pickedMaterials: PickedMaterial.parseList(json['pickedMaterials']),
         exports: ExportRecord.parseList(json['exports']),
         // 老存档里配乐是按**镜头**记区间的，读出来后按单元换算一次

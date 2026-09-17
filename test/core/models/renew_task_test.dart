@@ -8,6 +8,8 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'package:ishkafel/core/storage/edit_stamp.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 
 void main() {
   final task = RenewTask(
@@ -345,4 +347,33 @@ void main() {
     });
   });
 
+  test('editedBy 存得住、读得回', () {
+    final task = RenewTask(
+      id: 't_1',
+      name: '测试任务',
+      status: RenewTaskStatus.ready,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      editedBy: {
+        'u:u-abc/s:1': EditStamp(by: ActorKind.human, at: DateTime.now()),
+      },
+    );
+    final back = RenewTask.fromJson(task.toJson());
+    expect(back.editedBy['u:u-abc/s:1']!.by, ActorKind.human);
+  });
+
+  test('读不懂的戳被丢掉，其余的照常读回来——一个坏戳不许废掉整条任务', () {
+    final raw = RenewTask(
+      id: 't_1',
+      name: '测试任务',
+      status: RenewTaskStatus.ready,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      editedBy: {'u:good': EditStamp(by: ActorKind.agent, at: DateTime.now())},
+    ).toJson();
+    (raw['editedBy'] as Map)['u:bad'] = {'by': 'human'}; // 缺 at
+
+    final back = RenewTask.fromJson(raw);
+    expect(back.editedBy.keys, ['u:good']);
+  });
 }
