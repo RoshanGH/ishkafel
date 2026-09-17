@@ -98,9 +98,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       AppLog.info('补标签：没有打标服务（AI 凭据未配置），跳过');
       return;
     }
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) {
+      AppLog.info('补标签：数据目录未接线，跳过（补出来的标签没地方记账）');
+      return;
+    }
     final fixed = await TaggingResumer(
       repository: ref.read(taskRepositoryProvider),
       tagging: tagging,
+      dataDir: dataDir,
     ).resumeAll(
       onProgress: (p) {
         if (mounted) setState(() => _tagging = p);

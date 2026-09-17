@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/tagging_service.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
@@ -67,7 +69,18 @@ class _FakeTagging implements TaggingService {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
+/// 改动日志的落点：补上的标签也要记一笔，不然人下次打开看到多出来的标签，
+/// 没有任何地方说得清它们是哪来的
+late Directory dataDir;
+
+/// 这份测试里 resumer 的统一造法（日志落到一次性的临时目录）
+TaggingResumer resumer(TaskRepository repo, TaggingService tagging) =>
+    TaggingResumer(repository: repo, tagging: tagging, dataDir: dataDir);
+
 void main() {
+  setUp(() => dataDir = Directory.systemTemp.createTempSync('ishkafel_resume_'));
+  tearDown(() => dataDir.deleteSync(recursive: true));
+
   Shot shot({String? desc}) => Shot(startMs: 0, endMs: 1000, description: desc);
   var uidSeq = 0;
   // **身份是必需的**：读档时 RenewTask.fromJson 一定跑过 ensureUnitUids，
@@ -92,7 +105,7 @@ void main() {
       task('b', [unit([shot(desc: '看过了')])]),    // 不欠
     ]);
     final tagging = _FakeTagging();
-    final fixed = await TaggingResumer(repository: repo, tagging: tagging)
+    final fixed = await resumer(repo, tagging)
         .resumeAll();
 
     expect(fixed, 1);
@@ -109,18 +122,18 @@ void main() {
       ]),
     ]);
     final tagging = _FakeTagging();
-    await TaggingResumer(repository: repo, tagging: tagging).resumeAll();
+    await resumer(repo, tagging).resumeAll();
     expect(tagging.lastOnly, {1}, reason: '第 0 个打过了，重打是白花钱');
   });
 
   test('补的时候人正在改这条任务：不能拿旧的整个盖回去', () async {
     final repo = _FakeRepo([task('a', [unit([shot()])])]);
     final tagging = _FakeTagging();
-    final resumer = TaggingResumer(repository: repo, tagging: tagging);
+    final r = resumer(repo, tagging);
     // 模拟：打标进行中，人在工作台里把任务改了名
     final before = repo.store['a']!;
     repo.store['a'] = before.copyWith(name: '人刚改的名字');
-    await resumer.resumeAll();
+    await r.resumeAll();
     expect(repo.store['a']!.name, '人刚改的名字',
         reason: '拿手上那份旧的整个覆盖回去，会把他刚做的编辑抹掉');
     expect(repo.store['a']!.units!.first.tags, ['促单']);
@@ -128,8 +141,7 @@ void main() {
 
   test('补失败不该拦住人用软件', () async {
     final repo = _FakeRepo([task('a', [unit([shot()])])]);
-    final fixed = await TaggingResumer(
-            repository: repo, tagging: _FakeTagging(fail: true))
+    final fixed = await resumer(repo, _FakeTagging(fail: true))
         .resumeAll();
     expect(fixed, 0);
     expect(repo.store['a'], isNotNull, reason: '任务本身不能因此坏掉');
@@ -142,7 +154,7 @@ void main() {
     ]);
     final tagging = _FakeTagging();
     var n = 0;
-    await TaggingResumer(repository: repo, tagging: tagging)
+    await resumer(repo, tagging)
         .resumeAll(shouldStop: () => n++ > 0);
     expect(tagging.calls, lessThanOrEqualTo(1));
   });
@@ -175,7 +187,7 @@ void main() {
             .copyWith(units: [b, a.copyWith(index: 1)]);
       };
 
-      await TaggingResumer(repository: repo, tagging: tagging).resumeAll();
+      await resumer(repo, tagging).resumeAll();
 
       final units = repo.store['t']!.units!;
       expect(units[0].uid, 'bbb');
@@ -196,7 +208,7 @@ void main() {
             repo.store['t']!.copyWith(units: [b.copyWith(index: 0)]);
       };
 
-      await TaggingResumer(repository: repo, tagging: tagging).resumeAll();
+      await resumer(repo, tagging).resumeAll();
 
       final units = repo.store['t']!.units!;
       expect(units, hasLength(1));
