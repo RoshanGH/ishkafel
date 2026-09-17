@@ -104,13 +104,11 @@ import '../shared/long_task_dialog.dart';
 import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_repository.dart';
 import '../tasks/gui_task_mutation.dart';
-import 'task_lock_banner.dart';
 import 'subtitle_popover.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
@@ -201,54 +199,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 留着引用只为离开时 [SpeedFitter.prune] 一次
   SpeedFitter? _speedFitter;
 
-  /// 别人（多半是 Agent）持有的锁；为 null 表示没人占着
-  TaskLock? _lock;
-  Timer? _lockTimer;
-
   /// Agent 此刻在不在、在动哪个单元。**这套跟随是全软件共用的**：
   /// 同一份在场状态，编导台按行滚、这里按单元把播放头挪过去——
   /// 各模块只负责「我怎么把那个位置摆到眼前」，不各造一套协议
   AgentPresence? _agent;
   Timer? _agentPoll;
-
-  /// 锁文件。**在 initState 里就存下来**：dispose 时要放锁，而那时候
-  /// 已经不能再碰 ref（Riverpod 会抛 "Cannot use ref after disposed"）
-  TaskLockFile? _lockFile;
-
-  /// 本进程的身份。横幅上要能说出是谁占着，所以带上 pid
-  String get _lockHolder => 'gui:$pid';
-
-  /// 占住锁并盯着它。
-  ///
-  /// **进工作台就占锁**：人正在编辑而 Agent 同时在写，后写的会把先写的覆盖
-  /// 掉。两个方向都要防，不能只防 Agent 那一边。
-  ///
-  /// 每 5 秒一轮：既给自己的锁续命，也看看是不是被别人抢了。这个间隔比 60 秒
-  /// 的失效阈值密得多——对方一结束或一崩掉，很快就能恢复可编辑，而不是让人
-  /// 干等一分钟；自己这把锁也不会因为一次卡顿就过期。
-  void _watchLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final file = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    _lockFile = file;
-
-    void poll() {
-      // 先试着占住/续命。占不到说明别人正持着，那就进只读
-      final mine = file.heartbeat(_lockHolder) || file.acquire(_lockHolder);
-      final current = mine ? null : file.read();
-      final held = current != null &&
-          current.holder != _lockHolder &&
-          // 带上进程存在性：写锁的 app 已经退了的话，不用干等心跳超时
-          !current.isStale(DateTime.now().toUtc(),
-              processAlive: isProcessAlive);
-      final next = held ? current : null;
-      if (next?.holder == _lock?.holder) return;
-      if (mounted) setState(() => _lock = next);
-    }
-
-    poll();
-    _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
-  }
 
   /// 订阅 Agent 的在场状态，跟着它走：它看哪个单元，就把播放头挪过去。
   /// 展示完这一帧再回执——Agent 靠它决定什么时候走下一步（不猜时间）
@@ -488,17 +443,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     _playhead.value = units[index].startMs;
   }
 
-  /// 离开工作台就放锁——不放的话，别人要等 60 秒超时才能接手
-  void _releaseLock() => _lockFile?.release(_lockHolder);
-
-  void _takeoverLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    TaskLockFile(dataDir: dataDir, taskId: widget.task.id)
-        .forceTakeover(_lockHolder);
-    setState(() => _lock = null);
-  }
-
   /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
   /// 但页面本身只有 [PopScope.canPop] 依赖 dirty，只在它真正翻转时才需要重建。
   bool _lastDirty = false;
@@ -657,7 +601,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       unawaited(_buildSourceProxy());
     }
     _syncPreviewAudio();
-    _watchLock();
     _watchAgent();
   }
 
@@ -836,9 +779,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
-    _lockTimer?.cancel();
     _agentPoll?.cancel();
-    _releaseLock();
     _consequenceTimer?.cancel();
     // 浮层挂在 Overlay 上，页面 pop 不会带走它
     _subtitleStylePanel?.close();
@@ -957,7 +898,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 那是用户照着内容选的曲子，不能悄悄改，所以要弹出来点名。
   Future<void> _reorderUnit(int from, int to) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final next = moveUnit(editor.units, from: from, to: to);
     if (identical(next, editor.units)) return;
 
@@ -1144,7 +1085,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 人刚做的判断就被一个后台步骤抹掉了，而且不问一声。
   Future<void> _editUnitTags(int unitIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final picked = await showTagPicker(
@@ -1169,7 +1110,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 手改视觉镜头的标签（规矩同上，只是词表换成镜头层那几个标签组）
   Future<void> _editShotTags(int unitIndex, int shotIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1265,7 +1206,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// （一边离开才提交、另一边每敲一下就提交，人只会觉得「时好时坏」）
   Future<void> _editSubtitleAtBlock(
       int unitIndex, int shotIndex, Rect blockOnScreen) async {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     await showSubtitlePopover(
       context,
       anchor: blockOnScreen,
@@ -1305,7 +1246,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   void _setSubtitleLines(
       int unitIndex, int shotIndex, List<SubtitleLine> lines) {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     final slot = _subtitleSlot(unitIndex, shotIndex);
     if (slot == null) return;
     setState(() => _task = _task.copyWith(
@@ -1328,7 +1269,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   }
 
   void _resetSubtitle(int unitIndex, int shotIndex) {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     final slot = _subtitleSlot(unitIndex, shotIndex);
     if (slot == null) return;
     setState(() =>
@@ -1408,7 +1349,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _setShotSourceAudio(int unitIndex, int shotIndex,
       MaterialAudioMode? mode, double? volume) {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1436,7 +1377,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _setShotMaterialAudio(int unitIndex, int shotIndex,
       MaterialAudioMode? mode, double? volume) {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1474,7 +1415,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 不给它挑素材，导出会点名拦住，不会拿黑帧顶上。
   void _addUnit() {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final next = _task.isBlank
         ? BlankUnitOps.append(editor.units)
         : SegmentationEditOps.appendUnit(editor.units, fps: editor.fps);
@@ -1494,7 +1435,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         project: _task.project,
         onChanged: (next) {
           final editor = _editor;
-          if (editor == null || !_isEditable || _lock != null) return;
+          if (editor == null || !_isEditable) return;
           final units = BlankUnitOps.setTags(editor.units, unitIndex, next);
           editor.replaceUnitsForBlankTask(
               units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
@@ -1509,7 +1450,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// （见 [shiftReplacementsAfterRemoval] / [shiftBgmAfterRemoval]）。
   Future<void> _deleteBlankUnit(int unitIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     // 「至少留几个」是空白任务的规矩：那条片子整个由分子排出来。有原片的
     // 任务这里删的只是手动加的那个，删光了还有分析切出来的一整条
     if (_task.isBlank && editor.units.length <= blankMinUnits) {
@@ -2109,13 +2050,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               ?.name,
       segmenting: _segmentingUnit == unitIndex,
       retagging: _retaggingBaseUnit == unitIndex,
-      onSegment: _isEditable && _lock == null
+      onSegment: _isEditable
           ? () => _segmentUnitBase(unitIndex)
           : null,
-      onUnpin: _isEditable && _lock == null && hasOwnBaseShots(unit)
+      onUnpin: _isEditable && hasOwnBaseShots(unit)
           ? () => _unpinUnitBase(unitIndex)
           : null,
-      onRetag: _isEditable && _lock == null
+      onRetag: _isEditable
           ? () => _retagBaseUnit(unitIndex)
           : null,
     );
@@ -3319,7 +3260,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           onBack: _handleBackRequest,
           onEditTagGroups: _isEditable ? _editTagGroups : null,
           onEditMaterialAudio:
-              _isEditable && _lock == null ? _editMaterialAudio : null,
+              _isEditable ? _editMaterialAudio : null,
           materialAudioOn: _task.materialAudio.mode.audible,
           onEditSubtitle: _isEditable ? _editSubtitleStyle : null,
         ),
@@ -3351,7 +3292,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 text: err,
                 building: false,
                 retryLabel: '重新分离',
-                onRetry: _isEditable && _lock == null
+                onRetry: _isEditable
                     ? () {
                         final sel = _editor?.selection;
                         final u = sel?.unitIndex;
@@ -3375,19 +3316,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 building: false,
                 retryLabel: '重新分离',
                 // 只读时不给出口：这条任务正被别人占着，补出来也写不进去
-                onRetry: notice.retryable && _isEditable && _lock == null
+                onRetry: notice.retryable && _isEditable
                     ? _separateVocals
                     : null,
               ),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
-            // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
-            if (_lock case final lock?)
-              TaskLockBanner(
-                holder: lock.holder,
-                action: _agent?.action,
-                onTakeover: _takeoverLock,
-              ),
             Expanded(
               child: WorkbenchBody(
                 // Agent 在看哪儿，界面就跟到哪儿——像人自己点过去那样
@@ -3399,32 +3333,32 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 editor: editor,
                 // 两种任务都能加单元。有原片的任务加出来的那个**原片上没有它**
                 // （hasSource=false）：画面只能来自挑到的素材，成片因此比原片长
-                onAddUnit: _isEditable && _lock == null ? _addUnit : null,
+                onAddUnit: _isEditable ? _addUnit : null,
                 onReorderUnit:
-                    _isEditable && _lock == null ? _reorderUnit : null,
+                    _isEditable ? _reorderUnit : null,
                 materialAudioDefault: _task.materialAudio,
                 shotReplaced: _shotReplaced,
                 shotMaterialVoiceover: _shotMaterialVoiceover,
                 onEditUnitTags:
-                    _isEditable && _lock == null ? _editUnitTags : null,
+                    _isEditable ? _editUnitTags : null,
                 onEditShotTags:
-                    _isEditable && _lock == null ? _editShotTags : null,
+                    _isEditable ? _editShotTags : null,
                 subtitleLinesOf: _subtitleLinesOf,
                 subtitleEdited: _subtitleEdited,
                 subtitleTextOf: _subtitleTextOf,
                 subtitleLineCount: _subtitleLineCount,
                 onEditSubtitleBlock: _editSubtitleAtBlock,
                 onSubtitleChanged:
-                    _isEditable && _lock == null ? _setSubtitleLines : null,
+                    _isEditable ? _setSubtitleLines : null,
                 onSubtitleReset:
-                    _isEditable && _lock == null ? _resetSubtitle : null,
+                    _isEditable ? _resetSubtitle : null,
                 onShotMaterialAudioChanged:
-                    _isEditable && _lock == null ? _setShotMaterialAudio : null,
+                    _isEditable ? _setShotMaterialAudio : null,
                 sourceAudioDefault: _task.sourceAudio,
                 // 时间线靠它判断「字幕改过没有、要不要重画」
                 subtitleTrack: _task.subtitleTrack,
                 onShotSourceAudioChanged:
-                    _isEditable && _lock == null ? _setShotSourceAudio : null,
+                    _isEditable ? _setShotSourceAudio : null,
                 unitVoiceSwapped: (i) {
                   final units = editor.units;
                   return i < units.length &&
@@ -3440,7 +3374,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                     : null,
                 baseCard: _baseCard,
                 blankTask: _task.isBlank,
-                onDeleteUnit: _isEditable && _lock == null
+                onDeleteUnit: _isEditable
                     ? _deleteBlankUnit
                     : null,
                 // 有原片的任务只有**手动加的**单元能删。分析切出来的单元
@@ -3460,7 +3394,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 waveStatus: _waveStatus,
                 baseMedia: _baseMedia,
                 playhead: _playhead,
-                readOnly: !_isEditable || _lock != null,
+                readOnly: !_isEditable,
                 clock: widget.clock,
                 voices: _task.voices,
                 replacements: _replacements ?? const [],
@@ -3484,7 +3418,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   unitTagGroups: _task.unitTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
-                  readOnly: !_isEditable || _lock != null,
+                  readOnly: !_isEditable,
                   project: _task.project,
                   pickedMaterials: _task.pickedMaterials,
                   onPickedMaterialsChanged: _onPickedMaterialsChanged,
@@ -3515,7 +3449,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               onExport: blocked == null ? _openExport : null,
               onJianying: _jianyingBusy || !_isEditable ? null : _openJianying,
               onReview: _isEditable &&
-                      _lock == null &&
                       collectReviewItems(_replacements ?? const []).isNotEmpty
                   ? _openReview
                   : null,

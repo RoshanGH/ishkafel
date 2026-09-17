@@ -37,9 +37,7 @@ import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
 import '../tasks/gui_task_mutation.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/agent_request.dart';
-import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_repository.dart';
 import 'dart:io';
 
@@ -133,9 +131,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// **不能只写日志**：这一页的保存是不等结果的（`unawaited`），失败了顶上
   /// 那句「更改已自动保存」照旧挂着，人以为存好了就关窗走人，改的东西就没了
   String? _saveError;
-  TaskLockFile? _lock;
-  Timer? _lockHeartbeat;
-  String? _blockedBy;
 
   _ExtractState? _extract;
 
@@ -353,7 +348,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = ref.read(dataDirProvider);
     _dataDir = dataDir;
     _docPrint = dataDir == null ? null : taskFingerprint(dataDir, _task.id);
-    _acquireLock();
     _mediaCache = _buildMediaCache();
     _mediaCache?.addListener(_onMediaCache);
     _bgmCache = _buildBgmCache();
@@ -1081,9 +1075,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
   }
 
-  static String get _holder => '人（编导台）';
-
-  /// 与工作台/审核页同一套会话级互斥：谁先进谁处理
   /// 盘上这个任务的指纹。Agent 写盘之后它会变，界面据此重读
   String? _docPrint;
 
@@ -1132,9 +1123,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
-      // 编导台此前**接不了任何 Agent 请求**——脚本成片这条线在可视模式下
-      // 一个委派都做不了。最要紧的一条是「让出写锁但留在页面」：
-      // 不让位，Agent 就写不进来；让界面退出去，人就什么都看不见了
+      // 有 Agent 的代办请求就当场答复。**不答的话它只能等到超时**——
+      // 这一页目前接不了任何一种动作（提交方案、打开导出都是工作台的活），
+      // 但「接不了」也要说出来，不能装死
       _serveAgentRequest(dataDir);
       final now = readAgentPresence(dataDir: dataDir, taskId: _task.id);
       final was = _agent;
@@ -1188,11 +1179,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (leaving) {
         // 它走了：下次再来时重新对齐一次（人这期间可能自己滚到别处了）
         _scrolledTo = null;
-        // 让出去的锁要收回来，不然人接着改，改到保存那一下才发现写不进去
-        if (_yieldedToAgent) {
-          _yieldedToAgent = false;
-          _acquireLock();
-        }
         unawaited(_reloadAfterAgent());
       }
     });
@@ -1257,35 +1243,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (dataDir != null) {
       clearAgentPresence(dataDir: dataDir, taskId: _task.id);
     }
-    // **人接手了，这一页就不再自动让位。**
-    //
-    // 让位机制是为「人在旁边看着它干活」做的；人一旦按了这个按钮，
-    // 意思正相反：他要自己动手了。不记这一笔的话，Agent 下一条命令
-    // 一来，这一页又乖乖把锁让出去——**接手按钮等于白按**
-    //（真机上人按完还没来得及操作，Agent 就又接着写了）。
-    _humanTookOver = true;
-    _yieldedToAgent = false;
     // 界面自己在跑的自动铺片也要停：人按这个按钮的意思是「我来」，
     // 不是「你们俩一起来」
     _cancelDraft();
-    if (_lock == null) _acquireLock();
     setState(() => _agent = null);
     await _reloadAfterAgent();
   }
 
-  /// 人按过「我来接手」。在他离开这一页之前，不再把写锁让给 Agent
-  bool _humanTookOver = false;
-
   bool _servingRequest = false;
 
-  /// 这一页把写锁让给 Agent 了。它收工之后要**自己把锁拿回来**，
-  /// 否则人接着改会一路改到保存被拒才发现
-  bool _yieldedToAgent = false;
-
-  /// Agent 请这一页做一件事。目前只有一件：**让出写锁**。
+  /// Agent 请这一页做一件事。
   ///
-  /// 让位之后这一页转成只读跟随（和「Agent 占着锁时人打开这一页」同一套
-  /// 状态），人能眼看着它一行行往下做；要抢回来点横幅上的「我来接手」。
+  /// 这一页目前一种都接不了（提交方案、打开导出都是工作台的活）。
+  /// **接不了也要当场说**：不答复它只能等到超时，那比一句「接不了」更糟
   void _serveAgentRequest(Directory dataDir) {
     if (_servingRequest) return;
     final req = consumeAgentRequest(dataDir: dataDir, taskId: _task.id);
@@ -1302,88 +1272,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _servingRequest = false;
     }
 
-    switch (UiAction.parse(req.kind)) {
-      case UiAction.lockYield:
-        if (_humanTookOver) {
-          reply(false, '人已经按了「我来接手」，这个任务现在由他自己动手——'
-              '**停下来问他**，别再往这条任务里写');
-          return;
-        }
-        if (_lock == null) {
-          reply(true, '这一页本来就没占着写锁');
-          return;
-        }
-        // **先把没落盘的改动冲下去再让**：人可能刚拖过一镜、改过一句台词，
-        // 让位之后这一页就写不进去了，不冲就丢了
-        _flushNow();
-        _lockHeartbeat?.cancel();
-        _lockHeartbeat = null;
-        _lock?.release(_holder);
-        _lock = null;
-        // **别设 _blockedBy**：那个字段的意思是「被另一个界面挡住了」，
-        // 它渲染的是一张「等它结束再进」的空白拦截页——而人打开这一页
-        // 正是为了看 Agent 干活，拦掉等于把要看的东西挡在门外。
-        // 只读跟随靠的是在场状态（_agent），那一套已经有了
-        _yieldedToAgent = true;
-        reply(true, '写锁让给你了，人还在这一页看着——'
-            '记得把每一步都播报出来');
-      default:
-        reply(false, '这一页接不了这个动作：${req.kind}');
-    }
-  }
-
-  void _acquireLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: _task.id);
-    if (!lock.acquire(_holder)) {
-      final holder = lock.read()?.holder;
-      // Agent 占着**不拦成一张空白页**：可视模式下人正是为了看它干活才
-      // 打开这一页的，拦掉等于把要看的东西挡在门外。转成只读跟随
-      // （见 [_watchAgent]），它一收工这一页自动可操作。
-      //
-      // 审片台早就这么做了，这里漏了——验收 Agent 报回来的现象是：
-      // 「人在旁边看着，看到的是一块黑板」
-      if (isGuiHolder(holder)) _blockedBy = holder ?? '别人';
-      return;
-    }
-    _lock = lock;
-    // 心跳让锁活着：写脚本可能一坐半小时，超时失效等于没锁
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
-  }
-
-  /// 抢锁是破坏性的（对方之后的保存会被拒绝），与审核页同一套确认规矩
-  Future<void> _forceTakeover() async {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前环境没有数据目录，无法接管')));
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('强制接管这个任务？'),
-        content: Text('「${_blockedBy ?? '对方'}」之后的保存会被拒绝，'
-            '它未落盘的改动可能丢失。确定要接管吗？'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('接管')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: _task.id);
-    lock.forceTakeover(_holder);
-    setState(() => _blockedBy = null);
-    _lock = lock;
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
+    reply(false, '这一页接不了这个动作：${req.kind}');
   }
 
   /// 页面已经在拆了。**`mounted` 在 dispose 里还是 true**（元素是 dispose
@@ -1396,8 +1285,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _disposed = true;
     _autosave?.cancel();
     _flushNow();
-    _lockHeartbeat?.cancel();
-    _lock?.release(_holder);
     _mediaCache?.removeListener(_onMediaCache);
     _mediaCache?.dispose();
     _bgmCache?.removeListener(_onMediaCache);
@@ -2559,12 +2446,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 听感就是声音忽大忽小、严重时卡住反复念同几个字（真机反馈）。
   /// 字幕是画在预览层上的 widget，`setState` 就够，不必动轨道。
   void _mutate(ScriptDoc Function(ScriptDoc) f, {bool affectsTracks = true}) {
-    // Agent 干活时人改不动：两边同时写会把彼此的活覆盖掉，而且只有软件
-    // 看得见两个写入方（spec 第六节）。**所有数据改动都从这里过**，
-    // 拦这一处胜过给几十个控件各包一层只读
+    // **这不是「没有权限」，是两只手别抢同一个格子。**
+    //
+    // 软件里已经没有任何一把锁：Agent 随时写得进这条任务，人也随时能
+    // 自己上手。但这一页把整份脚本捧在内存里、定时整份落盘——Agent 正在
+    // 一行行写盘的同时人在这儿打字，下一次「跟盘」会把他刚打的字冲掉，
+    // 而他看不见。所以这一刻先拦一下，**出路就在眼前那个按钮上**：
+    // 点「我来接手」，Agent 当场停手，这一页立刻可以改。
     final agent = _agent;
     if (agent != null) {
-      _toast('${agent.holder} 正在操作这个任务——要自己改，先点上面的「我来接手」。');
+      _toast('${agent.holder} 正在动这一页——想自己改，点上面的「我来接手」，它就停手。');
       return;
     }
     // 人正在改东西：自动展开这一轮让开。不让的话，他改着第 3 行，
@@ -3385,7 +3276,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_blockedBy != null) return _blockedView();
     final extracting = _extract is _ExtractRunning;
     // 起步引导激活时右栏收敛：一边问「从哪里开始」、一边摆开行工作台，
     // 两套话语打架（真机截图核对时发现）
@@ -3953,7 +3843,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               height: 11,
               child: CircularProgressIndicator(strokeWidth: 1.4)),
           const SizedBox(width: AppSpacing.sm),
-          Text('${agent.holder} 正在操作这个任务',
+          Text('${agent.holder} 正在这条任务上干活',
               style: const TextStyle(
                   fontSize: AppFontSize.caption,
                   fontWeight: FontWeight.w600,
@@ -5191,31 +5081,6 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         '${(s % 60).toString().padLeft(2, '0')}';
   }
 
-  Widget _blockedView() => Scaffold(
-        backgroundColor: AppColors.background,
-        body: Center(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Text('「$_blockedBy」正在处理这个任务',
-                style: const TextStyle(
-                    fontSize: AppFontSize.title,
-                    color: AppColors.textPrimary)),
-            const SizedBox(height: AppSpacing.sm),
-            const Text('等它结束再进（谁先进谁处理）',
-                style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: AppFontSize.caption)),
-            const SizedBox(height: AppSpacing.lg),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              OutlinedButton(
-                  onPressed: () => Navigator.of(context).maybePop(),
-                  child: const Text('返回')),
-              const SizedBox(width: AppSpacing.sm),
-              FilledButton(
-                  onPressed: _forceTakeover, child: const Text('强制接管')),
-            ]),
-          ]),
-        ),
-      );
 }
 
 /// 导出进度对话框：一段一报，不许点掉——导出中改内容不会进这一版成片

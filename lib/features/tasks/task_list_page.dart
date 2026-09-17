@@ -323,18 +323,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         }
         reply(true, '已关掉新建任务');
       case UiAction.tasksOpen:
-        // 把压在列表上面的页面全弹掉（工作台/编导台/它们的子页）。
-        // 那些页面一退出就松锁，Agent 接着就能写这条任务
+        // 把压在列表上面的页面全弹掉（工作台/编导台/它们的子页）
         if (mounted) {
           Navigator.of(context).popUntil((r) => r.isFirst);
         }
-        reply(true, '已回到任务列表，锁松开了');
+        reply(true, '已回到任务列表');
       case UiAction.plansApply:
       case UiAction.exportOpen:
-      case UiAction.lockYield:
-        // 这几个动作是给那条任务的工作页的（它占着锁）。列表页收到说明
-        // 发错了地方——说清楚，别让 Agent 等到超时。
-        // 让位这一条尤其要说明白：列表页本来就没占任何任务的写锁
+        // 这两个动作是给那条任务的工作页的。列表页收到说明发错了地方——
+        // 说清楚，别让 Agent 等到超时
         reply(false, '${action.label}要发给那条任务的工作页，不是任务列表');
     }
   }

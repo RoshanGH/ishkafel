@@ -176,7 +176,7 @@ class TaskLogFile {
     } catch (e) {
       // **出声，不吞。** 日志记漏一笔，Agent 查到的「什么都没发生」
       // 看起来正好像「一切正常」
-      AppLog.warn('改动日志写不进去（$taskId · $op）：$e');
+      AppLog.warn('改动日志没写成（$taskId · $op）：$e');
       return false;
     }
   }

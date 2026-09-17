@@ -34,11 +34,16 @@ void main() {
         reason: '锁整套删掉了，这些地方还引着：\n${offenders.join('\n')}');
   });
 
-  test('CLI 的失败话术里没有「权限类」的说辞', () {
-    const banned = ['正在操作这个任务', '写不进去', '先等它', '被锁住',
-      '界面没有回应', '占着，先不动它了'];
+  test('失败话术里没有「权限类」的说辞——命令行和界面都算', () {
+    const banned = [
+      // 命令行那一侧
+      '正在操作这个任务', '写不进去', '先等它', '被锁住',
+      '界面没有回应', '占着，先不动它了',
+      // 界面那一侧：打开一个任务不再需要「取得」什么，它就是打开
+      '当前为只读', '强制接管', '自动解锁', '正在处理这个任务',
+    ];
     final offenders = <String>[];
-    for (final f in Directory('lib/cli')
+    for (final f in Directory('lib')
         .listSync(recursive: true)
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))) {

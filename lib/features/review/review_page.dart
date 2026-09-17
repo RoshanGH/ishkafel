@@ -26,7 +26,6 @@ import '../../core/log/app_log.dart';
 import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
-import '../../core/storage/task_lock.dart';
 import '../director/tag_picker.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
@@ -110,20 +109,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 原片段落的首帧图（分组 id → 本地 jpg）。抽出来一张补一张
   final Map<String, String> _originThumbs = {};
 
-  /// 独立模式的会话锁。**进门就持**：审核期间任务就是「人在处理」，
-  /// Agent 这时的写入要被拒（互斥是双向的——反过来 Agent 在处理时，
-  /// 这里进不来，见 [_blockedBy]）。工作台内嵌模式不碰锁：那是同一次会话
-  TaskLockFile? _lock;
-  Timer? _lockHeartbeat;
-  static String get _holder => '人（审核中）';
-
-  /// 进门时锁在**另一个界面**手里：显示是谁、给强制接管。
-  /// Agent 持锁不走这条路——见 [_agent]
-  String? _blockedBy;
-
-  /// Agent 此刻在这个任务上做什么。非 null = 它在干活：
-  /// 页面转成**只读跟随**（照常显示候选、滚到它动的那张卡），
-  /// 而不是拦成一张空白页——可视模式下人正是为了看它干活才打开这一页的
+  /// Agent 此刻在这个任务上做什么。非 null = 它在干活：页面**跟着它走**
+  /// （滚到它动的那张卡），但人照样能自己上手——打开这一页从来不需要
+  /// 先「取得」什么，它就是打开
   AgentPresence? _agent;
   Timer? _agentPoll;
 
@@ -139,7 +127,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void initState() {
     super.initState();
-    if (widget.onApply == null) _acquireSessionLock();
     _loadOriginThumbs();
     _watchAgent();
   }
@@ -254,59 +241,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         curve: Curves.easeOut);
   }
 
-  void _acquireSessionLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    if (!lock.acquire(_holder)) {
-      final holder = lock.read()?.holder;
-      // Agent 占着**不拦成空白页**：可视模式下人正是为了看它干活才打开
-      // 这一页的，拦掉等于把要看的东西挡在门外。转成只读跟随即可
-      // （见 [_followAgent]），它一收工这一页自动可操作
-      if (isGuiHolder(holder)) _blockedBy = holder ?? '别人';
-      return;
-    }
-    _lock = lock;
-    // 心跳让锁活着：审核可能一看十分钟，超时失效等于没锁
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
-  }
-
-  Future<void> _forceTakeover() async {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) {
-      // 测试环境才会走到：按钮点了必须有反应，不能静默吞掉
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前环境没有数据目录，无法接管')));
-      return;
-    }
-    // 抢锁是破坏性的：对方之后的写入会被拒绝。工作台的同名按钮有确认框，
-    // 这里必须同一套规矩
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('强制接管这个任务？'),
-        content: Text('「${_blockedBy ?? '对方'}」之后的保存会被拒绝，'
-            '它未落盘的改动可能丢失。确定要接管吗？'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('接管')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    lock.forceTakeover(_holder);
-    setState(() => _blockedBy = null);
-    _lock = lock;
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
-  }
-
   /// 给每个位置组的原片段落抽一张首帧图（取中点：两端常踩在转场上，
   /// 抽出来是糊的）。按任务缓存，抽过的直接用
   Future<void> _loadOriginThumbs() async {
@@ -358,8 +292,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void dispose() {
     _agentPoll?.cancel();
-    _lockHeartbeat?.cancel();
-    _lock?.release(_holder);
     _hoverDebounce?.cancel();
     _hover.dispose();
     _scroll.dispose();
@@ -595,20 +527,17 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             Expanded(child: _titleText()),
           ]),
         ),
-        body: _blockedBy != null
-            ? _blockedState()
-            : (_items.isEmpty
-                ? const _EmptyState()
-                : Column(children: [
-                    // Agent 在干活 / 刚替人干完活：两种都要在最显眼处说出来。
-                    // 界面不说话，人只会以为软件自己乱跳
-                    if (_agent != null) _agentBanner(_agent!),
-                    if (_agent == null && _delegateNote != null)
-                      _delegateBanner(_delegateNote!),
-                    Expanded(child: _reviewBody()),
-                  ])),
-        bottomNavigationBar:
-            _items.isEmpty || _blockedBy != null ? null : _confirmBar(),
+        body: _items.isEmpty
+            ? const _EmptyState()
+            : Column(children: [
+                // Agent 在干活 / 刚替人干完活：两种都要在最显眼处说出来。
+                // 界面不说话，人只会以为软件自己乱跳
+                if (_agent != null) _agentBanner(_agent!),
+                if (_agent == null && _delegateNote != null)
+                  _delegateBanner(_delegateNote!),
+                Expanded(child: _reviewBody()),
+              ]),
+        bottomNavigationBar: _items.isEmpty ? null : _confirmBar(),
       );
 
   Widget _titleText() => Column(
@@ -756,7 +685,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 那个镜头的标签——摆另一层等于给人看一份跟这次检索无关的东西。
   Widget _tagRow(_Section section) {
     final tags = _tagsOf(section);
-    final editable = _agent == null && _blockedBy == null;
+    // Agent 正在动这一页时不让人同时改同一处：不是「没有权限」，
+    // 是两只手在同一个格子上互相抢。它一收工立刻恢复
+    final editable = _agent == null;
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.xs),
       child: Wrap(
@@ -1211,7 +1142,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${agent.holder} 正在这一页上操作，当前为只读',
+                Text('${agent.holder} 正在这一页上干活',
                     style: const TextStyle(
                         fontSize: AppFontSize.caption,
                         color: AppColors.textSecondary)),
@@ -1254,36 +1185,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ]),
       );
 
-  /// 进门时锁在别人手里。互斥与工作台同一套长相：说清是谁、给强制接管
-  Widget _blockedState() => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock_outline,
-                size: 40, color: AppColors.orange),
-            const SizedBox(height: AppSpacing.md),
-            Text('$_blockedBy 正在操作这个任务',
-                style: const TextStyle(
-                    fontSize: AppFontSize.body, color: AppColors.textPrimary)),
-            const SizedBox(height: AppSpacing.xs),
-            const Text('等它结束再进，或者强制接管（它那边的写入会被拒绝）',
-                style: TextStyle(
-                    fontSize: AppFontSize.caption,
-                    color: AppColors.textTertiary)),
-            const SizedBox(height: AppSpacing.md),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('返回')),
-              const SizedBox(width: AppSpacing.sm),
-              FilledButton(
-                  key: const Key('review-takeover'),
-                  onPressed: _forceTakeover,
-                  child: const Text('强制接管')),
-            ]),
-          ],
-        ),
-      );
 }
 
 /// 审核结果（pop 回来处时带上，来处弹条提示用）

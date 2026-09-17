@@ -76,12 +76,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
     await tester.pump();
 
-    expect(find.textContaining('正在操作这个任务'), findsOneWidget);
+    expect(find.textContaining('正在这条任务上干活'), findsOneWidget);
     expect(find.text('正在给第 10 句挑镜头'), findsOneWidget,
         reason: '人在旁边看的是过程——它现在在干什么必须写出来');
   });
 
-  testWidgets('Agent 干活时人改不动，但看得见', (tester) async {
+  /// **这不是「没有权限」**——软件里已经没有任何一把锁，Agent 随时写得进
+  /// 这条任务，人也随时能自己上手。但这一页把整份脚本捧在内存里、定时整份
+  /// 落盘：Agent 正在一行行写盘的同时人在这儿打字，下一次「跟盘」会把他刚
+  /// 打的字冲掉，而他看不见。所以这一刻先拦一下，**出路就在眼前那个按钮上**。
+  testWidgets('Agent 干活时人先别动同一处，但出路就在眼前', (tester) async {
     final repo = _MemoryRepo();
     await pump(tester, repo);
     report(AgentPresence(
@@ -99,7 +103,7 @@ void main() {
         reason: '两边同时写会把彼此的活覆盖掉');
     // 横幅上有「我来接手」按钮，拦截提示里也指向它——拦下来要给出路
     expect(find.byKey(const ValueKey('agent-takeover')), findsOneWidget);
-    expect(find.textContaining('先点上面的「我来接手」'), findsOneWidget,
+    expect(find.textContaining('点上面的「我来接手」，它就停手'), findsOneWidget,
         reason: '拦下来要说清怎么办，不能只是点了没反应');
   });
 
