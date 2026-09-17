@@ -1028,7 +1028,6 @@ void main() {
       expect(retry.actor, actorTaskList);
     });
 
-
     test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {
       final task = makeFailedTask();
       await repo.save(task);

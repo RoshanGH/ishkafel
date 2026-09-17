@@ -157,7 +157,7 @@ void main() {
     );
     await expectLater(
         makePipeline(repo).analyze(noInfo,
-            by: ActorKind.agent, actor: 'Agent', ), throwsA(isA<StateError>()));
+            by: ActorKind.agent, actor: 'Agent'), throwsA(isA<StateError>()));
     expect(await repo.findById('t2'), isNull);
   });
 
