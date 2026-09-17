@@ -153,6 +153,22 @@ void main() {
         reason: '活儿真的干了，不是报个成功了事');
   });
 
+  /// **兜底自己干的时候，那张单子必须收回来。**
+  ///
+  /// 外层（`delegateOrDoItYourself`）2 秒就走 `myself()` 自己直写，而内层
+  /// 等回执原来给的是 20 秒——单子在盘上还要挂 18 秒，界面随时可能取走
+  /// 再做一遍，人看到两份。内层要比外层短，短的那一下把单子拿回来。
+  test('秒级兜底之后，盘上不该还挂着一张没人处理的单子', () async {
+    writeUiWhere(dir, module: 'workbench', taskId: 't1');
+
+    final code = await apply();
+    expect(code, 0);
+
+    // 界面这时候才想起来取单——**应该什么都取不到**
+    expect(consumeAgentRequest(dataDir: dir, taskId: 't1'), isNull,
+        reason: '兜底自己写完了还把单子留在盘上，界面过一会儿取走会再做一遍');
+  });
+
   test('界面在，明确回了拒绝：不兜底，原样把拒绝理由带回去', () async {
     writeUiWhere(dir, module: 'workbench', taskId: 't1');
 

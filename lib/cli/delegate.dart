@@ -18,6 +18,21 @@ import '../core/storage/ui_where.dart';
 ///
 /// 第 1 条不能省：少了它，界面没开的时候每条写命令都要白等 2 秒——47 镜挑
 /// 下来就是一分半纯等待。**委派只在人确实看着的时候才有意义。**
+/// 下单之后等回执该等多久——**必须比外层那个超时短一点**。
+///
+/// 一样长（或更长）的话，外层可能先到、直接走 `myself()` 自己干，
+/// 而**那张单子还挂在盘上**：界面随时可能取走再做一遍，人看到两份。
+/// 短一点，`viaUi` 就有机会在超时那一刻把单子 `consumeAgentRequest` 收回来。
+///
+/// 真机上 export 撞过这个（外 30s 内 30s）；apply plans / review 更反
+/// ——外 2 秒、内 20 秒，外层必先到，单子在盘上还要挂 18 秒。
+Duration withdrawBefore(Duration outer) {
+  final inner = outer - const Duration(milliseconds: 400);
+  return inner < const Duration(milliseconds: 200)
+      ? Duration(microseconds: outer.inMicroseconds ~/ 2)
+      : inner;
+}
+
 Future<T> delegateOrDoItYourself<T>({
   required Directory dataDir,
   required String? taskId,

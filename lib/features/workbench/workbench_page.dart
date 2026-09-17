@@ -3321,7 +3321,9 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 text: notice.text,
                 building: false,
                 retryLabel: '重新分离',
-                // 只读时不给出口：这条任务正被别人占着，补出来也写不进去
+                // `_isEditable` 现在恒 true（见它的文档注释：项目永远可编辑），
+                // 留着这一层是因为它是全页统一的可编辑判据，哪天真要收紧
+                // 只改那一处。**这里不再有「被别人占着」那回事**
                 onRetry: notice.retryable && _isEditable
                     ? _separateVocals
                     : null,

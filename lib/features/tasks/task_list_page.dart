@@ -306,7 +306,12 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
     final action = UiAction.parse(req.kind);
     if (action == null) {
-      reply(false, '认不出这个动作：${req.kind}');
+      // 认不出的动作**也是「这一页接不了」**，不是「试了没做成」：
+      // 带上标记，调用方自己去干（见 [AgentRequestResult.unsupported]）。
+      // 今天走不到这儿（wire 名都是从同一个枚举来的），但形状要一致——
+      // 不一致的那一天，谁也想不起来还有这么一处
+      reply(false, '任务列表接不了「${req.kind}」这件事——你自己做就行',
+          unsupported: true);
       return;
     }
     switch (action) {

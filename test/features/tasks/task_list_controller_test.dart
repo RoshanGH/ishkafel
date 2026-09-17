@@ -20,6 +20,8 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/cli/busy_guard.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'package:ishkafel/features/tasks/analysis_error_message.dart';
@@ -85,6 +87,24 @@ class _FakePipeline extends AnalysisPipeline {
         task.copyWith(status: RenewTaskStatus.ready, updatedAt: DateTime.now());
     await repo.save(updated);
     return updated;
+  }
+}
+
+/// 在进度回调那一刻偷看一眼在场状态：界面自己跑分析时它必须是写着的
+class _PeekingPipeline extends _FakePipeline {
+  final void Function() onProgressPeek;
+  _PeekingPipeline({required super.repo, required this.onProgressPeek});
+
+  @override
+  Future<RenewTask> analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    return super.analyze(task, onProgress: (p) {
+      onProgress?.call(p);
+      onProgressPeek();
+    }, onUnitsReady: onUnitsReady, by: by, actor: actor);
   }
 }
 
@@ -298,6 +318,43 @@ void main() {
     final tasks = pipelineContainer.read(taskListProvider).value!;
     final task = tasks.firstWhere((t) => t.id == 'new-id');
     expect(task.status, RenewTaskStatus.ready);
+  });
+
+  /// **界面自己跑分析也要写在场状态。**
+  ///
+  /// 不写的话，`ishkafel analyze` 那道「别把同一条管线跑两遍」的劝告认不出
+  /// 这一边：人在界面上点了分析、Agent 同时敲了 `analyze`，整条管线
+  /// （ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
+  /// **锁删掉之前这一条是锁挡着的，删了就得接住。**
+  test('界面自己跑分析：过程中写在场状态、带判据词，收工撤干净', () async {
+    final seen = <String>[];
+    final pipeline = _PeekingPipeline(repo: repo, onProgressPeek: () {
+      final p = readAgentPresence(dataDir: tempDir, taskId: 'new-id');
+      if (p != null) seen.add('${p.holder}|${p.action}');
+    });
+    final pipelineContainer = ProviderContainer(overrides: [
+      taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(tempDir),
+      importServiceProvider.overrideWithValue(importService),
+      analysisPipelineProvider.overrideWithValue(pipeline),
+    ]);
+    addTearDown(pipelineContainer.dispose);
+
+    await pipelineContainer.read(taskListProvider.future);
+    await pipelineContainer
+        .read(taskListProvider.notifier)
+        .importFile('/videos/新片.mp4');
+    await pumpEventQueue();
+
+    expect(seen, isNotEmpty,
+        reason: '跑的过程中必须在场——Agent 那边就是靠它才知道有人在做');
+    expect(seen.first, contains(analyzeBusyKeyword),
+        reason: '判据认的是这几个字，和 busy_guard 那份常量必须是同一个');
+    expect(seen.first, contains(actorAnalysisReport),
+        reason: '横幅上要说得出是谁在动它');
+    expect(readAgentPresence(dataDir: tempDir, taskId: 'new-id'), isNull,
+        reason: '收工要撤干净——不撤的话接下来 60 秒里 Agent 的 analyze '
+            '会被一条已经结束的活儿劝退');
   });
 
   test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {

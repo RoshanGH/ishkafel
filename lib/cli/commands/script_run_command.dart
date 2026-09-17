@@ -362,9 +362,13 @@ Future<int> runScriptVoiceCommand({
   // **这是劝告不是拒绝**（退出码 0 + `--force`），见 `busy_guard.dart`
   if (!force) {
     final busy = someoneElseBusyWith(
-        dataDir: dataDir, taskId: task.id, keywords: const ['配音'], now: now);
+        dataDir: dataDir,
+        taskId: task.id,
+        keywords: const [voiceBusyKeyword],
+        now: now);
     if (busy != null) {
-      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '配音'),
+      emitJson(
+          busySkipReport(taskId: task.id, busy: busy, what: voiceBusyKeyword),
           out: out);
       return 0;
     }
@@ -380,12 +384,13 @@ Future<int> runScriptVoiceCommand({
       module: 'director',
       lineIndex: targets.isEmpty ? 0 : targets.first,
       panel: AgentPanel.voice);
-  // 播报里带上「配音」两个字不是文风问题：上面那道劝告认的就是它
-  await voiceStage.begin('正在配音：这一轮 ${targets.length} 句',
-      focus: voiceFocus);
+  // 「配音」两个字来自 busy_guard 那份常量，不手写：上面那道劝告认的就是它，
+  // 手写的话哪天改了文案，判据会静默失效而测试照样全绿
+  final voiceOpening = '正在$voiceBusyKeyword：这一轮 ${targets.length} 句';
+  await voiceStage.begin(voiceOpening, focus: voiceFocus);
   // 静默模式下 begin 什么都不做，在场状态还是要立刻写——人可能正开着
   // 这一页，而另一个进程也要靠它才知道「这条任务已经有人在配音了」
-  voiceStage.note('正在配音：这一轮 ${targets.length} 句', focus: voiceFocus);
+  voiceStage.note(voiceOpening, focus: voiceFocus);
   final failed = <String>[];
   final degraded = <String>[];
   var instructed = 0;
@@ -461,7 +466,7 @@ Future<int> runScriptVoiceCommand({
       final request = deliveryRequestOf(currentDoc, target);
       if (delivery != null && request != null) {
         await voiceStage.show(
-            '配音前先听参考片第 ${i + 1} 句是怎么念的'
+            '$voiceBusyKeyword前先听参考片第 ${i + 1} 句是怎么念的'
             '（${k + 1}/${targets.length}）',
             focus: AgentFocus(
                 module: 'director', lineIndex: i, panel: AgentPanel.voice));
@@ -474,7 +479,8 @@ Future<int> runScriptVoiceCommand({
         sink.writeln('· 第 ${i + 1} 句的参考片没听成，这一句退回默认语气：'
             '${how.degradedReason}');
       }
-      await voiceStage.show('正在给第 ${i + 1} 句配音（${k + 1}/${targets.length}）',
+      await voiceStage.show(
+          '正在给第 ${i + 1} 句$voiceBusyKeyword（${k + 1}/${targets.length}）',
           focus: AgentFocus(
               module: 'director', lineIndex: i, panel: AgentPanel.voice));
       try {

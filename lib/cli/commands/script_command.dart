@@ -18,6 +18,7 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/audio/bgm_library.dart';
 import '../../core/ai/tag_dimension.dart';
 import '../../core/ai/taggers.dart';
+import '../../core/models/renew_task.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_doc.dart';
 import '../../core/script/shot_allocation.dart';
@@ -866,9 +867,13 @@ Future<int> runScriptTagRefCommand({
   // 场景——所以命令级还要有这一道。**劝告不是拒绝**，见 `busy_guard.dart`
   if (!force) {
     final busy = someoneElseBusyWith(
-        dataDir: dataDir, taskId: task.id, keywords: const ['打标'], now: now);
+        dataDir: dataDir,
+        taskId: task.id,
+        keywords: const [tagBusyKeyword],
+        now: now);
     if (busy != null) {
-      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '打标'),
+      emitJson(
+          busySkipReport(taskId: task.id, busy: busy, what: tagBusyKeyword),
           out: out);
       return 0;
     }
@@ -884,16 +889,66 @@ Future<int> runScriptTagRefCommand({
   var taggedSoFar = _taggedRefShotCount(doc);
   final tagFocus = AgentFocus(
       module: 'director', lineIndex: index, panel: AgentPanel.findShots);
-  // 播报里带上「打标」两个字不是文风问题：上面那道劝告认的就是它
-  final opening =
-      '正在给参考镜打标（第 $line 句，全片 $taggedSoFar/$totalShots 镜）';
+  // 「打标」两个字来自 busy_guard 那份常量，不手写：上面那道劝告认的就是它
+  final opening = '正在给参考镜$tagBusyKeyword'
+      '（第 $line 句，全片 $taggedSoFar/$totalShots 镜）';
   await stage.begin(opening, focus: tagFocus);
   // 静默模式下 begin 什么都不做，在场状态还是要立刻写——另一个进程
   // 要靠它才知道「这条任务已经有人在打标了」
   stage.note(opening, focus: tagFocus);
 
+  // **用 try/finally 收工**，不再在每个 return 点手写 `stage.end()`。
+  // 手写的那版漏了「识图抛异常」这条路：在场状态留在盘上，60 秒内的下一次
+  // tag-ref 会被**自己**的遗留状态劝退。同文件里 voice/analyze/export
+  // 都是 finally，只有这里是手写的
+  try {
+    return await _tagRefShots(
+      repository: repository,
+      task: task,
+      doc: doc,
+      ref: ref,
+      video: video,
+      line: line,
+      index: index,
+      lineId: target.id,
+      dataDir: dataDir,
+      stage: stage,
+      tagFocus: tagFocus,
+      shotTagger: shotTagger,
+      vocab: vocab,
+      run: run,
+      totalShots: totalShots,
+      taggedSoFar: taggedSoFar,
+      sink: sink,
+      out: out,
+    );
+  } finally {
+    stage.end();
+  }
+}
+
+/// tag-ref 的循环本体。抽出来是为了让上面那层能用一个 `finally` 兜住收工
+Future<int> _tagRefShots({
+  required FileTaskRepository repository,
+  required RenewTask task,
+  required ScriptDoc doc,
+  required LineRef ref,
+  required String video,
+  required int line,
+  required int index,
+  required String lineId,
+  required Directory dataDir,
+  required AgentStage stage,
+  required AgentFocus tagFocus,
+  required ShotTagger shotTagger,
+  required List<TagDimension> vocab,
+  required ProcessRunner? run,
+  required int totalShots,
+  required int taggedSoFar,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
   final done = <Map<String, dynamic>>[];
-  final lineId = target.id;
   var skipped = 0;
   for (var k = 0; k < ref.segments.length; k++) {
     final segStartMs = ref.segments[k].$1;
@@ -907,7 +962,6 @@ Future<int> runScriptTagRefCommand({
     final rereadDoc = reread?.script;
     if (reread == null || rereadDoc == null) {
       sink.writeln('这条任务在打标过程中被删掉了：${task.id}');
-      stage.end();
       return exitNotFound;
     }
     // 按 id 找行，不按下标：这期间行可能被加被删
@@ -915,7 +969,6 @@ Future<int> runScriptTagRefCommand({
     final freshRefNow = freshHits.isEmpty ? null : freshHits.first.reference;
     if (freshRefNow == null) {
       sink.writeln('第 $line 行的参考镜在打标过程中没了：${task.id}');
-      stage.end();
       return exitNotFound;
     }
     if ((freshRefNow.metaAt(segStartMs)?.description ?? '').isNotEmpty) {
@@ -927,7 +980,7 @@ Future<int> runScriptTagRefCommand({
       continue;
     }
     await stage.show(
-        '正在给第 $line 句的第 ${k + 1} 个参考镜打标'
+        '正在给第 $line 句的第 ${k + 1} 个参考镜$tagBusyKeyword'
         '（全片 ${taggedSoFar + 1}/$totalShots 镜）',
         focus: AgentFocus(
             module: 'director',
@@ -991,7 +1044,6 @@ Future<int> runScriptTagRefCommand({
     );
     if (updated == null) {
       sink.writeln('这条任务在打标过程中被删掉了：${task.id}');
-      stage.end();
       return exitNotFound;
     }
     done.add({
@@ -1001,7 +1053,6 @@ Future<int> runScriptTagRefCommand({
       if (meta.framePath != null) 'framePath': meta.framePath,
     });
   }
-  stage.end();
   emitJson({
     'ok': true,
     'lineIndex': index,

@@ -588,6 +588,9 @@ Future<int> _applyPlansViaUi({
   MiaoaContentService? contentService,
   CandidateProbe? candidateProbe,
   Future<FrameCheck> Function(int id)? frameCheckOf,
+
+  /// 等界面代办最多等多久。**内层等回执会比它短一点**（见 withdrawBefore）
+  Duration delegateTimeout = const Duration(seconds: 2),
 }) async {
   final String raw;
   try {
@@ -638,6 +641,7 @@ Future<int> _applyPlansViaUi({
   return delegateOrDoItYourself<int>(
     dataDir: dataDir,
     taskId: task.id,
+    timeout: delegateTimeout,
     viaUi: () async {
       sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
       final id = writeAgentRequest(
@@ -649,9 +653,17 @@ Future<int> _applyPlansViaUi({
           'pickedMaterials': [for (final m in picked) m.toJson()],
         },
       );
-      final result =
-          await waitForAgentRequest(dataDir: dataDir, taskId: task.id, id: id);
-      if (result == null) return null; // 没应，交给自己直写
+      final result = await waitForAgentRequest(
+          dataDir: dataDir,
+          taskId: task.id,
+          id: id,
+          timeout: withdrawBefore(delegateTimeout));
+      if (result == null) {
+        // **把单子收回来**：外层超时之后我们会自己干，而这张单子还挂在盘上
+        // ——界面过一会儿取走再做一遍的话，人看到两份（见 withdrawBefore）
+        consumeAgentRequest(dataDir: dataDir, taskId: task.id);
+        return null; // 没应，交给自己直写
+      }
       // **「这一页接不了」不是失败，是「人恰好开着另一页」。**
       //
       // 判「该不该委派」的 `delegateOrDoItYourself` 只问「界面在不在这条

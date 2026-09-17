@@ -132,6 +132,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 那句「更改已自动保存」照旧挂着，人以为存好了就关窗走人，改的东西就没了
   String? _saveError;
 
+  /// 上一次保存是**被指纹闸拦下来的**（盘上被 Agent 改过），不是别的错。
+  ///
+  /// 单独记一位是为了给出**那条专属的出路**（顶栏的「以我的为准」）——
+  /// 「保存失败」有很多种，只有这一种是人一按就能解决的
+  bool _overwriteBlocked = false;
+
   _ExtractState? _extract;
 
   /// 用户在空脚本上点了「直接开始写」：起步引导让位给预览
@@ -1092,6 +1098,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       return;
     }
     if (now == _docPrint && !force) return;
+    // **人手上有还没落盘的改动时，不拿盘上的盖掉他正在打的字。**
+    //
+    // 这时候指纹也**不往前推**：推了，他下一次保存就会悄悄覆盖 Agent 刚写的
+    // 那几处（这道闸当初就是为这个建的）；不推，保存会被挡住——而挡住这件事
+    // 现在是**说出来**的（见 `_flushNow` 里的 `_overwriteBlocked`），
+    // 顶栏给了「以我的为准」这条出路。要的就是「看得见、可操作」。
+    if (!force && (_saving || _overwriteBlocked)) return;
     _docPrint = now;
     unawaited(_repo.findById(_task.id).then((fresh) {
       final doc = fresh?.script;
@@ -1127,24 +1140,25 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       // 这一页目前接不了任何一种动作（提交方案、打开导出都是工作台的活），
       // 但「接不了」也要说出来，不能装死
       _serveAgentRequest(dataDir);
-      // **人接过手就不再跟随**，哪怕 Agent 还在一秒一条地写在场状态。
+      final agentNow = readAgentPresence(dataDir: dataDir, taskId: _task.id);
+      // **数据跟随永远跑，跟人接没接手无关。**
       //
-      // 不压住的话，「我来接手」许诺的「你马上就能改」只在几百毫秒内为真：
-      // 下一次 `stage.show` 把在场状态写回去（`script voice` 每句一两次、
-      // `tag-ref` 每镜一次，间隔以秒计），这一页立刻又变回跟随态，
-      // 人打了两个字就又被拦一次——真机上这个毛病挨过一次骂。
+      // 一度为了兑现「我来接手」把整个跟随停掉，结果更糟：`_docPrint` 从
+      // 接手那一刻起冻死，而 Agent 那条命令还在真的写盘——`canOverwrite`
+      // 从此永远为 false，人之后的每一次保存都被**静默丢掉**，顶栏还一直
+      // 挂着「保存中…」。**人打了字、屏幕上字在、提示说在存，离开页面全没了。**
+      // 那正是这一整批要消灭的形状，而且是我们自己造出来的。
       //
-      // **压住的只是「跟随」，不是 Agent**：它照写不误，人也照改不误，
-      // 两边的改动靠 TaskMutation 的重读 + 版本校验各自落盘。
-      // 人离开这一页（`dispose`）这面旗自然没了；他想接着看，重进一次就行。
-      final now = _humanTookOver
-          ? null
-          : readAgentPresence(dataDir: dataDir, taskId: _task.id);
+      // 这一页落的是整份 `script`，挡它的是这道页面级指纹闸，不是字段合并
+      // ——所以闸必须活着，不能靠「不跟随」把它绕过去。
+      if (agentNow != null) _followDocOnDisk(dataDir);
+
+      // **接手压住的只有「焦点跟随」**：人不想被拽着走、不想每打两个字
+      // 就被拦一次（下一条播报间隔以秒计，`script voice` 每句一两条）。
+      // **压的不是 Agent**：它照写不误。人离开这一页这面旗自然没了。
+      final now = _humanTookOver ? null : agentNow;
       final was = _agent;
       final leaving = was != null && now == null;
-      // **数据也要跟着走**：Agent 改了什么，这一页当场显示出来。
-      // 以前只做了「滚到那一行」，人看到的是一块不动的板子
-      if (now != null) _followDocOnDisk(dataDir);
       final focusChanged = now?.focus?.lineIndex != was?.focus?.lineIndex ||
           now?.focus?.shotIndex != was?.focus?.shotIndex ||
           now?.focus?.panel != was?.focus?.panel;
@@ -2558,9 +2572,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = _dataDir;
     if (dataDir != null && !canOverwrite(dataDir, _task.id, _docPrint)) {
       AppLog.info('盘上这份任务被外面改过，这次不覆盖（${_task.id}）');
+      // **拦下来必须说出来。**
+      //
+      // 只 return 的话：`_mutate` 已经把 `_saving = true`，而 `_saveDoc`
+      // 永远不会被调到去复位它——顶栏一直挂着「保存中…」，人以为存上了，
+      // 离开页面才发现全没了。**转圈不说话已经不合格，这个还在说谎。**
+      _overwriteBlocked = true;
+      _reportSaveFailure('Agent 刚又改过这条任务，这次没敢覆盖它'
+          '（你的改动还在屏幕上）');
       // **这里不能去重读**：dispose 里也会调 flush，那时再拉起重建预览
-      // 就会在树都拆了之后新起一个 Timer。重读交给 _watchAgent 的轮询，
-      // 它自己会发现指纹变了
+      // 就会在树都拆了之后新起一个 Timer
       return;
     }
     // **从这一刻起把 doc 定死**：`TaskMutation.apply` 的 edit 可能被重跑
@@ -2607,6 +2628,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         setState(() {
           _saving = false;
           _saveError = null;
+          _overwriteBlocked = false;
         });
       }
       // 顺手把封面对上：脚本任务的封面是成片第一帧（第一行第一镜）。
@@ -2616,6 +2638,22 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       AppLog.warn('脚本落库失败（taskId=$taskId）：$e');
       _reportSaveFailure('保存失败：$e');
     }
+  }
+
+  /// 「以我的为准」：把基线对齐到盘上此刻，然后照常保存。
+  ///
+  /// 后果说清楚：这一存会**覆盖 Agent 在这段窗口里写进去的那几处**。
+  /// 但那是人按下「我来接手」时就选定的方向（他来做主），而且
+  /// `ishkafel log` 里记着这一笔是 `human` 写的——查得到，不是悄悄发生的。
+  void _saveMineAnyway() {
+    final dataDir = _dataDir;
+    if (dataDir != null) _docPrint = taskFingerprint(dataDir, _task.id);
+    setState(() {
+      _overwriteBlocked = false;
+      _saveError = null;
+      _saving = true;
+    });
+    _flushNow();
   }
 
   /// 保存没成的话，顶上那句「更改已自动保存」必须换成说实话的那一句。
@@ -3962,20 +4000,36 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           const SizedBox(width: AppSpacing.sm),
           // 保存没成就在这儿说实话。挂着「更改已自动保存」而盘上其实没存，
           // 人关了窗才发现东西没了——那是最糟的一种失败
-          Tooltip(
-            message: _saveError ?? '',
-            child: Text(
-                _saveError != null
-                    ? '没保存上：$_saveError'
-                    : (_saving ? '保存中…' : '更改已自动保存'),
-                key: const ValueKey('director-save-status'),
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                    fontSize: AppFontSize.caption,
-                    color: _saveError != null
-                        ? AppColors.red
-                        : AppColors.textTertiary)),
+          // **要能被挤扁**：这句话最长的一种（指纹闸拦下来那条）比顶栏还宽，
+          // 不给 Flexible 的话整条 Row 直接溢出——真机上是一条黄黑警戒带
+          // 盖住半个顶栏。完整的话在 Tooltip 里
+          Flexible(
+            child: Tooltip(
+              message: _saveError ?? '',
+              child: Text(
+                  _saveError != null
+                      ? '没保存上：$_saveError'
+                      : (_saving ? '保存中…' : '更改已自动保存'),
+                  key: const ValueKey('director-save-status'),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: AppFontSize.caption,
+                      color: _saveError != null
+                          ? AppColors.red
+                          : AppColors.textTertiary)),
+            ),
           ),
+          // **被指纹闸拦下来时，给一条一按就走得通的出路。**
+          // 只说「没保存上」而不给出路，人唯一的办法是退出重进——
+          // 而那会把他刚打的字全丢掉
+          if (_overwriteBlocked)
+            TextButton(
+              key: const ValueKey('director-force-save'),
+              onPressed: _saveMineAnyway,
+              child: const Text('以我的为准',
+                  style: TextStyle(fontSize: AppFontSize.caption)),
+            ),
           const SizedBox(width: AppSpacing.sm),
           IconButton(
             key: const ValueKey('director-bgm'),

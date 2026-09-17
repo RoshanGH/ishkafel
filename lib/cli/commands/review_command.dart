@@ -390,9 +390,17 @@ Future<int> _delegateToUi({
         kind: keep ? 'review.keep' : 'review.drop',
         payload: {'decisions': [for (final d in decisions) d.toJson()]},
       );
-      final result =
-          await waitForAgentRequest(dataDir: dataDir, taskId: taskId, id: id);
-      if (result == null) return null; // 没应，交给自己直写
+      final result = await waitForAgentRequest(
+          dataDir: dataDir,
+          taskId: taskId,
+          id: id,
+          timeout: withdrawBefore(waitFor));
+      if (result == null) {
+        // **把单子收回来**：外层超时之后我们会自己干，而这张单子还挂在盘上
+        // ——界面过一会儿取走再做一遍的话，人看到两份（见 withdrawBefore）
+        consumeAgentRequest(dataDir: dataDir, taskId: taskId);
+        return null; // 没应，交给自己直写
+      }
       // **「这一页接不了」不是失败，是「人恰好开着另一页」。**
       //
       // 判「该不该委派」的 `delegateOrDoItYourself` 只问「界面在不在这条

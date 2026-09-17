@@ -9,6 +9,8 @@ import '../../core/audio/vocal_separator.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/project_ref.dart';
+import '../../cli/busy_guard.dart';
+import '../../core/storage/agent_presence.dart';
 import '../../core/storage/task_copy.dart';
 import '../settings/settings_providers.dart';
 import '../../core/models/renew_task.dart';
@@ -588,6 +590,27 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 任务永久无法再次触发分析。
   Future<void> _runAnalyze(AnalysisPipeline pipeline, RenewTask task) async {
     final progress = ref.read(analysisProgressProvider.notifier);
+    // **界面自己跑分析也要写在场状态。**
+    //
+    // 不写的话，`ishkafel analyze` 那道「别把同一条管线跑两遍」的劝告
+    // 认不出这一边——人在界面上点了分析、Agent 同时敲了 `analyze`，
+    // 整条管线（ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
+    // **锁删掉之前这一条是锁挡着的，删了就得接住。**
+    //
+    // `holder` 说人话（横幅上要显示）；判据认的是 action 里的「分析」
+    // 两个字，所以用 busy_guard 那份常量拼，别手写（见 `busy_guard.dart`）
+    final dataDir = ref.read(dataDirProvider);
+    void here(String what) {
+      if (dataDir == null) return;
+      writeAgentPresence(
+        dataDir: dataDir,
+        taskId: task.id,
+        presence: AgentPresence(
+            holder: actorAnalysisReport, at: DateTime.now(), action: what),
+      );
+    }
+
+    here('正在$analyzeBusyKeyword原片');
     try {
       await pipeline.analyze(
         task,
@@ -596,7 +619,12 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         // 标成人会让 Agent 以为这些边界是有人亲手定的，从此不敢动
         by: ActorKind.agent,
         actor: actorAnalysisReport,
-        onProgress: (p) => progress.report(task.id, p),
+        onProgress: (p) {
+          progress.report(task.id, p);
+          // 每一步都刷一次：在场状态 60 秒过期，而人声分离那一步常跑
+          // 几分钟不吭声——不刷的话它会在最该成立的那几分钟里失效
+          here('正在$analyzeBusyKeyword原片：${p.stage.name}');
+        },
         // 切分一好就刷新列表：那一刻任务已经能打开干活了，剩下的打标
         // 在后台补。让人对着「分析中」多等三倍时间没道理。
         onUnitsReady: (_) => unawaited(reload()),
@@ -609,6 +637,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       // 成功与失败都要清：留着最后一步的文案，卡片看起来像还在跑
       progress.clear(task.id);
       _analyzingTaskIds.remove(task.id);
+      // 在场状态也要撤——不撤的话接下来 60 秒里 Agent 的 analyze
+      // 会被一条已经结束的活儿劝退
+      if (dataDir != null) {
+        clearAgentPresence(dataDir: dataDir, taskId: task.id);
+      }
     }
   }
 

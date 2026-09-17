@@ -114,9 +114,14 @@ Future<int> runAnalyzeCommand({
   // 而非是软件限制的。」给事实和出路，不给规则。
   if (!force) {
     final busy = someoneElseBusyWith(
-        dataDir: dataDir, taskId: task.id, keywords: const ['分析'], now: now);
+        dataDir: dataDir,
+        taskId: task.id,
+        keywords: const [analyzeBusyKeyword],
+        now: now);
     if (busy != null) {
-      emitJson(busySkipReport(taskId: task.id, busy: busy, what: '分析'),
+      emitJson(
+          busySkipReport(
+              taskId: task.id, busy: busy, what: analyzeBusyKeyword),
           out: out);
       return 0;
     }
@@ -130,13 +135,16 @@ Future<int> runAnalyzeCommand({
     taskId: task.id,
     holder: holder ?? 'Agent',
   );
-  await stage.begin('正在分析原片',
+  // 「分析」两个字来自 busy_guard 那份常量：上面那道劝告认的就是它，
+  // 手写的话改文案会让判据静默失效
+  await stage.begin('正在$analyzeBusyKeyword原片',
       focus: const AgentFocus(module: 'workbench'));
   // **静默模式下 begin 什么都不做，在场状态还是要立刻写**：
   // 一来人可能正开着这一页，二来上面那道「别把同一条管线跑两遍」的劝告
   // 认的就是它——不在这儿写，第二个进程要等到第一次进度回调才看得见，
   // 而 prepare 那一段（抽音频、分离）好几分钟里它什么都看不见
-  stage.note('正在分析原片', focus: const AgentFocus(module: 'workbench'));
+  stage.note('正在$analyzeBusyKeyword原片',
+      focus: const AgentFocus(module: 'workbench'));
 
   try {
     if (external0.isEmpty) {
@@ -147,7 +155,7 @@ Future<int> runAnalyzeCommand({
         actor: 'Agent',
         onProgress: (progress) {
           sink.writeln('· ${progress.stage.name}');
-          stage.note('正在分析原片：${progress.stage.name}',
+          stage.note('正在$analyzeBusyKeyword原片：${progress.stage.name}',
               focus: const AgentFocus(module: 'workbench'));
         },
       );
@@ -165,7 +173,7 @@ Future<int> runAnalyzeCommand({
       task,
       onProgress: (progress) {
         sink.writeln('· ${progress.stage.name}');
-        stage.note('正在分析原片：${progress.stage.name}',
+        stage.note('正在$analyzeBusyKeyword原片：${progress.stage.name}',
             focus: const AgentFocus(module: 'workbench'));
       },
     );

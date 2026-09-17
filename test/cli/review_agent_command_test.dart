@@ -217,6 +217,15 @@ void main() {
           reason: '活儿真的干了，不是报个成功了事');
     });
 
+    /// 兜底自己干的时候那张单子必须收回来——否则界面过一会儿取走会再做
+    /// 一遍，人看到两份。内层等回执要比外层超时短，短的那一下把单子拿回来
+    test('秒级兜底之后，盘上不该还挂着一张没人处理的单子', () async {
+      final code = await run(['drop', 'r1'], items: '0:-:100');
+      expect(code, 0);
+      expect(consumeAgentRequest(dataDir: dir, taskId: 'r1'), isNull,
+          reason: '兜底自己剔完了还把单子留在盘上，界面取走会再剔一遍');
+    });
+
     test('界面报失败就把原因原样带回来', () async {
       final err = StringBuffer();
       final ui = Future<void>(() async {
