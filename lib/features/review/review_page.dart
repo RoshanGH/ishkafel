@@ -16,6 +16,7 @@ import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/models/unit_uid.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
@@ -819,13 +820,14 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
     }
     // 独立模式：这份任务此刻归自己写
     if (section.unitIndex >= _units.length) return;
-    unawaited(_saveTags(_units[section.unitIndex].uid, section.shotIndex, tags));
+    unawaited(_saveTags(_units[section.unitIndex].uid, section.unitIndex,
+        section.shotIndex, tags));
   }
 
   /// 把改好的标签落盘。**只动点名的那一个位置**——这一页手上的 `_units` 是
   /// 进门那一刻的整份，整份写回去会把 Agent 这期间改的切分抹掉。
-  Future<void> _saveTags(
-      String unitUid, int? shotIndex, List<String> tags) async {
+  Future<void> _saveTags(String unitUid, int unitIndex, int? shotIndex,
+      List<String> tags) async {
     try {
       final saved = await humanMutation(
         repo: ref.read(taskRepositoryProvider),
@@ -843,8 +845,15 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             : '人在审片台改了这一镜的检索标签',
         edit: (fresh) {
           final units = fresh.units ?? const <SemanticUnit>[];
-          // **按身份重新定位**，不能拿进门那一刻的下标当 fresh 的下标用
-          final i = units.indexWhere((u) => u.uid == unitUid);
+          // **按身份重新定位**，不能拿进门那一刻的下标当 fresh 的下标用。
+          // 还没发身份的单元（uid 是空串，老存档才有）没法按身份认领——
+          // 拿空串去找会命中「第一个也没有 uid 的」，那是别人家的标签。
+          // 这种只能退回按位置，而且不盖戳（戳认的就是身份）
+          final i = isUnitUid(unitUid)
+              ? units.indexWhere((u) => u.uid == unitUid)
+              : (unitIndex < units.length && !isUnitUid(units[unitIndex].uid)
+                  ? unitIndex
+                  : -1);
           if (i < 0) {
             return TaskEdit(
               task: fresh,
@@ -881,10 +890,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
             ]),
             before: {'tags': before, 'transcript': unit.transcript},
             after: {'tags': tags},
-            stampUnits: shotIndex == null ? [unitUid] : const [],
-            stampShots: shotIndex == null
-                ? const []
-                : [ShotRef(unitUid, shotIndex)],
+            stampUnits:
+                shotIndex == null && isUnitUid(unitUid) ? [unitUid] : const [],
+            stampShots: shotIndex != null && isUnitUid(unitUid)
+                ? [ShotRef(unitUid, shotIndex)]
+                : const [],
           );
         },
       );
