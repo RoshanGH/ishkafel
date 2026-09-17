@@ -114,16 +114,29 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
     try {
       final json = jsonDecode(await file.readAsString());
       final task = RenewTask.fromJson(json as Map<String, dynamic>);
-      // 单元身份（uid）在读档这一刻由 ensureUnitUids 补发——老存档、或者
-      // 刚拆分/新建出来还没建立身份的单元，盘上这个字段是空的。**只在内存
-      // 里补是不够的**：下一次独立的 findById 会再补一次，补出**不一样**
-      // 的随机值（ensureUnitUids 每次都重新掷号），两次读永远对不上号。
-      // TaskMutation 的 edit 闭包靠 uid 在 fresh 里重新定位单元——如果身份
-      // 只存在于这一次的内存里、不落盘，这条定位每次都会落空，等价于
-      // 「单元刚被删掉了」，改动因此白做。检测到这次读档补发了身份，
-      // 立刻写回去，让它从这一刻起稳定
+      // 单元身份（uid）在读档这一刻由 ensureUnitUidsDeterministic 补发——
+      // 老存档、或者刚拆分/新建出来还没建立身份的单元，盘上这个字段是空的。
+      //
+      // **正确性由确定性推导保证，不是由这次写回保证**：`ensureUnitUidsDeterministic`
+      // 按 taskId+index+startMs+endMs 推导，同一份磁盘数据不管被 findById
+      // 还是 findAll 读、读几次、几个进程同时读，推出来的都是同一个值——
+      // TaskMutation 靠 uid 在两次独立的读之间重新定位单元，这条保证不依赖
+      // 这次写回是否成功、甚至不依赖它有没有跑到。
+      //
+      // 这里写回**只是一次性迁移优化**：让这条老任务从此以后盘上就带着
+      // 正式的 uid，不用每次读档都重新跑一遍哈希；也让直接看 JSON 文件的
+      // 人（人工排查、脚本处理）看到的是真实身份，不是推导前的空字符串。
+      // 写失败（只读文件系统、磁盘满……）不影响这次读的正确性，只是丢了
+      // 这次「顺手记一笔」的机会，下次读到同一份数据照样能推出同一个
+      // uid——所以失败了就记一句警告，照常把这次读到的 task 返回，不算作
+      // 读失败
       if (_unitUidsWereJustAssigned(json, task)) {
-        await save(task);
+        try {
+          await save(task);
+        } catch (e) {
+          AppLog.warn('单元身份补发之后写回失败（不影响这次读取）'
+              ' ${file.path}：$e');
+        }
       }
       return task;
     } on FormatException catch (e) {
