@@ -3,7 +3,6 @@ import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 
 import '../../core/models/renew_task.dart';
-import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
@@ -294,7 +293,7 @@ Future<int> _changeCandidates({
           return TaskEdit(
             task: fresh.copyWith(replacementsByUid: RenewTask.byUid(freshUnits, pruned)),
             before: {
-              'decisions': [for (final d in decisions) _decisionFacts(d, materials)],
+              'decisions': [for (final d in decisions) reviewDecisionFacts(d, materials)],
             },
             after: {'left': collectReviewItems(pruned).length},
           );
@@ -384,22 +383,3 @@ class _ReviewRejected implements Exception {
 /// 一条剔除/保留决定值得记进日志的事实：不是只记素材 id，
 /// 是这条素材的标签、画面描述、烧字、品牌——Agent 要能从这些看出
 /// 人剔除的是哪一类，即便人没说为什么
-Map<String, dynamic> _decisionFacts(
-  ReviewDecision d,
-  Map<int, PickedMaterial> materials,
-) {
-  final m = materials[d.material];
-  return {
-    'unit': d.unit,
-    'shot': d.shot,
-    'material': d.material,
-    'keep': d.keep,
-    if (m != null) ...{
-      'name': m.name,
-      'sceneDescription': m.sceneDescription,
-      'durationMs': m.durationMs,
-      'burnedText': m.burnedText,
-      'productBrand': m.productBrand,
-    },
-  };
-}

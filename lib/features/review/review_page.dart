@@ -21,13 +21,17 @@ import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/replacement/unit_base.dart';
+import '../../core/log/app_log.dart';
+import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_lock.dart';
 import '../director/tag_picker.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_id_badge.dart';
+import '../tasks/gui_task_mutation.dart';
 import '../tasks/task_list_controller.dart';
 import 'review_hover_player.dart';
 
@@ -525,16 +529,42 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       return;
     }
 
-    // 独立模式：锁在进门时已持有，这里直接写盘
+    // 独立模式：这一页自己写盘。**剔除算在 fresh 的方案上**——审的这几分钟
+    // 里 Agent 可能又往里加了候选，拿进门那一刻的快照算完整份写回去，
+    // 新加的会连同被剔的一起消失
     try {
-      final repo = ref.read(taskRepositoryProvider);
-      final current = await repo.findById(widget.task.id) ?? widget.task;
-      final units = current.units ?? const <SemanticUnit>[];
-      final pruned =
-          applyReviewDecisions(current.replacementsFor(units), decisions);
-      await repo.save(current.copyWith(
-          replacementsByUid: RenewTask.byUid(units, pruned),
-          updatedAt: DateTime.now()));
+      final updated = await humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actorReview,
+      ).apply(
+        taskId: widget.task.id,
+        op: 'review.prune',
+        note: '人在审片台确认了这一轮候选的去留',
+        edit: (fresh) {
+          final units = fresh.units ?? const <SemanticUnit>[];
+          final before = fresh.replacementsFor(units);
+          final pruned = applyReviewDecisions(before, decisions);
+          final materials = {for (final m in fresh.pickedMaterials) m.id: m};
+          return TaskEdit(
+            task: fresh.copyWith(
+                replacementsByUid: RenewTask.byUid(units, pruned)),
+            // 每条决定都带上素材本身的样子：只记 id 的话，Agent 看不出
+            // 人不要的是哪一类（见 [reviewDecisionFacts]）
+            before: {
+              'candidates': collectReviewItems(before).length,
+              'decisions': [
+                for (final d in decisions) reviewDecisionFacts(d, materials),
+              ],
+            },
+            after: {'candidates': collectReviewItems(pruned).length},
+          );
+        },
+      );
+      if (updated == null) {
+        if (mounted) setState(() => _error = taskMissingMessage);
+        return;
+      }
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
       // 审核完回到来处——它不是终点站，主流程才是
@@ -787,10 +817,84 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       onTagsChanged(_units);
       return;
     }
-    // 独立模式：进门就持着锁，这份任务此刻归自己写
-    unawaited(ref
-        .read(taskRepositoryProvider)
-        .save(widget.task.copyWith(units: _units, updatedAt: DateTime.now())));
+    // 独立模式：这份任务此刻归自己写
+    if (section.unitIndex >= _units.length) return;
+    unawaited(_saveTags(_units[section.unitIndex].uid, section.shotIndex, tags));
+  }
+
+  /// 把改好的标签落盘。**只动点名的那一个位置**——这一页手上的 `_units` 是
+  /// 进门那一刻的整份，整份写回去会把 Agent 这期间改的切分抹掉。
+  Future<void> _saveTags(
+      String unitUid, int? shotIndex, List<String> tags) async {
+    try {
+      final saved = await humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actorReview,
+      ).apply(
+        taskId: widget.task.id,
+        op: 'unit.tags',
+        where: {
+          'unitUid': unitUid,
+          'shotIndex': ?shotIndex,
+        },
+        note: shotIndex == null
+            ? '人在审片台改了这一段的检索标签'
+            : '人在审片台改了这一镜的检索标签',
+        edit: (fresh) {
+          final units = fresh.units ?? const <SemanticUnit>[];
+          // **按身份重新定位**，不能拿进门那一刻的下标当 fresh 的下标用
+          final i = units.indexWhere((u) => u.uid == unitUid);
+          if (i < 0) {
+            return TaskEdit(
+              task: fresh,
+              before: {'present': false},
+              after: {'present': false, 'note': '这个单元在窗口内被删掉了'},
+            );
+          }
+          final unit = units[i];
+          if (shotIndex != null &&
+              (shotIndex < 0 || shotIndex >= unit.shots.length)) {
+            return TaskEdit(
+              task: fresh,
+              before: {'present': false},
+              after: {'present': false, 'note': '这一镜在窗口内没了（切分变过）'},
+            );
+          }
+          final before =
+              shotIndex == null ? unit.tags : unit.shots[shotIndex].tags;
+          return TaskEdit(
+            task: fresh.copyWith(units: [
+              for (var j = 0; j < units.length; j++)
+                if (j != i)
+                  units[j]
+                else if (shotIndex == null)
+                  unit.copyWith(tags: tags)
+                else
+                  unit.copyWith(shots: [
+                    for (var s = 0; s < unit.shots.length; s++)
+                      if (s == shotIndex)
+                        unit.shots[s].copyWith(tags: tags)
+                      else
+                        unit.shots[s],
+                  ]),
+            ]),
+            before: {'tags': before, 'transcript': unit.transcript},
+            after: {'tags': tags},
+            stampUnits: shotIndex == null ? [unitUid] : const [],
+            stampShots: shotIndex == null
+                ? const []
+                : [ShotRef(unitUid, shotIndex)],
+          );
+        },
+      );
+      if (saved == null && mounted) {
+        setState(() => _error = taskMissingMessage);
+      }
+    } catch (e) {
+      AppLog.warn('审片台改标签落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) setState(() => _error = '标签没存上：$e');
+    }
   }
 
   /// 这一段检索用的那一层标签
