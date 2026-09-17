@@ -36,8 +36,14 @@ Future<int> runAnalyzeCommand({
 
   /// 可视模式：分析要跑好几分钟，人得看着它一步步走到哪儿了
   bool? visual,
+
+  /// 已经有人在分析这条任务时照样再跑一遍。见 [_alreadyAnalyzing]
+  bool force = false,
   StringSink? out,
   StringSink? err,
+
+  /// 测试注入：判「有没有人正在分析」时的当前时刻
+  DateTime? now,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -88,6 +94,40 @@ Future<int> runAnalyzeCommand({
     return exitEnv;
   }
 
+  // **别把同一条管线跑两遍。**
+  //
+  // 整条分析是 ASR + LLM 切分 + 逐镜打标，几分钟、真金白银。而「调用方的
+  // 命令超时了、以为失败又起一个」在真机上是常态——此前挡住这件事的是
+  // 任务锁（第二个进程撞锁退出），锁删掉之后得有别的东西接住它。
+  //
+  // 配音、打标那种循环能把幂等落到每一项上（每一句/每一镜开工前重读盘，
+  // 做过的跳过）；分析不行，它是一整条管线，没有「项」可跳。
+  //
+  // **所以这里给的是劝告，不是拒绝**——这一条一定要分清楚：
+  //
+  // - 退出码是 0，不是失败
+  // - 报的是**事实**（「另一个进程正在分析，我没有重复做」），不是规则
+  // - `--force` 这条明路就写在输出里，决定权仍在调用方手上
+  //
+  // 产品负责人的原话：「任何它不应该做的事情，都应该是人告诉 Agent 的，
+  // 而非是软件限制的。」给事实和出路，不给规则。
+  if (!force) {
+    final busy = _alreadyAnalyzing(dataDir: dataDir, taskId: task.id, now: now);
+    if (busy != null) {
+      emitJson({
+        'ok': true,
+        // **必须是 JSON 里的一个字段**：Agent 是按 JSON 判断的，
+        // 只在 stderr 说一句它读不到，照样会以为分析做完了
+        'skipped': true,
+        'taskId': task.id,
+        'reason': '另一个进程正在分析这条任务'
+            '（正在：${busy.action.isEmpty ? '没说' : busy.action}）',
+        'hint': '要强制重跑加 --force',
+      }, out: out);
+      return 0;
+    }
+  }
+
   // 分析要跑好几分钟，是这条线上最长的一段等待——**每一步都要说出来**，
   // 不然人对着一块不动的板子不知道它是在跑还是卡死了
   final stage = AgentStage(
@@ -98,6 +138,11 @@ Future<int> runAnalyzeCommand({
   );
   await stage.begin('正在分析原片',
       focus: const AgentFocus(module: 'workbench'));
+  // **静默模式下 begin 什么都不做，在场状态还是要立刻写**：
+  // 一来人可能正开着这一页，二来上面那道「别把同一条管线跑两遍」的劝告
+  // 认的就是它——不在这儿写，第二个进程要等到第一次进度回调才看得见，
+  // 而 prepare 那一段（抽音频、分离）好几分钟里它什么都看不见
+  stage.note('正在分析原片', focus: const AgentFocus(module: 'workbench'));
 
   try {
     if (external0.isEmpty) {
@@ -198,6 +243,24 @@ Future<int> runAnalyzeCommand({
   } finally {
     stage.end();
   }
+}
+
+/// 这条任务上是不是已经有人在分析了。
+///
+/// 判据就是 Agent 的在场状态：谁在、在干什么。**心跳新不新鲜用现成的
+/// [defaultStaleAfter]**（`readAgentPresence` 自己就按它判），不另发明一个
+/// 时限——两套时限迟早对不上，而对不上的那一天没人看得出来。
+///
+/// 只认「正在分析」这一类活儿：同一条任务上 Agent 可能正在挑镜头、正在配乐，
+/// 那些跟重跑管线没关系，不该拦。
+AgentPresence? _alreadyAnalyzing({
+  required Directory dataDir,
+  required String taskId,
+  DateTime? now,
+}) {
+  final busy = readAgentPresence(dataDir: dataDir, taskId: taskId, now: now);
+  if (busy == null) return null;
+  return busy.action.contains('分析') ? busy : null;
 }
 
 /// 这些标签组下的**标签**（不是组名）。

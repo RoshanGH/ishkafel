@@ -97,6 +97,9 @@ Future<void> main(List<String> args) async {
             'whiteBox / blurBox 能盖住素材自带的烧录字幕')
     ..addOption('bottom', help: 'subtitle 用：字幕距画面底部的比例（如 0.22）')
     ..addOption('font', help: 'subtitle 用：字号占画面高度的比例（如 0.034）')
+    ..addFlag('force',
+        help: 'analyze 用：已经有另一个进程在分析这条任务时照样再跑一遍'
+            '（默认不跑，只报一句「有人在做」——整条管线几分钟、花钱）')
     ..addFlag('probe',
         help: 'candidates 用：探一下每条候选多长、选它会变速多少（慢一些）')
     ..addOption('video', help: 'peek 用：要看哪个视频文件')
@@ -220,6 +223,7 @@ Future<void> main(List<String> args) async {
         dataDir: dataDir,
         visual: parsed['visual'] as bool,
         external: parsed['external'] as String?,
+        force: parsed['force'] as bool,
       ),
     'skill' => await runSkillCommand(
         rest: rest,
