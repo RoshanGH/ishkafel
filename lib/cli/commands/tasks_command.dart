@@ -4,6 +4,8 @@ import '../../core/storage/task_media.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_copy.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 
@@ -116,9 +118,26 @@ Future<int> runTaskRenameCommand({
     sink.writeln('没有这个任务：${rest.first}');
     return exitNotFound;
   }
-  final next = name!.trim();
-  await repository.save(task.copyWith(name: next, updatedAt: DateTime.now()));
-  emitJson({'ok': true, 'id': task.id, 'name': next, 'was': task.name},
+  final wanted = name!.trim();
+  final updated = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'task.rename',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(name: wanted),
+      before: {'name': fresh.name},
+      after: {'name': wanted},
+    ),
+  );
+  if (updated == null) {
+    sink.writeln('这条任务在操作过程中被删掉了：${rest.first}');
+    return exitNotFound;
+  }
+  emitJson({'ok': true, 'id': updated.id, 'name': updated.name, 'was': task.name},
       out: out);
   return 0;
 }
