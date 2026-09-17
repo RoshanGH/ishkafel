@@ -19,7 +19,14 @@ enum ActorKind { human, agent }
 /// 产品特写那一类」。只记「删除 U3S1」它什么也看不出来；把素材的标签、时长、
 /// 画面描述、烧没烧字一起记下，意图就在那儿了。
 class TaskLogEntry {
-  /// 单调递增，是 `--since` 的游标
+  /// 单调递增，是 `--since` 的游标。
+  ///
+  /// **不落盘，读的时候现算。** 早先版本把 seq 写进 JSON、`append` 靠
+  /// `读 latestSeq → +1 → 写` 得出下一个号，这是一次读-改-写，CLI 和 GUI
+  /// 两个进程同时 `append` 会算出同一个 seq——不是数字难看，是撞号的那一笔
+  /// 从此在 `--since` 游标下永远查不到，等于凭空消失。改成按 `read()` 里
+  /// 成功解析到的行序赋号，`append` 就只是纯追加，不必读文件，竞态随之
+  /// 消失。
   final int seq;
   final DateTime at;
   final ActorKind by;
@@ -54,7 +61,7 @@ class TaskLogEntry {
   });
 
   Map<String, dynamic> toJson() => {
-        'seq': seq,
+        // seq 不写进去——它是读的时候按行序现算的，见 [seq] 的注释
         'at': at.toIso8601String(),
         'by': by.name,
         'actor': actor,
@@ -67,18 +74,31 @@ class TaskLogEntry {
       };
 
   /// 宽松解析：**任何一处不对就返回 null**，由调用方跳过这一行。
-  /// 一行读不懂的记录不该把整份日志废掉
+  /// 一行读不懂的记录不该把整份日志废掉。
+  ///
+  /// **`by` 解析不出合法值也算坏行**，不猜成某一方。这份日志存在的唯一
+  /// 意义就是分清人和 Agent，猜一个归属就是把「人 / Agent / 不知道」这
+  /// 三态悄悄压成两态——这正是这个项目栽过的毛病。
+  ///
+  /// 返回的 `seq` 是占位值 0，真正的号由 [TaskLogFile.read] 按解析成功的
+  /// 行序重新赋予（seq 不落盘，见 [seq] 的注释）。
   static TaskLogEntry? tryFromJson(Object? raw) {
     if (raw is! Map) return null;
-    final seq = raw['seq'];
     final at = DateTime.tryParse('${raw['at']}');
     final op = raw['op'];
-    if (seq is! int || at == null || op is! String || op.isEmpty) return null;
+    if (at == null || op is! String || op.isEmpty) return null;
+    ActorKind? by;
+    for (final k in ActorKind.values) {
+      if (k.name == raw['by']) {
+        by = k;
+        break;
+      }
+    }
+    if (by == null) return null;
     return TaskLogEntry(
-      seq: seq,
+      seq: 0,
       at: at,
-      by: ActorKind.values.firstWhere((k) => k.name == raw['by'],
-          orElse: () => ActorKind.agent),
+      by: by,
       actor: raw['actor'] is String ? raw['actor'] as String : '',
       taskId: raw['task'] is String ? raw['task'] as String : '',
       op: op,
@@ -116,11 +136,16 @@ class TaskLogFile {
     return entries.isEmpty ? 0 : entries.last.seq;
   }
 
-  /// 记一笔，返回它的 seq。
+  /// 记一笔，返回是否真的落盘了。
   ///
-  /// **追加写**：并发追加时各自成行，不会互相截断（同一条任务同时有两个写入方
-  /// 正是锁删掉之后的常态）。
-  int append({
+  /// **纯追加，不读文件。** 不再算 `latestSeq + 1`——seq 已经不落盘（见
+  /// [TaskLogEntry.seq] 的注释），`append` 不需要先读旧内容才能知道该写
+  /// 什么，两个写入方（CLI、GUI）谁先谁后都不用互相协调，读-改-写的竞态
+  /// 随之消失。
+  ///
+  /// 返回值补上了「到底写没写进去」——调用方不该拿到一个看起来正常的
+  /// 返回值，磁盘上却什么都没发生。
+  bool append({
     required ActorKind by,
     required String actor,
     required String op,
@@ -129,9 +154,8 @@ class TaskLogFile {
     Map<String, dynamic>? after,
     String note = '',
   }) {
-    final seq = latestSeq + 1;
     final entry = TaskLogEntry(
-      seq: seq,
+      seq: 0, // 占位，不落盘（toJson 里不写这个字段）
       at: DateTime.now(),
       by: by,
       actor: actor,
@@ -147,30 +171,52 @@ class TaskLogFile {
       f.parent.createSync(recursive: true);
       f.writeAsStringSync('${jsonEncode(entry.toJson())}\n',
           mode: FileMode.append, flush: true);
+      return true;
     } catch (e) {
       // **出声，不吞。** 日志记漏一笔，Agent 查到的「什么都没发生」
       // 看起来正好像「一切正常」
       AppLog.warn('改动日志写不进去（$taskId · $op）：$e');
+      return false;
     }
-    return seq;
   }
 
-  /// 读。`since` 之后的、`by` 那一方的，最多 `limit` 条（取最近的）
+  /// 读。`since` 之后的、`by` 那一方的，最多 `limit` 条（取最近的）。
+  ///
+  /// **seq 在这里现算**：按成功解析的行的次序从 1 开始编号，坏行不占号
+  /// （不落盘、也不参与计数）。
   List<TaskLogEntry> read({int? since, ActorKind? by, int limit = 200}) {
     final f = _file;
     if (!f.existsSync()) return const [];
     final out = <TaskLogEntry>[];
+    var skipped = 0;
+    var seq = 0;
     try {
       for (final line in f.readAsLinesSync()) {
         if (line.trim().isEmpty) continue;
-        TaskLogEntry? entry;
+        TaskLogEntry? parsed;
         try {
-          entry = TaskLogEntry.tryFromJson(jsonDecode(line));
+          parsed = TaskLogEntry.tryFromJson(jsonDecode(line));
         } catch (_) {
-          entry = null;
+          parsed = null;
         }
         // 读不懂的那一行跳过就是了，别让它废掉整份日志
-        if (entry == null) continue;
+        if (parsed == null) {
+          skipped++;
+          continue;
+        }
+        seq++;
+        final entry = TaskLogEntry(
+          seq: seq,
+          at: parsed.at,
+          by: parsed.by,
+          actor: parsed.actor,
+          taskId: parsed.taskId,
+          op: parsed.op,
+          where: parsed.where,
+          before: parsed.before,
+          after: parsed.after,
+          note: parsed.note,
+        );
         if (since != null && entry.seq <= since) continue;
         if (by != null && entry.by != by) continue;
         out.add(entry);
@@ -178,6 +224,10 @@ class TaskLogFile {
     } catch (e) {
       AppLog.warn('改动日志读不动（$taskId）：$e');
       return const [];
+    }
+    if (skipped > 0) {
+      // 坏行现在还会影响编号，比以前更该让人知道有几行没读懂
+      AppLog.warn('改动日志有 $skipped 行读不懂，已跳过（$taskId）');
     }
     return out.length <= limit ? out : out.sublist(out.length - limit);
   }

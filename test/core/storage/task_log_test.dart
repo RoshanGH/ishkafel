@@ -17,15 +17,22 @@ void main() {
   test('seq 从 1 开始，逐笔递增', () {
     final log = fileOf('t1');
     expect(log.latestSeq, 0);
-    expect(log.append(by: ActorKind.agent, actor: 'Agent', op: 'shot.pick'), 1);
-    expect(log.append(by: ActorKind.human, actor: '人（工作台）', op: 'shot.remove'), 2);
+    expect(
+        log.append(by: ActorKind.agent, actor: 'Agent', op: 'shot.pick'),
+        isTrue);
+    expect(
+        log.append(
+            by: ActorKind.human, actor: '人（工作台）', op: 'shot.remove'),
+        isTrue);
+    expect(log.read().map((e) => e.seq), [1, 2]);
     expect(log.latestSeq, 2);
   });
 
   test('新进程读到的 seq 接着上一次往下，不从 1 重来', () {
     fileOf('t1').append(by: ActorKind.agent, actor: 'Agent', op: 'shot.pick');
     // 换一个实例 = 换一个进程
-    expect(fileOf('t1').append(by: ActorKind.agent, actor: 'Agent', op: 'x'), 2);
+    fileOf('t1').append(by: ActorKind.agent, actor: 'Agent', op: 'x');
+    expect(fileOf('t1').read().last.seq, 2);
   });
 
   test('判断依据原样存下来，不被压扁成 id', () {
@@ -72,7 +79,21 @@ void main() {
     File('${dataDir.path}/logs/t1.jsonl')
         .writeAsStringSync('{这不是 json\n', mode: FileMode.append);
     log.append(by: ActorKind.agent, actor: 'Agent', op: 'c');
-    expect(log.read().map((e) => e.op), ['a', 'c']);
+    final entries = log.read();
+    expect(entries.map((e) => e.op), ['a', 'c']);
+    // 编号按成功解析的行算，坏行不占号：'c' 是第 2 条，不是第 3 条
+    expect(entries.map((e) => e.seq), [1, 2]);
+  });
+
+  test('by 字段是垃圾值的行被当坏行跳过', () {
+    final log = fileOf('t1');
+    log.append(by: ActorKind.agent, actor: 'Agent', op: 'a');
+    File('${dataDir.path}/logs/t1.jsonl').writeAsStringSync(
+      '{"at":"2026-01-01T00:00:00.000","op":"x","by":"神仙"}\n',
+      mode: FileMode.append,
+    );
+    log.append(by: ActorKind.agent, actor: 'Agent', op: 'b');
+    expect(log.read().map((e) => e.op), ['a', 'b']);
   });
 
   test('deleteAll 把这条任务的日志清掉——任务删了不留孤儿', () {
