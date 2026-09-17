@@ -96,6 +96,19 @@ void main() {
     expect(await otherStems.exists(), isTrue);
   });
 
+  test('改动日志也是产物：删任务时跟着一起走', () async {
+    // 日志登记进了 TaskArtifacts（logs/<id>.jsonl，跟 covers 同一种形状），
+    // 界面这条清理路径走的是 TaskArtifacts.of()，不用再单独去删日志文件
+    final logsDir = Directory('${tempDir.path}/logs')..createSync(recursive: true);
+    final log = await touch(logsDir, 'ab.jsonl');
+    final otherLog = await touch(logsDir, 'abc.jsonl');
+
+    await cleaner.cleanup('ab');
+
+    expect(await log.exists(), isFalse);
+    expect(await otherLog.exists(), isTrue, reason: '前缀相同的别的任务日志不能被误删');
+  });
+
   test('清理一个从不存在的任务：不抛异常，也不碰其他任务的产物', () async {
     final other = await touch(workDir, 'zz.pcm');
     final otherCover = await touch(coversDir, 'zz.jpg');

@@ -17,7 +17,6 @@ import '../../core/models/export_record.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_log.dart';
 import '../../core/storage/task_repository.dart';
 import '../../core/storage/task_seq.dart';
 import '../import_flow/import_service.dart';
@@ -213,11 +212,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       _deletedTaskIds.remove(task.id);
       rethrow;
     }
-    // 改动日志跟着任务走：任务没了，日志再没人会去看，留着就是孤儿数据
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir != null) {
-      TaskLogFile(dataDir: dataDir, taskId: task.id).deleteAll();
-    }
+    // 改动日志已登记进 TaskArtifacts（跟 covers 同款：按任务命名的单文件），
+    // 上面 taskArtifactCleanerProvider 那次清理已经带走了它，这里不用再删一次
     if (!_removeLocally(task.id)) await reload();
   }
 
