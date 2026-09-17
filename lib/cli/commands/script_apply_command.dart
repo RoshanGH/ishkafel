@@ -35,6 +35,26 @@ const List<String> scriptApplyKinds = [
   'baseline', 'line-voice', 'mix', 'word-shots',
 ];
 
+/// `what` → 落盘时用的 op 名。**受控清单**：新增一种 `apply` 子类型必须
+/// 在这里登记。不受控地拿 payload 里的 `what` 直接拼 op 名
+/// （`'script.apply.$what'`）会有两个问题：段内带连字符的 `what`
+/// （如 `shot-edit`）拼出来的 op 名段内也带连字符，风格不统一；
+/// 新增一种 `what` 会静默多出一个 op 名，没有地方能一眼看出这份日志
+/// 里到底可能出现哪些 op（2026-09-17 评审指出）。`shots` 不在这里——
+/// 它走 `_applyShotsPicks`，op 是固定的 `script.shots.pick`
+const Map<String, String> _scriptApplyOpNames = {
+  'subtitles': 'script.apply.subtitles',
+  'alloc': 'script.apply.alloc',
+  'bgm': 'script.apply.bgm',
+  'lines': 'script.apply.lines',
+  'shot-edit': 'script.apply.shotEdit',
+  'screen-text': 'script.apply.screenText',
+  'baseline': 'script.apply.baseline',
+  'line-voice': 'script.apply.lineVoice',
+  'mix': 'script.apply.mix',
+  'word-shots': 'script.apply.wordShots',
+};
+
 /// `ishkafel script apply <shots|subtitles|alloc|bgm> <task> --file <json>`
 ///
 /// 顺序不许变：**读文件 → 校验 → 拿锁 → 重读任务 → 再校验一次 → 写入 →
@@ -421,7 +441,7 @@ Future<int> _applyPureKind({
       actor: 'Agent',
     ).apply(
       taskId: task.id,
-      op: 'script.apply.$what',
+      op: _scriptApplyOpNames[what] ?? 'script.apply.$what',
       edit: (fresh) {
         final freshDoc = fresh.script;
         if (freshDoc == null) {
@@ -592,36 +612,186 @@ Future<RenewTask> _refreshScriptCover({
   return updated ?? latest;
 }
 
-/// 这一笔改前/改后值得记的事实。**除 baseline / mix 外都落在具体几行
-/// 上**——按提交的形状抽出受影响的行号，取那几行现在的台词，Agent 才能
-/// 看出改的是什么，不是只有一句「what=lines，动了 3 处」这种宽泛描述。
+/// 这一笔改前/改后值得记的事实。**每种子类型改的字段不一样，读的字段也
+/// 必须跟着不一样**——早先这里不分青红皂白只报行文本，而 `alloc` 改的是
+/// 时长、`shot-edit` 改的是取段/变速/音量、`bgm` 改的是曲子，行文本一个
+/// 字都没变，于是 before/after 逐字相同、日志等于没记（2026-09-17 评审
+/// 指出）。现在按 what 分发到各自的抽取器，取的是**真正被这笔改动碰过**
+/// 的那些字段。
 Map<String, dynamic> _applyPureFacts(
     String what, ScriptDoc doc, Map<String, dynamic> payload) {
-  if (what == 'baseline') {
-    return {'voiceId': doc.defaultVoiceId, 'speechRate': doc.defaultSpeechRate};
-  }
-  if (what == 'mix') {
-    return {'mix': doc.mix.toJson()};
-  }
-  final indices = switch (what) {
-    'subtitles' => [for (final s in _subtitles(payload)) s.lineIndex],
-    'alloc' => [for (final a in _allocs(payload)) a.lineIndex],
-    'lines' => [for (final e in _lineEdits(payload)) e.lineIndex],
-    'shot-edit' => [for (final e in _shotEdits(payload)) e.lineIndex],
-    'line-voice' => [for (final e in _lineVoices(payload)) e.lineIndex],
-    'word-shots' => [for (final p in _wordShots(payload)) p.lineIndex],
-    'screen-text' => [for (final e in _screenTexts(payload)) e.lineIndex],
-    'bgm' => [
-        for (final s in _bgms(payload))
-          for (var i = s.startLine; i <= s.endLine; i++) i,
-      ],
-    _ => const <int>[],
+  return switch (what) {
+    'baseline' => {
+        'voiceId': doc.defaultVoiceId,
+        'speechRate': doc.defaultSpeechRate,
+      },
+    'mix' => {'mix': doc.mix.toJson()},
+    'lines' => {
+        'lines': [
+          for (final e in _lineEdits(payload).map((e) => e.lineIndex).toSet())
+            if (e >= 0 && e < doc.lines.length)
+              {'lineIndex': e, 'text': doc.lines[e].text},
+        ],
+      },
+    'alloc' => {
+        'lines': [for (final a in _allocs(payload)) _allocFacts(doc, a.lineIndex)],
+      },
+    'shot-edit' => {
+        'shots': [for (final e in _shotEdits(payload)) _shotEditFacts(doc, e)],
+      },
+    'line-voice' => {
+        'lines': [
+          for (final e in _lineVoices(payload)) _lineVoiceFacts(doc, e.lineIndex),
+        ],
+      },
+    'word-shots' => {
+        'shots': [for (final p in _wordShots(payload)) _wordShotFacts(doc, p)],
+      },
+    'screen-text' => {
+        'screens': [
+          for (final e in _screenTexts(payload)) _screenTextFacts(doc, e),
+        ],
+      },
+    'subtitles' => {
+        'lines': [
+          for (final s in _subtitles(payload)) _subtitleFacts(doc, s.lineIndex),
+        ],
+      },
+    'bgm' => {
+        'segments': [for (final s in _bgms(payload)) _bgmSegmentFacts(doc, s.startLine)],
+      },
+    _ => const {},
   };
+}
+
+/// `alloc` 改的是每一镜分到的成片时长——这就是任务书点名要带的
+/// 「改时长要带前后毫秒数」，不是行文本
+Map<String, dynamic> _allocFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final shots = doc.lines[lineIndex].shots;
   return {
-    'lines': [
-      for (final i in indices.toSet())
-        if (i >= 0 && i < doc.lines.length) {'lineIndex': i, 'text': doc.lines[i].text},
-    ],
+    'lineIndex': lineIndex,
+    'allocMs': [for (final s in shots) s.allocMs],
+  };
+}
+
+/// `shot-edit` 覆盖 remove/trim/speed/volume 四种操作。
+/// **remove 不报单个下标的字段**：删完后面的镜头会整体前移，下标指的已经
+/// 不是同一个东西——报这一行现在还剩几镜、都是谁，删的是哪一个从
+/// before/after 的 materials 列表一比就看得出来。其余三种操作报的是
+/// 那一镜本身：取段起点、变速倍率、原声音量——变化前后的实际数值都在
+Map<String, dynamic> _shotEditFacts(ScriptDoc doc, ShotEdit e) {
+  if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+    return {'lineIndex': e.lineIndex, 'shotIndex': e.shotIndex, 'op': e.op, 'present': false};
+  }
+  final shots = doc.lines[e.lineIndex].shots;
+  if (e.op == 'remove') {
+    return {
+      'lineIndex': e.lineIndex,
+      'shotIndex': e.shotIndex,
+      'op': e.op,
+      'shotCount': shots.length,
+      'materials': [for (final s in shots) s.materialId],
+    };
+  }
+  if (e.shotIndex < 0 || e.shotIndex >= shots.length) {
+    return {'lineIndex': e.lineIndex, 'shotIndex': e.shotIndex, 'op': e.op, 'present': false};
+  }
+  final s = shots[e.shotIndex];
+  return {
+    'lineIndex': e.lineIndex,
+    'shotIndex': e.shotIndex,
+    'op': e.op,
+    'materialId': s.materialId,
+    'name': s.name,
+    'sceneDescription': s.sceneDescription,
+    'trimStartMs': s.trimStartMs,
+    'speed': s.speed,
+    'sourceVolume': s.sourceVolume,
+  };
+}
+
+/// `word-shots` 划词建镜：按 startWord/endWord 找那一镜——插入会让下标
+/// 漂移，不能按下标定位。改之前那份找不到（还没插），返回里只有
+/// shotCount；改之后那份能找到，材料事实就在
+Map<String, dynamic> _wordShotFacts(ScriptDoc doc, WordShotPick p) {
+  if (p.lineIndex < 0 || p.lineIndex >= doc.lines.length) {
+    return {'lineIndex': p.lineIndex, 'present': false};
+  }
+  final shots = doc.lines[p.lineIndex].shots;
+  final match = shots
+      .where((s) => s.startWord == p.startWord && s.endWord == p.endWord)
+      .toList();
+  return {
+    'lineIndex': p.lineIndex,
+    'startWord': p.startWord,
+    'endWord': p.endWord,
+    'shotCount': shots.length,
+    if (match.isNotEmpty) ...{
+      'materialId': match.first.materialId,
+      'name': match.first.name,
+      'sceneDescription': match.first.sceneDescription,
+    },
+  };
+}
+
+/// `subtitles` 断句：字幕屏的切点（按词序号，不是毫秒）
+Map<String, dynamic> _subtitleFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final screens = doc.lines[lineIndex].subtitleScreens;
+  return {
+    'lineIndex': lineIndex,
+    'cuts': screens == null ? null : [for (final s in screens) s.startWord],
+  };
+}
+
+/// `screen-text` 改某一屏的字幕文字覆盖
+Map<String, dynamic> _screenTextFacts(ScriptDoc doc, ScreenText e) {
+  if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+    return {'lineIndex': e.lineIndex, 'screenIndex': e.screenIndex, 'present': false};
+  }
+  final screens = doc.lines[e.lineIndex].subtitleScreens;
+  if (screens == null || e.screenIndex < 0 || e.screenIndex >= screens.length) {
+    return {'lineIndex': e.lineIndex, 'screenIndex': e.screenIndex, 'present': false};
+  }
+  return {
+    'lineIndex': e.lineIndex,
+    'screenIndex': e.screenIndex,
+    'text': screens[e.screenIndex].text,
+  };
+}
+
+/// `line-voice` 改某一行的音色/语速覆盖——`voiceIdOf`/`speechRateOf` 拿的是
+/// **生效值**（行覆盖不存在时退回本片基调），跟界面显示口径一致
+Map<String, dynamic> _lineVoiceFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final line = doc.lines[lineIndex];
+  return {
+    'lineIndex': lineIndex,
+    'voiceId': doc.voiceIdOf(line),
+    'speechRate': doc.speechRateOf(line),
+  };
+}
+
+/// `bgm` 铺的是哪一段——曲子 id/名字/音量，跟 bgm_command.dart 的
+/// `_bgmSegmentFacts` 同一个判据（不是只记素材 id）
+Map<String, dynamic> _bgmSegmentFacts(ScriptDoc doc, int startLine) {
+  final matches =
+      doc.bgmSegments.where((s) => s.startLine <= startLine && s.endLine >= startLine);
+  if (matches.isEmpty) return {'startLine': startLine, 'present': false};
+  final s = matches.first;
+  return {
+    'startLine': s.startLine,
+    'endLine': s.endLine,
+    'materialId': s.material.id,
+    'name': s.material.name,
+    'volume': s.volume,
   };
 }
 
