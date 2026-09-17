@@ -19,6 +19,7 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
@@ -150,6 +151,7 @@ Future<_Repo> _open(WidgetTester tester, {TaggingService? tagging}) async {
   await tester.pumpWidget(ProviderScope(
     overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(_logDir),
       taggingServiceProvider.overrideWithValue(tagging),
       miaoaTagServiceProvider.overrideWithValue(_FakeTagService()),
       miaoaProjectServiceProvider.overrideWithValue(_FakeProjectService()),
@@ -187,7 +189,15 @@ Future<void> _settleConsequence(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   _blankTaskNeverAsks();
   testWidgets('改动很小时也会问，但两项都默认不勾', (tester) async {
     await _open(tester);
@@ -411,6 +421,7 @@ void _blankTaskNeverAsks() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(_logDir),
         miaoaTagServiceProvider.overrideWithValue(_FakeTagService()),
         miaoaProjectServiceProvider.overrideWithValue(_FakeProjectService()),
       ],

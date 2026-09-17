@@ -107,6 +107,8 @@ import '../../core/storage/ui_action.dart';
 import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
+import '../tasks/gui_task_mutation.dart';
 import 'task_lock_banner.dart';
 import 'subtitle_popover.dart';
 
@@ -2536,11 +2538,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 直接把画面上的字幕拖到想要的高度——比在面板里拧「距底 21%」直观得多
   Future<void> _dragSubtitleTo(double bottomRatio) async {
-    final next = _task.copyWith(
+    setState(() => _task = _task.copyWith(
         subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio),
-        updatedAt: DateTime.now());
-    setState(() => _task = next);
-    await ref.read(taskRepositoryProvider).save(next);
+        updatedAt: DateTime.now()));
+    // 落盘只动**距底比例**这一个值：这一刻 Agent 可能正在改同一条任务的
+    // 别的东西，整份写回去会把它们抹掉
+    await _saveSubtitleStyle(
+      (fresh) => fresh.subtitle.copyWith(bottomRatio: bottomRatio),
+      note: '人直接把画面上的字幕拖到了想要的高度',
+    );
   }
 
   /// 改字幕样式。**主要用途是遮挡**：素材自带烧录字幕时（库里不少见，
@@ -2561,11 +2567,65 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       }
       return;
     }
-    final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
+    final style = picked.$1;
     // 预览的字幕是现画的一层，setState 就已经重画了——不推轨道、不换源
-    setState(() => _task = next);
-    await ref.read(taskRepositoryProvider).save(next);
+    setState(() =>
+        _task = _task.copyWith(subtitle: style, updatedAt: DateTime.now()));
+    await _saveSubtitleStyle((_) => style, note: '人在工作台调了全片字幕样式');
   }
+
+  /// 全片字幕样式落盘。**只换 `subtitle` 这一个字段**，其余交给盘上那份。
+  ///
+  /// [next] 拿到的是刚重读回来的那一份，不是这一页手上的 `_task`——后者是
+  /// 打开那一刻的样子，整份写回去会把 Agent 这期间改的东西悄悄抹掉。
+  Future<void> _saveSubtitleStyle(
+    SubtitleStyle Function(RenewTask fresh) next, {
+    required String note,
+  }) async {
+    try {
+      final saved = await humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actorWorkbench,
+      ).apply(
+        taskId: _task.id,
+        op: 'subtitle.set',
+        note: note,
+        edit: (fresh) {
+          final style = next(fresh);
+          return TaskEdit(
+            task: fresh.copyWith(subtitle: style),
+            before: _subtitleStyleFacts(fresh.subtitle),
+            after: _subtitleStyleFacts(style),
+          );
+        },
+      );
+      // 画面上的字已经变了、盘上却没变——不说的话人关了窗才发现白调一遍
+      if (saved == null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('这条任务已经被删了，字幕样式没能存下。'),
+          backgroundColor: AppColors.red,
+          duration: Duration(seconds: 5),
+        ));
+      }
+    } catch (e) {
+      AppLog.warn('字幕样式落库失败（taskId=${_task.id}）：$e');
+      if (mounted) {
+        _showSaveFailure('字幕样式',
+            retry: () => _saveSubtitleStyle(next, note: note));
+      }
+    }
+  }
+
+  /// 字幕样式的判断依据。**样式的主要用途是遮挡**（素材自带烧录字幕时，
+  /// 白字黑描边盖不住），所以形态、字号、位置、颜色一个都不能少——
+  /// 只记一个指纹的话，Agent 看不出人是嫌它盖不住还是嫌它太大
+  static Map<String, dynamic> _subtitleStyleFacts(SubtitleStyle style) => {
+        'preset': style.preset.name,
+        'bottomRatio': style.bottomRatio,
+        'fontRatio': style.fontRatio,
+        'colorHex': style.colorHex,
+      };
 
   /// 开着的字幕样式浮层（见 [showSubtitleStylePanel]）
   SubtitleStylePanel? _subtitleStylePanel;

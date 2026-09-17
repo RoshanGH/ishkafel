@@ -14,6 +14,7 @@ import '../settings/settings_providers.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
 import '../../core/models/tag_group_ref.dart';
+import '../../core/models/unit_uid.dart';
 import '../../core/models/export_record.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/replacement/replacement_plan.dart';
@@ -959,7 +960,12 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
             'unitCount': units.length,
             'changed': [for (final c in changed) c.$3],
           },
-          stampUnits: [for (final c in changed) c.$1],
+          // **只给发过身份的单元盖戳**：还没发 uid 的（老存档、刚拆出来
+          // 还没跑 ensureUnitUids）盖不上，点了名反而会被当成「戳丢了」报错
+          stampUnits: [
+            for (final c in changed)
+              if (isUnitUid(c.$1)) c.$1,
+          ],
         );
       },
     );
@@ -970,6 +976,13 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   ///
   /// **按 uid 配对，不按下标**：人可能删过、挪过单元，下标早就不是发起那一刻
   /// 那一套了。新加的单元（fresh 里没有）算「改动」，被删掉的也算。
+  ///
+  /// **两边都发齐了身份才按身份配对，否则退回按位置比**。老存档、刚
+  /// `new` 出来的单元 uid 是空串，而编辑器收下它们时会补发一轮
+  /// （`ensureUnitUids`）——于是「盘上那份没有 uid、手上这份有」是常态。
+  /// 这时按 uid 配对会把每一个单元都认成「新加的」，人明明什么都没改，
+  /// 却被结结实实盖上一圈「人改过」的戳（2026-09-18 真机测试当场抓到：
+  /// 打开工作台什么都不动就返回，两个单元全被标成人改过的）。
   static List<(String, Map<String, dynamic>, Map<String, dynamic>)>
       _changedUnitFacts(List<SemanticUnit> before, List<SemanticUnit> after) {
     Map<String, dynamic> facts(SemanticUnit u) => {
@@ -979,19 +992,34 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
           'shotCount': u.shots.length,
           'tags': u.tags,
         };
+    bool same(SemanticUnit a, SemanticUnit b) =>
+        const DeepCollectionEquality().equals(facts(a), facts(b));
+    final changed = <(String, Map<String, dynamic>, Map<String, dynamic>)>[];
+
+    final byUid = before.every((u) => isUnitUid(u.uid)) &&
+        after.every((u) => isUnitUid(u.uid));
+    if (!byUid) {
+      for (var i = 0; i < after.length; i++) {
+        if (i >= before.length) {
+          changed.add((after[i].uid, {'present': false}, facts(after[i])));
+        } else if (!same(before[i], after[i])) {
+          changed.add((after[i].uid, facts(before[i]), facts(after[i])));
+        }
+      }
+      for (var i = after.length; i < before.length; i++) {
+        changed.add((before[i].uid, facts(before[i]), {'present': false}));
+      }
+      return changed;
+    }
+
     final was = {for (final u in before) u.uid: u};
     final now = {for (final u in after) u.uid: u};
-    final changed = <(String, Map<String, dynamic>, Map<String, dynamic>)>[];
     for (final u in after) {
       final old = was[u.uid];
-      final a = facts(u);
       if (old == null) {
-        changed.add((u.uid, {'present': false}, a));
-        continue;
-      }
-      final b = facts(old);
-      if (!const DeepCollectionEquality().equals(b, a)) {
-        changed.add((u.uid, b, a));
+        changed.add((u.uid, {'present': false}, facts(u)));
+      } else if (!same(old, u)) {
+        changed.add((u.uid, facts(old), facts(u)));
       }
     }
     for (final u in before) {

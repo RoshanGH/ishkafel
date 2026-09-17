@@ -12,6 +12,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -65,7 +66,15 @@ RenewTask _task() => RenewTask(
       ],
     );
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   group('剪辑快捷键（CLAUDE.md 要求：空格播放、JKL、方向键逐帧）', () {
     late FakePlaybackController playback;
 
@@ -74,7 +83,7 @@ void main() {
       await repo.save(_task());
       playback = FakePlaybackController();
       await tester.pumpWidget(ProviderScope(
-        overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+        overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
         child: MaterialApp(
           home: WorkbenchPage(
             task: _task(),

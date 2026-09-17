@@ -13,6 +13,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/bgm_picker_sheet.dart';
 import 'package:ishkafel/features/workbench/timeline/timeline_hit_tester.dart';
@@ -106,6 +107,7 @@ Future<_Repo> _open(WidgetTester tester, {BgmPlan bgm = BgmPlan.empty}) async {
   await tester.pumpWidget(ProviderScope(
     overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(_logDir),
       bgmLibraryProvider.overrideWithValue(_Library()),
     ],
     child: MaterialApp(
@@ -138,7 +140,15 @@ Future<void> _dragOnBgmTrack(
   await tester.pumpAndSettle();
 }
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   testWidgets('框选一段镜头 → 挑一首 → 落库', (tester) async {
     final repo = await _open(tester);
 

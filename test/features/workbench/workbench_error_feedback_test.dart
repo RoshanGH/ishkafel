@@ -11,6 +11,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -77,12 +78,24 @@ RenewTask _task() => RenewTask(
       ],
     );
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   group('落库失败必须让用户看得见（否则表现为「按钮点了没反应」）', () {
     testWidgets('自动落库失败时给出可见提示，不让用户以为改动已经留住', (tester) async {
-      final repo = _FailingRepo();
+      // 工作台打开的任务本来就在盘上：TaskMutation 只改已存在的任务，
+      // 重读不到就如实返回「没有这条」，根本走不到 save 那一步
+      final repo = _FailingRepo()..failSave = false;
+      await repo.save(_task());
+      repo.failSave = true;
       await tester.pumpWidget(ProviderScope(
-        overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+        overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
         child: MaterialApp(
           home: WorkbenchPage(
             task: _task(),
