@@ -16,11 +16,24 @@ import 'package:flutter_test/flutter_test.dart';
 /// 时间」压到「一次同步回调」，并在这个窗口内被抢写时重跑一轮——**不是把并发
 /// 写变成零**。写清楚是因为承重件的文档比代码强，将来的人会照着它设计更激进的写法。
 void main() {
-  /// 白名单：这几处是写入口自己，或者根本不改已存在的任务
-  const allowed = {
+  /// 白名单一：这几个文件是写入口自己——整份豁免
+  const allowedFiles = {
     'lib/core/storage/task_mutation.dart', // 写入口本人
     'lib/core/storage/file_task_repository.dart',
     'lib/core/storage/task_repository.dart',
+  };
+
+  /// 白名单二：**建新任务**的那一处，没有「已存在的任务」可重读，
+  /// 结构上就不是 TaskMutation 的候选（`blank create` / `task-copy` /
+  /// `script new` 建的都是带新 id 的全新 `RenewTask`）。
+  ///
+  /// 只许放**建新任务**的那一处，narrow 到「文件 + 函数」，不是整个文件——
+  /// 以后有人往这个函数里加一处「改已存在任务」的写入，这条测试必须还能
+  /// 抓住它（新写入不在下面这份函数名单里，照样会被扫到）。
+  const allowedNewTaskCreation = {
+    'lib/cli/commands/blank_command.dart': {'_create'},
+    'lib/cli/commands/tasks_command.dart': {'runTaskCopyCommand'},
+    'lib/cli/commands/script_run_command.dart': {'runScriptNewCommand'},
   };
 
   /// 扫描范围分两步走：Task 6 先管住 CLI，Task 7 再扩到整个 lib。
@@ -28,21 +41,27 @@ void main() {
   /// 那这条测试就没法当 Task 6 的验收门。
   const scanRoot = 'lib/cli'; // ← Task 7 改成 'lib'
 
-  test('除了 TaskMutation，没有别的地方直接 save 任务', () {
+  test('除了 TaskMutation，没有别的地方直接 save 已存在的任务', () {
     final offenders = <String>[];
     for (final f in Directory(scanRoot)
         .listSync(recursive: true)
         .whereType<File>()
         .where((f) => f.path.endsWith('.dart'))) {
       final rel = f.path.replaceFirst('${Directory.current.path}/', '');
-      if (allowed.contains(rel)) continue;
-      final src = f.readAsStringSync();
-      for (final m in RegExp(r'\b(\w+)\.save\(').allMatches(src)) {
-        final receiver = m.group(1)!;
-        // 只认任务仓库那一类接收者，别把别的 save 误伤了
-        if (!RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
-            .hasMatch(receiver)) continue;
-        offenders.add('$rel → $receiver.save(');
+      if (allowedFiles.contains(rel)) continue;
+      final allowedFns = allowedNewTaskCreation[rel] ?? const <String>{};
+      final lines = f.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        for (final m
+            in RegExp(r'\b(\w+)\.save\(').allMatches(lines[i])) {
+          final receiver = m.group(1)!;
+          // 只认任务仓库那一类接收者，别把别的 save 误伤了
+          if (!RegExp(r'repo|repository|tasks?Repo', caseSensitive: false)
+              .hasMatch(receiver)) continue;
+          final fn = _enclosingTopLevelFunction(lines, i);
+          if (fn != null && allowedFns.contains(fn)) continue;
+          offenders.add('$rel${fn == null ? '' : ' → $fn'} → $receiver.save(');
+        }
       }
     }
     expect(offenders, isEmpty,
@@ -52,4 +71,21 @@ void main() {
             '改成 TaskMutation(...).apply(taskId: …, op: …, edit: (fresh) => …)，'
             '注意 edit 里只能读 fresh，不许引用外层的旧 task');
   });
+}
+
+/// 往上找最近一行**顶层函数签名**（不缩进、形如 `ReturnType name(`），
+/// 返回函数名；找不到给 null。
+///
+/// 只是个规则扫描器的启发式判断，不是真的解析 Dart AST——这份代码的
+/// 顶层函数都是「返回类型 空格 函数名 (」这个形状（`Future<int> _create(`
+/// / `Future<int> runTaskCopyCommand(`），够用。
+String? _enclosingTopLevelFunction(List<String> lines, int callLineIndex) {
+  final sig = RegExp(r'^[A-Za-z_][\w<>,\.\s\?]*\s+(_[A-Za-z]\w*|run[A-Z]\w*)\s*\(');
+  for (var i = callLineIndex; i >= 0; i--) {
+    final line = lines[i];
+    if (line.isEmpty || line.startsWith(' ') || line.startsWith('\t')) continue;
+    final m = sig.firstMatch(line);
+    if (m != null) return m.group(1);
+  }
+  return null;
 }
