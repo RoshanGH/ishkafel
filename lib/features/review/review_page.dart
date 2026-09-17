@@ -566,6 +566,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         if (mounted) setState(() => _error = taskMissingMessage);
         return;
       }
+      // **先看在不在，再碰 ref**：上面 await 了一次写盘，这期间页面可能
+      // 已经销毁，那时 `ref.read` 会抛 StateError
+      if (!mounted) return;
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
       // 审核完回到来处——它不是终点站，主流程才是

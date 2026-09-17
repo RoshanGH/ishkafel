@@ -108,6 +108,7 @@ import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
+import '../../core/storage/task_repository.dart';
 import '../tasks/gui_task_mutation.dart';
 import 'task_lock_banner.dart';
 import 'subtitle_popover.dart';
@@ -541,6 +542,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
   TaskListController? _tasks;
 
+  /// 写任务要用的两样东西，**进门就取好**（跟 [_tasks] 同一个理由）。
+  ///
+  /// 在方法体里现读 `ref` 的话，凡是「SnackBar 上的重试」这类比页面活得久的
+  /// 入口，点下去就会撞上一个已经销毁的 ref：`ref.read` 抛 StateError →
+  /// 被自己的 catch 吞掉 → `_showSaveFailure` 又因为 `mounted` 为 false
+  /// 不弹。人看到的是「点了重试，没反应」
+  TaskRepository? _repo;
+  Directory? _dataDir;
+
   /// 这条任务的最新状态。
   ///
   /// **不能拿 `widget.task` 去存**：切分和替换方案走两条落库通路，两边都
@@ -563,6 +573,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void initState() {
     super.initState();
     _tasks = ref.read(taskListProvider.notifier);
+    _repo = ref.read(taskRepositoryProvider);
+    _dataDir = ref.read(dataDirProvider);
     _mediaCache = _buildMediaCache();
     _bgmMediaCache = _buildBgmMediaCache()?..addListener(_onMediaCacheChanged);
     _mediaCache?.addListener(_onMediaCacheChanged);
@@ -2552,9 +2564,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 直接把画面上的字幕拖到想要的高度——比在面板里拧「距底 21%」直观得多
   Future<void> _dragSubtitleTo(double bottomRatio) async {
+    // 内存里这份只改 subtitle，**不碰 updatedAt**：它是 TaskMutation 的
+    // 版本令牌，手写一个就是在 `_task` 上放了个假值，哪天谁拿 `_task` 去跟
+    // 盘上比版本就踩上。真正的 updatedAt 由 apply 落盘时统一推
     setState(() => _task = _task.copyWith(
-        subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio),
-        updatedAt: DateTime.now()));
+        subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio)));
     // 落盘只动**距底比例**这一个值：这一刻 Agent 可能正在改同一条任务的
     // 别的东西，整份写回去会把它们抹掉
     await _saveSubtitleStyle(
@@ -2583,8 +2597,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     }
     final style = picked.$1;
     // 预览的字幕是现画的一层，setState 就已经重画了——不推轨道、不换源
-    setState(() =>
-        _task = _task.copyWith(subtitle: style, updatedAt: DateTime.now()));
+    // 同上：updatedAt 不手写，交给 apply
+    setState(() => _task = _task.copyWith(subtitle: style));
     await _saveSubtitleStyle((_) => style, note: '人在工作台调了全片字幕样式');
   }
 
@@ -2596,10 +2610,12 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     SubtitleStyle Function(RenewTask fresh) next, {
     required String note,
   }) async {
+    final repo = _repo;
+    if (repo == null) return;
     try {
       final saved = await humanMutation(
-        repo: ref.read(taskRepositoryProvider),
-        dataDir: ref.read(dataDirProvider),
+        repo: repo,
+        dataDir: _dataDir,
         actor: actorWorkbench,
       ).apply(
         taskId: _task.id,

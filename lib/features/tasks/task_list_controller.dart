@@ -105,6 +105,17 @@ enum RenameOutcome {
   taskMissing,
 }
 
+/// 工作台一次落库里「一个单元变了什么」：改前、改后，以及**改完之后它还在不在**。
+///
+/// `stillThere` 单独一格而不是靠 `after['present'] == false` 推——盖不盖戳
+/// 这件事不该依赖读一个约定好的 map key，那种约定改一次就会悄悄失效。
+typedef _UnitChange = ({
+  String uid,
+  Map<String, dynamic> before,
+  Map<String, dynamic> after,
+  bool stillThere,
+});
+
 /// 记录已被删除时给用户的说明（对话框/SnackBar 可能比任务活得更久）
 const taskMissingMessage = '该任务已被删除，本次操作未生效。';
 
@@ -756,34 +767,40 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       op: 'materials.picked',
       edit: (fresh) {
         final was = {for (final m in fresh.pickedMaterials) m.id};
+        final now = {for (final m in materials) m.id};
         return TaskEdit(
           task: fresh.copyWith(pickedMaterials: materials),
           before: {'count': fresh.pickedMaterials.length},
           after: {
             'count': materials.length,
-            // 新进来的那几条摊开记：Agent 要判断人往方案里添的是哪一类
+            // **进来的和出去的都要摊开记，尤其出去的那一侧**：需求判据的
+            // 原话就是「Agent 挑了四五个分镜，人删除了其中两个，Agent 要能
+            // 只凭日志总结出人不想要的是哪个类型」——记的就是删除那一侧。
+            // 只有 id 和名字，「哪个类型」无从谈起。素材对象就在 fresh 手上
             'added': [
               for (final m in materials)
-                if (!was.contains(m.id))
-                  {
-                    'id': m.id,
-                    'name': m.name,
-                    'sceneDescription': m.sceneDescription,
-                    'durationMs': m.durationMs,
-                    'burnedText': m.burnedText,
-                    'productBrand': m.productBrand,
-                  },
+                if (!was.contains(m.id)) _materialFacts(m),
             ],
             'removed': [
               for (final m in fresh.pickedMaterials)
-                if (!materials.any((n) => n.id == m.id))
-                  {'id': m.id, 'name': m.name},
+                if (!now.contains(m.id)) _materialFacts(m),
             ],
           },
         );
       },
     );
   }
+
+  /// 一条素材的判断依据。**「人不要的是哪一类」全在这五个字段里**：
+  /// 画面是什么、多长、烧没烧别人的字、露的是哪家的品牌
+  static Map<String, dynamic> _materialFacts(PickedMaterial m) => {
+        'id': m.id,
+        'name': m.name,
+        'sceneDescription': m.sceneDescription,
+        'durationMs': m.durationMs,
+        'burnedText': m.burnedText,
+        'productBrand': m.productBrand,
+      };
 
   /// 存「保留素材原声」的全片打底设置。传进来的 [task] 已经带上新值了——
   /// 只把**这一个字段**搬到 fresh 上，别的一律不碰
@@ -965,25 +982,34 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
           task: fresh.copyWith(units: units),
           before: {
             'unitCount': fresh.units?.length,
-            'changed': [for (final c in changed) c.$2],
+            'changed': [for (final c in changed) c.before],
           },
           after: {
             'unitCount': units.length,
-            'changed': [for (final c in changed) c.$3],
+            'changed': [for (final c in changed) c.after],
           },
-          // **只给发过身份的单元盖戳**：还没发 uid 的（老存档、刚拆出来
-          // 还没跑 ensureUnitUids）盖不上，点了名反而会被当成「戳丢了」报错
+          // 两道过滤，少一道都会让 `_reportMissedStamps` 稳定误报——
+          // 那条告警存在的意义是「戳没盖上而日志照记」，让它在最常见的
+          // 编辑动作上天天喊狼来了，真出事那次就没人信了：
+          //
+          // 1. **删掉的单元不盖**：戳长在单元对象上，对象都没了，盖无可盖。
+          //    删一个单元、合并两个单元（合并＝删掉一个）是工作台最常见的动作
+          // 2. **还没发身份的不盖**：uid 是空串（老存档、刚拆出来还没跑
+          //    ensureUnitUids），点了名也认不出是哪一个
           stampUnits: [
             for (final c in changed)
-              if (isUnitUid(c.$1)) c.$1,
+              if (c.stillThere && isUnitUid(c.uid)) c.uid,
           ],
         );
       },
     );
   }
 
-  /// 比出这一笔真正动了哪几个单元：按身份配对，返回
-  /// `(uid, 改前的样子, 改后的样子)`。
+  /// 比出这一笔真正动了哪几个单元。
+  ///
+  /// `stillThere` = 改完之后这个单元还在不在。**被删掉的也算一次「改动」**
+  /// （日志要记下人删了什么），但它盖不了戳——戳长在单元对象上，对象没了
+  /// 就无处可盖，点名反而会被 `_reportMissedStamps` 报成「戳丢了」。
   ///
   /// **按 uid 配对，不按下标**：人可能删过、挪过单元，下标早就不是发起那一刻
   /// 那一套了。新加的单元（fresh 里没有）算「改动」，被删掉的也算。
@@ -994,8 +1020,8 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 这时按 uid 配对会把每一个单元都认成「新加的」，人明明什么都没改，
   /// 却被结结实实盖上一圈「人改过」的戳（2026-09-18 真机测试当场抓到：
   /// 打开工作台什么都不动就返回，两个单元全被标成人改过的）。
-  static List<(String, Map<String, dynamic>, Map<String, dynamic>)>
-      _changedUnitFacts(List<SemanticUnit> before, List<SemanticUnit> after) {
+  static List<_UnitChange> _changedUnitFacts(
+      List<SemanticUnit> before, List<SemanticUnit> after) {
     Map<String, dynamic> facts(SemanticUnit u) => {
           'transcript': u.transcript,
           'startMs': u.startMs,
@@ -1005,20 +1031,20 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         };
     bool same(SemanticUnit a, SemanticUnit b) =>
         const DeepCollectionEquality().equals(facts(a), facts(b));
-    final changed = <(String, Map<String, dynamic>, Map<String, dynamic>)>[];
+    final changed = <_UnitChange>[];
 
     final byUid = before.every((u) => isUnitUid(u.uid)) &&
         after.every((u) => isUnitUid(u.uid));
     if (!byUid) {
       for (var i = 0; i < after.length; i++) {
         if (i >= before.length) {
-          changed.add((after[i].uid, {'present': false}, facts(after[i])));
+          changed.add(_added(after[i].uid, facts(after[i])));
         } else if (!same(before[i], after[i])) {
-          changed.add((after[i].uid, facts(before[i]), facts(after[i])));
+          changed.add(_edited(after[i].uid, facts(before[i]), facts(after[i])));
         }
       }
       for (var i = after.length; i < before.length; i++) {
-        changed.add((before[i].uid, facts(before[i]), {'present': false}));
+        changed.add(_removed(before[i].uid, facts(before[i])));
       }
       return changed;
     }
@@ -1028,18 +1054,28 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     for (final u in after) {
       final old = was[u.uid];
       if (old == null) {
-        changed.add((u.uid, {'present': false}, facts(u)));
+        changed.add(_added(u.uid, facts(u)));
       } else if (!same(old, u)) {
-        changed.add((u.uid, facts(old), facts(u)));
+        changed.add(_edited(u.uid, facts(old), facts(u)));
       }
     }
     for (final u in before) {
       if (!now.containsKey(u.uid)) {
-        changed.add((u.uid, facts(u), {'present': false}));
+        changed.add(_removed(u.uid, facts(u)));
       }
     }
     return changed;
   }
+
+  static _UnitChange _added(String uid, Map<String, dynamic> after) =>
+      (uid: uid, before: {'present': false}, after: after, stillThere: true);
+
+  static _UnitChange _edited(
+          String uid, Map<String, dynamic> b, Map<String, dynamic> a) =>
+      (uid: uid, before: b, after: a, stillThere: true);
+
+  static _UnitChange _removed(String uid, Map<String, dynamic> before) =>
+      (uid: uid, before: before, after: {'present': false}, stillThere: false);
 
   /// 工作台那一批「随手落库」的共同形状：走唯一写入口、写完刷新列表。
   ///

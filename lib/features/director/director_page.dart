@@ -2633,7 +2633,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 一次（写盘前发现被抢写），闭包里再去读 `_doc` 的话，人这会儿又敲了
     // 两个字，两次跑出来的就是两份不同的东西
     final doc = _doc;
-    _task = _task.copyWith(script: doc, updatedAt: DateTime.now());
+    // **不手写 updatedAt**：它是 TaskMutation 的版本令牌，在内存这份上放个
+    // 假值，哪天谁拿 `_task` 去跟盘上比版本就踩上。落盘那一下 apply 会推
+    _task = _task.copyWith(script: doc);
     unawaited(_saveDoc(doc));
   }
 
@@ -2711,7 +2713,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// **销毁后不许再碰 ref**：dispose 里会落一次盘，那时页面已经没了，
   /// 再去读 provider 会抛 StateError
   Future<void> _refreshCover() async {
-    if (!mounted) return;
+    // `mounted` 在 dispose 里还是 true（见 [_disposed]），而这条路正是从
+    // dispose 过来的：dispose → _flushNow → _saveDoc → await apply →
+    // 这里。两面旗都要看，否则销毁之后还会去读 ref
+    if (!mounted || _disposed) return;
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return;
     final cover = await ensureScriptCover(
@@ -2738,8 +2743,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           after: {'coverPath': cover},
         ),
       );
-      // 封面没存上不影响人继续干活（列表页上那张图旧一点而已），
-      // 但不能不吭声——查起来会以为封面逻辑坏了
+      // **这一处是四处里唯一只进日志的，理由写在这儿，别照着它抄**：
+      // 封面是软件自己抽的（成片第一帧），不是人刚做的决定——没存上人什么
+      // 也没损失，列表页上那张图旧一点而已。而且走到这里之前 `_saveDoc`
+      // 已经就同一件事（任务被删了）替人报过一次，再弹一次是对同一个事实
+      // 说两遍。
+      //
+      // 人的改动、人点出来的操作一律不许走这条路：那几处存不上必须当场说
+      // 出来（`_saveDoc` 的 `_reportSaveFailure`、工作台的
+      // `_warnIfTaskGone`、审片台的 `_error`）
       if (saved == null) {
         AppLog.warn('封面没存上：任务 ${_task.id} 已经被删了。');
       }

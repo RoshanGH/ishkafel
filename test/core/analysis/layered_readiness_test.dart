@@ -101,7 +101,8 @@ void main() {
       unitTagger: _SlowTagger(gate),
       vocabulary: _Vocab(),
       clock: () => DateTime.utc(2026, 8, 5),
-    ).analyze(task, by: ActorKind.agent, actor: 'Agent', onUnitsReady: (r) => readyAt = r);
+    ).analyze(task,
+        by: ActorKind.agent, actor: 'Agent', onUnitsReady: (r) => readyAt = r);
 
     // 打标还卡着，但切分应该已经落库、状态已经放出来了
     await Future<void>.delayed(const Duration(milliseconds: 50));

@@ -98,7 +98,7 @@ void main() {
     );
     await FileTaskRepository(temp).save(task);
 
-    final done = pipeline.analyze(task, by: ActorKind.agent, actor: 'Agent',);
+    final done = pipeline.analyze(task, by: ActorKind.agent, actor: 'Agent');
     // 让三条支线都有机会启动
     await Future<void>.delayed(const Duration(milliseconds: 50));
 

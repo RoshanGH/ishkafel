@@ -25,6 +25,7 @@ import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'package:ishkafel/features/tasks/analysis_error_message.dart';
 import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
+import 'package:ishkafel/features/tasks/gui_task_mutation.dart';
 import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
@@ -411,8 +412,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -473,8 +474,8 @@ void main() {
     test('本次运行中正在分析的任务不会被 reload 误标为中断', () async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -510,8 +511,8 @@ void main() {
       await repo.save(makeTask('d1'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(
             _RecordingCleaner(cleaned)),
@@ -532,8 +533,8 @@ void main() {
       await repo.save(makeTask('d2'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(_ThrowingCleaner()),
       ]);
@@ -693,8 +694,8 @@ void main() {
     Future<String> analysisErrorFor(Object error) async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, failWith: error)),
@@ -841,8 +842,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -881,8 +882,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
@@ -926,8 +927,8 @@ void main() {
 
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -963,8 +964,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -979,6 +980,55 @@ void main() {
       expect(outcome, RetryOutcome.started);
     });
 
+    /// **界面这条路要把「这趟分析记在谁头上」传下去，而且传的是软件。**
+    ///
+    /// 管线切出来的单元、打上的标签都是机器产的：标成「人」的话，Agent 读到
+    /// 「人切的分镜」就会让步于一个根本不存在的人类决定，从此不敢重切。
+    /// 人点「重试」那一下有它自己那一笔（`analyze.retry`，by=human）。
+    ///
+    /// 生产侧靠 `required` 兜住了「不许漏传」，但**传什么值没有门**——
+    /// 将来有人按「谁触发算谁的」改回 human 也不会红，所以在这里钉住。
+    test('界面触发的分析记在软件头上，不是人——机器产的东西不许标成人手定的', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+      final pipeline = _FakePipeline(repo: repo);
+      final pipelineContainer = ProviderContainer(
+        overrides: [
+          taskRepositoryProvider.overrideWithValue(repo),
+          dataDirProvider.overrideWithValue(tempDir),
+          importServiceProvider.overrideWithValue(importService),
+          analysisPipelineProvider.overrideWithValue(pipeline),
+        ],
+      );
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+
+      await pipelineContainer
+          .read(taskListProvider.notifier)
+          .retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(
+        pipeline.seenBy,
+        ActorKind.agent,
+        reason: '管线写进去的是机器切的边界、机器打的标签，不是人的判断',
+      );
+      expect(
+        pipeline.seenActor,
+        actorAnalysisReport,
+        reason:
+            'actor 那一格要说清具体是谁：界面这条是「软件（分析）」，'
+            'CLI 那条才是「Agent」',
+      );
+
+      // 人点的那一下没有丢：它是单独的一笔
+      final entries = TaskLogFile(dataDir: tempDir, taskId: task.id).read();
+      final retry = entries.lastWhere((e) => e.op == 'analyze.retry');
+      expect(retry.by, ActorKind.human);
+      expect(retry.actor, actorTaskList);
+    });
+
+
     test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {
       final task = makeFailedTask();
       await repo.save(task);
@@ -986,8 +1036,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
-      // 改动日志落这儿：界面的每一次写入都要记一笔
-      dataDirProvider.overrideWithValue(tempDir),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -1075,6 +1125,57 @@ void main() {
       final saved = await repo.findById('cut-1');
       expect(saved!.status, RenewTaskStatus.ready);
       expect(saved.units, units);
+    });
+
+    /// **删一个单元不许报「戳没盖上」。**
+    ///
+    /// 戳长在单元对象上，单元都删了就无处可盖——把删掉的 uid 塞进
+    /// `stampUnits`，`TaskMutation._reportMissedStamps` 每次都会 AppLog.error。
+    /// 而删单元、合并单元（合并＝删掉一个）是工作台最常见的动作：
+    /// 让这条告警在最常见的动作上稳定误报，等于把它喊成噪音，
+    /// 下次它为真问题响的时候没人会信。
+    test('删掉一个单元：日志照记，但不许报「戳没盖上」', () async {
+      final before = [
+        SemanticUnit(
+          index: 0,
+          uid: 'aaaaaaaaaaaa',
+          startMs: 0,
+          endMs: 1000,
+          transcript: '留下的这句',
+          shots: const [Shot(startMs: 0, endMs: 1000)],
+        ),
+        SemanticUnit(
+          index: 1,
+          uid: 'bbbbbbbbbbbb',
+          startMs: 1000,
+          endMs: 2000,
+          transcript: '被删掉的这句',
+          shots: const [Shot(startMs: 1000, endMs: 2000)],
+        ),
+      ];
+      final task = makeAwaitingCutTask().copyWith(units: before);
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+
+      final errors = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = (line) {
+        if (line.contains('[error]')) errors.add(line);
+      };
+      addTearDown(() => AppLog.sink = original);
+
+      await container.read(taskListProvider.notifier).saveSegmentationDraft(
+        task,
+        [before.first],
+      );
+
+      expect(errors, isEmpty, reason: '删掉的单元无处盖戳，不该点它的名——这条告警要留给真问题');
+
+      // 但这一笔必须记进日志，而且要看得出人删掉的是哪一句
+      final entries = TaskLogFile(dataDir: tempDir, taskId: 'cut-1').read();
+      final edit = entries.lastWhere((e) => e.op == 'units.edit');
+      expect(edit.by, ActorKind.human);
+      expect(jsonEncode(edit.before), contains('被删掉的这句'));
     });
   });
 

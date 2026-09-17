@@ -102,7 +102,8 @@ void main() {
     );
 
     final sw = Stopwatch()..start();
-    final result = await pipeline.analyze(task, by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
+    final result = await pipeline.analyze(task,
+        by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
       // ignore: avoid_print
       if (p.done == null || p.done! % 10 == 0) print('  ${p.summary}');
     });
