@@ -96,6 +96,20 @@ void main() {
     expect(log.read().map((e) => e.op), ['a', 'b']);
   });
 
+  test('limit 给负数不炸——防住任何调用方，不止 CLI 层', () {
+    final log = fileOf('t1');
+    log.append(by: ActorKind.agent, actor: 'Agent', op: 'a');
+    expect(() => log.read(limit: -1), returnsNormally);
+    expect(log.read(limit: -1), isEmpty);
+    expect(log.read(limit: 0), isEmpty);
+  });
+
+  test('日志文件读不动（不是没有）要抛，不能装成「没有改动」', () {
+    // 把该是文件的路径误建成目录，模拟「存在但读不了」
+    Directory('${dataDir.path}/logs/t1.jsonl').createSync(recursive: true);
+    expect(() => fileOf('t1').read(), throwsA(anything));
+  });
+
   test('deleteAll 把这条任务的日志清掉——任务删了不留孤儿', () {
     final log = fileOf('t1');
     log.append(by: ActorKind.agent, actor: 'Agent', op: 'a');

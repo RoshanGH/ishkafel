@@ -130,7 +130,8 @@ class TaskLogFile {
 
   File get _file => File(p.join(dataDir.path, 'logs', '$taskId.jsonl'));
 
-  /// 现在记到第几条。文件不在、读不动都返回 0
+  /// 现在记到第几条。**文件不在**返回 0；文件在但读不动跟着 [read] 抛
+  /// （见 [read] 的注释：那不是「没有」，装不得）
   int get latestSeq {
     final entries = read(limit: 1 << 30);
     return entries.isEmpty ? 0 : entries.last.seq;
@@ -182,53 +183,69 @@ class TaskLogFile {
 
   /// 读。`since` 之后的、`by` 那一方的，最多 `limit` 条（取最近的）。
   ///
+  /// **「文件不在」和「文件在但读不了」是两回事。** 前者是这条任务真的
+  /// 还没有一笔记录，返回空列表；后者（权限不够、路径被误建成目录……）
+  /// **往上抛**，不装成「没有改动」——静默吞掉的话，调用方分不清
+  /// 「什么都没发生」和「查不动」，这正是这份日志要防的「三态混成两态」，
+  /// 不能自己在源头先犯一遍。
+  ///
+  /// **`limit` 给非正数不炸。** 调用方（CLI 层）会先一步拒绝非法值，
+  /// 但这层自己也不能被任何调用方喂垮——非正数直接当「不要」处理，返回空。
+  ///
   /// **seq 在这里现算**：按成功解析的行的次序从 1 开始编号，坏行不占号
   /// （不落盘、也不参与计数）。
   List<TaskLogEntry> read({int? since, ActorKind? by, int limit = 200}) {
     final f = _file;
-    if (!f.existsSync()) return const [];
+    // existsSync() 对着一个被误建成目录的路径会返回 false，和「真的没有」
+    // 长得一模一样——用 typeSync 才分得清「不存在」和「存在但不是文件」
+    if (FileSystemEntity.typeSync(f.path) == FileSystemEntityType.notFound) {
+      return const [];
+    }
+    List<String> lines;
+    try {
+      lines = f.readAsLinesSync();
+    } catch (e) {
+      AppLog.warn('改动日志读不动（$taskId）：$e');
+      rethrow;
+    }
     final out = <TaskLogEntry>[];
     var skipped = 0;
     var seq = 0;
-    try {
-      for (final line in f.readAsLinesSync()) {
-        if (line.trim().isEmpty) continue;
-        TaskLogEntry? parsed;
-        try {
-          parsed = TaskLogEntry.tryFromJson(jsonDecode(line));
-        } catch (_) {
-          parsed = null;
-        }
-        // 读不懂的那一行跳过就是了，别让它废掉整份日志
-        if (parsed == null) {
-          skipped++;
-          continue;
-        }
-        seq++;
-        final entry = TaskLogEntry(
-          seq: seq,
-          at: parsed.at,
-          by: parsed.by,
-          actor: parsed.actor,
-          taskId: parsed.taskId,
-          op: parsed.op,
-          where: parsed.where,
-          before: parsed.before,
-          after: parsed.after,
-          note: parsed.note,
-        );
-        if (since != null && entry.seq <= since) continue;
-        if (by != null && entry.by != by) continue;
-        out.add(entry);
+    for (final line in lines) {
+      if (line.trim().isEmpty) continue;
+      TaskLogEntry? parsed;
+      try {
+        parsed = TaskLogEntry.tryFromJson(jsonDecode(line));
+      } catch (_) {
+        parsed = null;
       }
-    } catch (e) {
-      AppLog.warn('改动日志读不动（$taskId）：$e');
-      return const [];
+      // 读不懂的那一行跳过就是了，别让它废掉整份日志
+      if (parsed == null) {
+        skipped++;
+        continue;
+      }
+      seq++;
+      final entry = TaskLogEntry(
+        seq: seq,
+        at: parsed.at,
+        by: parsed.by,
+        actor: parsed.actor,
+        taskId: parsed.taskId,
+        op: parsed.op,
+        where: parsed.where,
+        before: parsed.before,
+        after: parsed.after,
+        note: parsed.note,
+      );
+      if (since != null && entry.seq <= since) continue;
+      if (by != null && entry.by != by) continue;
+      out.add(entry);
     }
     if (skipped > 0) {
       // 坏行现在还会影响编号，比以前更该让人知道有几行没读懂
       AppLog.warn('改动日志有 $skipped 行读不懂，已跳过（$taskId）');
     }
+    if (limit <= 0) return const [];
     return out.length <= limit ? out : out.sublist(out.length - limit);
   }
 
