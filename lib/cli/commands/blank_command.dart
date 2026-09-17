@@ -7,6 +7,8 @@ import '../../core/models/renew_task.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
@@ -68,11 +70,11 @@ Future<int> runBlankCommand({
   }
   try {
     return switch (what) {
-      'add' => await _add(repository, task, out ?? stdout),
-      'remove' =>
-        await _remove(repository, task, unit, sink, out ?? stdout),
-      'tags' =>
-        await _tags(repository, task, unit, tags, sink, out ?? stdout),
+      'add' => await _add(repository, dataDir, task, sink, out ?? stdout),
+      'remove' => await _remove(
+          repository, dataDir, task, unit, sink, out ?? stdout),
+      'tags' => await _tags(
+          repository, dataDir, task, unit, tags, sink, out ?? stdout),
       _ => () {
           sink.writeln('认不出「$what」。可用：create / add / remove / tags');
           return exitBadUsage;
@@ -133,17 +135,38 @@ Future<int> _create(
   return 0;
 }
 
-Future<int> _add(
-    FileTaskRepository repository, RenewTask task, StringSink out) async {
-  final units = BlankUnitOps.append(task.units ?? const []);
-  final next = task.copyWith(units: units, updatedAt: DateTime.now());
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+TaskMutation _mutation(FileTaskRepository repository, Directory dataDir) =>
+    TaskMutation(
+        repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+
+int _taskGoneDuring(String taskId, StringSink sink) {
+  sink.writeln('这条任务在操作过程中被删掉了：$taskId');
+  return exitNotFound;
+}
+
+Future<int> _add(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, StringSink sink, StringSink out) async {
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.add',
+    edit: (fresh) {
+      final before = fresh.units ?? const [];
+      final after = BlankUnitOps.append(before);
+      return TaskEdit(
+        task: fresh.copyWith(units: after),
+        before: {'unitCount': before.length},
+        after: {'unitCount': after.length},
+        stampUnits: after.length > before.length ? [after.last.uid] : const [],
+      );
+    },
+  );
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
-Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
-    StringSink sink, StringSink out) async {
+Future<int> _remove(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, StringSink sink, StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
@@ -153,26 +176,44 @@ Future<int> _remove(FileTaskRepository repository, RenewTask task, int? unit,
     sink.writeln('至少要留 $blankMinUnits 个分子，删不了');
     return exitBadUsage;
   }
-  // 配乐区间还是按下标记的，必须跟着挪。替换方案按单元的身份记，
-  // 只需要把没人认领的那条丢掉
-  final left = BlankUnitOps.removeAt(units, unit);
-  final live = {for (final u in left) u.uid};
-  final next = task.copyWith(
-    units: left,
-    replacementsByUid: {
-      for (final e in task.replacementsByUid.entries)
-        if (live.contains(e.key)) e.key: e.value,
+  final removedUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.remove',
+    where: {'unitUid': removedUid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      // 配乐区间还是按下标记的，必须跟着挪。替换方案按单元的身份记，
+      // 只需要把没人认领的那条丢掉
+      final left = BlankUnitOps.removeAt(freshUnits, unit);
+      final live = {for (final u in left) u.uid};
+      return TaskEdit(
+        task: fresh.copyWith(
+          units: left,
+          replacementsByUid: {
+            for (final e in fresh.replacementsByUid.entries)
+              if (live.contains(e.key)) e.key: e.value,
+          },
+          bgm: shiftBgmAfterRemoval(fresh.bgm, removed: unit),
+        ),
+        before: freshUnits.length > unit
+            ? {
+                'transcript': freshUnits[unit].transcript,
+                'tags': freshUnits[unit].tags,
+              }
+            : {'present': false},
+        after: {'unitCount': left.length},
+      );
     },
-    bgm: shiftBgmAfterRemoval(task.bgm, removed: unit),
-    updatedAt: DateTime.now(),
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
 
-Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
-    String? tags, StringSink sink, StringSink out) async {
+Future<int> _tags(FileTaskRepository repository, Directory dataDir,
+    RenewTask task, int? unit, String? tags, StringSink sink,
+    StringSink out) async {
   final units = task.units ?? const [];
   if (unit == null || unit < 0 || unit >= units.length) {
     sink.writeln('要给 --unit <下标>（0 起，当前 ${units.length} 个）');
@@ -183,9 +224,8 @@ Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
       if (piece.trim().isNotEmpty) piece.trim(),
   ];
   // 与 GUI、apply tags 同一条规矩：标签必须逐字命中词表，词表外的一律拒绝。
-  // 「厨房场景」和「厨房情景」在检索时是两回事
-  final vocabulary =
-      (await vocabularyFor(task.unitTagGroups)).toSet();
+  // 「厨房场景」和「厨房情景」在检索时是两回事。这一步是网络请求，留在 edit 之外
+  final vocabulary = (await vocabularyFor(task.unitTagGroups)).toSet();
   final unknown = wanted.where((t) => !vocabulary.contains(t)).toList();
   if (unknown.isNotEmpty) {
     sink.writeln('这些标签不在受控词表里：${unknown.join('、')}。'
@@ -193,11 +233,23 @@ Future<int> _tags(FileTaskRepository repository, RenewTask task, int? unit,
     return exitBadUsage;
   }
 
-  final next = task.copyWith(
-    units: BlankUnitOps.setTags(units, unit, wanted),
-    updatedAt: DateTime.now(),
+  final targetUid = units[unit].uid;
+  final updated = await _mutation(repository, dataDir).apply(
+    taskId: task.id,
+    op: 'unit.tags',
+    where: {'unitUid': targetUid},
+    edit: (fresh) {
+      final freshUnits = fresh.units ?? const [];
+      final before = freshUnits.length > unit ? freshUnits[unit].tags : const <String>[];
+      return TaskEdit(
+        task: fresh.copyWith(units: BlankUnitOps.setTags(freshUnits, unit, wanted)),
+        before: {'tags': before},
+        after: {'tags': wanted},
+        stampUnits: freshUnits.length > unit ? [freshUnits[unit].uid] : const [],
+      );
+    },
   );
-  await repository.save(next);
-  emitJson(taskToJson(next), out: out);
+  if (updated == null) return _taskGoneDuring(task.id, sink);
+  emitJson(taskToJson(updated), out: out);
   return 0;
 }
