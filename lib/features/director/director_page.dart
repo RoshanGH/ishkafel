@@ -2723,8 +2723,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (cover == null || cover == _task.coverPath || !mounted) return;
     _task = _task.copyWith(coverPath: cover);
     try {
-      final saved = await humanMutation(
-              repo: _repo, dataDir: dataDir, actor: actorDirector)
+      // **封面是软件抽的，不是人挑的**（成片第一帧）。标成「人」的话，
+      // Agent 读到「人换了封面」就不敢再重抽——那是让步于一个不存在的
+      // 人类决定（见 [softwareMutation]）
+      final saved = await softwareMutation(
+              repo: _repo, dataDir: dataDir, actor: actorCover)
           .apply(
         taskId: _task.id,
         op: 'script.cover.set',

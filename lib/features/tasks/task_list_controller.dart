@@ -116,12 +116,20 @@ const taskMissingMessage = '该任务已被删除，本次操作未生效。';
 const taskLoadFailedMessage = '任务列表读取失败，可能是数据目录暂时无法访问。请点「重试」重新加载。';
 
 class TaskListController extends AsyncNotifier<List<RenewTask>> {
-  /// 这个控制器的写入口。**任务的每一次改动都从这儿走**——没有第二条路。
+  /// 人真的点出来的那些改动的写入口。**任务的每一次改动都从这儿走**。
   ///
-  /// `by` 一律是人（见 [humanMutation]）；`actor` 说的是哪张台子，
-  /// 按方法给：`save*` 那一批全部来自工作台（唯一调用方是
-  /// `workbench_page.dart`），重命名/重试分析来自任务列表页。
+  /// `actor` 说的是哪张台子，按方法给：`save*` 那一批全部来自工作台
+  /// （唯一调用方是 `workbench_page.dart`），重命名/重试分析来自任务列表页。
   TaskMutation _mutation(String actor) => humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actor,
+      );
+
+  /// 软件自己干的活儿的写入口（`by` 是 agent，理由见 [softwareMutation]）：
+  /// 启动自检、报告分析失败。**人没在这里做过任何决定**，标成「人」会让
+  /// Agent 让步于一个不存在的人类决定。
+  TaskMutation _selfMutation(String actor) => softwareMutation(
         repo: ref.read(taskRepositoryProvider),
         dataDir: ref.read(dataDirProvider),
         actor: actor,
@@ -188,7 +196,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 清掉上一轮留下的陈旧中断标记。写不成不影响本次展示，下次启动再试
   Future<RenewTask> _clearStaleStalledMark(RenewTask task) async {
     try {
-      final healed = await _mutation(actorTaskList).apply(
+      final healed = await _selfMutation(actorSelfCheck).apply(
         taskId: task.id,
         op: 'analyze.stalled',
         note: '启动自检：上次那句「分析被中断」是陈旧的，分析其实成功了',
@@ -223,7 +231,7 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 把「状态停在分析中、又没有任何分析在跑」的任务标成可重试
   Future<RenewTask> _markStalled(RenewTask task) async {
     try {
-      final marked = await _mutation(actorTaskList).apply(
+      final marked = await _selfMutation(actorSelfCheck).apply(
         taskId: task.id,
         op: 'analyze.stalled',
         note: '启动自检：上次分析被中断（应用退出或异常关闭），标成可重试',
@@ -532,7 +540,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     final current = await _currentRecord(task, action: '分析失败落库');
     if (current == null) return;
     final message = _truncateAnalysisError(error);
-    await _mutation(actorTaskList).apply(
+    // **软件在报事实，不是人的判断**：这句失败原因是管线抛出来的，
+    // 标成「人」会让 Agent 把它当成人的诊断
+    await _selfMutation(actorAnalysisReport).apply(
       taskId: current.id,
       op: 'analyze.failed',
       edit: (fresh) => TaskEdit(

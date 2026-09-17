@@ -52,13 +52,12 @@ class TaggingResumer {
     required this.dataDir,
   });
 
-  /// 这一笔算谁的：**人这一侧**。
+  /// 这一笔算谁的：**软件自己**（`by` 是 agent，理由见 [softwareMutation]）。
   ///
-  /// 它不是 Agent 让它跑的，是人打开这个 app 带出来的——「软件在干活，
-  /// 不是 Agent」（同 `TaggingProgress` 那条注释）。具体是软件自己动的手，
-  /// 由每一笔的 `note` 说清楚。
-  TaskMutation get _mutation => humanMutation(
-      repo: repository, dataDir: dataDir, actor: actorTaskList);
+  /// 补出来的标签是机器打的，人没在这里做过任何决定。标成「人」的话，
+  /// Agent 读到「人打的标」就不敢再动它——那是让步于一个不存在的人类决定。
+  TaskMutation get _mutation => softwareMutation(
+      repo: repository, dataDir: dataDir, actor: actorResumeTagging);
 
   bool get running => _running;
 
