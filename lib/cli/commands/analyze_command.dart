@@ -12,6 +12,8 @@ import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
@@ -139,29 +141,56 @@ Future<int> runAnalyzeCommand({
     );
     saveAnalysisState(dataDir, id,
         AnalysisState(prepared: prepared, pending: external0));
-    await repository.save(task.copyWith(
-      asrSentences: prepared.sentences,
-      vocalsPath: prepared.vocalsPath,
-      backgroundPath: prepared.backgroundPath,
-    ));
+    final mutation = TaskMutation(
+        repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+    final prepped = await mutation.apply(
+      taskId: task.id,
+      op: 'analyze.prepare',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(
+          asrSentences: prepared.sentences,
+          vocalsPath: prepared.vocalsPath,
+          backgroundPath: prepared.backgroundPath,
+        ),
+        before: {'sentenceCount': fresh.asrSentences?.length ?? 0},
+        after: {'sentenceCount': prepared.sentences.length},
+      ),
+    );
+    if (prepped == null) {
+      sink.writeln('这条任务在分析过程中被删掉了：$id');
+      return exitNotFound;
+    }
 
     if (external0.contains(ExternalStep.segment)) {
       emitJson(segmentTodo(id, prepared.sentences), out: out);
       return 0;
     }
 
-    // 只外包打标：切分照常走内置，跑到「等你打标」那一步
+    // 只外包打标：切分照常走内置，跑到「等你打标」那一步。
+    // 语义切分是网络请求，做完拿到 drafts 再进第二次独立的 apply——
+    // 不能塞进上面那次 edit，重跑一次 edit 就是把切分又算一遍
     final drafts = await pipeline.splitter.split(prepared.sentences);
     final units =
         pipeline.assemble(task: task, drafts: drafts, prepared: prepared);
-    final ready = task.copyWith(
-      units: units,
-      status: RenewTaskStatus.ready,
-      asrSentences: prepared.sentences,
-      vocalsPath: prepared.vocalsPath,
-      backgroundPath: prepared.backgroundPath,
+    final ready = await mutation.apply(
+      taskId: task.id,
+      op: 'unit.segment.apply',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(
+          units: units,
+          status: RenewTaskStatus.ready,
+          asrSentences: prepared.sentences,
+          vocalsPath: prepared.vocalsPath,
+          backgroundPath: prepared.backgroundPath,
+        ),
+        before: {'unitCount': fresh.units?.length ?? 0, 'status': fresh.status.name},
+        after: {'unitCount': units.length, 'status': RenewTaskStatus.ready.name},
+      ),
     );
-    await repository.save(ready);
+    if (ready == null) {
+      sink.writeln('这条任务在切分过程中被删掉了：$id');
+      return exitNotFound;
+    }
     emitJson(
       tagTodo(
         id,
