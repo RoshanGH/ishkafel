@@ -92,10 +92,17 @@ void main() {
     test('挑镜头：每落一行就写一次盘', () {
       final src = File('lib/cli/commands/script_apply_command.dart')
           .readAsStringSync();
-      expect(src, contains('onLineDone'),
+      final body =
+          src.substring(src.indexOf('Future<int> _applyShotsPicks'));
+      final loop = body.substring(body.indexOf('for (final pick in _picks'));
+      // 落盘机制从 onLineDone 回调改成了 TaskMutation（Task 6）：原来的
+      // 回调复用循环外的旧任务快照，循环期间（画面自查是网络请求，可能
+      // 几十秒到几分钟）人在界面上的改动会被下一轮 save 整片抹掉。
+      // 改成每行一次独立 apply，「一行一落盘」这条行为本身没变
+      expect(loop.substring(0, 900), contains('TaskMutation('),
           reason: 'Agent 就算一次提交十几行，界面也该一行行长出来');
-      expect(src, contains('await onLineDone?.call(next)'),
-          reason: '钩子留了却不在每行调用，等于没留');
+      expect(loop.substring(0, 900), contains('.apply('),
+          reason: '光 new 一个 TaskMutation 不够，得真的调用 apply 落盘');
     });
   });
 
