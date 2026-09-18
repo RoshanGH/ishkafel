@@ -52,6 +52,17 @@ class AppBusyHolder {
   /// 于是一个已经销毁的页面可能抹掉别人正在跑的活儿的状态
   int _generation = 0;
 
+  /// **我写过、而且还没清。**
+  ///
+  /// 没有这一位的话，`dispose()` / `_stop()` 会无条件 `clearAppBusy`——
+  /// 栈本来就空（这一页一次活儿都没跑过）时关掉页面，照样把文件删掉。
+  /// 而这份文件**有第二个写入方**（任务列表那边的分析）：于是关一下编导台
+  /// 就可能抹掉别人正在跑的活儿的状态。
+  ///
+  /// 代次作废堵的是「遗留回调」那道门，这一位堵的是 `dispose` 那道门
+  /// ——同一个危害的两条路。
+  bool _wrote = false;
+
   /// 此刻正挂着的那句话；没挂就是 null
   String? get current => _stack.isEmpty ? null : _stack.last.what;
 
@@ -97,12 +108,16 @@ class AppBusyHolder {
     _pulse?.cancel();
     _pulse = null;
     _stack.clear();
+    // **只清自己写过的那一份**（见 [_wrote]）
+    if (!_wrote) return;
+    _wrote = false;
     clearAppBusy(dataDir: dataDir, taskId: taskId);
   }
 
   void _write() {
     final what = current;
     if (what == null) return;
+    _wrote = true;
     writeAppBusy(
       dataDir: dataDir,
       taskId: taskId,

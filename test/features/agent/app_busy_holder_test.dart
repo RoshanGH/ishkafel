@@ -135,6 +135,23 @@ void main() {
     other.dispose();
   });
 
+  /// `dispose()` 是「抹掉别人状态」的**另一道门**：代次作废堵的是遗留回调，
+  /// 这一条堵的是「我压根没写过，凭什么删」。
+  test('一次活儿都没跑过就关页面：不许去删别人写的那份', () {
+    final other = holderOf();
+    final otherDone = other.enter('正在分析原片');
+    expect(present(), isTrue);
+
+    // 另一个页面开了又关，中间一次 enter 都没有
+    holderOf().dispose();
+
+    expect(present(), isTrue,
+        reason: '这份文件有第二个写入方——没写过就不许清');
+    expect(readAppBusy(dataDir: dir, taskId: 't1')!.action, '正在分析原片');
+    otherDone();
+    other.dispose();
+  });
+
   test('页面拆了：嵌套到第几层都收干净', () async {
     final h = holderOf(pulse: const Duration(milliseconds: 20));
     h.enter('外层');

@@ -120,6 +120,22 @@ class _ExtractFailed extends _ExtractState {
 class _DirectorPageState extends ConsumerState<DirectorPage> {
   late RenewTask _task = widget.task;
   late ScriptDoc _doc = widget.task.script ?? ScriptDoc.empty();
+
+  /// 盘上此刻那一份对应的 `ScriptDoc` 对象。
+  ///
+  /// 保存成功、整份重读、跟随换上盘上那一份时赋值。`_flushNow` 开头拿它做
+  /// **引用相等**判断——相同就是「无事可存」，直接 return。
+  ///
+  /// 为什么不拿 [_dirty] 判：`_dirty` 是「人有没有动过」，而这里要判的是
+  /// 「**这一份和盘上那一份是不是同一个**」。导出、剪映、dispose 这些顺手
+  /// 冲一下的调用方从来不置 `_dirty`，可它们同样不该去写盘。
+  ///
+  /// 进门那一刻屏幕上这一份就是刚从盘上读出来的，`initState` 里把它对上。
+  ///
+  /// **不能写成 `late … = _doc`**：`late` 的初始化是**首次读取时**才跑的，
+  /// 而首次读取发生在 `_flushNow` 里——那时候 `_doc` 早就被人改过了，
+  /// 于是它把「改完的那一份」当成基线，`identical` 恒真、这一页再也存不下去。
+  ScriptDoc? _savedDoc;
   int _selected = 0;
 
   /// 刚插入的行：让它的输入框自动聚焦（回车后手不离键盘）
@@ -372,6 +388,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = ref.read(dataDirProvider);
     _dataDir = dataDir;
     _docPrint = dataDir == null ? null : taskFingerprint(dataDir, _task.id);
+    _savedDoc = _doc;
     _mediaCache = _buildMediaCache();
     _mediaCache?.addListener(_onMediaCache);
     _bgmCache = _buildBgmCache();
@@ -1109,13 +1126,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   ///
   /// 只在 Agent 在场时做：人自己编辑的时候，内存里的才是最新的，
   /// 反过来读盘会把人正在打的字冲掉
-  void _followDocOnDisk(Directory dataDir, {bool force = false}) {
+  void _followDocOnDisk(Directory dataDir) {
     final now = taskFingerprint(dataDir, _task.id);
-    if (_docPrint == null && !force) {
+    if (_docPrint == null) {
       _docPrint = now;
       return;
     }
-    if (now == _docPrint && !force) return;
+    if (now == _docPrint) return;
     // **人手上有还没落盘的改动时，不拿盘上的盖掉他正在打的字。**
     //
     // 判据是 `_dirty`，**不是 `_saving` 也不是 `_overwriteBlocked`**：
@@ -1126,7 +1143,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 那几处（这道闸当初就是为这个建的）；不推，保存会被挡住——而挡住这件事
     // 现在是**说出来**的（见 `_flushNow` 里的 `_overwriteBlocked`），
     // 顶栏给了「以我的为准」这条出路。要的就是「看得见、可操作」。
-    if (!force && _dirty) return;
+    if (_dirty) return;
     // 同一份重读在飞的时候不再发第二次：基线要等读成功才推进（见下），
     // 不挡的话 500ms 一拍会连着发好几次
     if (_followInFlight) return;
@@ -1144,6 +1161,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         _docPrint = now;
         _task = fresh!;
         _doc = doc;
+        _savedDoc = doc;
         // 屏幕上换成盘上这一份了，本地就没有未落盘的东西了——
         // **闸也要跟着自愈**，否则它一旦置真就永远不会复位
         // （`_saveDoc` 成功才复位，而它被闸挡着永远不会成功），
@@ -1161,6 +1179,10 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 这一刻有没有一次「跟随重读」在飞
   bool _followInFlight = false;
+
+  /// Agent 收工那一次重读失败了：**屏幕上是旧的**，而跟随已经不跑了。
+  /// 顶栏给一个「重新载入」，不然人只能退出重进（而且他不知道要退）
+  bool _reloadFailed = false;
 
   /// 上一次为哪一行滚过。**同一行上的后续播报不再滚**——它在这一行做十件
   /// 事，界面就稳稳停在这一行，跟人自己操作时一样
@@ -1336,12 +1358,29 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               '$wayOut');
       return;
     }
-    final fresh = await _repo.findById(_task.id);
+    // **这是 Agent 收工时唯一一次载入，读失败不许一声不吭。**
+    //
+    // 原来这一句没有任何错误处理：读失败 = 没提示、没日志、没重试，异常还从
+    // `unawaited(_reloadAfterAgent())` 抛成未捕获；而这时候 presence 已经清
+    // 了、跟随也不再跑——**屏幕永久停在 Agent 干活前那一版**，人完全不知道
+    // 自己看的是旧的。
+    final RenewTask? fresh;
+    try {
+      fresh = await _repo.findById(_task.id);
+    } catch (e) {
+      AppLog.warn('Agent 收工后重读任务失败（${_task.id}）：$e');
+      if (!mounted || _disposed) return;
+      setState(() => _reloadFailed = true);
+      _toast('Agent 收工了，但这一页没读到它写的东西——现在屏幕上是旧的。'
+          '点顶上的「重新载入」再试一次。');
+      return;
+    }
     final script = fresh?.script;
     if (!mounted || script == null) return;
     final dataDir = _dataDir;
     setState(() {
       _doc = script;
+      _savedDoc = script;
       _undoStack.clear();
       _redoStack.clear();
       // 屏幕上就是盘上这一份了：基线对齐、闸复位。
@@ -1349,6 +1388,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (dataDir != null) _docPrint = taskFingerprint(dataDir, _task.id);
       _dirty = false;
       _overwriteBlocked = false;
+      _reloadFailed = false;
       _saveError = null;
       _saving = false;
     });
@@ -1538,15 +1578,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final busyDone = _appBusyHere('正在$voiceBusyKeyword（界面上批量重配）');
     var failed = 0;
     try {
-    for (var i = 0; i < lineIds.length; i++) {
-      if (!mounted || _cancelBatchVoice) break;
-      final line = _doc.lines.where((l) => l.id == lineIds[i]).firstOrNull;
-      if (line == null) continue; // 期间被删了
-      setState(() => _batchVoiceProgress = (i + 1, lineIds.length, line.text));
-      final voiceId = _doc.voiceIdOf(line);
-      if (voiceId == null) continue;
-      if (!await _generateVoiceCore(line.id, voiceId)) failed++;
-    }
+      for (var i = 0; i < lineIds.length; i++) {
+        if (!mounted || _cancelBatchVoice) break;
+        final line = _doc.lines.where((l) => l.id == lineIds[i]).firstOrNull;
+        if (line == null) continue; // 期间被删了
+        setState(() => _batchVoiceProgress = (i + 1, lineIds.length, line.text));
+        final voiceId = _doc.voiceIdOf(line);
+        if (voiceId == null) continue;
+        if (!await _generateVoiceCore(line.id, voiceId)) failed++;
+      }
     } finally {
       busyDone();
     }
@@ -2680,6 +2720,26 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   void _flushNow() {
     _autosave?.cancel();
+    // **无事可存就什么都不做——连闸都不去碰。**
+    //
+    // 这一句必须在最前面。有五个调用方**根本不带本地改动**（导出、剪映、
+    // 补逐字时间收尾、自动铺一版收尾、dispose），它们只是顺手冲一下；
+    // 让它们走到闸上的话，只要此刻基线过期就会：
+    //
+    // 1. 置出一个**假的脏**（闸上那句 `_dirty = true` 的前提对它们不成立）
+    //    ——而假的脏**不可逆**：跟随早退、重读早退、保存被闸挡着，三个复位
+    //    点全都走不到，这一页从此冻住，顶栏那句「你的改动还在屏幕上」粘着
+    //    不走，而人一个字没改
+    // 2. 把一份**没有任何改动**的 doc 重新写盘，并往 `ishkafel log` 里记一笔
+    //    `human / 人（编导台）` 的 `script.edit`——**Agent 查日志会以为人动
+    //    过脚本**。这一批的立身之本就是日志说真话
+    //
+    // 一句 guard clause 把这两类在**全部五个调用点上**一次消灭，
+    // 比一门一门去关那五道门可靠。
+    //
+    // 判「有没有改动」用**引用相等**：`ScriptDoc` 是不可变的，每一次真改动
+    // 都换一个新对象，没改就还是同一个（零成本、不误判）。
+    if (identical(_doc, _savedDoc)) return;
     // **Agent 在场时一个字都不许写**。
     //
     // 这一页写盘写的是内存里的整份 doc。Agent 可视模式下界面刚被唤醒
@@ -2770,6 +2830,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         setState(() {
           _saving = false;
           _dirty = false;
+          _savedDoc = doc;
           _saveError = null;
           _overwriteBlocked = false;
         });
@@ -2893,6 +2954,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (saved == null) {
         AppLog.warn('封面没存上：任务 ${_task.id} 已经被删了。');
       }
+      // **这一页自己刚写过盘，基线要跟上。**
+      //
+      // 指纹是整份文件的 `size:mtime`——换一张封面，基线就过期了。不对齐的
+      // 话，紧接着任何一次 `_flushNow` 都会被自己刚写的那一版挡下来，
+      // 而那正是「假的脏」最常见的触发器（`_saveDoc` 对齐完基线就
+      // `unawaited(_refreshCover())`，这一趟又把它写旧了）
+      final d = _dataDir;
+      if (d != null) _docPrint = taskFingerprint(d, _task.id);
     } catch (e) {
       AppLog.warn('封面落库失败（taskId=${_task.id}）：$e');
     }
@@ -3225,27 +3294,27 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final failed = <String>[];
     final busyDone = _appBusyHere('正在$voiceBusyKeyword（补逐字时间）');
     try {
-    for (var i = 0; i < need.length; i++) {
-      if (!mounted) return;
-      final line = _doc.lines.where((l) => l.id == need[i]).firstOrNull;
-      if (line == null) continue; // 期间被删了
-      setState(() =>
-          _draftProgress = ('补逐字时间', line.text.trim(), i, need.length));
-      final voiceId = line.voiceId ??
-          _doc.lines
-              .lastWhere((l) => l.voiceId != null, orElse: () => line)
-              .voiceId;
-      if (voiceId == null) {
-        failed.add(line.text.trim());
-        continue;
+      for (var i = 0; i < need.length; i++) {
+        if (!mounted) return;
+        final line = _doc.lines.where((l) => l.id == need[i]).firstOrNull;
+        if (line == null) continue; // 期间被删了
+        setState(() =>
+            _draftProgress = ('补逐字时间', line.text.trim(), i, need.length));
+        final voiceId = line.voiceId ??
+            _doc.lines
+                .lastWhere((l) => l.voiceId != null, orElse: () => line)
+                .voiceId;
+        if (voiceId == null) {
+          failed.add(line.text.trim());
+          continue;
+        }
+        final ok = await _generateVoiceCore(line.id, voiceId);
+        // 重配了还是没有逐字时间（老服务端/长句）——也算没补上，别装成功
+        final after = _doc.lines.where((l) => l.id == line.id).firstOrNull;
+        if (!ok || (after?.voiceover?.words.isEmpty ?? true)) {
+          failed.add(line.text.trim());
+        }
       }
-      final ok = await _generateVoiceCore(line.id, voiceId);
-      // 重配了还是没有逐字时间（老服务端/长句）——也算没补上，别装成功
-      final after = _doc.lines.where((l) => l.id == line.id).firstOrNull;
-      if (!ok || (after?.voiceover?.words.isEmpty ?? true)) {
-        failed.add(line.text.trim());
-      }
-    }
     } finally {
       busyDone();
     }
@@ -3295,54 +3364,54 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     var voiceFailed = 0;
     var shotFailed = 0;
     try {
-    // 一、配音
-    for (var i = 0; i < needVoice.length; i++) {
-      if (!mounted || _draftCancelled) break;
-      final line = _doc.lines.where((l) => l.id == needVoice[i]).firstOrNull;
-      if (line == null) continue; // 生成期间被删了
-      setState(() =>
-          setStateProgress('配音', line.text.trim(), i, needVoice.length));
-      if (line.voiceId == null) {
-        _mutate((d) => d.setVoiceId(
-            _doc.lines.indexWhere((l) => l.id == line.id), defaultVoice));
+      // 一、配音
+      for (var i = 0; i < needVoice.length; i++) {
+        if (!mounted || _draftCancelled) break;
+        final line = _doc.lines.where((l) => l.id == needVoice[i]).firstOrNull;
+        if (line == null) continue; // 生成期间被删了
+        setState(() =>
+            setStateProgress('配音', line.text.trim(), i, needVoice.length));
+        if (line.voiceId == null) {
+          _mutate((d) => d.setVoiceId(
+              _doc.lines.indexWhere((l) => l.id == line.id), defaultVoice));
+        }
+        final ok = await _generateVoiceCore(
+            line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
+        if (!ok) voiceFailed++;
       }
-      final ok = await _generateVoiceCore(
-          line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
-      if (!ok) voiceFailed++;
-    }
-    // 二、配镜：照着参考片这一镜的画面去找像的。
-    // **外层那一份挂到这里结束才放**——配镜这一半（多帧识图 + miaoa 检索）
-    // 才是最贵的，而它里面 `_tagRefShot` 是逐镜 enter/exit 的，
-    // 中间那道缝原样还在。上一轮只挂到配音循环结束，注释写的是「整轮」，
-    // 代码只做到半轮
-    final tagIds =
-        needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
-    for (var i = 0; i < needShots.length; i++) {
-      if (!mounted || _draftCancelled) break;
-      final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
-      if (line == null) continue;
-      // 进度带分母**到镜**：一行可能有 9 个分镜，只报「第 3 句 / 27 句」
-      // 的话，人看着它在一句上停半分钟，不知道是卡了还是在干活
-      final segTotal = line.reference?.segments.length ?? 1;
-      setState(() => setStateProgress(
-          '照着参考片找镜头',
-          segTotal > 1
-              ? '${line.text.trim()}（这一句 $segTotal 个分镜）'
-              : line.text.trim(),
-          i,
-          needShots.length));
-      final missed = await _autoPickShotByReference(
-        line.id,
-        tagIds,
-        onProgress: (done, total) {
-          if (!mounted || total <= 1) return;
-          setState(() => setStateProgress('照着参考片找镜头',
-              '${line.text.trim()}（第 ${done + 1}/$total 个分镜）',
-              i, needShots.length));
-        },
-      );
-      shotFailed += missed.length;
-    }
+      // 二、配镜：照着参考片这一镜的画面去找像的。
+      // **外层那一份挂到这里结束才放**——配镜这一半（多帧识图 + miaoa 检索）
+      // 才是最贵的，而它里面 `_tagRefShot` 是逐镜 enter/exit 的，
+      // 中间那道缝原样还在。上一轮只挂到配音循环结束，注释写的是「整轮」，
+      // 代码只做到半轮
+      final tagIds =
+          needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
+      for (var i = 0; i < needShots.length; i++) {
+        if (!mounted || _draftCancelled) break;
+        final line = _doc.lines.where((l) => l.id == needShots[i]).firstOrNull;
+        if (line == null) continue;
+        // 进度带分母**到镜**：一行可能有 9 个分镜，只报「第 3 句 / 27 句」
+        // 的话，人看着它在一句上停半分钟，不知道是卡了还是在干活
+        final segTotal = line.reference?.segments.length ?? 1;
+        setState(() => setStateProgress(
+            '照着参考片找镜头',
+            segTotal > 1
+                ? '${line.text.trim()}（这一句 $segTotal 个分镜）'
+                : line.text.trim(),
+            i,
+            needShots.length));
+        final missed = await _autoPickShotByReference(
+          line.id,
+          tagIds,
+          onProgress: (done, total) {
+            if (!mounted || total <= 1) return;
+            setState(() => setStateProgress('照着参考片找镜头',
+                '${line.text.trim()}（第 ${done + 1}/$total 个分镜）',
+                i, needShots.length));
+          },
+        );
+        shotFailed += missed.length;
+      }
     } finally {
       // 收工走 finally：这段里有好几处 `break` / `return`，
       // 靠人工在每条出路上补一句，迟早漏掉一条
@@ -4214,6 +4283,17 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           // **被指纹闸拦下来时，给一条一按就走得通的出路。**
           // 只说「没保存上」而不给出路，人唯一的办法是退出重进——
           // 而那会把他刚打的字全丢掉
+          if (_reloadFailed)
+            Tooltip(
+              message: 'Agent 收工时这一页没读到它写的东西，'
+                  '现在显示的是旧的。点一下重读',
+              child: TextButton(
+                key: const ValueKey('director-reload-retry'),
+                onPressed: () => unawaited(_reloadAfterAgent()),
+                child: const Text('重新载入',
+                    style: TextStyle(fontSize: AppFontSize.caption)),
+              ),
+            ),
           if (_overwriteBlocked)
             Tooltip(
               message: '这条任务在你改的这段时间里被 Agent 也改过。'
