@@ -467,8 +467,33 @@ class CandidateTabState extends State<CandidateTab> {
     final before = _searchMode;
     _syncSearchMode();
     if (before != _searchMode) setState(() {});
-    unawaited(_refreshSearchIfNeeded());
+    _scheduleSearchRefresh();
   }
+
+  /// 把同一次操作里的多次通知合成一发检索。
+  ///
+  /// **为什么需要**：选中是分两步落定的，中间那一步是个注定作废的临时值——
+  /// `setMode(perShot)` 自己先猜第一镜并通知，调用方紧接着把真正选中的那一镜
+  /// 纠正回来、又通知一次；`selectUnit` 同理（先把镜头重置成默认再被纠正）。
+  /// 两次通知各打一发检索，而第一发从一开始就不该存在。
+  ///
+  /// 代次号拦不住它：号是在真正发请求那一刻才自增的，它前面还 await 着标签
+  /// 收窄的网络往返——作废的那一发完全可能先回来、先渲染。所以要在**发出去
+  /// 之前**就把它合掉。
+  ///
+  /// 用微任务而不是定时器：这些通知都发生在同一个同步调用栈里，微任务跑起来时
+  /// 选中已经落定，读到的就是最终值。定时器会平白拖慢一帧，而且还是猜时长。
+  void _scheduleSearchRefresh() {
+    if (_searchRefreshScheduled) return;
+    _searchRefreshScheduled = true;
+    scheduleMicrotask(() {
+      _searchRefreshScheduled = false;
+      if (!mounted) return;
+      unawaited(_refreshSearchIfNeeded());
+    });
+  }
+
+  bool _searchRefreshScheduled = false;
 
   /// 标签不可用时自动落到画面描述——把一个用不了的检索方式选中着，面板就
   /// 永远是空的。规则与「什么时候切回来」见 [nextSearchMode]
@@ -593,9 +618,27 @@ class CandidateTabState extends State<CandidateTab> {
         final plan = await _narrowedTags(scope);
         if (!mounted) return;
         setState(() => _tagPlan = plan);
-        await _search.searchByTags(tagIds: plan.tagIds);
+        // 标签这批不一定用得上。**判定要在发布之前做完**——先发布再回退，
+        // 那批被否掉的结果会实实在在地在界面上摆几秒（规格探测的时间），
+        // 而用户完全可能在那几秒里点中一条跟这一镜毫无关系的素材。
+        final keyword = scope.descriptionKeyword.trim();
+        var fellBack = false;
+        await _search.searchWithFallback(
+          primary: _search.tagQuery(plan.tagIds),
+          accept: (page) => tagResultIsUsable(
+              total: page.total,
+              returned: page.items.length,
+              pageSize: _search.pageSize),
+          fallback: keyword.isEmpty ? null : _search.descriptionQuery(keyword),
+          onFellBack: (rejected) {
+            fellBack = true;
+            _autoSemanticNote = _autoSemanticNoteFor(rejected.total);
+          },
+        );
         if (!mounted) return;
-        await _fallBackToDescriptionIfUseless(scope);
+        // 换没换都要如实反映：换了说清楚为什么换，没换就把上一次的话收回去
+        if (!fellBack && _autoSemanticNote != null) _autoSemanticNote = null;
+        setState(() {});
       case CandidateSearchMode.description:
         await _search.searchByDescription(scope.descriptionKeyword);
       case CandidateSearchMode.image:
@@ -604,7 +647,7 @@ class CandidateTabState extends State<CandidateTab> {
     }
   }
 
-  /// 标签没筛住就自动改走画面描述语义搜。
+  /// 标签没筛住就自动改走画面描述语义搜，**这句话解释为什么换**。
   ///
   /// **为什么必须自动做**：素材库按标签检索**不做相关性排序**，返回的是 id
   /// 最新的一批。真机上一个 35 镜的任务每一镜都命中一万多条，于是每一镜拿到的
@@ -613,24 +656,12 @@ class CandidateTabState extends State<CandidateTab> {
   /// 首条就是「夜晚室内脸上长满红痘的女孩坐在书桌前」。
   ///
   /// 换了要说出来（走 notes 那行灰字）——不说就是悄悄换了一套结果。
-  Future<void> _fallBackToDescriptionIfUseless(PickingScope scope) async {
-    final tagTotal = _search.total;
-    if (tagResultIsUsable(
-        total: tagTotal,
-        returned: _search.entries.length,
-        pageSize: _search.pageSize)) {
-      if (_autoSemanticNote != null) setState(() => _autoSemanticNote = null);
-      return;
-    }
-    final keyword = scope.descriptionKeyword.trim();
-    if (keyword.isEmpty) return;
-    await _search.searchByDescription(keyword);
-    if (!mounted) return;
-    setState(() => _autoSemanticNote = tagTotal == 0
-        ? '这组标签在素材库里一条都没有，已改用画面描述检索'
-        : '按标签命中 $tagTotal 条，宽到等于没筛（素材库按标签搜给的是最新的，'
-            '不是最像的），已改用画面描述检索');
-  }
+  /// 但**说归说，那批被否掉的结果一帧都不该露面**，判定在发布之前就做完了
+  /// （见 [CandidateSearchController.searchWithFallback]）。
+  String _autoSemanticNoteFor(int tagTotal) => tagTotal == 0
+      ? '这组标签在素材库里一条都没有，已改用画面描述检索'
+      : '按标签命中 $tagTotal 条，宽到等于没筛（素材库按标签搜给的是最新的，'
+          '不是最像的），已改用画面描述检索';
 
   void _onSearchModeChanged(CandidateSearchMode mode) {
     if (mode == _searchMode) return;
