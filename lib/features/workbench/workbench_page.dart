@@ -32,6 +32,7 @@ import '../../core/replacement/unit_base.dart';
 import 'base_segment_card.dart';
 import 'base_pin_dialogs.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
+import '../../core/editing/segmentation_change.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/editing/unit_reorder.dart';
@@ -548,6 +549,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     editor.addListener(_onEditorChanged);
     _editor = editor;
+    // **进门那一刻手上这份，就是已经落库的那一份。**
+    //
+    // 不先把基线立起来的话，本页**第一次**编辑器通知就会被当成「有改动」
+    // ——哪怕它只是跟着 Agent 挪了一下选中（`select()` 也会 notify）——
+    // 于是这份进门快照整份写回盘：Agent 刚写进去的东西被原样盖没，
+    // 日志里还留下一笔人名下的改动。2026-09-18 真机抓到的正是这一笔
+    // （#8 Agent 打上标签 → 1.35 秒后 #9「人」把它改了回去）
+    _savedUnits = editor.units;
     _replacements = task.replacementsFor(units);
     _syncEditLocks();
     _pinMaterials();
@@ -824,8 +833,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final editor = _editor;
     if (!pending || editor == null || !_isEditable) return;
     final units = editor.units;
-    if (_savedUnits != null &&
-        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+    // **比的时候不看来源戳**：`editedBy` 参与 `SemanticUnit` 的 `==`，
+    // 而 Agent 每写一次就盖一次戳——照 `==` 比的话，别人的戳会被当成
+    // 「人改了东西」，白写一次盘、白记一笔账（见 `segmentationChanged`）
+    if (_savedUnits != null && !segmentationChanged(_savedUnits!, units)) {
       return;
     }
     final notifier = _tasks;
@@ -2331,8 +2342,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final editor = _editor;
     if (editor == null || !_isEditable) return;
     final units = editor.units;
-    if (_savedUnits != null &&
-        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+    // **比的时候不看来源戳**：`editedBy` 参与 `SemanticUnit` 的 `==`，
+    // 而 Agent 每写一次就盖一次戳——照 `==` 比的话，别人的戳会被当成
+    // 「人改了东西」，白写一次盘、白记一笔账（见 `segmentationChanged`）
+    if (_savedUnits != null && !segmentationChanged(_savedUnits!, units)) {
       return;
     }
     try {
