@@ -61,7 +61,7 @@ void main() {
     final service = MiaoaContentService(
         gateway: MiaoaGateway(
       binary: 'miaoa',
-      run: (_, __) async => ProcessResult(
+      run: (_, _) async => ProcessResult(
           1, 0, jsonEncode({'records': <dynamic>[], 'total': 0}), ''),
     ));
     final out = StringBuffer();

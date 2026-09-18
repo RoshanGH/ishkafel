@@ -86,7 +86,7 @@ void main() {
           task: task,
           hoverPlayer: _FakeHoverPlayer(),
           resolveMedia: (_) async => '/tmp/fake.mp4',
-          extractOriginalThumb: (_, __, ___) async => null,
+          extractOriginalThumb: (_, _, _) async => null,
         ),
       ),
     ));
