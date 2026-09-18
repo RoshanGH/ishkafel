@@ -1127,11 +1127,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 现在是**说出来**的（见 `_flushNow` 里的 `_overwriteBlocked`），
     // 顶栏给了「以我的为准」这条出路。要的就是「看得见、可操作」。
     if (!force && _dirty) return;
-    _docPrint = now;
+    // 同一份重读在飞的时候不再发第二次：基线要等读成功才推进（见下），
+    // 不挡的话 500ms 一拍会连着发好几次
+    if (_followInFlight) return;
+    _followInFlight = true;
     unawaited(_repo.findById(_task.id).then((fresh) {
       final doc = fresh?.script;
       if (!mounted || doc == null) return;
       setState(() {
+        // **读成功了才推进基线。**
+        //
+        // 一度在 await 之前就推，于是重读失败走 catchError 时
+        // **基线已经前移而 `_doc` 还是旧的**——下一次保存会无声覆盖
+        // Agent 刚写进去的东西。宁可下一拍再读一次，也不能让基线跑到
+        // 内容前面去
+        _docPrint = now;
         _task = fresh!;
         _doc = doc;
         // 屏幕上换成盘上这一份了，本地就没有未落盘的东西了——
@@ -1146,8 +1156,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _schedulePreviewRebuild();
     }).catchError((Object e) {
       AppLog.warn('跟随 Agent 重读任务失败（${_task.id}）：$e');
-    }));
+    }).whenComplete(() => _followInFlight = false));
   }
+
+  /// 这一刻有没有一次「跟随重读」在飞
+  bool _followInFlight = false;
 
   /// 上一次为哪一行滚过。**同一行上的后续播报不再滚**——它在这一行做十件
   /// 事，界面就稳稳停在这一行，跟人自己操作时一样
@@ -1297,14 +1310,30 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// Agent 那条命令还在跑（确认框上一秒刚亲口说过），这时说「Agent 收工了」
   /// 就是同一段流程里两句话互相打脸。
   Future<void> _reloadAfterAgent({bool agentStillRunning = false}) async {
-    _flushNow();
+    // **人没改过就别冲。**
+    //
+    // 无条件 `_flushNow()` 的话，人一个字没改时这一句唯一的作用是在闸上
+    // 碰一鼻子灰：置 `_overwriteBlocked` → 顶栏变红字「没保存上：…你的改动
+    // 还在屏幕上」+ 冒出「以我的为准」。而随后的 `findById` 是真实文件 IO，
+    // 中间必然画得出帧——**每次 Agent 收工，人都会看到一次说谎的红横幅**。
+    //
+    // 更糟的是没被拦下的那些情形：它会把一份**没有任何改动**的 doc 重新
+    // 写盘，并往 `ishkafel log` 里记一笔 `human / 人（编导台）` 的
+    // `script.edit`——**Agent 查日志会以为人动过脚本**。这一批的立身之本
+    // 就是日志说真话。
+    if (_dirty) _flushNow();
     if (_dirty) {
       AppLog.info('这一页有没落盘的改动，不整份重读（${_task.id}）');
+      // **出路只在闸真的关上时才看得见**（顶栏那个按钮的显示条件就是
+      // `_overwriteBlocked`）。脏、但这一次没被拦的情形也会走到这儿——
+      // 那时候指着一个不存在的按钮说「点它」，等于把出路说成了假的。
+      final wayOut = _overwriteBlocked
+          ? '要存你的，点顶上的「以我的为准」。'
+          : '它会自己接着存——再改一个字就会重试。';
       _toast(agentStillRunning
-          ? '你手上还有没保存的改动，没敢拿盘上的盖掉它。'
-              '要存你的，点顶上的「以我的为准」。'
-          : 'Agent 收工了，但你手上还有没保存的改动——'
-              '没敢拿它的盖掉你的。要存你的，点顶上的「以我的为准」。');
+          ? '你手上还有没保存的改动，没敢拿盘上的盖掉它。$wayOut'
+          : 'Agent 收工了，但你手上还有没保存的改动——没敢拿它的盖掉你的。'
+              '$wayOut');
       return;
     }
     final fresh = await _repo.findById(_task.id);
@@ -1508,6 +1537,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // script voice 从缝里溜进来，整轮双份计费
     final busyDone = _appBusyHere('正在$voiceBusyKeyword（界面上批量重配）');
     var failed = 0;
+    try {
     for (var i = 0; i < lineIds.length; i++) {
       if (!mounted || _cancelBatchVoice) break;
       final line = _doc.lines.where((l) => l.id == lineIds[i]).firstOrNull;
@@ -1517,7 +1547,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (voiceId == null) continue;
       if (!await _generateVoiceCore(line.id, voiceId)) failed++;
     }
-    busyDone();
+    } finally {
+      busyDone();
+    }
     if (!mounted) return;
     final stopped = _cancelBatchVoice;
     setState(() => _batchVoiceProgress = null);
@@ -2672,6 +2704,16 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final dataDir = _dataDir;
     if (dataDir != null && !canOverwrite(dataDir, _task.id, _docPrint)) {
       AppLog.info('盘上这份任务被外面改过，这次不覆盖（${_task.id}）');
+      // **能被拦下来，本身就说明本地这份还没落盘。**
+      //
+      // 这一句是结构性的，不能指望各个调用点自己去置 `_dirty`：
+      // `_undo` / `_redo` / `_extractFromVideo` 三处都整份换掉 `_doc` 之后
+      // 立刻 `_flushNow()`，三处**都没有**走 `_mutate`。判据从
+      // 「_saving || _overwriteBlocked」换成 `_dirty` 那一轮，保护没跟过来
+      // ——撤销一下就被盘上那份整份替换掉、无声消失，提取脚本跑一分钟
+      // 的结果也一样。在调用点补，以后谁写第四个调用点又会漏；
+      // **在闸上补，结构上不可能漏。**
+      _dirty = true;
       // **拦下来必须说出来。**
       //
       // 只 return 的话：`_mutate` 已经把 `_saving = true`，而 `_saveDoc`
@@ -3182,11 +3224,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (go != true || !mounted) return;
     final failed = <String>[];
     final busyDone = _appBusyHere('正在$voiceBusyKeyword（补逐字时间）');
+    try {
     for (var i = 0; i < need.length; i++) {
-      if (!mounted) {
-        busyDone();
-        return;
-      }
+      if (!mounted) return;
       final line = _doc.lines.where((l) => l.id == need[i]).firstOrNull;
       if (line == null) continue; // 期间被删了
       setState(() =>
@@ -3206,7 +3246,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         failed.add(line.text.trim());
       }
     }
-    busyDone();
+    } finally {
+      busyDone();
+    }
     if (!mounted) return;
     setState(() => _draftProgress = null);
     _flushNow();
@@ -3246,10 +3288,13 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     required String defaultVoice,
   }) async {
     _draftCancelled = false;
-    // 整轮挂一份：逐句之间不留缝（见 [_appBusyHere]）
-    final busyDone = _appBusyHere('正在$voiceBusyKeyword（自动铺一版）');
+    // 整轮挂一份：配音、配镜两半之间、每一句/每一镜之间都不留缝
+    // （见 [AppBusyHolder]）。里面各步再各挂各的，栈没空就不撤
+    final busyDone =
+        _appBusyHere('正在$voiceBusyKeyword、$tagBusyKeyword（自动铺一版）');
     var voiceFailed = 0;
     var shotFailed = 0;
+    try {
     // 一、配音
     for (var i = 0; i < needVoice.length; i++) {
       if (!mounted || _draftCancelled) break;
@@ -3265,8 +3310,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
       if (!ok) voiceFailed++;
     }
-    busyDone();
-    // 二、配镜：照着参考片这一镜的画面去找像的
+    // 二、配镜：照着参考片这一镜的画面去找像的。
+    // **外层那一份挂到这里结束才放**——配镜这一半（多帧识图 + miaoa 检索）
+    // 才是最贵的，而它里面 `_tagRefShot` 是逐镜 enter/exit 的，
+    // 中间那道缝原样还在。上一轮只挂到配音循环结束，注释写的是「整轮」，
+    // 代码只做到半轮
     final tagIds =
         needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
     for (var i = 0; i < needShots.length; i++) {
@@ -3294,6 +3342,11 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         },
       );
       shotFailed += missed.length;
+    }
+    } finally {
+      // 收工走 finally：这段里有好几处 `break` / `return`，
+      // 靠人工在每条出路上补一句，迟早漏掉一条
+      busyDone();
     }
     if (!mounted) return;
     // 三、完成一拍 + 开播——魔法时刻要有个 crescendo：进度收束成

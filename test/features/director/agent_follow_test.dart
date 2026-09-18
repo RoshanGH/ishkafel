@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/features/settings/settings_providers.dart';
@@ -17,10 +18,18 @@ import 'package:ishkafel/features/director/director_page.dart';
 /// 时长，那个面板就打开，跟人自己点开去调的时候是一样的。」
 class _MemoryRepo implements TaskRepository {
   final _store = <String, RenewTask>{};
+
+  /// 下一次 findById 抛异常——用来验「重读失败」那条路
+  bool failNextFind;
+  _MemoryRepo({this.failNextFind = false});
+
   @override
   Future<List<RenewTask>> findAll() async => _store.values.toList();
   @override
-  Future<RenewTask?> findById(String id) async => _store[id];
+  Future<RenewTask?> findById(String id) async {
+    if (failNextFind) throw StateError('读盘失败（模拟）');
+    return _store[id];
+  }
   @override
   Future<void> save(RenewTask task) async => _store[task.id] = task;
   @override
@@ -376,6 +385,138 @@ void main() {
     expect(find.textContaining('Agent 收工了'), findsOneWidget,
         reason: '这条路上它确实收工了——这句是实话，该说');
     expect(find.textContaining('还有没保存的改动'), findsOneWidget);
+  });
+
+  /// **时序 3″：人一个字没改 + 按「我来接手」。**
+  ///
+  /// `_reloadAfterAgent` 一度**无条件** `_flushNow()`：人没改时这一句唯一的
+  /// 作用就是在闸上碰一鼻子灰，置 `_overwriteBlocked` → 顶栏变红字
+  /// 「没保存上：…你的改动还在屏幕上」。而随后那次重读是真实文件 IO，
+  /// 中间画得出帧——**每次都会闪一条说谎的红横幅**。
+  testWidgets('时序3″ 人没改过 + 按我来接手：没有红字，也不记一笔假的人工改动',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    await agentSaves(repo, 'Agent 写的');
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('agent-takeover')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const ValueKey('agent-takeover-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.textContaining('没保存上'), findsNothing,
+        reason: '人一个字没改，红字是假话');
+    expect(find.textContaining('你的改动还在屏幕上'), findsNothing);
+    expect(find.byKey(const ValueKey('director-force-save')), findsNothing,
+        reason: '没有要「以我的为准」的东西，那个按钮不该冒出来');
+    expect(find.text('Agent 写的'), findsWidgets, reason: '载入的是它写的那一份');
+  });
+
+  /// **时序 2′/3′：本地脏、但这一次 `_flushNow` 没被拦。**
+  ///
+  /// 早退判据（`_dirty`）和出路的显示条件（`_overwriteBlocked`）不再等价，
+  /// 所以会走到这一支：不许指着一个不存在的按钮说「点它」。
+  testWidgets('时序2′ 脏但没被拦：提示不许指向看不见的按钮', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+
+    // 人改了字，紧接着（自动保存还没到点）Agent 露面又收工
+    await tester.enterText(find.byType(TextField).first, '人刚打的字');
+    await tester.pump(const Duration(milliseconds: 100));
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '路过'));
+    await tester.pump(const Duration(milliseconds: 600));
+    clearAgentPresence(dataDir: dir, taskId: 't1');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+
+    // 盘上没被别人动过，所以这一次冲得下去——闸没关
+    expect(find.byKey(const ValueKey('director-force-save')), findsNothing);
+    expect(find.textContaining('点顶上的「以我的为准」'), findsNothing,
+        reason: '那个按钮此刻不存在，指着它说「点它」等于把出路说成假的');
+    expect((await repo.findById('t1'))!.script!.lines.first.text, '人刚打的字',
+        reason: '没被拦就该真的存下去');
+  });
+
+  /// **时序 1′：重读失败。**
+  ///
+  /// 基线一度在 `await` 之前就推进，于是重读失败时**基线已经前移而 `_doc`
+  /// 还是旧的**——下一次保存会无声覆盖 Agent 刚写进去的东西。
+  testWidgets('时序1′ 重读失败：基线不许跑到内容前面去', (tester) async {
+    final repo = _MemoryRepo(failNextFind: true);
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    agentWritesToDisk('Agent 写的');  // 指纹变 → 触发一次跟随重读（会失败）
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    // 读失败之后人改一笔：**必须被闸拦住**，不能无声覆盖
+    repo.failNextFind = false;
+    clearAgentPresence(dataDir: dir, taskId: 't1');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('第 1 句台词'), findsWidgets,
+        reason: '读成功那一次才该换内容');
+  });
+
+  /// **N1：`_dirty` 不能靠各个调用点自己去置。**
+  ///
+  /// `_undo` / `_redo` / `_extractFromVideo` 三处都整份换掉 `_doc` 之后立刻
+  /// `_flushNow()`，**三处都不走 `_mutate`**。旧判据
+  /// `(_saving || _overwriteBlocked)` 恰好把这三条路盖住了，换成 `_dirty`
+  /// 之后保护没跟过来——撤销一下就被盘上那份整份替换掉、无声消失，
+  /// 连「以我的为准」那条出路都被一并清掉。
+  ///
+  /// 所以那一句置位写在**闸被拦下的那个分支里**：能被拦，本身就说明
+  /// 本地这份还没落盘。在调用点补，以后谁写第四个调用点又会漏。
+  testWidgets('N1 撤销之后 Agent 又写了盘：撤销结果不许无声消失', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+
+    // 人改一笔并存成功（此刻 _dirty 回到 false）
+    await tester.enterText(find.byType(TextField).first, '人改的');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect((await repo.findById('t1'))!.script!.lines.first.text, '人改的');
+
+    // Agent 来了（跟随因此会跑起来），并写了盘 → 指纹变。
+    // 人按 ⌘Z 撤销——**这条路不走 `_mutate`**，直接换 `_doc` + flush
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    agentWritesToDisk('Agent 又写了一次');
+    // 焦点还在输入框里的话 ⌘Z 会被它吃掉
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    // 下一拍的跟随：不置 _dirty 的话，这一下把撤销结果整份冲掉
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('第 1 句台词'), findsWidgets,
+        reason: '撤销回到了原文，这一份还没落盘——'
+            '一次 follow 把它冲掉的话，人连撤销做了什么都看不见');
+    expect(find.byKey(const ValueKey('director-force-save')), findsOneWidget,
+        reason: '出路也被一并清掉的话，人连补救的按钮都没有');
   });
 
   /// **时序 4：闸已经关上之后，还出得去吗。**

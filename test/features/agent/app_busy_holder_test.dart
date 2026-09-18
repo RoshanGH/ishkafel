@@ -86,6 +86,55 @@ void main() {
     h.dispose();
   });
 
+  /// **交叉释放不许让话变空。**
+  ///
+  /// 一度用「进场时拍快照、退场还原」：两层交叉释放时，先释放那个会把话
+  /// 还原成它进场时的空串——`.app.json` 还在、`action` 却成了空串，
+  /// `busy_guard` 的关键词匹配当场失配。**状态还在、劝告已经瞎了**，
+  /// 比文件消失更难发现。
+  test('交叉释放：话换成栈里剩下那一层的，绝不变空', () {
+    final h = holderOf();
+    final a = h.enter('正在配音（整轮）');
+    final b = h.enter('正在给第 3 句配音');
+
+    a(); // 先放外层——快照还原那版会在这一下把话抹成空串
+    expect(present(), isTrue);
+    final action = readAppBusy(dataDir: dir, taskId: 't1')!.action;
+    expect(action, isNotEmpty, reason: '话一空，判据的关键词匹配就失配了');
+    expect(action, '正在给第 3 句配音', reason: '该是栈里剩下那一层的话');
+
+    b();
+    expect(present(), isFalse);
+    h.dispose();
+  });
+
+  /// `dispose()` 之后遗留的收工回调不许再动这份状态。
+  ///
+  /// 不作废的话：计数被减成负数，此后 enter/exit 配对全乱；而多出来的那一次
+  /// 收工会 `clearAppBusy`——**这份文件有第二个写入方**（任务列表那边的
+  /// 分析），于是一个已经销毁的页面可能抹掉别人正在跑的活儿的状态。
+  test('dispose 之后的遗留回调：什么都不做，尤其不许去撤别人的状态', () {
+    final h = holderOf();
+    final stale = h.enter('这一页的活儿');
+    h.dispose();
+    expect(present(), isFalse);
+
+    // 另一边（比如任务列表的分析）挂上了自己的
+    final other = holderOf();
+    final otherDone = other.enter('正在分析原片');
+    expect(present(), isTrue);
+
+    stale(); // 上一代的回调回来了
+    stale();
+    expect(present(), isTrue,
+        reason: '已经销毁的页面把别人正在跑的活儿的状态抹掉了');
+    expect(h.depth, 0, reason: '计数不许被减成负数');
+    expect(readAppBusy(dataDir: dir, taskId: 't1')!.action, '正在分析原片');
+
+    otherDone();
+    other.dispose();
+  });
+
   test('页面拆了：嵌套到第几层都收干净', () async {
     final h = holderOf(pulse: const Duration(milliseconds: 20));
     h.enter('外层');

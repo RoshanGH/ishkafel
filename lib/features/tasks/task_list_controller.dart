@@ -10,7 +10,7 @@ import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
 import '../../core/models/project_ref.dart';
 import '../../cli/busy_guard.dart';
-import '../../core/storage/agent_presence.dart';
+import '../agent/app_busy_holder.dart';
 import '../../core/storage/task_copy.dart';
 import '../settings/settings_providers.dart';
 import '../../core/models/renew_task.dart';
@@ -604,26 +604,18 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     //
     // 判据认的是 action 里的「分析」两个字，所以用 busy_guard 那份常量拼，
     // 别手写——手写的话改一句文案，判据会静默失效
+    // 心跳、嵌套、收工都交给 AppBusyHolder——**不再手写一份**。
+    // 手写的那版和编导台那版是两套各写各的，而「不留缝」「话不能变空」
+    // 「dispose 之后的回调不许乱减计数」这几条只在一处被守住过
     final dataDir = ref.read(dataDirProvider);
-    var what = '正在$analyzeBusyKeyword原片';
-    void here() {
-      if (dataDir == null) return;
-      writeAppBusy(
-        dataDir: dataDir,
-        taskId: task.id,
-        busy: AgentPresence(
-            holder: actorAnalysisReport, at: DateTime.now(), action: what),
-      );
-    }
-
-    here();
-    // **心跳，不能只靠进度回调。**
-    //
-    // 进度是**按阶段**发的，每个阶段只发一次；而 `building` 之后的逐镜打标
-    // 实测七十多秒——超过 60 秒的失效线。只在 onProgress 里刷的话，
-    // 这条状态恰好在**最贵的那一段**过期，这道劝告就白加了。
-    // 20 秒一跳，和 `AgentStage._pulse` 同一个值、同一个理由
-    final pulse = Timer.periodic(const Duration(seconds: 20), (_) => here());
+    final busy = dataDir == null
+        ? null
+        : AppBusyHolder(
+            dataDir: dataDir, taskId: task.id, holder: actorAnalysisReport);
+    // 外层挂整轮：进度是**按阶段**发的，每阶段一次，而 `building` 之后的
+    // 逐镜打标实测七十多秒——超过 60 秒的失效线。里面每换一步再挂一层，
+    // 两层之间不留缝
+    var release = busy?.enter('正在$analyzeBusyKeyword原片') ?? () {};
     try {
       await pipeline.analyze(
         task,
@@ -634,9 +626,12 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         actor: actorAnalysisReport,
         onProgress: (p) {
           progress.report(task.id, p);
-          // 换了一步就把话换掉；不换步的那几十秒靠上面那个心跳续着
-          what = '正在$analyzeBusyKeyword原片：${p.stage.name}';
-          here();
+          // 换一步就换一层：先挂新的再放旧的，**中间不留缝**。
+          // 不换步的那几十秒靠 AppBusyHolder 自己的心跳续着
+          final next =
+              busy?.enter('正在$analyzeBusyKeyword原片：${p.stage.name}') ?? () {};
+          release();
+          release = next;
         },
         // 切分一好就刷新列表：那一刻任务已经能打开干活了，剩下的打标
         // 在后台补。让人对着「分析中」多等三倍时间没道理。
@@ -650,12 +645,10 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       // 成功与失败都要清：留着最后一步的文案，卡片看起来像还在跑
       progress.clear(task.id);
       _analyzingTaskIds.remove(task.id);
-      pulse.cancel();
       // 在忙状态也要撤——不撤的话接下来 60 秒里 Agent 的 analyze
       // 会被一条**已经结束**的活儿劝退
-      if (dataDir != null) {
-        clearAppBusy(dataDir: dataDir, taskId: task.id);
-      }
+      release();
+      busy?.dispose();
     }
   }
 
