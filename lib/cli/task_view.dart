@@ -168,11 +168,13 @@ Map<String, dynamic> taskToJson(RenewTask task) {
 Map<String, dynamic> _unitToJson(
         SemanticUnit unit, ComposedTimeline? composed, int at) =>
     {
-      // **这个单元的身份**。改动日志全按 `unitUid` 记（`unit.*` 十一处、
-      // `blank.*` 两处、审片台的 `unit.tags`，以及 `units.edit` 的
-      // `changed` / `units.tag.*` 的 `taggedUnits`），而所有命令按下标操作
-      // ——不报身份的话，Agent 读完日志知道「哪个 uid 被人动过」，却没有
-      // 任何一条路把它对回一个下标，日志的可操作性在最后一米断掉。
+      // **这个单元的身份**。改动日志按 `unitUid` 记名——`where.unitUid`
+      // （`unit.*` 十一处、`blank.*` 两处、审片台的 `unit.tags`）、
+      // `units.tag.*` 的 `taggedUnits`、`units.edit` 的 `changed` 里每一项
+      // 的 `uid`（那一处原先没有，2026-09-18 补上：人那一侧唯一的 op
+      // 不点名，需求②要的「哪些是人干的」就在最后一米断掉）。
+      // 而所有写命令按下标点名——不报身份的话，Agent 读完日志知道
+      // 「哪个 uid 被人动过」，却没有任何一条路把它对回一个下标。
       //
       // 无条件报：命令行手上的任务一律从盘上读，读档就会补发身份
       // （`ensureUnitUidsDeterministic`），这里的 uid 不会是空串

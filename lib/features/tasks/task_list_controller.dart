@@ -1122,15 +1122,45 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
     return changed;
   }
 
-  static _UnitChange _added(String uid, Map<String, dynamic> after) =>
-      (uid: uid, before: {'present': false}, after: after, stillThere: true);
+  /// **身份要记进日志的两侧，但绝不能进 `facts()`。**
+  ///
+  /// 记进日志：改动日志全仓按 `unitUid` 记名（`unit.*`、`blank.*`、
+  /// `units.tag.*`、审片台的 `unit.tags`），而 `units.edit` 是**人那一侧
+  /// 唯一的 op**——它不点名，需求②要的「哪些是人干的」就在最后一米断掉：
+  /// Agent 知道人改过某个单元，却不知道是哪一个，而所有写命令按下标点名。
+  ///
+  /// 不进 `facts()`：那份 map 同时用来判「这个单元变没变」，而
+  /// 「盘上那份还没发身份、手上这份已经发了」是常态（见 [_changedUnitFacts]
+  /// 的文档）——uid 一旦参与比对，那种情况下每个单元都会被判成改过。
+  ///
+  /// 空串不写：老存档里没有身份的单元点了名也认不出是哪一个，
+  /// 写个空串只会让人以为「发过但是空的」（和 `SemanticUnit.toJson` 同规矩）。
+  /// 走仓库读出来的任务一律补发过身份，实际走不到这一支。
+  static Map<String, dynamic> _named(String uid, Map<String, dynamic> facts) =>
+      {if (isUnitUid(uid)) 'uid': uid, ...facts};
+
+  static _UnitChange _added(String uid, Map<String, dynamic> after) => (
+        uid: uid,
+        before: _named(uid, {'present': false}),
+        after: _named(uid, after),
+        stillThere: true
+      );
 
   static _UnitChange _edited(
           String uid, Map<String, dynamic> b, Map<String, dynamic> a) =>
-      (uid: uid, before: b, after: a, stillThere: true);
+      (
+        uid: uid,
+        before: _named(uid, b),
+        after: _named(uid, a),
+        stillThere: true
+      );
 
-  static _UnitChange _removed(String uid, Map<String, dynamic> before) =>
-      (uid: uid, before: before, after: {'present': false}, stillThere: false);
+  static _UnitChange _removed(String uid, Map<String, dynamic> before) => (
+        uid: uid,
+        before: _named(uid, before),
+        after: _named(uid, {'present': false}),
+        stillThere: false
+      );
 
   /// 工作台那一批「随手落库」的共同形状：走唯一写入口、写完刷新列表。
   ///
