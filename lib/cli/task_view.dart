@@ -200,6 +200,10 @@ Map<String, dynamic> _unitToJson(
       // 人手改过的标签：重新打标会跳过它。不报的话你会以为打标漏了这个单元，
       // 跑一遍发现它纹丝不动，也不知道为什么
       if (unit.tagsHandpicked) 'tagsHandpicked': true,
+      // **这一处是谁定的、什么时候定的。** 产品负责人要的是「发现这是人已经
+      // 修改的」——「发现」意味着看当前数据就能看见，不必先去翻一遍日志再
+      // 自己对下标。没人定过就整个键不出现：「不知道」不能压成「是我定的」
+      if (unit.editedBy != null) 'editedBy': unit.editedBy!.toJson(),
       'shots': [
         for (var i = 0; i < unit.shots.length; i++)
           {
@@ -227,6 +231,10 @@ Map<String, dynamic> _unitToJson(
               'productBrand': unit.shots[i].productBrand,
             'tags': unit.shots[i].tags,
             if (unit.shots[i].tagsHandpicked) 'tagsHandpicked': true,
+            // 这一镜是谁定的（同上）。**镜头这一层单独记**：人常常只动其中
+            // 一镜，单元层的戳说不出是哪一镜
+            if (unit.shots[i].editedBy != null)
+              'editedBy': unit.shots[i].editedBy!.toJson(),
             // 这一镜单独设过「放素材的哪一路声音」。**不设就不报这两个字段**
             // ——「跟随全片」和「明确设成某一档」要分得开
             if (unit.shots[i].materialAudioMode != null)
