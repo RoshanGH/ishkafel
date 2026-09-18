@@ -65,6 +65,26 @@ case "$MODE" in
   --release) OUT="build/macos/Build/Products/Release/ishkafel.app" ;;
   *)         OUT="build/macos/Build/Products/Debug/ishkafel.app" ;;
 esac
+
+# 把字幕字体放进包里。**必须在签名之前**——往签好名的 bundle 里塞东西会破坏
+# 封签，对方双击会报「已损坏」，而这件事要等包发出去才暴露。
+#
+# 为什么非带不可：字幕是烧进对外交付的成片的，系统自带的苹方/微软雅黑都没有
+# 授予这项权利（见 lib/core/subtitle/subtitle_font.dart）。包里没有这份字体，
+# 导出会**直接失败并点名**，不会偷偷退回系统字体。
+FONT_SRC="assets/fonts"
+FONT_DST="$OUT/Contents/Resources/fonts"
+if [ ! -s "$FONT_SRC/NotoSansSC-Medium.otf" ]; then
+  echo "缺 $FONT_SRC/NotoSansSC-Medium.otf——这个包导出时渲不出字幕。" >&2
+  exit 1
+fi
+rm -rf "$FONT_DST"
+mkdir -p "$FONT_DST"
+cp "$FONT_SRC/NotoSansSC-Medium.otf" "$FONT_DST/"
+# OFL 要求随字体一起分发许可原文
+cp "$FONT_SRC/LICENSE-NotoSansSC.txt" "$FONT_DST/"
+echo "字幕字体已随包带上（Noto Sans SC，SIL OFL）"
+
 # 用固定的自签名证书签一次。
 #
 # **不签的话每次重新编译都会重新弹一遍隐私授权框**（「ishkafel 想访问
