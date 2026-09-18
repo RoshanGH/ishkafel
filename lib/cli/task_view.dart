@@ -168,6 +168,15 @@ Map<String, dynamic> taskToJson(RenewTask task) {
 Map<String, dynamic> _unitToJson(
         SemanticUnit unit, ComposedTimeline? composed, int at) =>
     {
+      // **这个单元的身份**。改动日志全按 `unitUid` 记（`unit.*` 十一处、
+      // `blank.*` 两处、审片台的 `unit.tags`，以及 `units.edit` 的
+      // `changed` / `units.tag.*` 的 `taggedUnits`），而所有命令按下标操作
+      // ——不报身份的话，Agent 读完日志知道「哪个 uid 被人动过」，却没有
+      // 任何一条路把它对回一个下标，日志的可操作性在最后一米断掉。
+      //
+      // 无条件报：命令行手上的任务一律从盘上读，读档就会补发身份
+      // （`ensureUnitUidsDeterministic`），这里的 uid 不会是空串
+      'uid': unit.uid,
       'index': unit.index,
       // **原片位置**。老名字留着（已有调用方还在用），同时给一份把基准写在
       // 名字里的——两个基准混着用正是 2026-09-08 那个「属性栏写 00:45.03、

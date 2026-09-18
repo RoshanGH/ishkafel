@@ -22,6 +22,9 @@ Map<String, dynamic> shotContext({
 
   return {
     'unitIndex': unitIndex,
+    // 这一段的身份。**下标是位置、uid 才是身份**——日志按 uid 记，
+    // 照着日志回来挑素材时要对得上是不是同一段
+    'unitUid': unit.uid,
     'shotIndex': shotIndex,
     // 变速倍率靠它算：候选比坑位长就要加速，超出可变速区间就不能用
     'slotMs': shot.endMs - shot.startMs,
