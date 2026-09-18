@@ -44,6 +44,9 @@ void main() {
     expect(json['ok'], isTrue);
     expect(json['via'], 'agent');
     expect(json['landed'], isFalse, reason: '老实说没等到界面的确认');
+    // 单子要收回来：不收的话界面晚几秒取走，会把人又支回一次列表
+    expect(consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot), isNull,
+        reason: '没等它就自己走了，就别把单子留在盘上');
   });
 
   test('界面真的回应了：照常报 via ui', () async {

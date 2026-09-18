@@ -6,6 +6,7 @@ import '../app_locator.dart';
 
 import '../../app/service_wiring.dart';
 import '../../core/ai/ai_credentials.dart';
+import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/tag_vocabulary.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
@@ -45,6 +46,9 @@ Future<int> runAnalyzeCommand({
 
   /// 测试注入：判「有没有人正在分析」时的当前时刻
   DateTime? now,
+
+  /// 测试注入：不给就按凭据装配真实管线（与 script 那几条同一种做法）
+  AnalysisPipeline? pipeline,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -89,8 +93,8 @@ Future<int> runAnalyzeCommand({
     return exitEnv;
   }
 
-  final pipeline = buildAnalysisPipeline(credentials, dataDir);
-  if (pipeline == null) {
+  final line = pipeline ?? buildAnalysisPipeline(credentials, dataDir);
+  if (line == null) {
     sink.writeln('分析流水线装配失败（凭据不完整）');
     return exitEnv;
   }
@@ -148,7 +152,7 @@ Future<int> runAnalyzeCommand({
 
   try {
     if (external0.isEmpty) {
-      final analyzed = await pipeline.analyze(
+      final analyzed = await line.analyze(
         task,
         // 这一趟是 Agent 叫起来的——管线两边共用，谁触发算谁的
         by: ActorKind.agent,
@@ -169,7 +173,7 @@ Future<int> runAnalyzeCommand({
 
     // 有要外包的步骤：先把不可外包的前半程跑完（抽音频、分离、镜头切点、
     // ASR），落盘，然后把第一件待办交出去
-    final prepared = await pipeline.prepare(
+    final prepared = await line.prepare(
       task,
       onProgress: (progress) {
         sink.writeln('· ${progress.stage.name}');
@@ -207,9 +211,9 @@ Future<int> runAnalyzeCommand({
     // 只外包打标：切分照常走内置，跑到「等你打标」那一步。
     // 语义切分是网络请求，做完拿到 drafts 再进第二次独立的 apply——
     // 不能塞进上面那次 edit，重跑一次 edit 就是把切分又算一遍
-    final drafts = await pipeline.splitter.split(prepared.sentences);
+    final drafts = await line.splitter.split(prepared.sentences);
     final units =
-        pipeline.assemble(task: task, drafts: drafts, prepared: prepared);
+        line.assemble(task: task, drafts: drafts, prepared: prepared);
     final ready = await mutation.apply(
       taskId: task.id,
       op: 'units.assemble',

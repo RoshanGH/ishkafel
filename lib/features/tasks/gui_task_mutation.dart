@@ -20,6 +20,12 @@ const actorResumeTagging = '软件（补打标）';
 const actorAnalysisReport = '软件（分析）';
 const actorCover = '软件（封面）';
 
+/// 编导台上人点一下、软件自己跑起来的那些活儿（生成配音、给参考镜打标）。
+///
+/// **它只用在「软件在忙」那条通道上**（`writeAppBusy`），不写改动日志的
+/// actor——那几笔仍然算 `人（编导台）`，因为是人点的
+const actorDirectorBoard = '软件（编导台）';
+
 /// 界面这一侧、**人真的点出来的**那些改动的写入口。`by` 是 `human`。
 ///
 /// 判据是**这一笔写进去的东西是不是人的判断**：他挑的素材、拖的边界、

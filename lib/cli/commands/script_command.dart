@@ -905,7 +905,6 @@ Future<int> runScriptTagRefCommand({
     return await _tagRefShots(
       repository: repository,
       task: task,
-      doc: doc,
       ref: ref,
       video: video,
       line: line,
@@ -931,7 +930,6 @@ Future<int> runScriptTagRefCommand({
 Future<int> _tagRefShots({
   required FileTaskRepository repository,
   required RenewTask task,
-  required ScriptDoc doc,
   required LineRef ref,
   required String video,
   required int line,

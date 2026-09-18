@@ -133,6 +133,10 @@ void main() {
     final id = json['id'] as String;
     expect(id, isNotEmpty);
     expect(json['next'], contains(id));
+    // **单子要收回来。** 我们这就自己把任务建了，而那张单还挂在盘上的话，
+    // 界面晚几秒取走**会再弹一次向导、再建一条任务**
+    expect(consumeAgentRequest(dataDir: dir, taskId: globalPresenceSlot), isNull,
+        reason: '兜底自己建完了还把单子留在盘上，界面取走会再建一条');
     // 任务是真建出来的，不是嘴上说说
     expect(await FileTaskRepository(dir).findById(id), isNotNull);
   });

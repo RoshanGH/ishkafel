@@ -36,6 +36,7 @@ import '../../core/ui/text_editing_keys.dart';
 import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
+import '../../cli/busy_guard.dart';
 import '../tasks/gui_task_mutation.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/task_repository.dart';
@@ -1228,9 +1229,49 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     });
   }
 
-  /// Agent 收工后重新读盘。**先把本地未落盘的改动冲掉**，免得人自己的活丢了
+  /// **软件自己在这条任务上跑活儿时也要报「在忙」。**
+  ///
+  /// 报在 `writeAppBusy` 那一份，**不占 Agent 的播报通道**
+  /// （CLAUDE.md：「软件自己跑的活儿不许占那条通道」）。
+  /// 但「别把同一件贵活儿跑两遍」那道劝告看得见它——人在这一页点了
+  /// 「生成配音」，Agent 同时敲 `script voice`，不报的话双份计费。
+  ///
+  /// 返回一个「收工」回调：**必须在 finally 里调**，还带 20 秒心跳
+  /// （在场状态 60 秒过期，而一句 TTS / 一镜识图常常超过它）
+  VoidCallback _appBusyHere(String what) {
+    final dataDir = _dataDir ?? ref.read(dataDirProvider);
+    if (dataDir == null) return () {};
+    void write() => writeAppBusy(
+          dataDir: dataDir,
+          taskId: _task.id,
+          busy: AgentPresence(
+              holder: actorDirectorBoard, at: DateTime.now(), action: what),
+        );
+    write();
+    final pulse = Timer.periodic(const Duration(seconds: 20), (_) => write());
+    return () {
+      pulse.cancel();
+      clearAppBusy(dataDir: dataDir, taskId: _task.id);
+    };
+  }
+
+  /// Agent 收工后重新读盘。**先把本地未落盘的改动冲掉**，免得人自己的活丢了。
+  ///
+  /// **但那一冲可能被指纹闸拦下来**（盘上刚被 Agent 改过）。拦下来还照常
+  /// 整份替换 `_doc` 的话，人手上那笔没落盘的改动就被盘上那份**静默换掉**
+  /// 了——连撤销栈都一起清空，找都找不回来。而顶栏那句「你的改动还在
+  /// 屏幕上」在这条路上就成了假话。
+  ///
+  /// 所以拦下来就**不换**：屏幕上留着人的那一份，「以我的为准」那条出路
+  /// 还在，由人来决定要谁的。
   Future<void> _reloadAfterAgent() async {
     _flushNow();
+    if (_overwriteBlocked) {
+      AppLog.info('这一页有没落盘的改动、而盘上被改过，不整份重读（${_task.id}）');
+      _toast('Agent 收工了，但你手上还有没保存的改动——'
+          '没敢拿它的盖掉你的。要存你的，点顶上的「以我的为准」。');
+      return;
+    }
     final fresh = await _repo.findById(_task.id);
     final script = fresh?.script;
     if (!mounted || script == null) return;
@@ -1542,6 +1583,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (factory == null) return false;
     final line = _doc.lines.firstWhere((l) => l.id == lineId);
     setState(() => _generatingLineIds.add(lineId));
+    // 「配音」两个字来自 busy_guard 那份常量：Agent 那边的劝告认的就是它
+    final done = _appBusyHere('正在$voiceBusyKeyword（界面上点的）');
     try {
       final service = factory(_task);
       // 先听一遍参考片这一句是怎么念的，把念法交给合成。不带这句指令，
@@ -1584,6 +1627,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       AppLog.warn('配音生成失败（line=$lineId）：$e');
       return false;
     } finally {
+      done();
       if (mounted) setState(() => _generatingLineIds.remove(lineId));
     }
   }
@@ -1801,6 +1845,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     final segs = ref.segments;
     if (segIndex < 0 || segIndex >= segs.length) return null;
     final (segStart, segEnd) = segs[segIndex];
+    // 「打标」两个字来自 busy_guard 那份常量：Agent 的 tag-ref 认的就是它。
+    // 不报的话，人在这一页点选那一镜 + Agent 同时 tag-ref = 双份识图费
+    final done = _appBusyHere('正在给参考镜$tagBusyKeyword（界面上点的）');
     try {
       // 三帧：头/中/尾——单帧看不出镜头里在发生什么（U 层实测）
       final dir = Directory(
@@ -1861,6 +1908,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     } catch (e) {
       AppLog.warn('参考镜头打标失败（line=$lineId seg=$segIndex）：$e');
       return null;
+    } finally {
+      done();
     }
   }
 
@@ -2642,10 +2691,33 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 「以我的为准」：把基线对齐到盘上此刻，然后照常保存。
   ///
-  /// 后果说清楚：这一存会**覆盖 Agent 在这段窗口里写进去的那几处**。
-  /// 但那是人按下「我来接手」时就选定的方向（他来做主），而且
-  /// `ishkafel log` 里记着这一笔是 `human` 写的——查得到，不是悄悄发生的。
-  void _saveMineAnyway() {
+  /// **这是破坏性动作**，所以先确认、并把后果说清：这一存会覆盖 Agent 在
+  /// 这段窗口里写进去的那几处。设计标准里「破坏性操作有确认」就是这一条。
+  ///
+  /// 它仍然是对的出路：那是人按下「我来接手」时就选定的方向（他来做主），
+  /// 而且 `ishkafel log` 里记着这一笔是 `human` 写的——查得到，不是悄悄发生的。
+  Future<void> _saveMineAnyway() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('以你的为准保存？'),
+        content: const Text('这条任务在你改的这段时间里被 Agent 也改过。\n\n'
+            '存下去会盖掉它这段时间写进去的那几处（配音、镜头这些）。\n'
+            '它已经写完的其它部分不受影响，这一笔也会记进改动日志。\n\n'
+            '想留着它写的，就别存——去 Agent 那头让它停下，'
+            '再退出这一页重进（你现在改的会丢）。'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('先不存')),
+          FilledButton(
+              key: const ValueKey('director-force-save-confirm'),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('以我的为准')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
     final dataDir = _dataDir;
     if (dataDir != null) _docPrint = taskFingerprint(dataDir, _task.id);
     setState(() {
@@ -3916,7 +3988,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
 
   /// 顶栏：返回 + 身份（#编号 · 名字 · 模块徽标）+ 保存状态。
   /// 自动保存要**说出来**——用户不问「存了没」是因为界面一直在回答
-  /// Agent 在场的横幅：谁在、正在做什么、以及「我来接手」
+  /// Agent 在场的横幅：谁在、正在做什么、**这会儿这一页改不动**、
+  /// 以及出路（「我来接手」）。
+  ///
+  /// 「改不动」这一句非说不可：全局播报条只给一条到处都对的忠告
+  /// （它不知道人开着哪一页），**这一页真的拦编辑，那就得由这里说出来**
+  /// ——不说就又是一次「点了没反应」。
   Widget _agentBanner(AgentPresence agent) => Container(
         width: double.infinity,
         color: AppColors.accentBlue.withValues(alpha: 0.16),
@@ -3928,7 +4005,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
               height: 11,
               child: CircularProgressIndicator(strokeWidth: 1.4)),
           const SizedBox(width: AppSpacing.sm),
-          Text('${agent.holder} 正在这条任务上干活',
+          Text('${agent.holder} 正在这条任务上干活'
+              '——这会儿这一页改不动',
               style: const TextStyle(
                   fontSize: AppFontSize.caption,
                   fontWeight: FontWeight.w600,
@@ -4024,11 +4102,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           // 只说「没保存上」而不给出路，人唯一的办法是退出重进——
           // 而那会把他刚打的字全丢掉
           if (_overwriteBlocked)
-            TextButton(
-              key: const ValueKey('director-force-save'),
-              onPressed: _saveMineAnyway,
-              child: const Text('以我的为准',
-                  style: TextStyle(fontSize: AppFontSize.caption)),
+            Tooltip(
+              message: '这条任务在你改的这段时间里被 Agent 也改过。'
+                  '存下去会盖掉它这段时间写进去的那几处——点了会先问一遍',
+              child: TextButton(
+                key: const ValueKey('director-force-save'),
+                onPressed: () => unawaited(_saveMineAnyway()),
+                child: const Text('以我的为准',
+                    style: TextStyle(fontSize: AppFontSize.caption)),
+              ),
             ),
           const SizedBox(width: AppSpacing.sm),
           IconButton(

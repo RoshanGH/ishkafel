@@ -154,6 +154,10 @@ Future<int> runUiCommand({
   final result = await waitForAgentRequest(
       dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
   if (result == null) {
+    // **先把单子收回来。** 不收的话：我们这就自己把任务建了，而那张单
+    // 还挂在盘上——界面晚几秒取走，**会再弹一次向导、再建一条任务**。
+    // 和 delegate.withdrawBefore 那一处是同一个形状（见 delegate.dart）
+    consumeAgentRequest(dataDir: dataDir, taskId: globalPresenceSlot);
     // 超时不再是失败：委派是首选路径，不是必经之路（见 delegate.dart）。
     // 界面没跟上——没开、或者停在别的页面收不到这个请求——就自己建，
     // 三种模式都有现成的、不经界面就能建任务的 CLI 命令
@@ -329,6 +333,8 @@ Future<int> _backToTaskList({
   final result = await waitForAgentRequest(
       dataDir: dataDir, taskId: globalPresenceSlot, id: id, timeout: waitForUi);
   if (result == null) {
+    // 同上：单子收回来，免得界面晚几秒取走又把人支回列表一次
+    consumeAgentRequest(dataDir: dataDir, taskId: globalPresenceSlot);
     // 超时不是失败：它多半没开。而且退不退回列表本来就不影响任何写操作
     sink.writeln('界面没接这一单（等了 ${waitForUi.inSeconds} 秒），我没等它——'
         '它可能没开，也可能没在监听这个请求。'

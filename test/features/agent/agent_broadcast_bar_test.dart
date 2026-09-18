@@ -46,8 +46,12 @@ void main() {
         b: AgentBroadcast.empty.push('正在导出'), holder: 'Agent');
     expect(find.textContaining('只读'), findsNothing,
         reason: '工作台一道闸都没有，说「只读」是假话');
-    expect(find.textContaining('你照样能自己改'), findsOneWidget,
+    expect(find.textContaining('先别跟它抢'), findsOneWidget,
         reason: '不说的话人会以为软件卡了——但要说实话');
+    expect(find.textContaining('你照样能自己改'), findsNothing,
+        reason: '这条浮层是全局的，它不知道人开着哪一页。'
+            '「你能改」在编导台上不成立——**不许作任何能力承诺**，'
+            '只给一条到处都对的忠告');
   });
 
   testWidgets('做完的打勾，正在做的不打——一眼看出走到哪儿了', (tester) async {

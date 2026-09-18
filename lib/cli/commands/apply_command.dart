@@ -173,6 +173,11 @@ Future<int> _applyDirect({
   }
 }
 
+/// 等界面代办最多等多久。**内层等回执比它短**（见 `withdrawBefore`）：
+/// 短的那一下 `viaUi` 才有机会把单子收回来，否则外层先到、我们自己写完了，
+/// 单子还挂在盘上，界面随时取走再做一遍
+const Duration _delegateTimeout = Duration(seconds: 2);
+
 /// 落盘方案：**直写路径**（界面不在这条任务上）和**委派兜底**（界面在、
 /// 但没跟上）共用同一份——避免同一件事两处算
 Future<int> _commitPlans({
@@ -589,8 +594,6 @@ Future<int> _applyPlansViaUi({
   CandidateProbe? candidateProbe,
   Future<FrameCheck> Function(int id)? frameCheckOf,
 
-  /// 等界面代办最多等多久。**内层等回执会比它短一点**（见 withdrawBefore）
-  Duration delegateTimeout = const Duration(seconds: 2),
 }) async {
   final String raw;
   try {
@@ -641,7 +644,7 @@ Future<int> _applyPlansViaUi({
   return delegateOrDoItYourself<int>(
     dataDir: dataDir,
     taskId: task.id,
-    timeout: delegateTimeout,
+    timeout: _delegateTimeout,
     viaUi: () async {
       sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
       final id = writeAgentRequest(
@@ -657,7 +660,7 @@ Future<int> _applyPlansViaUi({
           dataDir: dataDir,
           taskId: task.id,
           id: id,
-          timeout: withdrawBefore(delegateTimeout));
+          timeout: withdrawBefore(_delegateTimeout));
       if (result == null) {
         // **把单子收回来**：外层超时之后我们会自己干，而这张单子还挂在盘上
         // ——界面过一会儿取走再做一遍的话，人看到两份（见 withdrawBefore）

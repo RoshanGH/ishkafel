@@ -326,11 +326,16 @@ void main() {
   /// 这一边：人在界面上点了分析、Agent 同时敲了 `analyze`，整条管线
   /// （ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
   /// **锁删掉之前这一条是锁挡着的，删了就得接住。**
-  test('界面自己跑分析：过程中写在场状态、带判据词，收工撤干净', () async {
+  test('界面自己跑分析：报在「软件在忙」那条，不占 Agent 的播报通道', () async {
     final seen = <String>[];
+    final onAgentChannel = <String>[];
     final pipeline = _PeekingPipeline(repo: repo, onProgressPeek: () {
-      final p = readAgentPresence(dataDir: tempDir, taskId: 'new-id');
+      final p = readAppBusy(dataDir: tempDir, taskId: 'new-id');
       if (p != null) seen.add('${p.holder}|${p.action}');
+      // **播报通道上必须一个字都没有**：CLAUDE.md「软件自己跑的活儿
+      // 不许占那条通道——占了，人就分不清是谁在动手」
+      final a = readAgentPresence(dataDir: tempDir, taskId: 'new-id');
+      if (a != null) onAgentChannel.add(a.action);
     });
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
@@ -348,13 +353,16 @@ void main() {
 
     expect(seen, isNotEmpty,
         reason: '跑的过程中必须在场——Agent 那边就是靠它才知道有人在做');
-    expect(seen.first, contains(analyzeBusyKeyword),
-        reason: '判据认的是这几个字，和 busy_guard 那份常量必须是同一个');
     expect(seen.first, contains(actorAnalysisReport),
         reason: '横幅上要说得出是谁在动它');
-    expect(readAgentPresence(dataDir: tempDir, taskId: 'new-id'), isNull,
+    expect(onAgentChannel, isEmpty,
+        reason: '软件自己跑的活儿占了播报通道，底部浮层会冒出'
+            '「软件（分析）正在干 #12」+ 转圈，人分不清是谁在动手');
+    expect(readAppBusy(dataDir: tempDir, taskId: 'new-id'), isNull,
         reason: '收工要撤干净——不撤的话接下来 60 秒里 Agent 的 analyze '
             '会被一条已经结束的活儿劝退');
+    // 而判据必须看得见它（分开通道不是为了让判据装作看不见）
+    expect(seen.first, contains(analyzeBusyKeyword));
   });
 
   test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {

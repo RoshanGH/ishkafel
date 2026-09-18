@@ -2,6 +2,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/cli/busy_guard.dart';
+import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/analysis/analysis_progress.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/cli/commands/analyze_command.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
@@ -106,6 +110,28 @@ void main() {
     expect(out.toString(), isNot(contains('"skipped":true')));
   });
 
+  /// **判据词得跟真命令的播报对得上**（配音、打标、界面分析三条已经这么钉住
+  /// 了，就差这条）。手写在场状态的那几条测试证明不了这件事：
+  /// 把开工那句改成「开始处理原片」，判据当场失效，而它们照样全绿。
+  test('analyze 开工那一刻，在场状态里带着「分析」这个判据词', () async {
+    // 命令跑完会 `stage.end()` 撤干净，所以在**管线跑起来的那一刻**抢一眼
+    // ——用注入的假管线，不靠计时器碰运气
+    String? seen;
+    await runAnalyzeCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      pipeline: _PeekingPipeline(
+          () => seen = readAgentPresence(dataDir: dir, taskId: 't1')?.action),
+      out: StringBuffer(),
+      err: StringBuffer(),
+    );
+
+    expect(seen, isNotNull, reason: '开工就该报，另一个进程要靠它才知道有人在做');
+    expect(seen, contains(analyzeBusyKeyword),
+        reason: '判据认的就是这几个字。文案改了而常量没跟着改，'
+            '「别把同一条管线跑两遍」会静默失效');
+  });
+
   test('别人在这条任务上干的是别的活（挑镜头）：不拦', () async {
     reportAnalyzing(action: '正在给第 3 段挑镜头');
     final out = StringBuffer();
@@ -116,4 +142,27 @@ void main() {
         reason: '挑镜头跟重跑分析管线没关系，拦它是白拦');
     expect(out.toString(), isNot(contains('"skipped":true')));
   });
+}
+
+
+/// 假分析管线：只在被调用的那一刻偷看一眼在场状态，然后原样返回。
+///
+/// 不碰真音视频、不打网络——这条测试要证的只有一件事：
+/// **命令报出去的那句话，和劝告认的那个判据词，是同一个东西。**
+class _PeekingPipeline implements AnalysisPipeline {
+  final void Function() peek;
+  _PeekingPipeline(this.peek);
+
+  @override
+  Future<RenewTask> analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    peek();
+    return task;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

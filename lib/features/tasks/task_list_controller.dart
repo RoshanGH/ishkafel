@@ -590,27 +590,40 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
   /// 任务永久无法再次触发分析。
   Future<void> _runAnalyze(AnalysisPipeline pipeline, RenewTask task) async {
     final progress = ref.read(analysisProgressProvider.notifier);
-    // **界面自己跑分析也要写在场状态。**
+    // **界面自己跑分析也要报「在忙」，但报在另一条通道上。**
     //
-    // 不写的话，`ishkafel analyze` 那道「别把同一条管线跑两遍」的劝告
-    // 认不出这一边——人在界面上点了分析、Agent 同时敲了 `analyze`，
-    // 整条管线（ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
+    // 不报的话，`ishkafel analyze` 那道「别把同一条管线跑两遍」的劝告认不出
+    // 这一边——人在界面上点了分析、Agent 同时敲了 `analyze`，整条管线
+    // （ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
     // **锁删掉之前这一条是锁挡着的，删了就得接住。**
     //
-    // `holder` 说人话（横幅上要显示）；判据认的是 action 里的「分析」
-    // 两个字，所以用 busy_guard 那份常量拼，别手写（见 `busy_guard.dart`）
+    // 但**不能写 Agent 那份在场状态**（`writeAgentPresence`）：那条是播报
+    // 通道，CLAUDE.md 明令「软件自己跑的活儿不许占那条通道——占了，人就
+    // 分不清是谁在动手」；而且两边共用一个文件会互相覆盖、互相抹掉。
+    // 所以走 `writeAppBusy` 那一份，判据两份都看（见 `busy_guard.dart`）。
+    //
+    // 判据认的是 action 里的「分析」两个字，所以用 busy_guard 那份常量拼，
+    // 别手写——手写的话改一句文案，判据会静默失效
     final dataDir = ref.read(dataDirProvider);
-    void here(String what) {
+    var what = '正在$analyzeBusyKeyword原片';
+    void here() {
       if (dataDir == null) return;
-      writeAgentPresence(
+      writeAppBusy(
         dataDir: dataDir,
         taskId: task.id,
-        presence: AgentPresence(
+        busy: AgentPresence(
             holder: actorAnalysisReport, at: DateTime.now(), action: what),
       );
     }
 
-    here('正在$analyzeBusyKeyword原片');
+    here();
+    // **心跳，不能只靠进度回调。**
+    //
+    // 进度是**按阶段**发的，每个阶段只发一次；而 `building` 之后的逐镜打标
+    // 实测七十多秒——超过 60 秒的失效线。只在 onProgress 里刷的话，
+    // 这条状态恰好在**最贵的那一段**过期，这道劝告就白加了。
+    // 20 秒一跳，和 `AgentStage._pulse` 同一个值、同一个理由
+    final pulse = Timer.periodic(const Duration(seconds: 20), (_) => here());
     try {
       await pipeline.analyze(
         task,
@@ -621,9 +634,9 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
         actor: actorAnalysisReport,
         onProgress: (p) {
           progress.report(task.id, p);
-          // 每一步都刷一次：在场状态 60 秒过期，而人声分离那一步常跑
-          // 几分钟不吭声——不刷的话它会在最该成立的那几分钟里失效
-          here('正在$analyzeBusyKeyword原片：${p.stage.name}');
+          // 换了一步就把话换掉；不换步的那几十秒靠上面那个心跳续着
+          what = '正在$analyzeBusyKeyword原片：${p.stage.name}';
+          here();
         },
         // 切分一好就刷新列表：那一刻任务已经能打开干活了，剩下的打标
         // 在后台补。让人对着「分析中」多等三倍时间没道理。
@@ -637,10 +650,11 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       // 成功与失败都要清：留着最后一步的文案，卡片看起来像还在跑
       progress.clear(task.id);
       _analyzingTaskIds.remove(task.id);
-      // 在场状态也要撤——不撤的话接下来 60 秒里 Agent 的 analyze
-      // 会被一条已经结束的活儿劝退
+      pulse.cancel();
+      // 在忙状态也要撤——不撤的话接下来 60 秒里 Agent 的 analyze
+      // 会被一条**已经结束**的活儿劝退
       if (dataDir != null) {
-        clearAgentPresence(dataDir: dataDir, taskId: task.id);
+        clearAppBusy(dataDir: dataDir, taskId: task.id);
       }
     }
   }

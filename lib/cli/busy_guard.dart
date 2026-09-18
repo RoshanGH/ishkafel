@@ -55,10 +55,20 @@ AgentPresence? someoneElseBusyWith({
   required List<String> keywords,
   DateTime? now,
 }) {
-  final busy = readAgentPresence(dataDir: dataDir, taskId: taskId, now: now);
-  if (busy == null) return null;
-  for (final word in keywords) {
-    if (busy.action.contains(word)) return busy;
+  // **两份都要看。**
+  //
+  // Agent 的在场状态（播报通道那一份）和**软件自己在忙**的那一份是两个文件
+  // ——分开是因为播报只该报 Agent（CLAUDE.md 明令），**不是因为判据可以
+  // 装作看不见软件那一边**。这道劝告存在的理由之一就是拦住「人在界面上点了
+  // 分析 + Agent 同时 analyze」，漏掉软件那份等于把它弄瞎。
+  for (final busy in [
+    readAgentPresence(dataDir: dataDir, taskId: taskId, now: now),
+    readAppBusy(dataDir: dataDir, taskId: taskId, now: now),
+  ]) {
+    if (busy == null) continue;
+    for (final word in keywords) {
+      if (busy.action.contains(word)) return busy;
+    }
   }
   return null;
 }

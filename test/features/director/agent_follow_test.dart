@@ -274,14 +274,86 @@ void main() {
         reason: '拦下来要说实话，不能挂着「保存中…」');
     expect(find.text('保存中…'), findsNothing);
 
-    // 出路：一按就存得进去
+    // 出路：点开 → 确认（破坏性操作要先问一遍）→ 真的存得进去
     await tester.tap(find.byKey(const ValueKey('director-force-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester
+        .tap(find.byKey(const ValueKey('director-force-save-confirm')));
     await tester.pump(const Duration(seconds: 2));
     await tester.pump();
 
     final saved = await repo.findById('t1');
     expect(saved!.script!.lines.first.text, '人改的',
         reason: '「以我的为准」要真的存得进去，不然那只是一个安慰按钮');
+  });
+
+  /// **Agent 收工那一下，不许把人没落盘的改动静默换掉。**
+  ///
+  /// `_reloadAfterAgent` 先 `_flushNow` 再整份重读、清空撤销栈。而
+  /// `_flushNow` 恰好被指纹闸拦下时（人手上有没落盘的改动、盘上又被改过），
+  /// 那笔改动就被盘上那份**直接替换掉**——连撤销栈都清了，找都找不回来。
+  /// 而顶栏那句「你的改动还在屏幕上」在这条路上就成了假话。
+  testWidgets('Agent 收工时人还有没保存的改动：不拿盘上的换掉他', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+
+    agentWritesToDisk('基线');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 人先改了字，而同一段窗口里 Agent 又写了盘 → 保存被指纹闸拦下
+    await tester.enterText(find.byType(TextField).first, '人还没存的改动');
+    await tester.pump(const Duration(milliseconds: 200));
+    agentWritesToDisk('Agent 又写了一次');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.textContaining('没敢覆盖它'), findsWidgets);
+
+    // 这时 Agent 来了，人按「我来接手」——那条路会走 _reloadAfterAgent
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在给第 5 句配音'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('agent-takeover')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byKey(const ValueKey('agent-takeover-confirm')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('人还没存的改动'), findsWidgets,
+        reason: '整份重读会把他没落盘的那笔静默换掉，撤销栈还一起清了');
+    expect(find.textContaining('没敢拿它的盖掉你的'), findsOneWidget,
+        reason: '不换也要说出来，并指向「以我的为准」那条出路');
+  });
+
+  /// 「以我的为准」会覆盖 Agent 在这段窗口里写进去的那几处——
+  /// **破坏性操作要有确认，而且要说清后果**（设计标准里的一条）
+  testWidgets('「以我的为准」先问一遍，并说清会盖掉什么', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    agentWritesToDisk('基线');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).first, '人改的');
+    await tester.pump(const Duration(milliseconds: 200));
+    agentWritesToDisk('Agent 又写了一次');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('director-force-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('盖掉它这段时间写进去的那几处'), findsOneWidget,
+        reason: '一按就覆盖而不说后果，是破坏性操作没有确认');
+    // 先不存：什么都不该发生
+    await tester.tap(find.text('先不存'));
+    await tester.pump(const Duration(seconds: 1));
+    expect((await repo.findById('t1'))!.script!.lines.first.text,
+        isNot('人改的'));
   });
 
   testWidgets('展示完这一步才回执——Agent 靠它决定什么时候走下一步',
