@@ -40,13 +40,32 @@ class TaskEdit {
   /// 挪到了这份契约上，同样不会报错，只会盖错镜头。
   final List<ShotRef> stampShots;
 
+  /// 这一笔**什么都没改**：不落盘、不记日志、不盖戳。
+  ///
+  /// 「算不算改动」只有调用方知道（工作台那一笔的判据是「除了来源戳之外
+  /// 还有没有别的不一样」，见 `segmentationChanged`），所以判据留在调用方；
+  /// 而「没改就什么都不做」这件事收在唯一写入口里做，不让每个调用点各写
+  /// 一遍——写漏一处就是一笔假账，而假账看起来和真账一模一样。
+  ///
+  /// **默认 false，得明说才短路**：有些写入内容没变但仍然必须落盘
+  /// （读档补发身份那类迁移），不能让 `apply` 对所有调用方一律短路。
+  final bool nothingChanged;
+
   const TaskEdit({
     required this.task,
     this.before,
     this.after,
     this.stampUnits = const [],
     this.stampShots = const [],
-  });
+  }) : nothingChanged = false;
+
+  /// 这一笔算下来什么都没改——见 [nothingChanged]
+  const TaskEdit.nothingChanged(this.task)
+      : before = null,
+        after = null,
+        stampUnits = const [],
+        stampShots = const [],
+        nothingChanged = true;
 }
 
 /// **唯一的任务写入口。** 界面和 CLI 都走它，谁都不许自己 `repo.save`。
@@ -108,6 +127,11 @@ class TaskMutation {
       result: result,
       edit: edit,
     );
+
+    // **什么都没改就到此为止**：不落盘、不记账、不盖戳，`updatedAt` 也不推。
+    // 记一笔空改动的代价不是「日志里多一行」——Agent 读日志看到「人在
+    // 18:06 改过这个单元」，就可能绕开它，而人什么都没做
+    if (reconciled.nothingChanged) return reconciled.task;
 
     final stamped = _stamp(reconciled, taskId: taskId, op: op)
         .copyWith(updatedAt: DateTime.now());

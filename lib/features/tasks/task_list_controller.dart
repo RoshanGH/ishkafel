@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/tagging_service.dart';
 import '../../core/audio/bgm_plan.dart';
+import '../../core/editing/segmentation_change.dart';
 import '../../core/audio/vocal_separator.dart';
 import '../../core/audio/voice_plan.dart';
 import '../../core/log/app_log.dart';
@@ -1017,7 +1018,21 @@ class TaskListController extends AsyncNotifier<List<RenewTask>> {
       task,
       op: 'units.edit',
       edit: (fresh) {
-        final changed = _changedUnitFacts(fresh.units ?? const [], units);
+        final before = fresh.units ?? const <SemanticUnit>[];
+        // **除了来源戳之外什么都没变，就整笔不做**（不落盘、不记账）。
+        //
+        // 工作台那道「变了没有」的守卫用的是 `SemanticUnit` 的 `==`，而
+        // `editedBy` 在里面：Agent 写一次、盖一次戳，这里就被叫醒一次，
+        // 于是日志里多一笔**人名下的空改动**——Agent 读到「人改过这个
+        // 单元」就可能绕开它，而人一根手指都没动（2026-09-18 真机复现）。
+        //
+        // 判据不能用下面那个 `changed` 为空：`_changedUnitFacts` 只比
+        // 台词/起止/镜数/标签，人在单元内部拖一条镜头边界它一样是空的，
+        // 拿它短路就成了静默丢改动
+        if (!segmentationChanged(before, units)) {
+          return TaskEdit.nothingChanged(fresh);
+        }
+        final changed = _changedUnitFacts(before, units);
         return TaskEdit(
           task: fresh.copyWith(units: units),
           before: {
