@@ -749,6 +749,53 @@ void main() {
         reason: '连着读不上来还一声不吭，人会照着过期的脚本继续干');
   });
 
+  /// **Agent 还在场时读失败：不许说它「收工了」。**
+  ///
+  /// 「重新载入」那套文案一直无条件说「Agent 收工时…」。而这个按钮有**两条
+  /// 来路**：Agent 真的收工那一次读失败，和**它还在干活**而跟随连着读不上来
+  /// （Minor② 加的那条出口把后者变成了常态路径）。
+  ///
+  /// 于是人正看着播报条上它一步步在动，界面却说它收工了——**一句当场看得见
+  /// 的假话**，正是这七轮一路在消灭的那一类。
+  testWidgets('Agent 还在场时读失败：文案里不许出现「收工」', (tester) async {
+    final repo = _MemoryRepo(failNextFind: true);
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在给第 3 句配音'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 连着几拍读不上来（每拍指纹都变，所以每拍都会试一次）。
+    // **全程不清在场状态**——它一直在干活
+    for (var i = 0; i < 4; i++) {
+      agentWritesToDisk('第 $i 次');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+    }
+
+    expect(find.byKey(const ValueKey('director-reload-retry')), findsOneWidget,
+        reason: '连着读不上来要给出口');
+    expect(find.textContaining('收工'), findsNothing,
+        reason: '它还在干活——人正看着播报条上它在动，说它收工了是假话');
+
+    // **Tooltip 的话要单独查**：它不渲染成 Text，`textContaining` 看不见，
+    // 而人一悬停就会看到那句写死的「Agent 收工时…」
+    final tip = tester.widget<Tooltip>(find.ancestor(
+        of: find.byKey(const ValueKey('director-reload-retry')),
+        matching: find.byType(Tooltip)));
+    expect(tip.message, isNot(contains('收工')),
+        reason: 'Tooltip 写死成「收工时」，人一悬停就看到一句假话');
+
+    // 按一下重试（还在读失败）：那句 toast 也不许说「收工」
+    await tester.tap(find.byKey(const ValueKey('director-reload-retry')));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.textContaining('收工'), findsNothing,
+        reason: 'catch 分支也要按「此刻它在不在场」说话');
+    expect(find.textContaining('现在屏幕上是旧的'), findsOneWidget,
+        reason: '话要照说——只是不许把读失败说成收工');
+  });
+
   /// **时序 4：闸已经关上之后，还出得去吗。**
   ///
   /// `_overwriteBlocked` 一旦置真，只有保存成功才复位——而它被闸挡着永远

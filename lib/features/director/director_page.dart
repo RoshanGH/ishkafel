@@ -1200,6 +1200,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 这一刻有没有一次「跟随重读」在飞
   bool _followInFlight = false;
 
+  /// **此刻这条任务上还有没有 Agent 在场**——按盘上那份状态说话，
+  /// 不按页面自己的 `_agent`（人接过手之后那一份是被压住的，
+  /// 而 Agent 那条命令还在跑，见 [_humanTookOver]）。
+  ///
+  /// 「重新载入」那套文案靠它分叉：读失败有两条来路，一条是 Agent 真的
+  /// 收工了，一条是它还在干活而跟随连着读不上来
+  bool _agentOnStageNow() {
+    final dataDir = _dataDir;
+    if (dataDir == null) return false;
+    return readAgentPresence(dataDir: dataDir, taskId: _task.id) != null;
+  }
+
   /// 跟随重读连着失败了几次。偶发一次不吭声（下一拍会自己补上），
   /// 连着几次就得让人看见——静默停在旧版比说一句难听的话糟得多
   int _followFailures = 0;
@@ -1394,11 +1406,20 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     try {
       fresh = await _repo.findById(_task.id);
     } catch (e) {
-      AppLog.warn('Agent 收工后重读任务失败（${_task.id}）：$e');
+      AppLog.warn('重读任务失败（${_task.id}）：$e');
       if (!mounted || _disposed) return;
       setState(() => _reloadFailed = true);
-      _toast('Agent 收工了，但这一页没读到它写的东西——现在屏幕上是旧的。'
-          '点顶上的「重新载入」再试一次。');
+      // **读失败不等于「Agent 收工了」。**
+      //
+      // 这条 catch 一直无条件说「收工了」，而上面那条早退分支明明就是按
+      // `agentStillRunning` 分叉的——人按「我来接手」之后读失败，界面就会
+      // 说一句「Agent 收工了」，而它那条命令还在跑。跟随连着失败也走同一条
+      // 出口之后，「它还在干活、界面却说它收工了」变成了常态路径
+      _toast(agentStillRunning
+          ? '这一页没读到盘上最新的内容——现在屏幕上是旧的。'
+              '点顶上的「重新载入」再试一次。'
+          : 'Agent 收工了，但这一页没读到它写的东西——现在屏幕上是旧的。'
+              '点顶上的「重新载入」再试一次。');
       return;
     }
     final script = fresh?.script;
@@ -4367,11 +4388,19 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           // 而那会把他刚打的字全丢掉
           if (_reloadFailed)
             Tooltip(
-              message: 'Agent 收工时这一页没读到它写的东西，'
-                  '现在显示的是旧的。点一下重读',
+              // **按此刻的事实说话，不写死。**
+              //
+              // 这个按钮有两条来路：Agent 收工那一次读失败，和跟随连着几次
+              // 读失败（那时它还在干活）。写死成「收工时」的话，后一条就是
+              // 一句当场看得见的假话——人正看着播报条上它一步步在动
+              message: _agentOnStageNow()
+                  ? '这一页没读到盘上最新的内容，现在显示的是旧的。点一下重读'
+                  : 'Agent 收工时这一页没读到它写的东西，'
+                      '现在显示的是旧的。点一下重读',
               child: TextButton(
                 key: const ValueKey('director-reload-retry'),
-                onPressed: () => unawaited(_reloadAfterAgent()),
+                onPressed: () => unawaited(
+                    _reloadAfterAgent(agentStillRunning: _agentOnStageNow())),
                 child: const Text('重新载入',
                     style: TextStyle(fontSize: AppFontSize.caption)),
               ),
