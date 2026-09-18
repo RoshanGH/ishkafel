@@ -121,27 +121,41 @@ class CandidateSearchController extends ChangeNotifier {
   /// 上一次检索是什么——翻页要拿它换一页重跑。null 表示还没检索过。
   Future<CandidatePage> Function(int page)? _lastQuery;
 
-  Future<void> searchByTags({
-    required List<int> tagIds,
-    String mode = 'or',
-  }) =>
-      _start((page) => service.searchByTags(
+  /// 「按标签搜」这个查询本身（还没发出去）。
+  ///
+  /// 单独抽出来是给 [searchWithFallback] 用的：那条路要拿到查询、试一次、
+  /// 看结果值不值得用，再决定发布谁。写成 `searchByTags` 那样「一调用就发布」
+  /// 的话，中间那批必然在界面上过一遍。
+  Future<CandidatePage> Function(int page) tagQuery(List<int> tagIds,
+          {String mode = 'or'}) =>
+      (page) => service.searchByTags(
             tagIds: tagIds,
             mode: mode,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,
-          ));
+          );
 
-  Future<void> searchByDescription(String keyword,
+  /// 「按画面描述语义搜」这个查询本身（还没发出去）
+  Future<CandidatePage> Function(int page) descriptionQuery(String keyword,
           {List<int> tagIds = const []}) =>
-      _start((page) => service.searchByDescription(
+      (page) => service.searchByDescription(
             keyword: keyword,
             tagIds: tagIds,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,
-          ));
+          );
+
+  Future<void> searchByTags({
+    required List<int> tagIds,
+    String mode = 'or',
+  }) =>
+      _start(tagQuery(tagIds, mode: mode));
+
+  Future<void> searchByDescription(String keyword,
+          {List<int> tagIds = const []}) =>
+      _start(descriptionQuery(keyword, tagIds: tagIds));
 
   /// 按文件名搜（兜底：标签和描述都筛不到时，直接按名字捞）
   Future<void> searchByName(String keyword,
@@ -216,29 +230,84 @@ class CandidateSearchController extends ChangeNotifier {
     _notify();
   }
 
+  /// 一次检索，两套方案：先试 [primary]，[accept] 判它不值得用就改走
+  /// [fallback]——**被否掉的那一批一帧都不发布**。
+  ///
+  /// 为什么必须做在控制器里：在外面写成「先 search、再判断、再 search」，
+  /// 等于把中间那批推到界面上走一遍。真机上规格探测要几秒，那几秒里它就
+  /// 明晃晃摆在用户面前，而它恰恰是「按标签搜给的是最新的、不是最像的」
+  /// 那一堆。2026-09-18 用户原话：「它这个镜头的搜索都会经过明显的两次
+  /// 跳转……如果它慢的话，我接受它一个 Loading，但是我不接受它这样跳来
+  /// 跳去，因为中间我真的可能会选到那些。」
+  ///
+  /// [onFellBack] 拿到的是被否掉的那一页——换了检索方式要说出来，
+  /// 但说的是「换了」这件事，不是把那批结果摆出来。
+  Future<void> searchWithFallback({
+    required Future<CandidatePage> Function(int page) primary,
+    required bool Function(CandidatePage page) accept,
+    Future<CandidatePage> Function(int page)? fallback,
+    void Function(CandidatePage rejected)? onFellBack,
+  }) async {
+    final generation = _beginLoading();
+    _page = 1;
+    var query = primary;
+    CandidatePage page;
+    try {
+      page = await primary(1);
+      if (generation != _generation) return;
+      if (!accept(page) && fallback != null) {
+        onFellBack?.call(page);
+        query = fallback;
+        page = await fallback(1);
+      }
+    } catch (e) {
+      _failIfCurrent(generation, e);
+      return;
+    }
+    if (generation != _generation) return;
+    // 翻页要重发的是**最终赢的那个**查询，不是被否掉的那个
+    _lastQuery = query;
+    _publish(page);
+    await _probeAll(generation);
+  }
+
   Future<void> _run(Future<CandidatePage> Function() search) async {
+    final generation = _beginLoading();
+    final CandidatePage page;
+    try {
+      page = await search();
+    } catch (e) {
+      _failIfCurrent(generation, e);
+      return;
+    }
+    if (generation != _generation) return;
+    _publish(page);
+    await _probeAll(generation);
+  }
+
+  /// 领一个代次号并进入 loading（清空旧结果）。返回这一次的代次号
+  int _beginLoading() {
     final generation = ++_generation;
     _status = CandidateSearchStatus.loading;
     _failureMessage = null;
     _failureKind = null;
     _entries = const [];
     _notify();
+    return generation;
+  }
 
-    final CandidatePage page;
-    try {
-      page = await search();
-    } catch (e) {
-      if (generation != _generation) return; // 过期的失败同样不该覆盖新结果
-      _status = CandidateSearchStatus.failed;
-      // 网关已经把 401/403/未安装/超时翻译成可照做的中文，原样透出
-      _failureMessage = describeSearchFailure(e);
-      _failureKind = e is MiaoaException ? e.kind : null;
-      _entries = const [];
-      _notify();
-      return;
-    }
+  /// 过期的失败同样不该覆盖新结果
+  void _failIfCurrent(int generation, Object e) {
     if (generation != _generation) return;
+    _status = CandidateSearchStatus.failed;
+    // 网关已经把 401/403/未安装/超时翻译成可照做的中文，原样透出
+    _failureMessage = describeSearchFailure(e);
+    _failureKind = e is MiaoaException ? e.kind : null;
+    _entries = const [];
+    _notify();
+  }
 
+  void _publish(CandidatePage page) {
     _status = CandidateSearchStatus.ready;
     _total = page.total;
     _skipped = page.skipped;
@@ -254,8 +323,6 @@ class CandidateSearchController extends ChangeNotifier {
       for (final m in page.items) CandidateEntry(material: m, probing: true),
     ];
     _notify();
-
-    await _probeAll(generation);
   }
 
   /// 工作池并发探测：结果按素材 id 回填，每填一条通知一次（渐进填充）
