@@ -4,11 +4,15 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../ffmpeg/process_runner.dart';
+import 'subtitle_font.dart';
 import 'subtitle_overlay.dart';
 import 'subtitle_style.dart';
 
-/// 把字幕行渲成透明 PNG——文字交给 macOS 自带的系统渲染（AppKit，经
-/// osascript 的 JXA 调用），不依赖 ffmpeg 编没编 libass/freetype。
+/// 把字幕行渲成透明 PNG——排版交给 AppKit（经 osascript 的 JXA 调用），
+/// 不依赖 ffmpeg 编没编 libass/freetype。
+///
+/// **字体是随包自带的**（Noto Sans SC，SIL OFL），不是系统的苹方——
+/// 原因见 [SubtitleFont]：这些图是要烧进对外交付的成片的。
 ///
 /// 产物按内容指纹命名（文本 + 样式 + 分辨率），已存在就不重渲；一次
 /// osascript 进程渲完这一批缺的，不是一句一个进程。
@@ -85,6 +89,12 @@ class SubtitleRasterizer {
     }
     if (missing.isEmpty) return _collect(entries, blur);
 
+    // 字体找不到就**直接失败并点名**，绝不退回系统字体：退回去等于把授权
+    // 问题放回来（苹方/雅黑都不许把渲染结果烧进对外交付的成片），而且成片
+    // 会静默变样——换个字体交付出去的片子就不一样了，却没有任何地方报错
+    final font = SubtitleFont.locate();
+    if (font == null) throw StateError(SubtitleFont.missingMessage);
+
     final stamp = '${pid}_${_seq++}';
     final script = File(p.join(outDir.path, 'subrender_$stamp.js'))
       ..writeAsStringSync(_jxaScript);
@@ -103,6 +113,10 @@ class SubtitleRasterizer {
       ..writeAsStringSync(jsonEncode({
         'width': width,
         'height': height,
+        // 随包分发的字体（SIL OFL，可商用）。JXA 先把它注册进本进程，
+        // 再按 PostScript 名取——不依赖系统里装没装
+        'fontPath': font.path,
+        'fontName': SubtitleFont.postScriptName,
         'fontSize': (height * style.fontRatio).round(),
         'marginV': (height * style.bottomRatio).round(),
         // 描边占字号的百分比。对标原片字幕的重描边（粗黑边 + 实心白字，
@@ -179,29 +193,42 @@ class SubtitleRasterizer {
     }
   }
 
+  /// 缓存指纹。**字体版本也在里面**——换了字体就是换了渲染规则，指纹不跟着变
+  /// 的话，盘上那些用苹方渲过的 PNG 会被原样取出来复用：用户装了新版，导出来的
+  /// 还是旧字体的图，而哪儿都不报错（见 [SubtitleFont.renderRevision]）
   static String _fingerprint(
           String text, int width, int height, SubtitleStyle style) =>
       '${text.hashCode.toRadixString(16)}_${width}x$height'
-      '_${style.fingerprint.hashCode.toRadixString(16)}';
+      '_${style.fingerprint.hashCode.toRadixString(16)}'
+      '_${SubtitleFont.renderRevision}';
 }
 
 /// AppKit 渲字（JXA）。白字黑描边（NSStrokeWidth 负值 = 描边 + 填充），
 /// 底部居中、按宽度折行；box 预设先铺半透明圆角底再画字。
-/// 真机验证过：中文（PingFang SC）、折行、透明通道都正常。
+/// 字体先用 CoreText 注册进本进程再按 PostScript 名取，不碰用户的字体册。
+/// 真机验证过：中文（Noto Sans SC）、折行、透明通道都正常。
 const String _jxaScript = r'''
 function run(argv) {
   ObjC.import('Cocoa');
+  ObjC.import('CoreText');
   const data = $.NSData.dataWithContentsOfFile(argv[0]);
   const spec = JSON.parse($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding).js);
   const w = spec.width, h = spec.height;
+  // 把随包分发的字体注册进**本进程**（不动用户的字体册）。
+  // 用它而不是系统苹方：苹方没有授予「把渲染结果烧进对外交付的成片」这项
+  // 权利，而这里渲出来的图正是要烧进要交付的片子里的
+  $.CTFontManagerRegisterFontsForURL(
+    $.NSURL.fileURLWithPath(spec.fontPath), $.kCTFontManagerScopeProcess, null);
   for (const it of spec.items) {
     const rep = $.NSBitmapImageRep.alloc
       .initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
         null, w, h, 8, 4, true, false, $.NSDeviceRGBColorSpace, 0, 0);
     $.NSGraphicsContext.saveGraphicsState;
     $.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep));
-    let font = $.NSFont.fontWithNameSize('PingFangSC-Semibold', spec.fontSize);
-    if (font.isNil()) font = $.NSFont.boldSystemFontOfSize(spec.fontSize);
+    const font = $.NSFont.fontWithNameSize(spec.fontName, spec.fontSize);
+    // **不退回系统字体。** 退回去人看不出来（字幕照样渲得出），但交付出去的
+    // 片子用的就是没有授权的字体了——宁可这一次导不出来，也不能悄悄换掉
+    if (font.isNil()) throw new Error('字幕字体没注册上：' + spec.fontPath);
     const para = $.NSMutableParagraphStyle.alloc.init;
     // NSTextAlignmentCenter：新 SDK 里是 1（老 AppKit 的 2 现在是右对齐，
     // 真机上就是被它坑出了「从右往左排」）
