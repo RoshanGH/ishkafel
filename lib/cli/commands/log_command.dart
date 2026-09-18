@@ -84,7 +84,13 @@ Future<int> runLogCommand({
 
   if (json) {
     for (final e in entries) {
-      emitJson(e.toJson(), out: out);
+      // **游标要摆在机器可读那条路上。** `toJson()` 故意不写 `seq`
+      // （它是读时按行序现算的，落盘会把撞号问题请回来，见
+      // [TaskLogEntry.seq]），但那份 JSON 同时是给 Agent 看的——不给号，
+      // 它只能自己数行，而命中 `limit`（默认 200、取的是最近的）或者用了
+      // `--by` 过滤时必然数错：下一次 `--since` 要么重读、要么漏读。
+      // 所以号在这一层补，盘上那一行不动
+      emitJson({'seq': e.seq, ...e.toJson()}, out: out);
     }
     return 0;
   }
