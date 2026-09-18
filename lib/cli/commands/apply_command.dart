@@ -18,6 +18,8 @@ import '../../core/miaoa/candidate_probe.dart';
 import '../../core/ai/frame_check.dart';
 import '../../core/replacement/brand_consistency.dart';
 import '../../core/replacement/picked_material.dart';
+import '../../core/replacement/picked_thumbs.dart';
+import '../../core/net/http_bytes.dart';
 import '../../core/replacement/replacement_plan.dart';
 import '../../core/replacement/unit_base.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
@@ -314,6 +316,11 @@ Future<List<PickedMaterial>> gatherPickedMaterials({
   final probe = candidateProbe ??
       CandidateProbe(run: const ResolvingProcessRunner().call);
   final media = TaskMedia(dataDir: dataDir, taskId: task.id);
+  // 首帧图的落点与界面那条路是**同一个目录、同一份实现**（PickedThumbs）
+  final thumbs = PickedThumbs(
+    dir: Directory(p.join(dataDir.path, 'picked_thumbs', task.id)),
+    fetch: httpBytes,
+  );
   return collectPickedMaterials(
     candidateIds: used,
     known: task.pickedMaterials,
@@ -331,6 +338,18 @@ Future<List<PickedMaterial>> gatherPickedMaterials({
       return spec?.durationMs ?? 0;
     },
     checkFrame: frameCheckOf ?? _wired(dataDir, task),
+    // 首帧图：**Agent 这条路以前一张都不下**，于是人进审核页看到的是
+    // 一整屏「画面还没抽出来」——而审核页的全部意义就是看图判断
+    // （2026-09-18 真机）。
+    //
+    // 单独按 id 解析，不复用上面那个 fetch：那个为了省往返，素材已在本地
+    // 时直接返回 null。图缺了才多问这一次，有图的一次都不问
+    fetchThumb: (id) async {
+      final hit = thumbs.cached(id);
+      if (hit != null) return hit;
+      final m = await content.fetchById(id);
+      return m == null ? null : thumbs.ensure(m);
+    },
   );
 }
 

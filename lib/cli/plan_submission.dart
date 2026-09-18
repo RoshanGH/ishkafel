@@ -393,6 +393,13 @@ Future<List<PickedMaterial>> collectPickedMaterials({
   required Future<CandidateMaterial?> Function(int id) fetch,
   required Future<int> Function(int id) probeDurationMs,
   Future<FrameCheck> Function(int id)? checkFrame,
+  // 按 **id** 取图，不复用上面那个 [fetch]。
+  //
+  // [fetch] 为了省网络往返，在「素材已经下到本地」时会直接返回 null
+  // （名字描述那些字段是给人看的，不值得为它多问一次）。图不一样——
+  // 缺了图，审核页那张卡就是一块什么都不说的底色。所以这条路自己解析，
+  // 而且只在**真的缺图时**才多问那一次
+  Future<String?> Function(int id)? fetchThumb,
 }) async {
   final byId = {for (final m in known) m.id: m};
   final out = <PickedMaterial>[];
@@ -401,7 +408,10 @@ Future<List<PickedMaterial>> collectPickedMaterials({
     if (hit != null && hit.durationMs != null) {
       // 时长齐了但画面还没看全：补看一次。「时长齐了」不代表这条素材
       // 没问题——两件事各查各的
-      out.add(await _checked(hit, checkFrame));
+      //
+      // 图缺了也一样要补。「已经存过的不重量」说的是**时长**，把缺的图
+      // 一起跳过，人在审核页看到的就是一整屏「画面还没抽出来」
+      out.add(await _checked(await _withThumb(hit, fetchThumb), checkFrame));
       continue;
     }
     // **时长比名字要紧**：取段只认时长，名字和描述是给人看的。
@@ -416,7 +426,10 @@ Future<List<PickedMaterial>> collectPickedMaterials({
         name: material?.name ?? '素材 $id',
         voiceover: material?.voiceover ?? '',
         sceneDescription: material?.sceneDescription ?? '',
-        thumbPath: hit?.thumbPath,
+        // 之前挑过就沿用那张；没有就现下一张。**这条以前只写
+        // `hit?.thumbPath`**——于是纯 Agent 挑的素材永远没有图，
+        // 而审核页的全部意义就是看图判断
+        thumbPath: hit?.thumbPath ?? await fetchThumb?.call(id),
         // 量不到就留空。存个 0 进去，取段会以为它是 0 秒——那比没有更糟
         durationMs: ms > 0 ? ms : null,
         burnedText: hit?.burnedText,
@@ -427,6 +440,18 @@ Future<List<PickedMaterial>> collectPickedMaterials({
     ));
   }
   return List.unmodifiable(out);
+}
+
+/// 补一张首帧图。已经有的不重下；没接下载器、素材库没给地址、或者下不来，
+/// 都保持 null——**如实留空**，界面会照实说「画面还没抽出来」，
+/// 那比记一个指向空文件的路径强。
+Future<PickedMaterial> _withThumb(
+  PickedMaterial m,
+  Future<String?> Function(int id)? fetchThumb,
+) async {
+  if (m.thumbPath != null || fetchThumb == null) return m;
+  final path = await fetchThumb(m.id);
+  return path == null ? m : m.withThumb(path);
 }
 
 /// 看一眼画面（烧字 + 产品露出品牌）。已经看过的不重看；没接检查器或看不成

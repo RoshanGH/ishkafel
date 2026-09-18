@@ -6,6 +6,7 @@ import '../../core/ai/frame_check.dart';
 import '../../core/log/app_log.dart';
 import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/replacement/picked_material.dart';
+import '../../core/replacement/picked_thumbs.dart';
 
 /// 下载一段字节。注入而不是内建，测试里不碰网络。
 typedef BytesFetcher = Future<List<int>> Function(String url);
@@ -77,23 +78,12 @@ class PickedMaterialStore {
     }
   }
 
-  Future<String?> _thumb(CandidateMaterial material) async {
-    final url = material.thumbnailUrl;
-    if (url == null || url.isEmpty) return null;
-    final file = File(p.join(dir.path, '${material.id}.jpg'));
-    // 已经下过就不再下：同一条素材可能被好几个单元选中
-    if (file.existsSync() && file.lengthSync() > 0) return file.path;
-    try {
-      final bytes = await fetch(url);
-      if (bytes.isEmpty) return null;
-      dir.createSync(recursive: true);
-      await file.writeAsBytes(bytes, flush: true);
-      return file.path;
-    } catch (e) {
-      AppLog.warn('已选素材 ${material.id} 的首帧图下载失败：$e');
-      return null;
-    }
-  }
+  /// 首帧图交给 [PickedThumbs]——**界面和 Agent 两条路共用那一份**。
+  ///
+  /// 以前这段只长在界面这条路上，Agent 提交方案那条一张都不下，于是纯 Agent
+  /// 挑的素材进了审核页全是「画面还没抽出来」（2026-09-18 真机）。
+  Future<String?> _thumb(CandidateMaterial material) =>
+      PickedThumbs(dir: dir, fetch: fetch).ensure(material);
 
   /// 清掉不再被引用的首帧图。取消勾选之后那张图就没人看了，留着只是占地方。
   void prune(Set<int> keepIds) {
