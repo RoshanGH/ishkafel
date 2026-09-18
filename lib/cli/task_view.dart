@@ -213,6 +213,14 @@ Map<String, dynamic> _unitToJson(
       // 修改的」——「发现」意味着看当前数据就能看见，不必先去翻一遍日志再
       // 自己对下标。没人定过就整个键不出现：「不知道」不能压成「是我定的」
       if (unit.editedBy != null) 'editedBy': unit.editedBy!.toJson(),
+      // 这一段**整体替换**时放素材自己的哪一路声音。不设就不报这两个字段
+      // ——「跟随（原声、满音量）」和「明确设成某一档」要分得开（和镜头
+      // 那两个同一条规矩）。人在界面上设得了而这里不报的话，Agent 拿到的
+      // 「没有这个键」看起来正好像「没人设过」
+      if (unit.wholeAudioMode != null)
+        'wholeAudioMode': unit.wholeAudioMode!.name,
+      if (unit.wholeAudioVolume != null)
+        'wholeAudioVolume': unit.wholeAudioVolume,
       'shots': [
         for (var i = 0; i < unit.shots.length; i++)
           {
