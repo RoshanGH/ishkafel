@@ -23,6 +23,7 @@ import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/replacement/unit_base.dart';
 import '../../core/log/app_log.dart';
+import '../../core/storage/doc_watch.dart';
 import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
@@ -83,11 +84,20 @@ class ReviewPage extends ConsumerStatefulWidget {
 }
 
 class _ReviewPageState extends ConsumerState<ReviewPage> {
+  /// 这一页手上的那份任务。**不是 `widget.task`**——进门那一刻的快照
+  /// 过一会儿就旧了：人开着这一页的时候 CLI 照样在写盘（`apply plans`
+  /// 被这一页回了 `unsupported` 之后，它就是自己写的），新候选落在盘上，
+  /// 而这一页还按老样子判「这一页上没有这些候选」。见 [_reloadIfStale]
+  late RenewTask _task = widget.task;
+
+  /// 上一次读到这份数据时盘上的指纹。对不上 = 这期间有人写过
+  String? _taskPrint;
+
   /// 单元列表的**可变副本**：审核页能就地改标签，改完这里先变，
   /// 再按模式落库（内嵌模式交回工作台，独立模式自己写盘）
   late List<SemanticUnit> _units = [...(widget.task.units ?? const [])];
 
-  late final List<ReviewItem> _items =
+  late List<ReviewItem> _items =
       collectReviewItems(widget.task.replacementsFor(_units));
 
   /// 被剔除的候选。默认空 = 全保留：审核是把不要的挑出来
@@ -127,6 +137,10 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void initState() {
     super.initState();
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir != null) {
+      _taskPrint = taskFingerprint(dataDir, widget.task.id);
+    }
     _loadOriginThumbs();
     _watchAgent();
   }
@@ -142,15 +156,70 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
-      _handleDelegated(dataDir);
+      unawaited(_handleDelegated(dataDir));
       _followAgent(dataDir);
     });
   }
 
-  void _handleDelegated(Directory dataDir) {
+  /// 正在服务一张代办单。**轮询是 500ms 一次、而服务这件事要等一次重读**
+  /// ——不挡一下的话，下一轮会从同一个目录再取走一张单子并发地做
+  bool _serving = false;
+
+  Future<void> _handleDelegated(Directory dataDir) async {
+    if (_serving) return;
     final request =
         consumeAgentRequest(dataDir: dataDir, taskId: widget.task.id);
     if (request == null) return;
+    _serving = true;
+    try {
+      // **先对一眼盘**：单子上点的候选可能是这一页打开之后才落盘的
+      await _reloadIfStale(dataDir);
+      if (!mounted) return;
+      _serveDelegated(dataDir, request);
+    } finally {
+      _serving = false;
+    }
+  }
+
+  /// 盘上那份比手上这份新的话，重读一次并把派生视图全部重算。
+  ///
+  /// **按内容指纹判定，不看「Agent 在不在场」**：在场是 500ms 轮询出来的，
+  /// 窗口里照样对不上（`doc_watch.dart` 里那两条真机教训同源）。
+  ///
+  /// **只在独立模式做。** 内嵌模式下工作台才是这条任务的写入方，它手上
+  /// 那份比盘上新（自动保存有 800ms 防抖），这时重读盘会把人刚拖的边界
+  /// 挤掉——那是拿一个新问题换掉旧问题。
+  Future<void> _reloadIfStale(Directory dataDir) async {
+    if (widget.onApply != null) return;
+    final now = taskFingerprint(dataDir, widget.task.id);
+    if (now == _taskPrint) return;
+    final fresh =
+        await ref.read(taskRepositoryProvider).findById(widget.task.id);
+    if (!mounted) return;
+    // 读不到（在这期间被删了）就保持原样：不拿旧的冒充新的，也不在这里
+    // 报错——「任务不见了」这一页有自己的出口（落库时 saved == null）
+    if (fresh == null) return;
+    setState(() {
+      _taskPrint = now;
+      _adoptTask(fresh);
+    });
+    unawaited(_loadOriginThumbs());
+  }
+
+  /// 换上新读到的那份，派生视图**全部重算**——漏掉一个就会出现
+  /// 「卡片是新的、分组还是旧的」这种更难查的错位
+  void _adoptTask(RenewTask fresh) {
+    _task = fresh;
+    _units = [...(fresh.units ?? const [])];
+    _items = collectReviewItems(fresh.replacementsFor(_units));
+    _previewKeys = _buildPreviewKeys();
+    _sections = _buildSections();
+    // 剔除是这一页的临时状态。盘上已经没有的那几张卡，标记跟着作废——
+    // 留着的话它会在下一次「确认」时对着一个不存在的位置生效
+    _dropped.removeWhere((k) => !_items.any((i) => keyOf(i) == k));
+  }
+
+  void _serveDelegated(Directory dataDir, AgentRequest request) {
     final keep = request.kind == 'review.keep';
     if (request.kind != 'review.drop' && !keep) {
       // **带上 unsupported**：这句话说的是「人恰好开着审片台」，
@@ -255,7 +324,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       if (start == null || end == null) continue;
       // 取自原片的那些要有原片；取自素材的（底片固定过）不需要
       if (section.originCandidateId == null &&
-          widget.task.sourcePath == null) {
+          _task.sourcePath == null) {
         continue;
       }
       try {
@@ -306,16 +375,18 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   // ---- 数据视图 ----
 
   PickedMaterial? _materialOf(int id) {
-    for (final m in widget.task.pickedMaterials) {
+    for (final m in _task.pickedMaterials) {
       if (m.id == id) return m;
     }
     return null;
   }
 
   /// 标了 ★ 的那些（预览版）：审核的人该知道哪条是 Agent 的首选
-  late final Set<String> _previewKeys = () {
+  late Set<String> _previewKeys = _buildPreviewKeys();
+
+  Set<String> _buildPreviewKeys() {
     final keys = <String>{};
-    final replacements = widget.task.replacementsFor(_units);
+    final replacements = _task.replacementsFor(_units);
     for (var u = 0; u < replacements.length; u++) {
       final r = replacements[u];
       if (r.wholeCandidateIds.isNotEmpty) {
@@ -327,11 +398,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       }
     }
     return keys;
-  }();
+  }
 
   /// 「本来的样子」该读哪个文件：底片固定过的单元读那条素材，其余读原片
   String? _originPathOf(int? candidateId) {
-    if (candidateId == null) return widget.task.sourcePath;
+    if (candidateId == null) return _task.sourcePath;
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return null;
     return TaskMedia(dataDir: dataDir, taskId: widget.task.id)
@@ -339,9 +410,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   }
 
   /// 位置分组（保持出现顺序）
-  late final List<_Section> _sections = () {
+  late List<_Section> _sections = _buildSections();
+
+  List<_Section> _buildSections() {
     final map = <String, _Section>{};
-    final units = widget.task.units ?? const [];
+    final units = _task.units ?? const [];
     for (final item in _items) {
       final id = '${item.unit}/${item.shot}';
       map.putIfAbsent(id, () {
@@ -381,7 +454,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       map[id]!.items.add(item);
     }
     return map.values.toList();
-  }();
+  }
 
   int get _droppedCount => _dropped.length;
 
@@ -527,7 +600,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           backgroundColor: AppColors.surface,
           titleSpacing: 0,
           title: Row(children: [
-            TaskIdBadge(task: widget.task),
+            TaskIdBadge(task: _task),
             const SizedBox(width: AppSpacing.sm),
             Expanded(child: _titleText()),
           ]),
@@ -554,7 +627,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                   style: TextStyle(
                       fontSize: AppFontSize.emphasis,
                       fontWeight: FontWeight.w600)),
-              Text(widget.task.name,
+              Text(_task.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -621,7 +694,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 // 原片这一段打头：审核就是「原来是什么 → 换成什么」的对比
-                if (widget.task.sourcePath != null &&
+                if (_task.sourcePath != null &&
                     section.originStartMs != null &&
                     section.originEndMs != null) ...[
                   _originalCard(section),
@@ -736,8 +809,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 搜完才发现是空的，那时也不知道是标签选错了。
   Future<void> _editTags(_Section section) async {
     final groups = section.shotIndex == null
-        ? widget.task.unitTagGroups
-        : widget.task.shotTagGroups;
+        ? _task.unitTagGroups
+        : _task.shotTagGroups;
     final picked = await showTagPicker(
       context,
       tags: ref.read(miaoaTagServiceProvider),
