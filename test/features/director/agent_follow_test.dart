@@ -598,6 +598,157 @@ void main() {
         reason: '出路也被一并清掉的话，人连补救的按钮都没有');
   });
 
+  /// **探针一：改一笔 → ⌘Z（在自动保存到点之前）。**
+  ///
+  /// `_mutate` 先置 `_dirty` / `_saving` 再排 800ms 自动保存。⌘Z 把 `_doc`
+  /// 换回 `_mutate` 压进去的那一份——正好 `identical(_doc, _savedDoc)`。
+  /// 短路只 `return` 不复位的话，**两面旗从此没有任何人放下**：
+  /// 顶栏「保存中…」永久粘着（没有任何东西在存），跟随被 `_dirty` 早退，
+  /// Agent 之后写的东西永远上不了屏。
+  testWidgets('探针一 改一笔又撤销：旗子要放下，跟随要活着', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+
+    await tester.enterText(find.byType(TextField).first, '人改的');
+    // 输入框 1200ms 才提交给 `_mutate`；`_mutate` 再排 800ms 自动保存。
+    // 卡在这两级之间撤销
+    await tester.pump(const Duration(milliseconds: 1250));
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('保存中…'), findsNothing,
+        reason: '没有任何东西在存，挂着「保存中…」就是说谎，而且永久粘着');
+    expect(find.textContaining('还有没保存的改动'), findsNothing);
+
+    // **跟随还得活着**：Agent 写一版，屏幕要跟上
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await agentSaves(repo, 'Agent 写的');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Agent 写的'), findsWidgets,
+        reason: '`_dirty` 没放下的话跟随永远早退，屏幕停在旧版');
+  });
+
+  /// **探针二：闸已经关上 → ⌘Z。**
+  ///
+  /// 人把自己那一笔撤掉了，屏幕上就是上次写出去/读进来的那一份
+  /// ——**没有任何东西需要保住**。所以：
+  ///
+  /// - 「以我的为准」那个按钮要收回去。它是破坏性的（覆盖别人写进去的
+  ///   东西），留着一个「没东西可保却能覆盖别人」的按钮比不给更糟
+  /// - 跟随要立刻活过来，Agent 那一版自己上屏
+  ///
+  /// 这是我对「以我的为准 + 撤销」那条路的判断，理由写在报告第一节。
+  testWidgets('探针二 闸关上之后撤销：出路收回去，跟随活过来', (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    agentWritesToDisk('基线');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 人改一笔 + 盘上同时被改 → 闸关上
+    await tester.enterText(find.byType(TextField).first, '人改的');
+    await tester.pump(const Duration(milliseconds: 200));
+    agentWritesToDisk('Agent 又写了一次');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.byKey(const ValueKey('director-force-save')), findsOneWidget);
+
+    // ⌘Z 撤回去
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyZ);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.byKey(const ValueKey('director-force-save')), findsNothing,
+        reason: '没东西需要保住了，一个能覆盖别人的破坏性按钮不该还挂在那儿');
+    expect(find.textContaining('没敢覆盖它'), findsNothing);
+    expect(find.text('保存中…'), findsNothing);
+
+    // 跟随活过来：Agent 那一版自己上屏
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await agentSaves(repo, 'Agent 最后一笔');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('Agent 最后一笔'), findsWidgets,
+        reason: '旗子不放下的话这一页从此冻住，Agent 写什么都上不了屏');
+  });
+
+  /// **Minor①：跟随读成功了，那句「现在显示的是旧的」要一起撤掉。**
+  ///
+  /// `_reloadFailed` 一度只在**重读**成功时复位，跟随成功那一处漏了：
+  /// 收工读失败 → 按钮出现；Agent 回来又写一版、跟随把它读上来了，
+  /// **屏幕已经是最新的**，而那条假提示和按钮还挂着。
+  testWidgets('Minor① 跟随读成功之后，「重新载入」那条假提示要撤掉',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 收工那一次读失败 → 出口出现
+    await agentSaves(repo, 'Agent 第一版');
+    repo.failNextFind = true;
+    clearAgentPresence(dataDir: dir, taskId: 't1');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.byKey(const ValueKey('director-reload-retry')), findsOneWidget);
+
+    // Agent 回来又写一版，这次跟随读成功了
+    repo.failNextFind = false;
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '又回来了'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await agentSaves(repo, 'Agent 第二版');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Agent 第二版'), findsWidgets, reason: '屏幕已经是最新的');
+    expect(find.byKey(const ValueKey('director-reload-retry')), findsNothing,
+        reason: '屏幕已经最新了还挂着「现在显示的是旧的」，又是一句粘住的假话');
+  });
+
+  /// **Minor②：跟随连着读不上来，要让人看得见。**
+  ///
+  /// 只写日志的话，屏幕静默停在旧版——人照着一份过期的脚本继续干，
+  /// 而他不知道。偶发一次不吭声（下一拍自己会补上），连着几次就得说。
+  testWidgets('Minor② 跟随连着失败：给出和收工失败同一个出口', (tester) async {
+    final repo = _MemoryRepo(failNextFind: true);
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在干活'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 连着几拍都读不上来（每拍指纹都变，所以每拍都会试一次）
+    for (var i = 0; i < 4; i++) {
+      agentWritesToDisk('第 $i 次');
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+    }
+
+    expect(find.byKey(const ValueKey('director-reload-retry')), findsOneWidget,
+        reason: '连着读不上来还一声不吭，人会照着过期的脚本继续干');
+  });
+
   /// **时序 4：闸已经关上之后，还出得去吗。**
   ///
   /// `_overwriteBlocked` 一旦置真，只有保存成功才复位——而它被闸挡着永远

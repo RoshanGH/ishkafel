@@ -41,3 +41,26 @@ bool canOverwrite(Directory dataDir, String taskId, String? loadedPrint) {
   if (now == 'none') return true; // 文件还不存在：这是第一次落盘
   return now == loadedPrint;
 }
+
+/// 界面自己写完一次盘之后，基线该不该推到「写完之后」那一份。
+///
+/// [current] 是写之前的基线，[before] 是**紧挨着那次写**取的现盘指纹，
+/// [after] 是写完之后的。
+///
+/// **只有 `before == current`（这段窗口里没有别人写过）才推。** 否则就是
+/// 推过别人那一笔——跟随从此判「没变」不再重读（**Agent 那一笔人永远看不到**），
+/// 而人下一次保存 `canOverwrite` 为真、**整份内容静默盖过去**。
+///
+/// 为什么会有这个窗口：编导台保存完会顺手换一张封面（`ensureScriptCover`
+/// 要抽帧，**可能是秒级**），而封面也写同一个 `tasks/<id>.json`。不推基线的话，
+/// 本页自己的封面写入会把下一次真改动误判成「Agent 改过」；无条件推，
+/// 就会把这段窗口里 Agent 的写入一并推过去。
+///
+/// 宁可让下一次保存被自己的封面挡一下（人看得见、有出路），
+/// 也不能静默盖掉别人的活。
+String? advanceBaselineAfterOwnWrite({
+  required String? current,
+  required String before,
+  required String after,
+}) =>
+    before == current ? after : current;

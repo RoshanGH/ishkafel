@@ -1168,19 +1168,45 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         // 这一页从此冻住：再也不跟随、每次保存都被拦
         _dirty = false;
         _overwriteBlocked = false;
+        // **读成功了，屏幕上就是最新的**——那句「现在显示的是旧的」
+        // 和「重新载入」按钮要一起撤掉。漏了这一行的话，收工读失败之后
+        // Agent 再写一版、跟随把它读上来了，那条假提示还挂在顶栏上
+        _reloadFailed = false;
+        _followFailures = 0;
         _saveError = null;
         _saving = false;
       });
       _schedulePreviewRebuild();
     }).catchError((Object e) {
       AppLog.warn('跟随 Agent 重读任务失败（${_task.id}）：$e');
+      // **连着读不上来就得让人看见。**
+      //
+      // 只写日志的话，屏幕静默停在旧版——人照着一份过期的脚本继续干，
+      // 而他不知道。偶发一次会被下一拍自己补上（基线没推进，500ms 后还会
+      // 再试），所以不吓唬人；连着几次说明这不是抖动。
+      // 复用收工读失败那条出口（同一句话、同一个「重新载入」）
+      _followFailures++;
+      if (_followFailures >= _followFailuresBeforeSpeakUp &&
+          mounted &&
+          !_disposed &&
+          !_reloadFailed) {
+        setState(() => _reloadFailed = true);
+        _toast('连着几次没读到盘上的最新内容——现在屏幕上是旧的。'
+            '点顶上的「重新载入」再试一次。');
+      }
     }).whenComplete(() => _followInFlight = false));
   }
 
   /// 这一刻有没有一次「跟随重读」在飞
   bool _followInFlight = false;
 
-  /// Agent 收工那一次重读失败了：**屏幕上是旧的**，而跟随已经不跑了。
+  /// 跟随重读连着失败了几次。偶发一次不吭声（下一拍会自己补上），
+  /// 连着几次就得让人看见——静默停在旧版比说一句难听的话糟得多
+  int _followFailures = 0;
+  static const int _followFailuresBeforeSpeakUp = 3;
+
+  /// 重读失败了：**屏幕上是旧的**。收工那一次失败时跟随已经不跑了，
+  /// 跟随自己连着失败时它还在重试——两种都给同一个出口。
   /// 顶栏给一个「重新载入」，不然人只能退出重进（而且他不知道要退）
   bool _reloadFailed = false;
 
@@ -1389,6 +1415,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       _dirty = false;
       _overwriteBlocked = false;
       _reloadFailed = false;
+      _followFailures = 0;
       _saveError = null;
       _saving = false;
     });
@@ -2739,7 +2766,43 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     //
     // 判「有没有改动」用**引用相等**：`ScriptDoc` 是不可变的，每一次真改动
     // 都换一个新对象，没改就还是同一个（零成本、不误判）。
-    if (identical(_doc, _savedDoc)) return;
+    if (identical(_doc, _savedDoc)) {
+      // **走短路之前先把旗子放下。**
+      //
+      // `_mutate` 先置 `_dirty` / `_saving` 再排 800ms 自动保存。只要这
+      // 800ms 内 `_doc` 被换回 `_savedDoc` 那个对象（**⌘Z 就是**：`_undo`
+      // 弹出来的正是 `_mutate` 压进去的那一份），定时器在上面被取消，
+      // 而这里直接 return 的话，**两面旗从此没有任何人复位**——
+      // 跟随被 `_dirty` 早退、`_reloadAfterAgent` 被 `_dirty` 早退、
+      // 保存也没有定时器会再来。实测：顶栏「保存中…」永久粘着（没有任何
+      // 东西在存），Agent 之后写的东西永远上不了屏，收工时还弹一句
+      // 「你手上还有没保存的改动」——人一处未落盘的都没有。
+      //
+      // **闸的状态也要跟着放下。** `_overwriteBlocked` 的意思是「你屏幕上
+      // 有东西没存进去」；屏幕上这一份既然就是上次写出去/读进来的那一份，
+      // 这句话已经不成立了。不放的话，顶栏会挂着一个「以我的为准」——
+      // 按下去要覆盖别人写的东西，而其实**没有任何东西需要保住**。
+      // 放下之后跟随立刻活过来，Agent 那一版 500ms 内自己就上屏了。
+      if (_dirty || _saving || _overwriteBlocked) {
+        void clear() {
+          _dirty = false;
+          _saving = false;
+          if (_overwriteBlocked) {
+            _overwriteBlocked = false;
+            // 只清这一种失败：别的保存失败（真异常）不该被顺手抹掉
+            _saveError = null;
+          }
+        }
+
+        // **dispose 里也会调到这条路**，那时候 setState 会直接断言崩掉
+        if (mounted && !_disposed) {
+          setState(clear);
+        } else {
+          clear();
+        }
+      }
+      return;
+    }
     // **Agent 在场时一个字都不许写**。
     //
     // 这一页写盘写的是内存里的整份 doc。Agent 可视模式下界面刚被唤醒
@@ -2926,6 +2989,18 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
     if (cover == null || cover == _task.coverPath || !mounted) return;
     _task = _task.copyWith(coverPath: cover);
+    // **写之前先记下此刻的指纹。**
+    //
+    // 下面那一句 `apply` 会写一次 `tasks/<id>.json`，写完必须把基线推上去
+    // （不推的话，本页自己的封面写入会把下一次真改动误判成「Agent 改过」）。
+    // 但**只能在「这段窗口里没有别人写过」时推**：`_saveDoc` 对齐基线到
+    // 这里之间隔着整个 `ensureScriptCover`（抽帧，可能是秒级），Agent 完全
+    // 可能在这中间写了一次盘。无条件推的话会**推过 Agent 那次写入**——
+    // 跟随从此判「没变」不再重读（**它那一笔人永远看不到**），
+    // 而人下一次保存 `canOverwrite` 为真、**整份 script 静默盖过去**。
+    //
+    // 取在紧挨 `apply` 之前，把窗口压到最小
+    final before = taskFingerprint(dataDir, _task.id);
     try {
       // **封面是软件抽的，不是人挑的**（成片第一帧）。标成「人」的话，
       // Agent 读到「人换了封面」就不敢再重抽——那是让步于一个不存在的
@@ -2954,14 +3029,21 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (saved == null) {
         AppLog.warn('封面没存上：任务 ${_task.id} 已经被删了。');
       }
-      // **这一页自己刚写过盘，基线要跟上。**
+      // **这一页自己刚写过盘，基线要跟上——但只在没人插队的前提下。**
       //
       // 指纹是整份文件的 `size:mtime`——换一张封面，基线就过期了。不对齐的
-      // 话，紧接着任何一次 `_flushNow` 都会被自己刚写的那一版挡下来，
-      // 而那正是「假的脏」最常见的触发器（`_saveDoc` 对齐完基线就
-      // `unawaited(_refreshCover())`，这一趟又把它写旧了）
-      final d = _dataDir;
-      if (d != null) _docPrint = taskFingerprint(d, _task.id);
+      // 话，紧接着任何一次 `_flushNow` 都会被自己刚写的那一版挡下来。
+      // 而 `before != _docPrint` 说明**这段窗口里有别人写过**，这时候推
+      // 基线就是推过别人那一笔（见上面 `before` 那段）——宁可让下一次保存
+      // 被自己的封面挡一下（人看得见、有出路），也不能静默盖掉 Agent 的活
+      if (before != _docPrint) {
+        AppLog.info('写封面这段窗口里有别人动过盘，基线不推（${_task.id}）');
+      }
+      _docPrint = advanceBaselineAfterOwnWrite(
+        current: _docPrint,
+        before: before,
+        after: taskFingerprint(dataDir, _task.id),
+      );
     } catch (e) {
       AppLog.warn('封面落库失败（taskId=${_task.id}）：$e');
     }
