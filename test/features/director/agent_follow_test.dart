@@ -81,6 +81,16 @@ void main() {
         DateTime.now().add(Duration(seconds: 10 * diskWrites)));
   }
 
+  /// Agent 真的改了第一句台词并落盘：**仓库和指纹两边都动**。
+  ///
+  /// 只动指纹（`agentWritesToDisk`）证不了「屏幕上换成了它的最终版」；
+  /// 只动仓库证不了指纹闸的行为。这一条两样都要。
+  Future<void> agentSaves(_MemoryRepo repo, String text) async {
+    final was = (await repo.findById('t1'))!;
+    await repo.save(was.copyWith(script: was.script!.updateText(0, text)));
+    agentWritesToDisk(text);
+  }
+
   testWidgets('Agent 在场：横幅说清是谁、正在做什么', (tester) async {
     final repo = _MemoryRepo();
     await pump(tester, repo);
@@ -288,13 +298,134 @@ void main() {
         reason: '「以我的为准」要真的存得进去，不然那只是一个安慰按钮');
   });
 
-  /// **Agent 收工那一下，不许把人没落盘的改动静默换掉。**
+  /// **时序 1（主干路）：人一个字没改 + Agent 收工。**
   ///
-  /// `_reloadAfterAgent` 先 `_flushNow` 再整份重读、清空撤销栈。而
-  /// `_flushNow` 恰好被指纹闸拦下时（人手上有没落盘的改动、盘上又被改过），
-  /// 那笔改动就被盘上那份**直接替换掉**——连撤销栈都清了，找都找不回来。
-  /// 而顶栏那句「你的改动还在屏幕上」在这条路上就成了假话。
-  testWidgets('Agent 收工时人还有没保存的改动：不拿盘上的换掉他', (tester) async {
+  /// 这条被我修坏过一次：早退的判据用了 `_overwriteBlocked`（「盘上变过」），
+  /// 而 Agent 收工那一刻它必然为真——于是屏幕永远停在倒数第二版、从此不再
+  /// 跟随、还弹一句「你手上还有没保存的改动」的假话。
+  /// **判「换不换」只能看 `_dirty`（本地有没有未落盘的改动）。**
+  testWidgets('时序1 人没改过 + Agent 收工：屏幕上是它的最终版，一句提示都不弹',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在给第 1 句配音'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // Agent 连写两版，最后一笔紧接着收工（静默模式下 stage.end() 无延迟）
+    await agentSaves(repo, 'Agent 第一版');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await agentSaves(repo, 'Agent 最后一笔');
+    clearAgentPresence(dataDir: dir, taskId: 't1');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('Agent 最后一笔'), findsWidgets,
+        reason: '人一个字没改，屏幕上就该是它的最终版');
+    expect(find.textContaining('没保存的改动'), findsNothing,
+        reason: '他没有未保存的改动——说有就是假话');
+    expect(find.textContaining('没敢覆盖'), findsNothing);
+
+    // 而且从此还跟得动：Agent 回来再写一版，屏幕要跟上
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '又回来了'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await agentSaves(repo, 'Agent 又一版');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    expect(find.text('Agent 又一版'), findsWidgets,
+        reason: '指纹基线没对齐的话，这一页从此永久不再跟随');
+  });
+
+  /// **时序 2：人改了字没保存 + Agent 收工。**
+  ///
+  /// 和时序 1 只差一件事——本地有没有未落盘的改动。**判据换对了，这两条
+  /// 才会分别走向正确的两个方向**：这一条保住人的，时序 1 载入 Agent 的。
+  testWidgets('时序2 人改了字没保存 + Agent 收工：保住人的，提示说的是实话',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    agentWritesToDisk('基线');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 人先改字（这会儿 Agent 还没来，改得动）
+    await tester.enterText(find.byType(TextField).first, '人没存的那一笔');
+    await tester.pump(const Duration(milliseconds: 200));
+    // 同一段窗口里 Agent 写了盘 → 人的自动保存被指纹闸拦下
+    await agentSaves(repo, 'Agent 最后一笔');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.textContaining('没敢覆盖它'), findsWidgets);
+
+    // Agent 露个面然后收工 → 走 leaving 那条路
+    report(AgentPresence(
+        holder: 'Agent', at: DateTime.now(), action: '正在收尾'));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    clearAgentPresence(dataDir: dir, taskId: 't1');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(find.text('人没存的那一笔'), findsWidgets,
+        reason: '整份重读会把他没落盘的那笔静默换掉，撤销栈还一起清了');
+    expect(find.textContaining('Agent 收工了'), findsOneWidget,
+        reason: '这条路上它确实收工了——这句是实话，该说');
+    expect(find.textContaining('还有没保存的改动'), findsOneWidget);
+  });
+
+  /// **时序 4：闸已经关上之后，还出得去吗。**
+  ///
+  /// `_overwriteBlocked` 一旦置真，只有保存成功才复位——而它被闸挡着永远
+  /// 不会成功。不给自愈的话这一页就冻住了：再也不跟随、每次保存都被拦。
+  testWidgets('时序4 闸关上之后：人的改动一存进去，这一页就恢复正常',
+      (tester) async {
+    final repo = _MemoryRepo();
+    await pump(tester, repo);
+    agentWritesToDisk('基线');
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+
+    // 先把闸关上（人改了字 + 盘上同时被改）
+    await tester.enterText(find.byType(TextField).first, '人改的');
+    await tester.pump(const Duration(milliseconds: 200));
+    agentWritesToDisk('Agent 又写了一次');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect(find.textContaining('没敢覆盖它'), findsWidgets);
+
+    // 出路：以我的为准 → 存进去 → 闸复位
+    await tester.tap(find.byKey(const ValueKey('director-force-save')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester
+        .tap(find.byKey(const ValueKey('director-force-save-confirm')));
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+
+    expect(find.textContaining('没敢覆盖它'), findsNothing,
+        reason: '存进去了闸就该复位，不然这一页永久冻住');
+    expect(find.byKey(const ValueKey('director-force-save')), findsNothing);
+
+    // 恢复正常：再改一次，照常存得进去
+    await tester.enterText(find.byType(TextField).first, '再改一次');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump();
+    expect((await repo.findById('t1'))!.script!.lines.first.text, '再改一次');
+  });
+
+  /// **时序 3：人改了字没保存 + 按「我来接手」（Agent 没收工）。**
+  ///
+  /// `_takeoverFromAgent` 末尾会重读一次盘——那一下不许把人没落盘的改动
+  /// 静默换掉（连撤销栈都清）。而且这条路上**Agent 那条命令还在跑**
+  /// （确认框上一秒刚亲口说过），提示里不许出现「Agent 收工了」
+  /// ——同一段流程里两句话互相打脸。
+  testWidgets('时序3 人改了字没保存 + 按我来接手：改动保住，提示说的是实话',
+      (tester) async {
     final repo = _MemoryRepo();
     await pump(tester, repo);
 
@@ -324,8 +455,11 @@ void main() {
 
     expect(find.text('人还没存的改动'), findsWidgets,
         reason: '整份重读会把他没落盘的那笔静默换掉，撤销栈还一起清了');
-    expect(find.textContaining('没敢拿它的盖掉你的'), findsOneWidget,
+    expect(find.textContaining('没敢拿盘上的盖掉它'), findsOneWidget,
         reason: '不换也要说出来，并指向「以我的为准」那条出路');
+    expect(find.textContaining('Agent 收工了'), findsNothing,
+        reason: '这条路上它还在跑——确认框上一秒刚说过，'
+            '这儿再说「收工了」就是同一段流程里两句话互相打脸');
   });
 
   /// 「以我的为准」会覆盖 Agent 在这段窗口里写进去的那几处——

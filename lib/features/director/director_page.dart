@@ -37,6 +37,7 @@ import 'scroll_into_view.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/task_mutation.dart';
 import '../../cli/busy_guard.dart';
+import '../agent/app_busy_holder.dart';
 import '../tasks/gui_task_mutation.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/task_repository.dart';
@@ -132,6 +133,22 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// **不能只写日志**：这一页的保存是不等结果的（`unawaited`），失败了顶上
   /// 那句「更改已自动保存」照旧挂着，人以为存好了就关窗走人，改的东西就没了
   String? _saveError;
+
+  /// **这一页手上有没落盘的改动。**
+  ///
+  /// 判「能不能拿盘上的盖掉屏幕上的」只能靠它。一度拿 `_saving` 和
+  /// `_overwriteBlocked` 顶替，两个都不对：
+  ///
+  /// - `_saving` 会被 `_reportSaveFailure` 复位，保存失败之后它就是 false，
+  ///   而人的改动还在屏幕上
+  /// - `_overwriteBlocked` 的含义是「**盘上变过**」，不是「本地有改动」。
+  ///   Agent 收工那一刻这两件事几乎总是同时成立，于是**人一个字没改**
+  ///   也会走进「保住人的改动」那条路——屏幕从此停在 Agent 的倒数第二版，
+  ///   还弹一句「你手上还有没保存的改动」的假话。而「人一个字没改」
+  ///   是主干路，不是边角
+  ///
+  /// `_mutate` 置位；保存成功、或整份重读之后清零。
+  bool _dirty = false;
 
   /// 上一次保存是**被指纹闸拦下来的**（盘上被 Agent 改过），不是别的错。
   ///
@@ -1101,11 +1118,15 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     if (now == _docPrint && !force) return;
     // **人手上有还没落盘的改动时，不拿盘上的盖掉他正在打的字。**
     //
+    // 判据是 `_dirty`，**不是 `_saving` 也不是 `_overwriteBlocked`**：
+    // 前者保存失败就被复位了，后者说的是「盘上变过」而不是「本地有改动」
+    // （见 `_dirty` 的文档注释）。
+    //
     // 这时候指纹也**不往前推**：推了，他下一次保存就会悄悄覆盖 Agent 刚写的
     // 那几处（这道闸当初就是为这个建的）；不推，保存会被挡住——而挡住这件事
     // 现在是**说出来**的（见 `_flushNow` 里的 `_overwriteBlocked`），
     // 顶栏给了「以我的为准」这条出路。要的就是「看得见、可操作」。
-    if (!force && (_saving || _overwriteBlocked)) return;
+    if (!force && _dirty) return;
     _docPrint = now;
     unawaited(_repo.findById(_task.id).then((fresh) {
       final doc = fresh?.script;
@@ -1113,6 +1134,14 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       setState(() {
         _task = fresh!;
         _doc = doc;
+        // 屏幕上换成盘上这一份了，本地就没有未落盘的东西了——
+        // **闸也要跟着自愈**，否则它一旦置真就永远不会复位
+        // （`_saveDoc` 成功才复位，而它被闸挡着永远不会成功），
+        // 这一页从此冻住：再也不跟随、每次保存都被拦
+        _dirty = false;
+        _overwriteBlocked = false;
+        _saveError = null;
+        _saving = false;
       });
       _schedulePreviewRebuild();
     }).catchError((Object e) {
@@ -1238,52 +1267,66 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   ///
   /// 返回一个「收工」回调：**必须在 finally 里调**，还带 20 秒心跳
   /// （在场状态 60 秒过期，而一句 TTS / 一镜识图常常超过它）
+  /// 开工/收工都交给 [AppBusyHolder]：它管心跳，也管**嵌套不留缝**
+  /// （批量活儿整轮挂一份，里面每一句再各挂一份）。
   VoidCallback _appBusyHere(String what) {
     final dataDir = _dataDir ?? ref.read(dataDirProvider);
     if (dataDir == null) return () {};
-    void write() => writeAppBusy(
-          dataDir: dataDir,
-          taskId: _task.id,
-          busy: AgentPresence(
-              holder: actorDirectorBoard, at: DateTime.now(), action: what),
-        );
-    write();
-    final pulse = Timer.periodic(const Duration(seconds: 20), (_) => write());
-    return () {
-      pulse.cancel();
-      clearAppBusy(dataDir: dataDir, taskId: _task.id);
-    };
+    final busy = _appBusy ??= AppBusyHolder(
+        dataDir: dataDir, taskId: _task.id, holder: actorDirectorBoard);
+    return busy.enter(what);
   }
 
-  /// Agent 收工后重新读盘。**先把本地未落盘的改动冲掉**，免得人自己的活丢了。
+  AppBusyHolder? _appBusy;
+
+  /// 重新读盘，把 Agent 写进去的东西载到屏幕上。
   ///
-  /// **但那一冲可能被指纹闸拦下来**（盘上刚被 Agent 改过）。拦下来还照常
-  /// 整份替换 `_doc` 的话，人手上那笔没落盘的改动就被盘上那份**静默换掉**
-  /// 了——连撤销栈都一起清空，找都找不回来。而顶栏那句「你的改动还在
-  /// 屏幕上」在这条路上就成了假话。
+  /// 两条路都会走到这里：Agent 收工（`leaving`）、人按「我来接手」。
   ///
-  /// 所以拦下来就**不换**：屏幕上留着人的那一份，「以我的为准」那条出路
-  /// 还在，由人来决定要谁的。
-  Future<void> _reloadAfterAgent() async {
+  /// **判「换不换」只能看 `_dirty`（本地有没有未落盘的改动），不能看
+  /// `_overwriteBlocked`（盘上有没有变过）。** 这两件事在 Agent 收工那一刻
+  /// 几乎总是同时成立——它刚写完最后一笔，指纹当然变了。拿后者当判据，
+  /// **人一个字没改也会走进「保住人的改动」那条路**：屏幕永远停在 Agent 的
+  /// 倒数第二版、从此不再跟随、还弹一句「你手上还有没保存的改动」的假话，
+  /// 而按「以我的为准」会把 Agent 最后那几笔抹掉。那条主干路被我修坏过一次。
+  ///
+  /// 本地真有未落盘的改动时才不换：屏幕上留着人的那一份，
+  /// 「以我的为准」那条出路还在，由人来决定要谁的。
+  ///
+  /// [agentStillRunning] 决定那句提示怎么说——人按「我来接手」时
+  /// Agent 那条命令还在跑（确认框上一秒刚亲口说过），这时说「Agent 收工了」
+  /// 就是同一段流程里两句话互相打脸。
+  Future<void> _reloadAfterAgent({bool agentStillRunning = false}) async {
     _flushNow();
-    if (_overwriteBlocked) {
-      AppLog.info('这一页有没落盘的改动、而盘上被改过，不整份重读（${_task.id}）');
-      _toast('Agent 收工了，但你手上还有没保存的改动——'
-          '没敢拿它的盖掉你的。要存你的，点顶上的「以我的为准」。');
+    if (_dirty) {
+      AppLog.info('这一页有没落盘的改动，不整份重读（${_task.id}）');
+      _toast(agentStillRunning
+          ? '你手上还有没保存的改动，没敢拿盘上的盖掉它。'
+              '要存你的，点顶上的「以我的为准」。'
+          : 'Agent 收工了，但你手上还有没保存的改动——'
+              '没敢拿它的盖掉你的。要存你的，点顶上的「以我的为准」。');
       return;
     }
     final fresh = await _repo.findById(_task.id);
     final script = fresh?.script;
     if (!mounted || script == null) return;
+    final dataDir = _dataDir;
     setState(() {
       _doc = script;
       _undoStack.clear();
       _redoStack.clear();
+      // 屏幕上就是盘上这一份了：基线对齐、闸复位。
+      // 不对齐的话下一次保存又会被自己刚载入的这一版挡下来
+      if (dataDir != null) _docPrint = taskFingerprint(dataDir, _task.id);
+      _dirty = false;
+      _overwriteBlocked = false;
+      _saveError = null;
+      _saving = false;
     });
     _pinAllShots();
     _pinBgm();
     _schedulePreviewRebuild();
-    _toast('Agent 的改动已载入。');
+    if (!agentStillRunning) _toast('Agent 的改动已载入。');
   }
 
   /// 人要自己上手：这一页**停止跟随** Agent，人立刻能改。
@@ -1327,7 +1370,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     // 播报（秒级）就把它写回来了，人打两个字就又被拦一次
     _humanTookOver = true;
     setState(() => _agent = null);
-    await _reloadAfterAgent();
+    // 人按「我来接手」时 Agent 那条命令**还在跑**——确认框上一秒刚说过。
+    // 这条路上的提示不许说「Agent 收工了」
+    await _reloadAfterAgent(agentStillRunning: true);
   }
 
   /// 人按过「我来接手」。
@@ -1374,6 +1419,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _disposed = true;
     _autosave?.cancel();
     _flushNow();
+    _appBusy?.dispose();
     _mediaCache?.removeListener(_onMediaCache);
     _mediaCache?.dispose();
     _bgmCache?.removeListener(_onMediaCache);
@@ -1458,6 +1504,9 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
   /// 点下去以后软件假死两分钟是不能接受的
   Future<void> _regenerateVoices(List<String> lineIds) async {
     _cancelBatchVoice = false;
+    // 整轮挂一份在忙状态：逐句 write→clear 之间那道缝会让 Agent 的
+    // script voice 从缝里溜进来，整轮双份计费
+    final busyDone = _appBusyHere('正在$voiceBusyKeyword（界面上批量重配）');
     var failed = 0;
     for (var i = 0; i < lineIds.length; i++) {
       if (!mounted || _cancelBatchVoice) break;
@@ -1468,6 +1517,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (voiceId == null) continue;
       if (!await _generateVoiceCore(line.id, voiceId)) failed++;
     }
+    busyDone();
     if (!mounted) return;
     final stopped = _cancelBatchVoice;
     setState(() => _batchVoiceProgress = null);
@@ -2572,6 +2622,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     _redoStack.clear();
     setState(() {
       _doc = f(_doc);
+      _dirty = true;
       _saving = true;
     });
     _autosave?.cancel();
@@ -2676,6 +2727,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
       if (mounted && !_disposed) {
         setState(() {
           _saving = false;
+          _dirty = false;
           _saveError = null;
           _overwriteBlocked = false;
         });
@@ -3129,8 +3181,12 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     );
     if (go != true || !mounted) return;
     final failed = <String>[];
+    final busyDone = _appBusyHere('正在$voiceBusyKeyword（补逐字时间）');
     for (var i = 0; i < need.length; i++) {
-      if (!mounted) return;
+      if (!mounted) {
+        busyDone();
+        return;
+      }
       final line = _doc.lines.where((l) => l.id == need[i]).firstOrNull;
       if (line == null) continue; // 期间被删了
       setState(() =>
@@ -3150,6 +3206,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
         failed.add(line.text.trim());
       }
     }
+    busyDone();
     if (!mounted) return;
     setState(() => _draftProgress = null);
     _flushNow();
@@ -3189,6 +3246,8 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
     required String defaultVoice,
   }) async {
     _draftCancelled = false;
+    // 整轮挂一份：逐句之间不留缝（见 [_appBusyHere]）
+    final busyDone = _appBusyHere('正在$voiceBusyKeyword（自动铺一版）');
     var voiceFailed = 0;
     var shotFailed = 0;
     // 一、配音
@@ -3206,6 +3265,7 @@ class _DirectorPageState extends ConsumerState<DirectorPage> {
           line.id, _doc.lines.firstWhere((l) => l.id == line.id).voiceId!);
       if (!ok) voiceFailed++;
     }
+    busyDone();
     // 二、配镜：照着参考片这一镜的画面去找像的
     final tagIds =
         needShots.isEmpty ? const <String, int>{} : await _loadTagIds();
