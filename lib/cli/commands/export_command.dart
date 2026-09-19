@@ -26,6 +26,7 @@ import '../../core/storage/task_seq.dart';
 import '../agent_stage.dart';
 import '../agent_lock_holder.dart';
 import '../cli_output.dart';
+import '../../core/export/export_plan.dart';
 import '../plan_submission.dart';
 import 'apply_command.dart';
 
@@ -111,6 +112,25 @@ Future<int> runExportCommand({
     return exitBadUsage;
   }
 
+
+  // 手动加的单元一条素材都没挑：**命令行这头也要拦**。
+  //
+  // 判据和界面那条路是同一份（`unitsWithNothingToShow`），连话都说同一句
+  // ——两边说法不一样，人对着截图问「这是同一个错吗」都答不上来。
+  //
+  // 为什么必须拦：导出那边「没挑素材」一律走「用原片这一段」，而这些单元的
+  // startMs~endMs 根本不指向原片的任何位置。真让它跑下去，出来的是一段空白
+  // 或者直接崩在 ffmpeg 里，而人要等整批片子导完才发现。
+  //
+  // 看的是**这一批方案摊开之后**的样子，不是任务当前的替换现状：要导的是
+  // 方案，方案里写 keepOriginal 的插入段就是没东西可放
+  final empty = unitsWithNothingToShow(
+      units, projectPlansToReplacements(validation.plans, units));
+  if (empty.isNotEmpty) {
+    sink.writeln('${empty.map((i) => 'U${i + 1}').join('、')} 还没挑素材。'
+        '这些单元是手动加的，原片里没有对应画面，不挑就没东西可放。');
+    return exitBadUsage;
+  }
 
   final dest = Directory(outputDir ??
       p.join(Platform.environment['HOME'] ?? '.', 'Desktop',

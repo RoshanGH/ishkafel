@@ -63,6 +63,26 @@ void main() {
         reason: '上一次没下完留下的空壳会一直被当成命中端出来，'
             '而界面只看路径存不存在——画出来是一整块纯色底且一个字都不说');
   });
+  test('空的台词语义单元：界面和命令行都要拦，而且说同一句话', () {
+    // 2026-09-19 用户原话：「如果有某个单元没有底片，这个时候就不能导出，
+    // 要提醒没有出来有个空的台词语义单元。」
+    //
+    // 判据早就写好了（unitsWithNothingToShow），但一度**只有界面在用**：
+    // Agent 敲 ishkafel export 直接放行，而那些单元的时间范围根本不指向
+    // 原片的任何位置——导出来是一段空白或者直接崩在 ffmpeg 里
+    final gui =
+        File('lib/features/export/export_dialog.dart').readAsStringSync();
+    final cli =
+        File('lib/cli/commands/export_command.dart').readAsStringSync();
+    for (final (where, src) in [('界面', gui), ('命令行', cli)]) {
+      expect(src, contains('unitsWithNothingToShow'),
+          reason: '$where 那条导出路径没有这道拦截——'
+              '手动加的单元一条素材都没挑，片子会导出来是坏的');
+      expect(src, contains('还没挑素材'),
+          reason: '$where 说的话要和另一条一样。两边说法不一样，'
+              '人对着截图问「这是同一个错吗」都答不上来');
+    }
+  });
 }
 
 /// 把某个顶层函数的函数体抠出来（到下一个顶层声明为止）
