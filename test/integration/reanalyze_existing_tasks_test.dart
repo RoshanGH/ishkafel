@@ -23,6 +23,7 @@ import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/ai/volcano_asr_provider.dart';
 import 'package:ishkafel/core/ai/volcano_semantic_splitter.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_reviewer.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
@@ -108,7 +109,8 @@ void main() {
       }
       final was = _shape(task);
       final sw = Stopwatch()..start();
-      final after = await pipeline.analyze(task, onProgress: (p) {
+      final after = await pipeline.analyze(task,
+          by: ActorKind.agent, actor: 'Agent', onProgress: (p) {
         // ignore: avoid_print
         if (p.done == null || p.done! % 10 == 0) print('  ${p.summary}');
       });

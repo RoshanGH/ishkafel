@@ -30,6 +30,7 @@ void main() {
       _file('export_work/ab/out.mp4');
       _file('voices/ab/u0.wav');
       _file('picked_thumbs/ab/100.jpg');
+      _file('logs/ab.jsonl');
 
       expect(
           _names(TaskArtifacts(_root).of('ab')),
@@ -40,6 +41,7 @@ void main() {
             'analysis_work/stems/ab',
             'covers/ab.jpg',
             'export_work/ab',
+            'logs/ab.jsonl',
             'picked_thumbs/ab',
             'speed_fit/ab',
             'voices/ab',
@@ -77,6 +79,16 @@ void main() {
 
       expect(TaskArtifacts(_root).orphans({'ab'}), isEmpty,
           reason: '拿 ab.jpg 整个去比的话，活着的任务的封面会被当成孤儿删掉');
+    });
+
+    test('崩溃、手动删存档留下的孤儿日志，启动扫一遍能认出来', () {
+      // logs/<id>.jsonl 跟 covers/<id>.jpg 是同一种形状：按任务命名的单文件，
+      // 不是一个任务一个子目录，走的是同一条 _stem 判归属的路
+      _file('logs/alive.jsonl');
+      _file('logs/ghost.jsonl');
+
+      expect(_names(TaskArtifacts(_root).orphans({'alive'})),
+          ['logs/ghost.jsonl']);
     });
 
     test('删掉之后返回实际释放的字节数', () {

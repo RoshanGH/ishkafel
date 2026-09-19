@@ -5,13 +5,12 @@ import '../../core/script/script_doc.dart';
 import '../../core/script/script_service_wiring.dart';
 import '../../core/script/uploaded_voice.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
 /// `ishkafel script voice-file <任务> --line N <音频文件>` ——
@@ -74,22 +73,11 @@ Future<int> runScriptVoiceFileCommand({
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」占着，'
-        '先不动它了。');
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   final focus =
       AgentFocus(module: 'director', lineIndex: index, panel: AgentPanel.voice);
@@ -137,20 +125,51 @@ Future<int> runScriptVoiceFileCommand({
       sink.writeln('这段录音没听清（$e）——时长照用，但断不了句。');
     }
 
-    final before = target.text.trim();
-    final next = applyUploadedVoice(
-      doc: doc,
-      lineIndex: index,
-      audioPath: kept.path,
-      durationMs: durationMs,
-      words: words,
-      heardText: heard,
+    final beforeText = target.text.trim();
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'voice.upload',
+      where: {'line': line},
+      edit: (fresh) {
+        final freshDoc = fresh.script;
+        if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+        final applied = applyUploadedVoice(
+          doc: freshDoc,
+          lineIndex: index,
+          audioPath: kept.path,
+          durationMs: durationMs,
+          words: words,
+          heardText: heard,
+        );
+        return TaskEdit(
+          task: fresh.copyWith(script: applied),
+          before: {
+            'text': freshDoc.lines.length > index
+                ? freshDoc.lines[index].text.trim()
+                : beforeText,
+            'durationMs': freshDoc.lines.length > index
+                ? freshDoc.lines[index].voiceover?.durationMs
+                : null,
+          },
+          after: {'text': applied.lines[index].text.trim(), 'durationMs': durationMs},
+        );
+      },
     );
-    await repository.save(task.copyWith(script: next, updatedAt: DateTime.now()));
+    if (updated == null) {
+      sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     // 这一行的时长换了根，镜头分配跟着变——让人当场看见落到哪一行
     await stage.show('第 $line 行换成你自己的录音了（${durationMs}ms）',
         focus: focus);
 
+    final next = updated.script!;
+    final before = beforeText;
     final after = next.lines[index].text.trim();
     if (after != before) {
       // 台词一改，按字划出来的分镜就不成立了（字的位置全变了）——说出来
@@ -176,6 +195,5 @@ Future<int> runScriptVoiceFileCommand({
   } finally {
     // 收工要撤在场状态，否则界面会一直显示「Agent 正在操作」，人动不了手
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }

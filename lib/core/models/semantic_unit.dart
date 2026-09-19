@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import '../audio/material_audio.dart';
 import '../analysis/providers.dart' show AsrSentence;
+import '../storage/edit_stamp.dart';
 import 'shot.dart';
 import 'tag_trace.dart';
 import 'unit_uid.dart';
@@ -35,6 +36,11 @@ class SemanticUnit {
   /// 而且不问一声：他不会想到「我改的东西被一个后台步骤盖了」，
   /// 只会觉得改了没生效。想让模型重新接管，先把手改清掉。
   final bool tagsHandpicked;
+
+  /// 这个单元是谁定的、什么时候定的——同一类事实戳，见 [Shot.editedBy]
+  /// 的注释（分工：`tagsHandpicked` 回答「标签要不要重打」，`editedBy`
+  /// 回答「这一处是谁定的」）。null = 没有戳
+  final EditStamp? editedBy;
 
   /// 这次打标的过程量（输入台词、词表、模型原样回复）
   final TagTrace? trace;
@@ -96,6 +102,7 @@ class SemanticUnit {
     this.tags = const [],
     this.tagsStale = false,
     this.tagsHandpicked = false,
+    this.editedBy,
     this.trace,
     this.shots = const [],
     this.baseCandidateId,
@@ -120,6 +127,7 @@ class SemanticUnit {
     List<String>? tags,
     bool? tagsStale,
     bool? tagsHandpicked,
+    EditStamp? editedBy,
     TagTrace? trace,
     List<Shot>? shots,
     int? baseCandidateId,
@@ -137,6 +145,7 @@ class SemanticUnit {
         tags: tags ?? this.tags,
         tagsStale: tagsStale ?? this.tagsStale,
         tagsHandpicked: tagsHandpicked ?? this.tagsHandpicked,
+        editedBy: editedBy ?? this.editedBy,
         trace: trace ?? this.trace,
         shots: shots ?? this.shots,
         baseCandidateId: baseCandidateId ?? this.baseCandidateId,
@@ -156,6 +165,7 @@ class SemanticUnit {
         'tags': tags,
         'tagsStale': tagsStale,
         if (tagsHandpicked) 'tagsHandpicked': true,
+        if (editedBy != null) 'editedBy': editedBy!.toJson(),
         'shots': shots.map((s) => s.toJson()).toList(),
         'trace': trace?.toJson(),
         'hasSource': hasSource,
@@ -181,6 +191,7 @@ class SemanticUnit {
         tagsStale: json['tagsStale'] == true,
         // 存量存档里没有这个字段——那时的标签都是模型打的
         tagsHandpicked: json['tagsHandpicked'] == true,
+        editedBy: EditStamp.tryFromJson(json['editedBy']),
         shots: (json['shots'] as List<dynamic>?)
                 ?.map((e) => Shot.fromJson(e as Map<String, dynamic>))
                 .toList() ??
@@ -213,9 +224,11 @@ class SemanticUnit {
       // 底片换了就是另一个单元：同样的 shots 按另一条素材切出来，
       // 画面完全不同。不比这一项，换底片后界面会判成「没变」而不刷新
       other.baseCandidateId == baseCandidateId &&
+      other.editedBy == editedBy &&
       _listEq.equals(other.shots, shots);
 
   @override
   int get hashCode => Object.hash(index, startMs, endMs, transcript,
-      Object.hashAll(tags), tagsStale, baseCandidateId, Object.hashAll(shots));
+      Object.hashAll(tags), tagsStale, baseCandidateId, editedBy,
+      Object.hashAll(shots));
 }

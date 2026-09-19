@@ -8,6 +8,8 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
+import 'package:ishkafel/core/storage/edit_stamp.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 
 void main() {
   final task = RenewTask(
@@ -345,4 +347,69 @@ void main() {
     });
   });
 
+  test('单元/镜头上的来源戳随任务一起存得住、读得回', () {
+    // 戳长在 SemanticUnit / Shot 对象自己身上（见 edit_stamp.dart），
+    // 不是挂在 RenewTask 上的旁挂表——这里验的是它跟着任务整体序列化
+    // 一起往返，不掉东西
+    final task = RenewTask(
+      id: 't_1',
+      name: '测试任务',
+      status: RenewTaskStatus.ready,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      units: [
+        SemanticUnit(
+          uid: 'u-abc',
+          index: 0,
+          startMs: 0,
+          endMs: 1000,
+          transcript: '台词',
+          editedBy: EditStamp(by: ActorKind.human, at: DateTime.now()),
+          shots: [
+            Shot(
+              startMs: 0,
+              endMs: 1000,
+              editedBy: EditStamp(by: ActorKind.agent, at: DateTime.now()),
+            ),
+          ],
+        ),
+      ],
+    );
+
+    final back = RenewTask.fromJson(task.toJson());
+
+    expect(back.units!.single.editedBy!.by, ActorKind.human);
+    expect(back.units!.single.shots.single.editedBy!.by, ActorKind.agent);
+  });
+
+  test('读不懂的镜头戳被丢掉，其余数据照常读回来——一个坏戳不许废掉整条任务', () {
+    final task = RenewTask(
+      id: 't_1',
+      name: '测试任务',
+      status: RenewTaskStatus.ready,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      units: [
+        SemanticUnit(
+          uid: 'u-abc',
+          index: 0,
+          startMs: 0,
+          endMs: 1000,
+          transcript: '台词',
+          shots: [Shot(startMs: 0, endMs: 1000)],
+        ),
+      ],
+    );
+    final raw = task.toJson();
+    // 手动塞一个读不懂的镜头戳（缺 at）——模拟磁盘上被截断/损坏的存档
+    final unitJson = (raw['units'] as List).single as Map<String, dynamic>;
+    final shotJson = (unitJson['shots'] as List).single as Map<String, dynamic>;
+    shotJson['editedBy'] = {'by': 'human'};
+
+    final back = RenewTask.fromJson(raw);
+
+    expect(back.units!.single.shots.single.editedBy, isNull,
+        reason: '戳读不懂就当没有，不许把整条任务废掉');
+    expect(back.units!.single.transcript, '台词', reason: '其余字段必须完好');
+  });
 }

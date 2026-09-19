@@ -411,19 +411,22 @@ class RenewTask {
       };
 
   factory RenewTask.fromJson(Map<String, dynamic> json) {
+    final id = json['id'] as String;
     // 先解出单元：配乐的老存档要靠它把镜头下标换算成单元下标
     final parsedUnits = (json['units'] as List<dynamic>?)
         ?.map((e) => SemanticUnit.fromJson(e as Map<String, dynamic>))
         .toList();
     // 被旧版删单元那条路挪错的起止，读档时按镜头修回来（见
-    // [repairUnitBoundsFromShots]）——盘上已经坏掉的任务不会自己好
-    // 补发身份：老存档没有这个字段，而挂在单元上的东西全按它记
-    // （见 [ensureUnitUids]）
+    // [repairUnitBoundsFromShots]）——盘上已经坏掉的任务不会自己好。
+    // 补发身份：老存档没有这个字段，而挂在单元上的东西全按它记。
+    // **这里必须用确定性版本**——同一份磁盘数据会被 findById/findAll
+    // 独立解析很多次，掷随机数（[ensureUnitUids]）每次都会掷出不一样的
+    // 值，两次读永远对不上号（见 [ensureUnitUidsDeterministic] 的文档）
     final units = parsedUnits == null
         ? null
-        : ensureUnitUids(repairUnitBoundsFromShots(parsedUnits));
+        : ensureUnitUidsDeterministic(id, repairUnitBoundsFromShots(parsedUnits));
     return RenewTask(
-        id: json['id'] as String,
+        id: id,
         name: json['name'] as String,
         seq: json['seq'] is num ? (json['seq'] as num).toInt() : null,
         sourcePath: json['sourcePath'] as String?,

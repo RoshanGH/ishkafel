@@ -168,6 +168,17 @@ Map<String, dynamic> taskToJson(RenewTask task) {
 Map<String, dynamic> _unitToJson(
         SemanticUnit unit, ComposedTimeline? composed, int at) =>
     {
+      // **这个单元的身份**。改动日志按 `unitUid` 记名——`where.unitUid`
+      // （`unit.*` 十一处、`blank.*` 两处、审片台的 `unit.tags`）、
+      // `units.tag.*` 的 `taggedUnits`、`units.edit` 的 `changed` 里每一项
+      // 的 `uid`（那一处原先没有，2026-09-18 补上：人那一侧唯一的 op
+      // 不点名，需求②要的「哪些是人干的」就在最后一米断掉）。
+      // 而所有写命令按下标点名——不报身份的话，Agent 读完日志知道
+      // 「哪个 uid 被人动过」，却没有任何一条路把它对回一个下标。
+      //
+      // 无条件报：命令行手上的任务一律从盘上读，读档就会补发身份
+      // （`ensureUnitUidsDeterministic`），这里的 uid 不会是空串
+      'uid': unit.uid,
       'index': unit.index,
       // **原片位置**。老名字留着（已有调用方还在用），同时给一份把基准写在
       // 名字里的——两个基准混着用正是 2026-09-08 那个「属性栏写 00:45.03、
@@ -200,6 +211,18 @@ Map<String, dynamic> _unitToJson(
       // 人手改过的标签：重新打标会跳过它。不报的话你会以为打标漏了这个单元，
       // 跑一遍发现它纹丝不动，也不知道为什么
       if (unit.tagsHandpicked) 'tagsHandpicked': true,
+      // **这一处是谁定的、什么时候定的。** 产品负责人要的是「发现这是人已经
+      // 修改的」——「发现」意味着看当前数据就能看见，不必先去翻一遍日志再
+      // 自己对下标。没人定过就整个键不出现：「不知道」不能压成「是我定的」
+      if (unit.editedBy != null) 'editedBy': unit.editedBy!.toJson(),
+      // 这一段**整体替换**时放素材自己的哪一路声音。不设就不报这两个字段
+      // ——「跟随（原声、满音量）」和「明确设成某一档」要分得开（和镜头
+      // 那两个同一条规矩）。人在界面上设得了而这里不报的话，Agent 拿到的
+      // 「没有这个键」看起来正好像「没人设过」
+      if (unit.wholeAudioMode != null)
+        'wholeAudioMode': unit.wholeAudioMode!.name,
+      if (unit.wholeAudioVolume != null)
+        'wholeAudioVolume': unit.wholeAudioVolume,
       'shots': [
         for (var i = 0; i < unit.shots.length; i++)
           {
@@ -227,6 +250,10 @@ Map<String, dynamic> _unitToJson(
               'productBrand': unit.shots[i].productBrand,
             'tags': unit.shots[i].tags,
             if (unit.shots[i].tagsHandpicked) 'tagsHandpicked': true,
+            // 这一镜是谁定的（同上）。**镜头这一层单独记**：人常常只动其中
+            // 一镜，单元层的戳说不出是哪一镜
+            if (unit.shots[i].editedBy != null)
+              'editedBy': unit.shots[i].editedBy!.toJson(),
             // 这一镜单独设过「放素材的哪一路声音」。**不设就不报这两个字段**
             // ——「跟随全片」和「明确设成某一档」要分得开
             if (unit.shots[i].materialAudioMode != null)

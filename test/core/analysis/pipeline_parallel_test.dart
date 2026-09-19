@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -97,7 +98,7 @@ void main() {
     );
     await FileTaskRepository(temp).save(task);
 
-    final done = pipeline.analyze(task);
+    final done = pipeline.analyze(task, by: ActorKind.agent, actor: 'Agent');
     // 让三条支线都有机会启动
     await Future<void>.delayed(const Duration(milliseconds: 50));
 

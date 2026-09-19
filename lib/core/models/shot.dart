@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 
 import '../audio/material_audio.dart';
+import '../storage/edit_stamp.dart';
 import 'tag_trace.dart';
 
 /// 视觉镜头：语义单元内部的画面切换单元（不可变）
@@ -30,6 +31,19 @@ class Shot {
   /// 这些标签是**人手改的**，不是模型打的。重新打标时跳过它
   /// （理由见 [SemanticUnit.tagsHandpicked]）
   final bool tagsHandpicked;
+
+  /// 这一镜是谁定的、什么时候定的——给 Agent 看当前数据时**当场就能发现**
+  /// 「这是人已经改过的」，不用去翻改动日志（时间线，要翻）。
+  ///
+  /// 跟 [tagsHandpicked] 分工不同：`tagsHandpicked` 回答「这组标签要不要
+  /// 重打」，`editedBy` 回答「这一处是谁定的、什么时候定的」，是更通用的
+  /// 事实戳。两者都是「这是人干的还是机器干的」这同一类东西，所以挨着放。
+  ///
+  /// 戳长在镜头对象自己身上，不是按下标挂在别处的旁挂表——拆镜头、并镜头
+  /// 会让同一单元内后续镜头的下标整体漂移，旁挂表会把戳错记到相邻镜头上
+  /// 且不报错（详见 `edit_stamp.dart` 文件头注释）。null = 没有戳
+  /// （老存档，或还没被谁明确定过）。
+  final EditStamp? editedBy;
 
   /// 这次打标的过程量（喂了哪些帧、什么词表、模型原样回了什么）
   final TagTrace? trace;
@@ -73,6 +87,7 @@ class Shot {
     this.sourceAudioVolume,
     this.tagsStale = false,
     this.tagsHandpicked = false,
+    this.editedBy,
     this.trace,
     this.boundaryTrace,
   });
@@ -87,6 +102,7 @@ class Shot {
     String? productBrand,
     bool? tagsStale,
     bool? tagsHandpicked,
+    EditStamp? editedBy,
     TagTrace? trace,
     BoundaryTrace? boundaryTrace,
     MaterialAudioMode? materialAudioMode,
@@ -102,6 +118,7 @@ class Shot {
         productBrand: productBrand ?? this.productBrand,
         tagsStale: tagsStale ?? this.tagsStale,
         tagsHandpicked: tagsHandpicked ?? this.tagsHandpicked,
+        editedBy: editedBy ?? this.editedBy,
         trace: trace ?? this.trace,
         boundaryTrace: boundaryTrace ?? this.boundaryTrace,
         materialAudioMode: materialAudioMode ?? this.materialAudioMode,
@@ -124,6 +141,7 @@ class Shot {
         productBrand: productBrand,
         tagsStale: tagsStale,
         tagsHandpicked: tagsHandpicked,
+        editedBy: editedBy,
         trace: trace,
         boundaryTrace: boundaryTrace,
         materialAudioMode: mode,
@@ -145,6 +163,7 @@ class Shot {
         productBrand: productBrand,
         tagsStale: tagsStale,
         tagsHandpicked: tagsHandpicked,
+        editedBy: editedBy,
         trace: trace,
         boundaryTrace: boundaryTrace,
         materialAudioMode: materialAudioMode,
@@ -161,6 +180,7 @@ class Shot {
         if (productBrand != null) 'productBrand': productBrand,
         'tagsStale': tagsStale,
         if (tagsHandpicked) 'tagsHandpicked': true,
+        if (editedBy != null) 'editedBy': editedBy!.toJson(),
         'trace': trace?.toJson(),
         'boundaryTrace': boundaryTrace?.toJson(),
         // 只在真的覆盖过时才写：写成 null 会让「跟随任务」和「明确设成默认值」
@@ -181,6 +201,7 @@ class Shot {
         productBrand: json['productBrand'] as String?,
         tagsStale: json['tagsStale'] as bool? ?? false,
         tagsHandpicked: json['tagsHandpicked'] == true,
+        editedBy: EditStamp.tryFromJson(json['editedBy']),
         trace: TagTrace.tryFromJson(json['trace']),
         boundaryTrace: BoundaryTrace.tryFromJson(json['boundaryTrace']),
         // 存量存档：这个覆盖原来只有 true/false，true 就是不分离的原声
@@ -209,10 +230,11 @@ class Shot {
       other.materialAudioVolume == materialAudioVolume &&
       other.sourceAudioMode == sourceAudioMode &&
       other.sourceAudioVolume == sourceAudioVolume &&
+      other.editedBy == editedBy &&
       const ListEquality<String>().equals(other.tags, tags);
 
   @override
   int get hashCode => Object.hash(
-      startMs, endMs, description, productBrand, tagsStale,
+      startMs, endMs, description, productBrand, tagsStale, editedBy,
       Object.hashAll(tags));
 }

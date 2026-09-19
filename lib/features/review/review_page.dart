@@ -16,18 +16,23 @@ import '../../core/ffmpeg/process_runner.dart';
 import '../../core/ffmpeg/thumbnail_service.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/models/semantic_unit.dart';
+import '../../core/models/unit_uid.dart';
 import '../../core/replacement/picked_material.dart';
 import '../../core/review/review_receipt.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/replacement/unit_base.dart';
+import '../../core/log/app_log.dart';
+import '../../core/storage/doc_watch.dart';
+import '../../core/storage/edit_stamp.dart';
 import '../../core/storage/task_media.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_mutation.dart';
 import '../director/tag_picker.dart';
 import '../picking/picking_providers.dart';
 import '../settings/settings_providers.dart';
 import '../tasks/new_task_wizard/wizard_providers.dart';
 import '../tasks/task_id_badge.dart';
+import '../tasks/gui_task_mutation.dart';
 import '../tasks/task_list_controller.dart';
 import 'review_hover_player.dart';
 
@@ -44,15 +49,15 @@ class ReviewPage extends ConsumerStatefulWidget {
   final RenewTask task;
 
   /// 工作台内嵌模式：确认时把决定交回工作台，由它在自己的会话里应用
-  /// ——同一个人的同一次编辑会话，没有第二把锁。为 null 时是**独立模式**
-  /// （CLI 唤醒 / 任务列表进入）：进门持锁、确认自己写盘
+  /// ——同一个人的同一次编辑会话，不该有第二条落盘路径。为 null 时是
+  /// **独立模式**（CLI 唤醒 / 任务列表进入）：确认时自己写盘
   final void Function(List<ReviewDecision> decisions)? onApply;
 
   /// 标签在这一页被改过时回调（**内嵌模式必须接**）。
   ///
   /// 为什么不让审核页自己写盘：内嵌时工作台开着同一条任务，两边都是整份
   /// 任务对象落库，谁后写谁赢——不交回去的话，人在这里改的标签会被工作台
-  /// 的下一次保存抹掉。为 null 时是独立模式，自己持锁自己写。
+  /// 的下一次保存抹掉。为 null 时是独立模式，自己写。
   final void Function(List<SemanticUnit> units)? onTagsChanged;
 
   /// 测试注入：假播放器（真实现碰 libmpv）、假素材解析、假抽帧
@@ -79,11 +84,20 @@ class ReviewPage extends ConsumerStatefulWidget {
 }
 
 class _ReviewPageState extends ConsumerState<ReviewPage> {
+  /// 这一页手上的那份任务。**不是 `widget.task`**——进门那一刻的快照
+  /// 过一会儿就旧了：人开着这一页的时候 CLI 照样在写盘（`apply plans`
+  /// 被这一页回了 `unsupported` 之后，它就是自己写的），新候选落在盘上，
+  /// 而这一页还按老样子判「这一页上没有这些候选」。见 [_reloadIfStale]
+  late RenewTask _task = widget.task;
+
+  /// 上一次读到这份数据时盘上的指纹。对不上 = 这期间有人写过
+  String? _taskPrint;
+
   /// 单元列表的**可变副本**：审核页能就地改标签，改完这里先变，
   /// 再按模式落库（内嵌模式交回工作台，独立模式自己写盘）
   late List<SemanticUnit> _units = [...(widget.task.units ?? const [])];
 
-  late final List<ReviewItem> _items =
+  late List<ReviewItem> _items =
       collectReviewItems(widget.task.replacementsFor(_units));
 
   /// 被剔除的候选。默认空 = 全保留：审核是把不要的挑出来
@@ -105,20 +119,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 原片段落的首帧图（分组 id → 本地 jpg）。抽出来一张补一张
   final Map<String, String> _originThumbs = {};
 
-  /// 独立模式的会话锁。**进门就持**：审核期间任务就是「人在处理」，
-  /// Agent 这时的写入要被拒（互斥是双向的——反过来 Agent 在处理时，
-  /// 这里进不来，见 [_blockedBy]）。工作台内嵌模式不碰锁：那是同一次会话
-  TaskLockFile? _lock;
-  Timer? _lockHeartbeat;
-  static String get _holder => '人（审核中）';
-
-  /// 进门时锁在**另一个界面**手里：显示是谁、给强制接管。
-  /// Agent 持锁不走这条路——见 [_agent]
-  String? _blockedBy;
-
-  /// Agent 此刻在这个任务上做什么。非 null = 它在干活：
-  /// 页面转成**只读跟随**（照常显示候选、滚到它动的那张卡），
-  /// 而不是拦成一张空白页——可视模式下人正是为了看它干活才打开这一页的
+  /// Agent 此刻在这个任务上做什么。非 null = 它在干活：页面**跟着它走**
+  /// （滚到它动的那张卡），但人照样能自己上手——打开这一页从来不需要
+  /// 先「取得」什么，它就是打开
   AgentPresence? _agent;
   Timer? _agentPoll;
 
@@ -134,7 +137,10 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void initState() {
     super.initState();
-    if (widget.onApply == null) _acquireSessionLock();
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir != null) {
+      _taskPrint = taskFingerprint(dataDir, widget.task.id);
+    }
     _loadOriginThumbs();
     _watchAgent();
   }
@@ -150,23 +156,83 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
-      _handleDelegated(dataDir);
+      unawaited(_handleDelegated(dataDir));
       _followAgent(dataDir);
     });
   }
 
-  void _handleDelegated(Directory dataDir) {
+  /// 正在服务一张代办单。**轮询是 500ms 一次、而服务这件事要等一次重读**
+  /// ——不挡一下的话，下一轮会从同一个目录再取走一张单子并发地做
+  bool _serving = false;
+
+  Future<void> _handleDelegated(Directory dataDir) async {
+    if (_serving) return;
     final request =
         consumeAgentRequest(dataDir: dataDir, taskId: widget.task.id);
     if (request == null) return;
+    _serving = true;
+    try {
+      // **先对一眼盘**：单子上点的候选可能是这一页打开之后才落盘的
+      await _reloadIfStale(dataDir);
+      if (!mounted) return;
+      _serveDelegated(dataDir, request);
+    } finally {
+      _serving = false;
+    }
+  }
+
+  /// 盘上那份比手上这份新的话，重读一次并把派生视图全部重算。
+  ///
+  /// **按内容指纹判定，不看「Agent 在不在场」**：在场是 500ms 轮询出来的，
+  /// 窗口里照样对不上（`doc_watch.dart` 里那两条真机教训同源）。
+  ///
+  /// **只在独立模式做。** 内嵌模式下工作台才是这条任务的写入方，它手上
+  /// 那份比盘上新（自动保存有 800ms 防抖），这时重读盘会把人刚拖的边界
+  /// 挤掉——那是拿一个新问题换掉旧问题。
+  Future<void> _reloadIfStale(Directory dataDir) async {
+    if (widget.onApply != null) return;
+    final now = taskFingerprint(dataDir, widget.task.id);
+    if (now == _taskPrint) return;
+    final fresh =
+        await ref.read(taskRepositoryProvider).findById(widget.task.id);
+    if (!mounted) return;
+    // 读不到（在这期间被删了）就保持原样：不拿旧的冒充新的，也不在这里
+    // 报错——「任务不见了」这一页有自己的出口（落库时 saved == null）
+    if (fresh == null) return;
+    setState(() {
+      _taskPrint = now;
+      _adoptTask(fresh);
+    });
+    unawaited(_loadOriginThumbs());
+  }
+
+  /// 换上新读到的那份，派生视图**全部重算**——漏掉一个就会出现
+  /// 「卡片是新的、分组还是旧的」这种更难查的错位
+  void _adoptTask(RenewTask fresh) {
+    _task = fresh;
+    _units = [...(fresh.units ?? const [])];
+    _items = collectReviewItems(fresh.replacementsFor(_units));
+    _previewKeys = _buildPreviewKeys();
+    _sections = _buildSections();
+    // 剔除是这一页的临时状态。盘上已经没有的那几张卡，标记跟着作废——
+    // 留着的话它会在下一次「确认」时对着一个不存在的位置生效
+    _dropped.removeWhere((k) => !_items.any((i) => keyOf(i) == k));
+  }
+
+  void _serveDelegated(Directory dataDir, AgentRequest request) {
     final keep = request.kind == 'review.keep';
     if (request.kind != 'review.drop' && !keep) {
+      // **带上 unsupported**：这句话说的是「人恰好开着审片台」，
+      // 不是「这件事做不成」。不带的话，`ishkafel export` 会因为
+      // 「人在审片台上看这条任务」而失败——那正是这一批要杀的那句
+      // 「我做不了，因为软件那边不让」（见 [AgentRequestResult.unsupported]）
       writeAgentRequestResult(
           dataDir: dataDir,
           taskId: widget.task.id,
           id: request.id,
           ok: false,
-          message: '审核页不认识「${request.kind}」这件事');
+          unsupported: true,
+          message: '审片台接不了「${request.kind}」这件事——你自己做就行');
       return;
     }
     final decisions = [
@@ -249,59 +315,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         curve: Curves.easeOut);
   }
 
-  void _acquireSessionLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    if (!lock.acquire(_holder)) {
-      final holder = lock.read()?.holder;
-      // Agent 占着**不拦成空白页**：可视模式下人正是为了看它干活才打开
-      // 这一页的，拦掉等于把要看的东西挡在门外。转成只读跟随即可
-      // （见 [_followAgent]），它一收工这一页自动可操作
-      if (isGuiHolder(holder)) _blockedBy = holder ?? '别人';
-      return;
-    }
-    _lock = lock;
-    // 心跳让锁活着：审核可能一看十分钟，超时失效等于没锁
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
-  }
-
-  Future<void> _forceTakeover() async {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) {
-      // 测试环境才会走到：按钮点了必须有反应，不能静默吞掉
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前环境没有数据目录，无法接管')));
-      return;
-    }
-    // 抢锁是破坏性的：对方之后的写入会被拒绝。工作台的同名按钮有确认框，
-    // 这里必须同一套规矩
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('强制接管这个任务？'),
-        content: Text('「${_blockedBy ?? '对方'}」之后的保存会被拒绝，'
-            '它未落盘的改动可能丢失。确定要接管吗？'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('取消')),
-          FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('接管')),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    final lock = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    lock.forceTakeover(_holder);
-    setState(() => _blockedBy = null);
-    _lock = lock;
-    _lockHeartbeat = Timer.periodic(
-        const Duration(seconds: 20), (_) => lock.heartbeat(_holder));
-  }
-
   /// 给每个位置组的原片段落抽一张首帧图（取中点：两端常踩在转场上，
   /// 抽出来是糊的）。按任务缓存，抽过的直接用
   Future<void> _loadOriginThumbs() async {
@@ -311,7 +324,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       if (start == null || end == null) continue;
       // 取自原片的那些要有原片；取自素材的（底片固定过）不需要
       if (section.originCandidateId == null &&
-          widget.task.sourcePath == null) {
+          _task.sourcePath == null) {
         continue;
       }
       try {
@@ -353,8 +366,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   @override
   void dispose() {
     _agentPoll?.cancel();
-    _lockHeartbeat?.cancel();
-    _lock?.release(_holder);
     _hoverDebounce?.cancel();
     _hover.dispose();
     _scroll.dispose();
@@ -364,16 +375,18 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   // ---- 数据视图 ----
 
   PickedMaterial? _materialOf(int id) {
-    for (final m in widget.task.pickedMaterials) {
+    for (final m in _task.pickedMaterials) {
       if (m.id == id) return m;
     }
     return null;
   }
 
   /// 标了 ★ 的那些（预览版）：审核的人该知道哪条是 Agent 的首选
-  late final Set<String> _previewKeys = () {
+  late Set<String> _previewKeys = _buildPreviewKeys();
+
+  Set<String> _buildPreviewKeys() {
     final keys = <String>{};
-    final replacements = widget.task.replacementsFor(_units);
+    final replacements = _task.replacementsFor(_units);
     for (var u = 0; u < replacements.length; u++) {
       final r = replacements[u];
       if (r.wholeCandidateIds.isNotEmpty) {
@@ -385,11 +398,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       }
     }
     return keys;
-  }();
+  }
 
   /// 「本来的样子」该读哪个文件：底片固定过的单元读那条素材，其余读原片
   String? _originPathOf(int? candidateId) {
-    if (candidateId == null) return widget.task.sourcePath;
+    if (candidateId == null) return _task.sourcePath;
     final dataDir = ref.read(dataDirProvider);
     if (dataDir == null) return null;
     return TaskMedia(dataDir: dataDir, taskId: widget.task.id)
@@ -397,9 +410,11 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   }
 
   /// 位置分组（保持出现顺序）
-  late final List<_Section> _sections = () {
+  late List<_Section> _sections = _buildSections();
+
+  List<_Section> _buildSections() {
     final map = <String, _Section>{};
-    final units = widget.task.units ?? const [];
+    final units = _task.units ?? const [];
     for (final item in _items) {
       final id = '${item.unit}/${item.shot}';
       map.putIfAbsent(id, () {
@@ -439,7 +454,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       map[id]!.items.add(item);
     }
     return map.values.toList();
-  }();
+  }
 
   int get _droppedCount => _dropped.length;
 
@@ -525,16 +540,45 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       return;
     }
 
-    // 独立模式：锁在进门时已持有，这里直接写盘
+    // 独立模式：这一页自己写盘。**剔除算在 fresh 的方案上**——审的这几分钟
+    // 里 Agent 可能又往里加了候选，拿进门那一刻的快照算完整份写回去，
+    // 新加的会连同被剔的一起消失
     try {
-      final repo = ref.read(taskRepositoryProvider);
-      final current = await repo.findById(widget.task.id) ?? widget.task;
-      final units = current.units ?? const <SemanticUnit>[];
-      final pruned =
-          applyReviewDecisions(current.replacementsFor(units), decisions);
-      await repo.save(current.copyWith(
-          replacementsByUid: RenewTask.byUid(units, pruned),
-          updatedAt: DateTime.now()));
+      final updated = await humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actorReview,
+      ).apply(
+        taskId: widget.task.id,
+        op: 'review.prune',
+        note: '人在审片台确认了这一轮候选的去留',
+        edit: (fresh) {
+          final units = fresh.units ?? const <SemanticUnit>[];
+          final before = fresh.replacementsFor(units);
+          final pruned = applyReviewDecisions(before, decisions);
+          final materials = {for (final m in fresh.pickedMaterials) m.id: m};
+          return TaskEdit(
+            task: fresh.copyWith(
+                replacementsByUid: RenewTask.byUid(units, pruned)),
+            // 每条决定都带上素材本身的样子：只记 id 的话，Agent 看不出
+            // 人不要的是哪一类（见 [reviewDecisionFacts]）
+            before: {
+              'candidates': collectReviewItems(before).length,
+              'decisions': [
+                for (final d in decisions) reviewDecisionFacts(d, materials),
+              ],
+            },
+            after: {'candidates': collectReviewItems(pruned).length},
+          );
+        },
+      );
+      if (updated == null) {
+        if (mounted) setState(() => _error = taskMissingMessage);
+        return;
+      }
+      // **先看在不在，再碰 ref**：上面 await 了一次写盘，这期间页面可能
+      // 已经销毁，那时 `ref.read` 会抛 StateError
+      if (!mounted) return;
       await ref.read(taskListProvider.notifier).reload();
       if (!mounted) return;
       // 审核完回到来处——它不是终点站，主流程才是
@@ -556,25 +600,22 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
           backgroundColor: AppColors.surface,
           titleSpacing: 0,
           title: Row(children: [
-            TaskIdBadge(task: widget.task),
+            TaskIdBadge(task: _task),
             const SizedBox(width: AppSpacing.sm),
             Expanded(child: _titleText()),
           ]),
         ),
-        body: _blockedBy != null
-            ? _blockedState()
-            : (_items.isEmpty
-                ? const _EmptyState()
-                : Column(children: [
-                    // Agent 在干活 / 刚替人干完活：两种都要在最显眼处说出来。
-                    // 界面不说话，人只会以为软件自己乱跳
-                    if (_agent != null) _agentBanner(_agent!),
-                    if (_agent == null && _delegateNote != null)
-                      _delegateBanner(_delegateNote!),
-                    Expanded(child: _reviewBody()),
-                  ])),
-        bottomNavigationBar:
-            _items.isEmpty || _blockedBy != null ? null : _confirmBar(),
+        body: _items.isEmpty
+            ? const _EmptyState()
+            : Column(children: [
+                // Agent 在干活 / 刚替人干完活：两种都要在最显眼处说出来。
+                // 界面不说话，人只会以为软件自己乱跳
+                if (_agent != null) _agentBanner(_agent!),
+                if (_agent == null && _delegateNote != null)
+                  _delegateBanner(_delegateNote!),
+                Expanded(child: _reviewBody()),
+              ]),
+        bottomNavigationBar: _items.isEmpty ? null : _confirmBar(),
       );
 
   Widget _titleText() => Column(
@@ -586,7 +627,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
                   style: TextStyle(
                       fontSize: AppFontSize.emphasis,
                       fontWeight: FontWeight.w600)),
-              Text(widget.task.name,
+              Text(_task.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -653,7 +694,7 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 // 原片这一段打头：审核就是「原来是什么 → 换成什么」的对比
-                if (widget.task.sourcePath != null &&
+                if (_task.sourcePath != null &&
                     section.originStartMs != null &&
                     section.originEndMs != null) ...[
                   _originalCard(section),
@@ -722,7 +763,13 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 那个镜头的标签——摆另一层等于给人看一份跟这次检索无关的东西。
   Widget _tagRow(_Section section) {
     final tags = _tagsOf(section);
-    final editable = _agent == null && _blockedBy == null;
+    // Agent 正在动这一页时不让人同时改同一处：不是「没有权限」，
+    // 是两只手在同一个格子上互相抢——人改的会被下一次刷新盖掉，而他
+    // 看不见。**横幅上把这件事说出来**（见 [_agentBanner]），不能只是
+    // 把按钮藏起来。它一收工立刻恢复。
+    //
+    // 根因是这两个工作页整份落盘；改成按字段合并之后这道闸就不必存在了
+    final editable = _agent == null;
     return Padding(
       padding: const EdgeInsets.only(top: AppSpacing.xs),
       child: Wrap(
@@ -762,8 +809,8 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
   /// 搜完才发现是空的，那时也不知道是标签选错了。
   Future<void> _editTags(_Section section) async {
     final groups = section.shotIndex == null
-        ? widget.task.unitTagGroups
-        : widget.task.shotTagGroups;
+        ? _task.unitTagGroups
+        : _task.shotTagGroups;
     final picked = await showTagPicker(
       context,
       tags: ref.read(miaoaTagServiceProvider),
@@ -787,10 +834,93 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
       onTagsChanged(_units);
       return;
     }
-    // 独立模式：进门就持着锁，这份任务此刻归自己写
-    unawaited(ref
-        .read(taskRepositoryProvider)
-        .save(widget.task.copyWith(units: _units, updatedAt: DateTime.now())));
+    // 独立模式：这份任务此刻归自己写
+    if (section.unitIndex >= _units.length) return;
+    unawaited(_saveTags(_units[section.unitIndex].uid, section.unitIndex,
+        section.shotIndex, tags));
+  }
+
+  /// 把改好的标签落盘。**只动点名的那一个位置**——这一页手上的 `_units` 是
+  /// 进门那一刻的整份，整份写回去会把 Agent 这期间改的切分抹掉。
+  Future<void> _saveTags(String unitUid, int unitIndex, int? shotIndex,
+      List<String> tags) async {
+    try {
+      final saved = await humanMutation(
+        repo: ref.read(taskRepositoryProvider),
+        dataDir: ref.read(dataDirProvider),
+        actor: actorReview,
+      ).apply(
+        taskId: widget.task.id,
+        op: 'unit.tags',
+        where: {
+          'unitUid': unitUid,
+          'shotIndex': ?shotIndex,
+        },
+        note: shotIndex == null
+            ? '人在审片台改了这一段的检索标签'
+            : '人在审片台改了这一镜的检索标签',
+        edit: (fresh) {
+          final units = fresh.units ?? const <SemanticUnit>[];
+          // **按身份重新定位**，不能拿进门那一刻的下标当 fresh 的下标用。
+          // 还没发身份的单元（uid 是空串，老存档才有）没法按身份认领——
+          // 拿空串去找会命中「第一个也没有 uid 的」，那是别人家的标签。
+          // 这种只能退回按位置，而且不盖戳（戳认的就是身份）
+          final i = isUnitUid(unitUid)
+              ? units.indexWhere((u) => u.uid == unitUid)
+              : (unitIndex < units.length && !isUnitUid(units[unitIndex].uid)
+                  ? unitIndex
+                  : -1);
+          if (i < 0) {
+            return TaskEdit(
+              task: fresh,
+              before: {'present': false},
+              after: {'present': false, 'note': '这个单元在窗口内被删掉了'},
+            );
+          }
+          final unit = units[i];
+          if (shotIndex != null &&
+              (shotIndex < 0 || shotIndex >= unit.shots.length)) {
+            return TaskEdit(
+              task: fresh,
+              before: {'present': false},
+              after: {'present': false, 'note': '这一镜在窗口内没了（切分变过）'},
+            );
+          }
+          final before =
+              shotIndex == null ? unit.tags : unit.shots[shotIndex].tags;
+          return TaskEdit(
+            task: fresh.copyWith(units: [
+              for (var j = 0; j < units.length; j++)
+                if (j != i)
+                  units[j]
+                else if (shotIndex == null)
+                  unit.copyWith(tags: tags)
+                else
+                  unit.copyWith(shots: [
+                    for (var s = 0; s < unit.shots.length; s++)
+                      if (s == shotIndex)
+                        unit.shots[s].copyWith(tags: tags)
+                      else
+                        unit.shots[s],
+                  ]),
+            ]),
+            before: {'tags': before, 'transcript': unit.transcript},
+            after: {'tags': tags},
+            stampUnits:
+                shotIndex == null && isUnitUid(unitUid) ? [unitUid] : const [],
+            stampShots: shotIndex != null && isUnitUid(unitUid)
+                ? [ShotRef(unitUid, shotIndex)]
+                : const [],
+          );
+        },
+      );
+      if (saved == null && mounted) {
+        setState(() => _error = taskMissingMessage);
+      }
+    } catch (e) {
+      AppLog.warn('审片台改标签落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) setState(() => _error = '标签没存上：$e');
+    }
   }
 
   /// 这一段检索用的那一层标签
@@ -1077,9 +1207,16 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ),
       );
 
-  /// Agent 正在动这一页：说清它在做什么，并告诉人现在是只读。
+  /// Agent 正在动这一页：说清它在做什么，以及为什么这会儿改标签和
+  /// 「确认」都按不动。
   ///
-  /// 「它在做什么」这一句是可视模式的全部意义——只说「有人占着」等于没说
+  /// **两个都要说到**：只解释标签、不解释确认键，人点了确认没反应还是
+  /// 会以为软件坏了——那是「点了没反应」的另一种长相。
+  ///
+  /// 「它在做什么」这一句是可视模式的全部意义——只说「有人在」等于没说。
+  ///
+  /// **不许在这儿许诺「你能停掉它」**：软件不提供停掉 Agent 的能力，
+  /// 人要停它得去 Agent 那头说。这里只说事实：它一收工，入口自己回来。
   Widget _agentBanner(AgentPresence agent) => Container(
         width: double.infinity,
         padding: const EdgeInsets.symmetric(
@@ -1094,7 +1231,9 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${agent.holder} 正在这一页上操作，当前为只读',
+                Text('${agent.holder} 正在这一页上干活'
+                    '——它动着的时候，改标签和「确认」先按不动，'
+                    '免得你改的被它下一次刷新盖掉。它一收工，两个都自己回来',
                     style: const TextStyle(
                         fontSize: AppFontSize.caption,
                         color: AppColors.textSecondary)),
@@ -1137,36 +1276,6 @@ class _ReviewPageState extends ConsumerState<ReviewPage> {
         ]),
       );
 
-  /// 进门时锁在别人手里。互斥与工作台同一套长相：说清是谁、给强制接管
-  Widget _blockedState() => Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.lock_outline,
-                size: 40, color: AppColors.orange),
-            const SizedBox(height: AppSpacing.md),
-            Text('$_blockedBy 正在操作这个任务',
-                style: const TextStyle(
-                    fontSize: AppFontSize.body, color: AppColors.textPrimary)),
-            const SizedBox(height: AppSpacing.xs),
-            const Text('等它结束再进，或者强制接管（它那边的写入会被拒绝）',
-                style: TextStyle(
-                    fontSize: AppFontSize.caption,
-                    color: AppColors.textTertiary)),
-            const SizedBox(height: AppSpacing.md),
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('返回')),
-              const SizedBox(width: AppSpacing.sm),
-              FilledButton(
-                  key: const Key('review-takeover'),
-                  onPressed: _forceTakeover,
-                  child: const Text('强制接管')),
-            ]),
-          ],
-        ),
-      );
 }
 
 /// 审核结果（pop 回来处时带上，来处弹条提示用）

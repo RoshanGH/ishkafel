@@ -29,8 +29,18 @@ void main() {
     final rest = src.substring(from);
     final next = RegExp(r'\nFuture<int> ').firstMatch(rest);
     final extract = next == null ? rest : rest.substring(0, next.start);
-    expect(extract, contains('defaultVoiceId: baseline'),
-        reason: '音色是必选项——没有它，后面每一步的时长都是空的');
+    // Task 6 把这里的写入改走 TaskMutation：落盘那一刻改成
+    // `fresh.script?.defaultVoiceId ?? baseline`——fresh 已经有默认音色时
+    // 保留那个（可能是拿锁期间人自己定的），没有才补 baseline。行为比原来
+    // 「一律用计算好的 baseline 覆盖」更对，但「没有默认音色时一定会补上
+    // 一个」这条不变量没变。
+    //
+    // 断言钉死这个精确表达式，不是只看 `?? baseline` 这个子串在哪儿
+    // 出现——那个子串在这段函数体里随便一处都能过，等于没守住东西
+    // （2026-09-17 评审指出这条断言被放松了）
+    expect(extract, contains('defaultVoiceId: fresh.script?.defaultVoiceId ?? baseline'),
+        reason: '音色是必选项——没有它，后面每一步的时长都是空的；'
+            'fresh 已经有默认音色时要保留它，不能一律用算好的 baseline 覆盖');
     expect(extract, contains('趁还没配音赶紧换'),
         reason: '定了默认不等于不能改，但要说清「配完再换要重配一轮」');
   });

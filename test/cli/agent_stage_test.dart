@@ -33,6 +33,42 @@ void main() {
         run: fakeOpen,
       );
 
+  /// **在场状态是有保质期的**（60 秒），而上报是**按步**发生的，不是按时间。
+  /// 人声分离那一步常跑几分钟一声不吭——于是「它还在干活」这个事实会在最该
+  /// 成立的那几分钟里过期：界面横幅闪回「没人在」，`analyze` 的「别把同一条
+  /// 管线跑两遍」也跟着失灵。**而调用方超时重试恰恰最容易发生在最长的那段
+  /// 等待里**，正是那道劝告要拦的场面。
+  ///
+  /// 所以在场状态要有自己的心跳（原来那把锁的 20 秒续命 Timer，换个名义跑）。
+  test('长活儿中途一声不吭时，在场状态靠心跳续着，不会过期', () async {
+    final s = AgentStage(
+      mode: AgentStageMode.silent,
+      dataDir: dir,
+      taskId: 't1',
+      pulseEvery: const Duration(milliseconds: 30),
+    );
+    s.note('正在分离人声');
+    final first = readAgentPresence(dataDir: dir, taskId: 't1')!.at;
+
+    // 这期间一步都不报——真机上就是人声分离那几分钟
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    final later = readAgentPresence(dataDir: dir, taskId: 't1')!;
+    expect(later.at.isAfter(first), isTrue,
+        reason: '没有心跳的话，60 秒后这条在场状态就过期了——'
+            '而那正是它最该成立的时候');
+    expect(later.action, '正在分离人声',
+        reason: '心跳原样重发，不该让界面以为它换了一步');
+
+    s.end();
+    final atEnd = readAgentPresence(dataDir: dir, taskId: 't1');
+    expect(atEnd, isNull, reason: '收工要撤干净');
+    // 收工之后心跳必须停：不停的话它会把刚撤掉的状态又写回来
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(readAgentPresence(dataDir: dir, taskId: 't1'), isNull,
+        reason: 'end() 没停掉心跳的话，撤下去的状态会被心跳写回来');
+  });
+
   test('静默模式：不弹窗、不写在场状态——那条路径要保持原来的速度', () async {
     await stage(AgentStageMode.silent).begin('挑镜头');
     expect(launched, isEmpty);

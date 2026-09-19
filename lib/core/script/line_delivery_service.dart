@@ -201,8 +201,8 @@ class LineDeliveryService {
         'endMs': request.endMs,
       }));
     } catch (e) {
-      // 写不进去只是下次要重花一次钱，不该让这一句配音失败
-      AppLog.warn('念法缓存写不进去（line=${request.lineId}）：$e');
+      // 没写成只是下次要重花一次钱，不该让这一句配音失败
+      AppLog.warn('念法缓存没写成（line=${request.lineId}）：$e');
     }
   }
 }

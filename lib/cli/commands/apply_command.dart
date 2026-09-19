@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../core/analysis/tag_merge.dart';
 import '../../core/models/semantic_unit.dart';
 import 'dart:io';
 import '../frame_check_wiring.dart';
@@ -6,9 +7,10 @@ import '../frame_check_wiring.dart';
 import 'package:path/path.dart' as p;
 
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../app/service_wiring.dart';
 import '../../core/models/renew_task.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../task_view.dart';
@@ -26,14 +28,11 @@ import '../../core/miaoa/miaoa_content_service.dart';
 import '../../core/ffmpeg/process_runner.dart';
 import '../../core/storage/task_media.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
-import '../../core/storage/ui_wake.dart';
-import '../../core/storage/ui_where.dart';
 import '../cli_output.dart';
-import '../gui_lock_guidance.dart';
+import '../delegate.dart';
 import '../plan_submission.dart';
 
 /// `ishkafel apply plans <task> --file <json>`（也支持从 stdin 读）
@@ -78,53 +77,46 @@ Future<int> runApplyCommand({
     return exitNotFound;
   }
 
-  // 别人正持着锁就不写——两边同时写会互相覆盖，而且悄无声息
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    final current = lock.read();
-    // **界面占着锁不是冲突，是委派的时机**：可视模式要求界面停在这个任务上，
-    // 而写入要求界面不能停在这个任务上——于是最该让人看见的一步（提交方案，
-    // 成片长什么样就是这一步定的），恰恰因为「人在看」而做不了。
-    // 以前给的出路是「让界面挪开」，那等于让人别看。
-    if (what == 'plans' && isGuiHolder(current?.holder)) {
-      return await _applyPlansViaUi(
-        dataDir: dataDir,
-        task: task,
-        file: file,
-        readStdin: readStdin,
-        sink: sink,
-        out: out,
-      );
-    }
-    sink.writeln(guiLockGuidance(
-        holder: current?.holder, taskId: task.id));
-    return exitLocked;
-  }
-
-  try {
-    return await _applyWithLock(
-      contentService: contentService,
-      candidateProbe: candidateProbe,
-      what: what,
-      id: id,
+  // **提交方案一律走委派这条路。**
+  //
+  // 「人在界面上看着」曾经是这一步的障碍：界面占着锁，而提交方案恰恰是
+  // 最该让人看见的一步（成片长什么样就是它定的），于是最该看的时候反而
+  // 做不了，给出的出路还是「让人别看」。现在反过来——界面在这条任务上
+  // 就请它代办（人看着方案落进去），不在就零等待自己写。
+  // 两条路落的是同一份 `_commitPlans`，不会有第二套算法。
+  if (what == 'plans') {
+    return _applyPlansViaUi(
+      dataDir: dataDir,
       task: task,
       file: file,
       readStdin: readStdin,
-      dataDir: dataDir,
-      repository: repository,
       sink: sink,
       out: out,
-      visual: visual,
-      holder: holder,
+      contentService: contentService,
+      candidateProbe: candidateProbe,
     );
-  } finally {
-    // 命令跑完立刻还锁。不还的话要等心跳超时 60 秒，这期间人在 app 里
-    // 打开这个任务只能看不能改，还不知道为什么
-    lock.release(holder ?? agentLockHolder);
   }
+
+  return _applyDirect(
+    what: what,
+    id: id,
+    task: task,
+    file: file,
+    readStdin: readStdin,
+    dataDir: dataDir,
+    repository: repository,
+    sink: sink,
+    out: out,
+    visual: visual,
+    holder: holder,
+  );
 }
 
-Future<int> _applyWithLock({
+/// `segment` / `tags`：外包出去的**判断**回填进来。
+///
+/// `plans` 不走这里——它统一走 [_applyPlansViaUi]（界面在就委派、不在就
+/// 自己写），**收素材与画面自查因此物理上只有一处**
+Future<int> _applyDirect({
   required String what,
   required String id,
   required RenewTask task,
@@ -136,9 +128,6 @@ Future<int> _applyWithLock({
   required StringSink? out,
   bool? visual,
   String? holder,
-  MiaoaContentService? contentService,
-  CandidateProbe? candidateProbe,
-  Future<FrameCheck> Function(int id)? frameCheckOf,
 }) async {
   final String raw;
   try {
@@ -164,7 +153,7 @@ Future<int> _applyWithLock({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   if (what == 'segment') {
     await stage.begin('正在应用切分',
@@ -176,51 +165,100 @@ Future<int> _applyWithLock({
       stage.end();
     }
   }
-  if (what == 'tags') {
-    await stage.begin('正在应用标签',
-        focus: const AgentFocus(module: 'workbench'));
-    try {
-      return await _applyTags(
-          decoded, task, dataDir, repository, sink, out ?? stdout);
-    } finally {
-      stage.end();
-    }
+  await stage.begin('正在应用标签',
+      focus: const AgentFocus(module: 'workbench'));
+  try {
+    return await _applyTags(
+        decoded, task, dataDir, repository, sink, out ?? stdout);
+  } finally {
+    stage.end();
   }
+}
 
-  final validation = parsePlans(decoded, task);
-  if (!validation.ok) {
-    for (final problem in validation.errors) {
-      sink.writeln('· $problem');
-    }
-    return exitBadUsage;
-  }
+/// 等界面代办最多等多久。**内层等回执比它短**（见 `withdrawBefore`）：
+/// 短的那一下 `viaUi` 才有机会把单子收回来，否则外层先到、我们自己写完了，
+/// 单子还挂在盘上，界面随时取走再做一遍
+const Duration _delegateTimeout = Duration(seconds: 2);
 
-  _writePlans(dataDir, id, raw);
+/// 落盘方案：**直写路径**（界面不在这条任务上）和**委派兜底**（界面在、
+/// 但没跟上）共用同一份——避免同一件事两处算
+Future<int> _commitPlans({
+  required Directory dataDir,
+  required RenewTask task,
+  required FileTaskRepository repository,
+  required String raw,
+  required List<SubmittedPlan> plans,
+  required List<PickedMaterial> picked,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  _writePlans(dataDir, task.id, raw);
   final units = task.units ?? const <SemanticUnit>[];
-  final replacements = projectPlansToReplacements(validation.plans, units);
-
-  final picked = await gatherPickedMaterials(
-    replacements: replacements,
-    task: task,
-    dataDir: dataDir,
-    contentService: contentService,
-    candidateProbe: candidateProbe,
-    frameCheckOf: frameCheckOf,
-  );
+  final replacements = projectPlansToReplacements(plans, units);
 
   // 同步投影成任务的替换现状：审核页读的是它——不投影的话，
-  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）
-  await repository.save(task.copyWith(
-      // 按单元的身份落库：这份投影本来就是「哪个单元用哪几条素材」
-      replacementsByUid: RenewTask.byUid(units, replacements),
-      pickedMaterials: picked));
+  // 纯 CLI 流程里 `ishkafel review` 永远无东西可审（真机踩过）。
+  //
+  // **按 uid 合并，不整份替换**（2026-09-17 评审纠正：整份替换的理由
+  // 「按 uid 合并会让人删过的方案复活」站不住——整份替换同样会让它复活
+  // （byUid 里那条旧方案照样在），而且额外还会抹掉人在这段窗口里给
+  // 新单元建的方案。按 uid 合并再按 fresh 的活 uid 过滤，在每一种情形下
+  // 都不劣于整份替换，严格更好）：merge 完之后把 fresh 里已经不存在的
+  // uid 过滤掉，不留孤儿方案。pickedMaterials 同理按素材 id 合并。
+  final byUid = RenewTask.byUid(units, replacements);
+  final updated = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'plans.apply',
+    edit: (fresh) {
+      final liveUids = {for (final u in fresh.units ?? const []) u.uid};
+      final mergedReplacements = {...fresh.replacementsByUid, ...byUid}
+        ..removeWhere((uid, _) => !liveUids.contains(uid));
+      final mergedPicked = {
+        for (final m in fresh.pickedMaterials) m.id: m,
+        for (final m in picked) m.id: m,
+      }.values.toList();
+      return TaskEdit(
+        task: fresh.copyWith(
+          replacementsByUid: mergedReplacements,
+          pickedMaterials: mergedPicked,
+        ),
+        before: {
+          'replacedUnits': fresh.replacementsByUid.length,
+          'materials': fresh.pickedMaterials.length,
+        },
+        after: {
+          'replacedUnits': mergedReplacements.length,
+          'materials': [
+            for (final m in picked)
+              {
+                'id': m.id,
+                'name': m.name,
+                'sceneDescription': m.sceneDescription,
+                'durationMs': m.durationMs,
+                'burnedText': m.burnedText,
+                'productBrand': m.productBrand,
+              },
+          ],
+        },
+      );
+    },
+  );
+  if (updated == null) {
+    sink.writeln('这条任务在提交方案的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   emitJson({
     'ok': true,
     ...planApplyReport(
-        plans: validation.plans,
+        plans: plans,
         picked: picked,
-        task: task,
-        shortSlots: shortSlotsOf(task)),
+        task: updated,
+        shortSlots: shortSlotsOf(updated)),
   }, out: out);
   return 0;
 }
@@ -387,16 +425,31 @@ Future<int> _applySegment(
     return 1;
   }
 
+  // 组装是纯计算：drafts/prepared 都是已经拿到手的数据，没有 IO——
+  // 可以放心整段塞进 TaskMutation 的 edit 闭包
   final units = pipeline.assemble(
       task: task, drafts: parsed.drafts, prepared: state.prepared);
-  final ready = task.copyWith(
-    units: units,
-    status: RenewTaskStatus.ready,
-    asrSentences: state.prepared.sentences,
-    vocalsPath: state.prepared.vocalsPath,
-    backgroundPath: state.prepared.backgroundPath,
+  final mutation = TaskMutation(
+      repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+  final ready = await mutation.apply(
+    taskId: task.id,
+    op: 'units.assemble',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(
+        units: units,
+        status: RenewTaskStatus.ready,
+        asrSentences: state.prepared.sentences,
+        vocalsPath: state.prepared.vocalsPath,
+        backgroundPath: state.prepared.backgroundPath,
+      ),
+      before: {'unitCount': fresh.units?.length ?? 0, 'status': fresh.status.name},
+      after: {'unitCount': units.length, 'status': RenewTaskStatus.ready.name},
+    ),
   );
-  await repository.save(ready);
+  if (ready == null) {
+    err.writeln('这条任务在应用切分的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
 
   final stillPending = {...state.pending}..remove(ExternalStep.segment);
   saveAnalysisState(dataDir, task.id,
@@ -417,9 +470,58 @@ Future<int> _applySegment(
   }
 
   err.writeln('切分已应用（${units.length} 个单元），开始内置打标');
+  // 打标是网络请求：做完拿到结果再进第二次独立的 apply，
+  // 不能把它塞进上面那次 edit——重跑一次 edit 就是把打标又算一遍
   final tagged = await pipeline.tagging.tag(ready, units);
-  final done = ready.copyWith(units: tagged);
-  await repository.save(done);
+  final done = await mutation.apply(
+    taskId: task.id,
+    op: 'units.tag.auto',
+    edit: (fresh) {
+      // **合并标签，不整份替换单元**：tagged 是打标开始那一刻（ready）的
+      // 快照打出来的结果，打标是分钟级的网络活儿——这段窗口里人在界面上
+      // 拖过的边界、改过的台词、动过的镜头、手打的标签，如果整份换成
+      // tagged 里对应的单元对象就会被悄悄盖回打标开始那一刻的旧版本。
+      // 这正是 one_task_writer_test.dart 文档里五次事故的第一条：
+      // 「管线打标 vs 工作台编辑：打标结束整份存回打标开始那一刻的快照，
+      // 人在这七成时间里拖的边界全没了」——这里就是那个原型场景。
+      //
+      // 项目里已经有一份为这个场景写的合并：mergeTagsInto——按 uid 配对、
+      // 边界一模一样才认（边界变过的单元这份标签是照旧边界打的，安上去
+      // 就是错的）、当前已经有标签的不覆盖（人手改的比这份旧结果新）。
+      // 不在这里另写一份更弱的合并——那正是这批改造要消灭的「同一件事
+      // 两处算」。
+      final freshUnits = fresh.units;
+      // units 本来是 null（没分析过）时绝不能悄悄变成 []——那是另一个
+      // 事实（task_mutation.dart 的 _stamp 对同一条原则也有一句注释）。
+      // 正常流程走不到这里（上一次 apply 已经把 units 落成非空列表），
+      // 纯防御
+      if (freshUnits == null) {
+        return TaskEdit(
+          task: fresh,
+          before: {'unitCount': 0},
+          after: {'unitCount': 0, 'note': 'units 是 null（没分析过），无标签可合并'},
+        );
+      }
+      final merged = mergeTagsInto(freshUnits, tagged);
+      // 真正变了标签的 uid：跟 mergeTagsInto 判定「要不要真的动一下」
+      // 用同一条判据（tag_merge.dart 导出的 unitTagsChanged）——不能只比
+      // 单元级 tags，镜头标签是这次填上的、单元级 tags 没动（人手打过、
+      // 不被覆盖）时也算「这个单元真的变了」，只看单元级会漏报
+      final taggedUids = [
+        for (var i = 0; i < freshUnits.length && i < merged.length; i++)
+          if (unitTagsChanged(freshUnits[i], merged[i])) merged[i].uid,
+      ];
+      return TaskEdit(
+        task: fresh.copyWith(units: merged),
+        before: {'unitCount': freshUnits.length},
+        after: {'unitCount': merged.length, 'taggedUnits': taggedUids},
+      );
+    },
+  );
+  if (done == null) {
+    err.writeln('这条任务在打标的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
@@ -453,8 +555,24 @@ Future<int> _applyTags(
     return exitBadUsage;
   }
 
-  final done = task.copyWith(units: parsed.units);
-  await repository.save(done);
+  final done = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: task.id,
+    op: 'units.tag.import',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(units: parsed.units),
+      before: {'unitCount': fresh.units?.length ?? 0},
+      after: {'unitCount': parsed.units.length},
+    ),
+  );
+  if (done == null) {
+    err.writeln('这条任务在应用标签的过程中被删掉了：${task.id}');
+    return exitNotFound;
+  }
   clearAnalysisState(dataDir, task.id);
   emitJson(taskToJson(done), out: out);
   return 0;
@@ -480,10 +598,10 @@ Future<String> _readStdin() async =>
     await stdin.transform(utf8.decoder).join();
 
 
-/// 请界面去提交方案——**人不用挪开，还能眼看着方案落到时间线上**。
-///
-/// 与新建任务走同一条委派通道（`AgentRequest`）：下单 → 界面真的去做 →
-/// 回执配对。界面那头做的和人自己点是同一件事，不另造一套只读展示。
+/// 委派是首选路径，不是必经之路（见 `delegate.dart`）：界面确实停在这条
+/// 任务上就请它代办——**人不用挪开，还能眼看着方案落到时间线上**；
+/// 界面没跟上（不在这条任务上、或者接了单没应）就自己直写，零等待或
+/// 秒级兜底，绝不因为可视化掉线就卡住。
 Future<int> _applyPlansViaUi({
   required Directory dataDir,
   required RenewTask task,
@@ -494,6 +612,7 @@ Future<int> _applyPlansViaUi({
   MiaoaContentService? contentService,
   CandidateProbe? candidateProbe,
   Future<FrameCheck> Function(int id)? frameCheckOf,
+
 }) async {
   final String raw;
   try {
@@ -505,18 +624,24 @@ Future<int> _applyPlansViaUi({
     return exitBadUsage;
   }
 
-  // **素材在这一头收，不在界面那头收**：探时长要 ffprobe、看画面要 AI 凭据，
-  // 这些都在命令行这边。界面只负责把方案投影出来给人看。
+  // **素材在这一头收，不管最后走哪条路**：探时长要 ffprobe、看画面要
+  // AI 凭据，这些都在命令行这边；委派给界面时投影给人看，自己直写时
+  // 直接用来落盘——同一份准备工作，不能因为走委派就漏、也不能因为
+  // 秒级兜底赶时间就重算一遍（gatherPickedMaterials 本身可能要跑
+  // 几十次 AI 调用，放进 2 秒超时的窗口里只会让委派形同虚设）。
   //
   // 一度只把 raw 递过去就完事——于是委派这条路上取段全失效（用不到素材
   // 时长）、画面自查一次不跑，出现了最难发现的组合：**人在旁边看着的时候，
   // 检查反而不做**，而那正是他最信任的一次。
+  //
+  // validation 拿不到有效结果时**不能悄悄当成空方案**——那会让秒级兜底
+  // 直写一份「什么都没改」的方案，报 ok:true，而真实原因是解析失败
+  PlanValidation validation =
+      const PlanValidation(errors: ['方案内容解析失败']);
   List<PickedMaterial> picked = task.pickedMaterials;
-  List<SubmittedPlan> plans = const [];
   try {
-    final validation = parsePlans(jsonDecode(raw), task);
+    validation = parsePlans(jsonDecode(raw), task);
     if (validation.ok) {
-      plans = validation.plans;
       picked = await gatherPickedMaterials(
         replacements:
             projectPlansToReplacements(validation.plans, task.units ?? const []),
@@ -528,69 +653,94 @@ Future<int> _applyPlansViaUi({
       );
     }
   } catch (e) {
-    // 方案本身有问题的话，界面那头会给出准确的报错——这里不抢话。
-    // 收不到素材也照样递过去：让界面报「哪一条不合格」比这里含糊地失败强
+    // 方案本身有问题的话，界面那头会给出准确的报错——这里不抢话，
+    // 委派那条路继续把 raw 递过去；走到自己直写那条路时，上面那个
+    // 占位的 validation 会让它老实拒绝，而不是当空方案悄悄写过去
     stderr.writeln('提交前没能把素材收齐（$e）——'
         '取段和画面自查这一轮会缺，方案本身照常提交');
   }
 
-  // **委派之前先确认界面真的停在这条任务上。**
-  //
-  // 界面的锁**不会自己放**：人打开过这个任务、后来退回了列表，锁还留着。
-  // 于是上面判定「界面占着锁」而走到这条委派路，但请求是发给**那条任务的
-  // 工作页**的——列表页不接，结果干等 90 秒超时，报「界面没有回应」。
-  // 先把界面叫回来，再递方案。
-  if (readUiWhere(dataDir)?.isOnTask(task.id) != true) {
-    sink.writeln('· 界面不在这条任务上，先把它叫回来');
-    writeUiWake(dataDir, task.id, review: false);
-    final deadline = DateTime.now().add(const Duration(seconds: 15));
-    while (DateTime.now().isBefore(deadline)) {
-      if (readUiWhere(dataDir)?.isOnTask(task.id) == true) break;
-      await Future<void>.delayed(const Duration(milliseconds: 200));
-    }
-  }
-
-  sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
-  final id = writeAgentRequest(
+  return delegateOrDoItYourself<int>(
     dataDir: dataDir,
     taskId: task.id,
-    kind: UiAction.plansApply.wire,
-    payload: {
-      'raw': raw,
-      'pickedMaterials': [for (final m in picked) m.toJson()],
+    timeout: _delegateTimeout,
+    viaUi: () async {
+      sink.writeln('这个任务的页面正开着，已请界面代为提交——人能看着方案落进去…');
+      final id = writeAgentRequest(
+        dataDir: dataDir,
+        taskId: task.id,
+        kind: UiAction.plansApply.wire,
+        payload: {
+          'raw': raw,
+          'pickedMaterials': [for (final m in picked) m.toJson()],
+        },
+      );
+      final result = await waitForAgentRequest(
+          dataDir: dataDir,
+          taskId: task.id,
+          id: id,
+          timeout: withdrawBefore(_delegateTimeout));
+      if (result == null) {
+        // **把单子收回来**：外层超时之后我们会自己干，而这张单子还挂在盘上
+        // ——界面过一会儿取走再做一遍的话，人看到两份（见 withdrawBefore）
+        consumeAgentRequest(dataDir: dataDir, taskId: task.id);
+        return null; // 没应，交给自己直写
+      }
+      // **「这一页接不了」不是失败，是「人恰好开着另一页」。**
+      //
+      // 判「该不该委派」的 `delegateOrDoItYourself` 只问「界面在不在这条
+      // 任务上」，问不了「这一页能不能接这个动作」。于是人开着审片台看这条
+      // 任务时，导出/提交方案会收到审片台那句「我不认识这件事」——把它当
+      // 真失败往上抛，Agent 得到的就是「我做不了，因为软件那边不让」，
+      // 而理由竟然是人开着另一页。那正是这一批要杀的那句话。
+      //
+      // 所以 unsupported 走和「没应」同一条路：自己干。
+      if (result.unsupported) {
+        sink.writeln('界面现在那一页接不了提交方案（${result.message}），'
+            '我自己写。');
+        return null;
+      }
+      if (!result.ok) {
+        // 这是界面**真的试了、只是没做成**——不是「没应」，不兜底，
+        // 原样把拒绝理由带回去
+        sink.writeln('没提交成功：${result.message}');
+        return exitFailed;
+      }
+      emitJson({
+        'ok': true,
+        'via': 'ui',
+        'message': result.message,
+        ...result.payload,
+        // **和直写给出同一份报告**。不给的话就出现了最别扭的一种缺口：
+        // 检查跑了、界面上那条橙色警告也报了，**只有 Agent 拿不到**——
+        // 而委派正是人在旁边看着时走的那条路，人扭头问「它刚才说啥了」，
+        // Agent 答不上来
+        ...planApplyReport(
+            plans: validation.plans,
+            picked: picked,
+            task: task,
+            shortSlots: shortSlotsOf(task)),
+      }, out: out);
+      return 0;
+    },
+    myself: () async {
+      if (!validation.ok) {
+        for (final problem in validation.errors) {
+          sink.writeln('· $problem');
+        }
+        return exitBadUsage;
+      }
+      sink.writeln('界面不在这条任务上（或没跟上），直接自己提交…');
+      return _commitPlans(
+        dataDir: dataDir,
+        task: task,
+        repository: FileTaskRepository(dataDir),
+        raw: raw,
+        plans: validation.plans,
+        picked: picked,
+        sink: sink,
+        out: out,
+      );
     },
   );
-  final result = await waitForAgentRequest(
-      dataDir: dataDir,
-      taskId: task.id,
-      id: id,
-      // 界面要真的把方案投影上去、人还得看得见，给足时间
-      timeout: const Duration(seconds: 90));
-  if (result == null) {
-    // 超时是真失败：活儿没干。报成功的话人会以为方案提交上去了
-    sink.writeln('界面没有回应（等了 90 秒）。'
-        '让用户看一眼那个页面；或者用 ishkafel ui open ${task.id} '
-        '把界面带回这条任务再跑一次');
-    return exitEnv;
-  }
-  if (!result.ok) {
-    sink.writeln('没提交成功：${result.message}');
-    return exitFailed;
-  }
-  emitJson({
-    'ok': true,
-    'via': 'ui',
-    'message': result.message,
-    ...result.payload,
-    // **和直写给出同一份报告**。不给的话就出现了最别扭的一种缺口：
-    // 检查跑了、界面上那条橙色警告也报了，**只有 Agent 拿不到**——
-    // 而委派正是人在旁边看着时走的那条路，人扭头问「它刚才说啥了」，
-    // Agent 答不上来
-    ...planApplyReport(
-        plans: plans,
-        picked: picked,
-        task: task,
-        shortSlots: shortSlotsOf(task)),
-  }, out: out);
-  return 0;
 }

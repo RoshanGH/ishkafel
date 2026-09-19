@@ -6,11 +6,16 @@ import 'agent_broadcast.dart';
 import 'package:path/path.dart' as p;
 
 import '../log/app_log.dart';
-import 'task_lock.dart';
+
+/// 心跳停多久算「不在场」。
+///
+/// **必须能自愈**：Agent 可能崩溃、被 kill、断电。没有这条，界面会一直
+/// 以为有人在动这个任务，横幅永远挂着。
+const Duration defaultStaleAfter = Duration(seconds: 60);
 
 /// Agent 此刻在这个任务上**干什么、看哪儿**。
 ///
-/// 任务锁只回答「谁占着」，不够——用户要的是看得懂它在动什么：
+/// 「谁在动这个任务」这一条不够——用户要的是看得懂它在动什么：
 ///
 /// > 它选中第 10 行，那就跟人一样把第 10 行放到界面中间；它去调某一镜的
 /// > 时长或变速，那个面板就打开，跟人自己点开去调的时候是一样的。
@@ -18,8 +23,8 @@ import 'task_lock.dart';
 /// **焦点必须由 Agent 主动上报**，不能靠界面从数据变化里猜：它可能读了半天
 /// 才动手，也可能一次改好几行——人在旁边看的是**过程**，不是结果差异。
 ///
-/// 与任务锁同一条自愈规矩：心跳停了就当它不在（见 [defaultStaleAfter]），
-/// 否则 Agent 一崩，界面会一直以为有人占着。
+/// 心跳停了就当它不在（见 [defaultStaleAfter]），否则 Agent 一崩，
+/// 界面会一直以为有人在动这个任务。
 class AgentPresence {
   /// 谁在（`Agent` / `人（编导台）`）——横幅上要说得出名字
   final String holder;
@@ -229,6 +234,74 @@ void clearAgentPresence({
     if (f.existsSync()) f.deleteSync();
   } catch (e) {
     AppLog.warn('Agent 在场状态清除失败（$taskId）：$e');
+  }
+}
+
+/// 软件**自己**在跑的活儿写这一份，和 Agent 的在场状态**分两个文件**。
+///
+/// 两条理由，缺一不可：
+///
+/// 1. **播报通道只报 Agent。** CLAUDE.md 明令：「播报只报 Agent 在做什么。
+///    软件自己跑的活儿不许占那条通道——占了，人就分不清是谁在动手。」
+///    共用一个文件的话，人在界面上点一下「重试分析」，底部浮层立刻冒出
+///    「软件（分析）正在干 #12」+ 转圈，跟 Agent 干活长得一模一样
+/// 2. **两边不能互相覆盖。** 共用的话：人点重试分析会盖掉正在跑的 Agent 的
+///    在场状态；收工那下 `clearAgentPresence` 会把对方的一起抹掉（要等 20 秒
+///    心跳才自愈）；而抹掉那一刻，正开着编导台的人还会收到一次**假的**
+///    「Agent 的改动已载入」收工提示
+///
+/// **但「别把同一件贵活儿跑两遍」那道劝告必须看得见这一份**——它存在的理由
+/// 就是拦住「人在界面上点了分析 + Agent 同时 analyze」。分开文件是为了不让
+/// 它占播报通道，**不是为了让判据装作看不见它**（见 `cli/busy_guard.dart`）。
+File _appBusyFile(Directory dataDir, String taskId) =>
+    File(p.join(dataDir.path, 'presence', '$taskId.app.json'));
+
+/// 软件自己开工了（界面点的分析、自动铺片这类）。
+///
+/// 心跳规矩和 [writeAgentPresence] 一样：**长活儿要隔一会儿刷一次**，
+/// 不然 60 秒后它就过期了，而最贵的那一段恰恰常常超过 60 秒不吭声
+void writeAppBusy({
+  required Directory dataDir,
+  required String taskId,
+  required AgentPresence busy,
+}) {
+  try {
+    final f = _appBusyFile(dataDir, taskId);
+    f.parent.createSync(recursive: true);
+    f.writeAsStringSync(jsonEncode(busy.toJson()));
+  } catch (e) {
+    AppLog.warn('软件在忙状态写入失败（$taskId）：$e');
+  }
+}
+
+/// 软件此刻在这条任务上忙什么。心跳停了、文件坏了、根本没有，一律返回 null
+AgentPresence? readAppBusy({
+  required Directory dataDir,
+  required String taskId,
+  DateTime? now,
+  Duration staleAfter = defaultStaleAfter,
+}) {
+  try {
+    final f = _appBusyFile(dataDir, taskId);
+    if (!f.existsSync()) return null;
+    final busy = AgentPresence.tryFromJson(jsonDecode(f.readAsStringSync()));
+    if (busy == null) return null;
+    return busy.isStale(now ?? DateTime.now(), staleAfter: staleAfter)
+        ? null
+        : busy;
+  } catch (e) {
+    AppLog.warn('软件在忙状态读取失败（$taskId）：$e');
+    return null;
+  }
+}
+
+/// 软件这件活儿干完了
+void clearAppBusy({required Directory dataDir, required String taskId}) {
+  try {
+    final f = _appBusyFile(dataDir, taskId);
+    if (f.existsSync()) f.deleteSync();
+  } catch (e) {
+    AppLog.warn('软件在忙状态清除失败（$taskId）：$e');
   }
 }
 

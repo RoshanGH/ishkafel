@@ -2,6 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart' show AsrSentence, AsrWord;
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/core/storage/edit_stamp.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 
 void main() {
   const unit = SemanticUnit(
@@ -25,6 +27,26 @@ void main() {
   test('SemanticUnit 序列化往返一致（含 tags 与 shots）', () {
     expect(SemanticUnit.fromJson(unit.toJson()), unit);
     expect(unit.durationMs, 9000);
+  });
+
+  test('Shot 的来源戳存得住、读得回', () {
+    final stamped = Shot(
+      startMs: 0,
+      endMs: 1000,
+      editedBy: EditStamp(by: ActorKind.human, at: DateTime.utc(2026, 9, 17)),
+    );
+    final back = Shot.fromJson(stamped.toJson());
+    expect(back, stamped);
+    expect(back.editedBy!.by, ActorKind.human);
+  });
+
+  test('SemanticUnit 的来源戳存得住、读得回', () {
+    final stamped = unit.copyWith(
+      editedBy: EditStamp(by: ActorKind.agent, at: DateTime.utc(2026, 9, 17)),
+    );
+    final back = SemanticUnit.fromJson(stamped.toJson());
+    expect(back, stamped);
+    expect(back.editedBy!.by, ActorKind.agent);
   });
 
   test('shotsStrictlyNested 校验严格包含', () {

@@ -21,7 +21,11 @@ void main() {
       // 这些不是产物：任务本体、方案、锁、在场状态、Agent 看的帧图
       // （帧图按内容指纹存、跨任务复用，删任务不该带走）
       'tasks', 'plans', 'locks', 'presence', 'analysis_state',
-      'agent_frames', 'preview_cache', 'credentials', 'covers',
+      'agent_frames', 'preview_cache', 'credentials',
+      // covers / logs 不是「一个任务一个子目录」，是按任务命名的单文件
+      // （<id>.jpg / <id>.jsonl），走 TaskArtifacts.of() 里各自的 Directory
+      // getter（coversDir / logsDir），不进 perTaskDirNames
+      'covers', 'logs',
       // analysis_work 有自己的清理路径（它第一层混着任务与非任务的东西，
       // 见 TaskArtifacts 里对 stems 的处理）
       'analysis_work',

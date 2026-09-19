@@ -11,15 +11,14 @@ import '../../core/script/script_doc.dart';
 import '../../core/script/sound_mix.dart';
 import '../../core/script/shot_allocation.dart';
 import '../../core/script/word_shot_insert.dart';
+import '../../core/models/renew_task.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
-import '../gui_lock_guidance.dart';
 import '../agent_stage.dart';
 import '../script_apply.dart';
 
@@ -31,6 +30,26 @@ const List<String> scriptApplyKinds = [
   'lines', 'shot-edit', 'screen-text',
   'baseline', 'line-voice', 'mix', 'word-shots',
 ];
+
+/// `what` → 落盘时用的 op 名。**受控清单**：新增一种 `apply` 子类型必须
+/// 在这里登记。不受控地拿 payload 里的 `what` 直接拼 op 名
+/// （`'script.apply.$what'`）会有两个问题：段内带连字符的 `what`
+/// （如 `shot-edit`）拼出来的 op 名段内也带连字符，风格不统一；
+/// 新增一种 `what` 会静默多出一个 op 名，没有地方能一眼看出这份日志
+/// 里到底可能出现哪些 op（2026-09-17 评审指出）。`shots` 不在这里——
+/// 它走 `_applyShotsPicks`，op 是固定的 `script.shots.pick`
+const Map<String, String> scriptApplyOpNames = {
+  'subtitles': 'script.apply.subtitles',
+  'alloc': 'script.apply.alloc',
+  'bgm': 'script.apply.bgm',
+  'lines': 'script.apply.lines',
+  'shot-edit': 'script.apply.shotEdit',
+  'screen-text': 'script.apply.screenText',
+  'baseline': 'script.apply.baseline',
+  'line-voice': 'script.apply.lineVoice',
+  'mix': 'script.apply.mix',
+  'word-shots': 'script.apply.wordShots',
+};
 
 /// `ishkafel script apply <shots|subtitles|alloc|bgm> <task> --file <json>`
 ///
@@ -68,6 +87,16 @@ Future<int> runScriptApplyCommand({
     sink.writeln('认不出「$what」。可用：${supported.join(' / ')}');
     return exitBadUsage;
   }
+  // op 名清单必须跟 scriptApplyKinds 同步登记（shots 除外，它走
+  // _applyShotsPicks、op 是固定的 script.shots.pick）——没登记就在校验
+  // 阶段直接拒绝，不留一个「静默多出个 op 名」的口子。这条分支理论上
+  // 到不了：有 architecture 测试守着两份清单一一对应，但防御性地留着，
+  // 别指望那条测试是唯一防线
+  if (what != 'shots' && !scriptApplyOpNames.containsKey(what)) {
+    sink.writeln('内部错误：「$what」没有登记 op 名，无法落盘（这是代码的漏，'
+        '不是提交的问题）');
+    return exitFailed;
+  }
   final id = rest[1];
 
   final Map<String, dynamic> payload;
@@ -92,30 +121,18 @@ Future<int> runScriptApplyCommand({
     return exitBadUsage;
   }
 
-  // 先在锁外面校验一遍：不合格就别去打扰正在用界面的人
+  // 先校验一遍：不合格就别去打扰正在用界面的人
   final first = _validate(what, task.script!, payload);
   if (first.isNotEmpty) {
     _reject(first, sink);
     return exitBadUsage;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    final current = lock.read();
-    sink.writeln(guiLockGuidance(
-        holder: current?.holder, taskId: task.id));
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   // 可视模式下这一句会把软件拉起来、落到这个任务、等界面真的展示完
   await stage.begin(_actionOf(what, payload), focus: _focusOf(what, payload));
@@ -126,85 +143,27 @@ Future<int> runScriptApplyCommand({
   }
 
   try {
-    // 拿锁期间人可能改过：重读一遍再校验，别拿旧前提写新数据
-    final fresh = await repository.findById(task.id);
-    final doc = fresh?.script;
-    if (doc == null) {
-      sink.writeln('任务在写入前被删了或不再是脚本任务');
-      return exitNotFound;
-    }
-    final second = _validate(what, doc, payload);
-    if (second.isNotEmpty) {
-      sink.writeln('（拿到锁之后重新核对，这些不再成立——'
-          '多半是有人在界面里改过）');
-      _reject(second, sink);
-      return exitBadUsage;
-    }
-
-    final next = await _apply(what, doc, payload,
-        dataDir: dataDir,
-        taskId: task.id,
-        frameCheckOf: frameCheckOf,
-        onLineDone: (partial) =>
-            repository.save(fresh!.copyWith(script: partial)));
-    // 封面 = 成片第一帧。Agent 挑完镜头，列表页上这条片子就该有画面了，
-    // 不然它和一个空任务长得一模一样
-    final cover = await ensureScriptCover(
-      doc: next,
-      dataDir: dataDir,
-      taskId: task.id,
-      localPathOf: (id) {
-        return TaskMedia(dataDir: dataDir, taskId: task.id).localMaterial(id);
-      },
-    );
-    await repository.save(fresh!.copyWith(
-      script: next,
-      coverPath: cover ?? fresh.coverPath,
-    ));
-    // **有素材没看成画面就要点名**，不能只往日志里写一行 warn。
-    //
-    // 素材还没落到本地时画面自查整批跳过，于是 framesSeen 全是 null。
-    // 手册反复讲「null 是没看成、不是没问题」，却没给过补救的路——
-    // 验收 Agent 只能自己摸出「先 peek 把素材拉下来，再原样重提一遍」，
-    // 而正是那一轮才查出有条素材底部烧着别的片子的台词：照第一轮直接导出，
-    // 交付的就是两层字幕打架的废片
-    // **回读一遍：报的是「存进去了什么」，不是「你提交了什么」。**
-    //
-    // 真机上第 20、24 行拿到 {"ok":true,"applied":1,"changed":"给 1 行挑了
-    // 镜头"}，而盘上是 0 个镜头——界面诚实地写着「还没挑镜头」，命令行
-    // 撒了谎。只信退出码的 Agent 会交付两个空坑位的片子，而且没人会察觉。
-    final emptied = what == 'shots' ? _picksThatLandedEmpty(payload, next) : const <int>[];
-    if (emptied.isNotEmpty) {
-      sink.writeln('这几行提交了镜头，落盘之后却是空的：'
-          '${emptied.map((i) => '第 ${i + 1} 行').join('、')}。\n'
-          '**这一步没成**——素材时长拿不到（还没下到本地）时会走到这里。'
-          '先 ishkafel script peek <任务> --materials <id,id> 把素材拉下来，'
-          '再重提一次；提完用 script show --json 核一眼那几行的 shots。');
-      return exitFailed;
-    }
-    final unchecked = what == 'shots' ? _uncheckedMaterialIds(next) : const <int>[];
-    emitJson({
-      'ok': true,
-      'what': what,
-      'taskId': task.id,
-      'applied': _countOf(what, payload),
-      // 说清改了什么，别让调用方靠 applied 的数字去猜
-      'changed': _changedOf(what, payload),
-      if (unchecked.isNotEmpty) ...{
-        'uncheckedMaterials': unchecked,
-        'warning': '这 ${unchecked.length} 条素材的画面**没看成**'
-            '（多半是还没落到本地）——不是「没问题」，是「不知道有没有问题」。'
-            '素材上要是烧着别的片子的字，我们再烧一行台词就是两层字打架，'
-            '整条片子废掉。',
-        'next': 'ishkafel script peek <任务> --materials '
-            '${unchecked.join(',')} 把它们拉到本地，'
-            '然后把刚才这份提交**原样再提一次**，这次才会真的看图',
-      },
-    }, out: out);
-    return 0;
+    return what == 'shots'
+        ? await _applyShotsPicks(
+            task: task,
+            dataDir: dataDir,
+            repository: repository,
+            payload: payload,
+            frameCheckOf: frameCheckOf,
+            sink: sink,
+            out: out,
+          )
+        : await _applyPureKind(
+            task: task,
+            dataDir: dataDir,
+            repository: repository,
+            what: what,
+            payload: payload,
+            sink: sink,
+            out: out,
+          );
   } finally {
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 
@@ -321,50 +280,22 @@ List<ApplyIssue> _validate(
   }
 }
 
-Future<ScriptDoc> _apply(
-  String what,
-  ScriptDoc doc,
-  Map<String, dynamic> payload, {
-  required Directory dataDir,
-  required String taskId,
-  ShotFrameCheck? frameCheckOf,
+/// `apply` 提交没被 TaskMutation 直接落盘接受时抛出来的信号：
+/// 用异常带出「拒绝」这个结果，而不是改外层变量——edit 必须是纯的。
+///
+/// [gone] = 任务在写入前被删了/不再是脚本任务；否则是校验没过。
+class _ScriptApplyRejected implements Exception {
+  final List<ApplyIssue> problems;
+  final bool gone;
+  _ScriptApplyRejected(this.problems, {this.gone = false});
+}
 
-  /// 每处理完一行就回调一次，让调用方落盘。
-  ///
-  /// **界面是靠读盘跟上进度的**：整批处理完才写一次的话，人看到的是
-  /// 十几行忽然一起冒出来。一行一写，画面才是一格格长出来的
-  Future<void> Function(ScriptDoc partial)? onLineDone,
-}) async {
+/// 除 `shots` 外的所有 `apply` 子类型：整段计算里**没有一处 await**，
+/// 可以放心地整段塞进 TaskMutation 的 edit 闭包——`shots` 因为要为每个
+/// 候选做画面自查（网络请求），必须单独处理，见 [_applyShotsPicks]。
+ScriptDoc _applyPure(String what, ScriptDoc doc, Map<String, dynamic> payload) {
   var next = doc;
   switch (what) {
-    case 'shots':
-      final offered = _offeredMaterials(payload);
-      // **画面自查**：素材上烧着别家的字，我们再给台词烧一行，就是两层字
-      // 叠在一起；画面里露的是竞品，台词说的和画面里摆的对不上——两样都
-      // 只有看图才发现得了，而且都会毁掉整片。替换裂变那边在 apply 时查，
-      // 这条线一开始整条缺席（见 shot_frame_check.dart）
-      final checker =
-          frameCheckOf ?? defaultShotFrameCheck(dataDir: dataDir, taskId: taskId);
-      // 一行一落盘：Agent 就算一次提交十几行，界面也要**一行行长出来**，
-      // 而不是全处理完忽然刷一下。人反复说的就是这件事
-      for (final pick in _picks(payload)) {
-        final line = next.lines[pick.lineIndex];
-        final shots = checker == null
-            ? [for (final id in pick.materialIds) offered[id]!]
-            : await checkedShots(
-                shots: [for (final id in pick.materialIds) offered[id]!],
-                check: (s) => checker(s.materialId, s.durationMs),
-              );
-        // 落盘时必须跟着分时长，否则 allocMs 为 null，这一行进不了预览
-        final root = ShotAllocation.rootMsOf(line.withShots(shots));
-        next = next.setShotsById(
-            line.id,
-            root == null
-                ? shots
-                : ShotAllocation.fillBySlowdown(
-                    reallocShots(line, shots), root));
-        await onLineDone?.call(next);
-      }
     case 'subtitles':
       for (final sub in _subtitles(payload)) {
         final line = next.lines[sub.lineIndex];
@@ -480,6 +411,446 @@ Future<ScriptDoc> _apply(
       }
   }
   return next;
+}
+
+/// 除 `shots` 外的所有 `apply` 子类型的落盘：整段计算没有 IO，
+/// 包进一次 TaskMutation——edit 里重新校验（拿锁期间人可能改过），
+/// 只读 fresh，纯变换算完直接返回，不留第二个写入点。
+Future<int> _applyPureKind({
+  required RenewTask task,
+  required Directory dataDir,
+  required FileTaskRepository repository,
+  required String what,
+  required Map<String, dynamic> payload,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  RenewTask? updated;
+  try {
+    updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      // 到这里 what 已经在 runScriptApplyCommand 里校验过一定登记在
+      // scriptApplyOpNames 里（见那边的早退检查），! 不是在赌运气
+      op: scriptApplyOpNames[what]!,
+      edit: (fresh) {
+        final freshDoc = fresh.script;
+        if (freshDoc == null) {
+          throw _ScriptApplyRejected(const [], gone: true);
+        }
+        // 拿锁期间人可能改过：重读一遍再校验，别拿旧前提写新数据
+        final issues = _validate(what, freshDoc, payload);
+        if (issues.isNotEmpty) throw _ScriptApplyRejected(issues);
+        final next = _applyPure(what, freshDoc, payload);
+        return TaskEdit(
+          task: fresh.copyWith(script: next),
+          before: _applyPureFacts(what, freshDoc, payload),
+          after: _applyPureFacts(what, next, payload),
+        );
+      },
+    );
+  } on _ScriptApplyRejected catch (e) {
+    if (e.gone) {
+      sink.writeln('任务在写入前被删了或不再是脚本任务');
+      return exitNotFound;
+    }
+    sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
+    _reject(e.problems, sink);
+    return exitBadUsage;
+  }
+  if (updated == null) {
+    sink.writeln('任务在写入前被删了或不再是脚本任务');
+    return exitNotFound;
+  }
+  updated = await _refreshScriptCover(
+      repository: repository, dataDir: dataDir, latest: updated);
+  return _reportApplyResult(
+      what: what, payload: payload, task: updated, sink: sink, out: out);
+}
+
+/// `shots`：每挑好一行的镜头就落一次盘，而且每一笔都是**独立的**
+/// TaskMutation。
+///
+/// 原来这个循环拿一份任务快照，每行做几秒到几十秒的画面自查（网络请求），
+/// 然后 `repository.save` 复用同一份循环外的旧快照——循环期间（可能几十
+/// 秒到几分钟）人在界面上的任何改动都会被下一轮 save 整片抹掉，且不报错。
+/// 这是这批改造要杀的那个 bug 的最恶劣版本：窗口不是一次同步回调，是一整
+/// 个循环的时间。改成每行一次独立 apply：画面自查严格在 edit 之外，
+/// edit 只读那一刻重读到的 fresh，不读循环外累积的状态；
+/// 「一行一落盘、一步步长出来」这条界面行为不变。
+Future<int> _applyShotsPicks({
+  required RenewTask task,
+  required Directory dataDir,
+  required FileTaskRepository repository,
+  required Map<String, dynamic> payload,
+  ShotFrameCheck? frameCheckOf,
+  required StringSink sink,
+  required StringSink? out,
+}) async {
+  // 拿锁期间人可能改过：重读一遍再校验，别拿旧前提写新数据
+  final fresh0 = await repository.findById(task.id);
+  final doc0 = fresh0?.script;
+  if (doc0 == null) {
+    sink.writeln('任务在写入前被删了或不再是脚本任务');
+    return exitNotFound;
+  }
+  final issues = _validate('shots', doc0, payload);
+  if (issues.isNotEmpty) {
+    sink.writeln('（拿到锁之后重新核对，这些不再成立——多半是有人在界面里改过）');
+    _reject(issues, sink);
+    return exitBadUsage;
+  }
+
+  final offered = _offeredMaterials(payload);
+  // **画面自查**：素材上烧着别家的字，我们再给台词烧一行，就是两层字叠在
+  // 一起；画面里露的是竞品，台词说的和画面里摆的对不上——两样都只有看图
+  // 才发现得了，而且都会毁掉整片
+  final checker =
+      frameCheckOf ?? defaultShotFrameCheck(dataDir: dataDir, taskId: task.id);
+
+  var latest = fresh0!;
+  for (final pick in _picks(payload)) {
+    final rawShots = [for (final id in pick.materialIds) offered[id]!];
+    // 网络请求：做完拿到结果再进 apply，edit 里绝不能再发一次
+    final checked = checker == null
+        ? rawShots
+        : await checkedShots(
+            shots: rawShots,
+            check: (s) => checker(s.materialId, s.durationMs),
+          );
+
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.shots.pick',
+      where: {'lineIndex': pick.lineIndex},
+      edit: (fresh) {
+        final freshDoc = fresh.script;
+        if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+        final line = freshDoc.lines[pick.lineIndex];
+        // 落盘时必须跟着分时长，否则 allocMs 为 null，这一行进不了预览
+        final root = ShotAllocation.rootMsOf(line.withShots(checked));
+        final placed = root == null
+            ? checked
+            : ShotAllocation.fillBySlowdown(reallocShots(line, checked), root);
+        return TaskEdit(
+          task: fresh.copyWith(script: freshDoc.setShotsById(line.id, placed)),
+          before: {
+            'lineIndex': pick.lineIndex,
+            'materials': [for (final s in line.shots) s.materialId],
+            'names': [for (final s in line.shots) s.name],
+            'sceneDescriptions': [for (final s in line.shots) s.sceneDescription],
+          },
+          after: {
+            'lineIndex': pick.lineIndex,
+            'materials': [for (final s in placed) s.materialId],
+            'names': [for (final s in placed) s.name],
+            'sceneDescriptions': [for (final s in placed) s.sceneDescription],
+          },
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在提交镜头过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
+    latest = updated;
+  }
+
+  latest = await _refreshScriptCover(
+      repository: repository, dataDir: dataDir, latest: latest);
+  return _reportApplyResult(
+      what: 'shots', payload: payload, task: latest, sink: sink, out: out);
+}
+
+/// 封面 = 成片第一帧。Agent 挑完镜头，列表页上这条片子就该有画面了，
+/// 不然它和一个空任务长得一模一样。抽帧是 IO（可能要跑 ffmpeg），
+/// 留在 edit 之外；只有算出来的封面路径跟当前不一样时才多落一笔盘，
+/// 不做这一次性的脏活。
+Future<RenewTask> _refreshScriptCover({
+  required FileTaskRepository repository,
+  required Directory dataDir,
+  required RenewTask latest,
+}) async {
+  final doc = latest.script;
+  if (doc == null) return latest;
+  final cover = await ensureScriptCover(
+    doc: doc,
+    dataDir: dataDir,
+    taskId: latest.id,
+    localPathOf: (id) =>
+        TaskMedia(dataDir: dataDir, taskId: latest.id).localMaterial(id),
+  );
+  if (cover == null || cover == latest.coverPath) return latest;
+  final updated = await TaskMutation(
+    repo: repository,
+    dataDir: dataDir,
+    by: ActorKind.agent,
+    actor: 'Agent',
+  ).apply(
+    taskId: latest.id,
+    op: 'script.cover.set',
+    edit: (fresh) => TaskEdit(
+      task: fresh.copyWith(coverPath: cover),
+      before: {'coverPath': fresh.coverPath},
+      after: {'coverPath': cover},
+    ),
+  );
+  return updated ?? latest;
+}
+
+/// 这一笔改前/改后值得记的事实。**每种子类型改的字段不一样，读的字段也
+/// 必须跟着不一样**——早先这里不分青红皂白只报行文本，而 `alloc` 改的是
+/// 时长、`shot-edit` 改的是取段/变速/音量、`bgm` 改的是曲子，行文本一个
+/// 字都没变，于是 before/after 逐字相同、日志等于没记（2026-09-17 评审
+/// 指出）。现在按 what 分发到各自的抽取器，取的是**真正被这笔改动碰过**
+/// 的那些字段。
+Map<String, dynamic> _applyPureFacts(
+    String what, ScriptDoc doc, Map<String, dynamic> payload) {
+  return switch (what) {
+    'baseline' => {
+        'voiceId': doc.defaultVoiceId,
+        'speechRate': doc.defaultSpeechRate,
+      },
+    'mix' => {'mix': doc.mix.toJson()},
+    // insert/remove 会改行数，光看某一行的文本看不出发生了什么——
+    // insert 那一行本身的文本压根没变（插的是它后面那一行），remove
+    // 之后同一下标上冒出来的是被顶上来的下一行文本，看着像是「这一行
+    // 的台词被改成了别人的」。带上 lineCount，insert 再带上插入之后
+    // 那个位置的文本（2026-09-17 复审指出这里 before==after）
+    'lines' => {
+        'lineCount': doc.lines.length,
+        'lines': [
+          for (final e in _lineEdits(payload))
+            {
+              'lineIndex': e.lineIndex,
+              'op': e.op,
+              'text': e.lineIndex >= 0 && e.lineIndex < doc.lines.length
+                  ? doc.lines[e.lineIndex].text
+                  : null,
+              if (e.op == 'insert')
+                'insertedText': e.lineIndex + 1 >= 0 && e.lineIndex + 1 < doc.lines.length
+                    ? doc.lines[e.lineIndex + 1].text
+                    : null,
+            },
+        ],
+      },
+    'alloc' => {
+        // 同一个 lineIndex 提交多条时去重——不去重日志里会出现重复项
+        'lines': [
+          for (final i in _allocs(payload).map((a) => a.lineIndex).toSet())
+            _allocFacts(doc, i),
+        ],
+      },
+    'shot-edit' => {
+        'shots': [for (final e in _shotEdits(payload)) _shotEditFacts(doc, e)],
+      },
+    'line-voice' => {
+        'lines': [
+          for (final e in _lineVoices(payload)) _lineVoiceFacts(doc, e.lineIndex),
+        ],
+      },
+    'word-shots' => {
+        'shots': [for (final p in _wordShots(payload)) _wordShotFacts(doc, p)],
+      },
+    'screen-text' => {
+        'screens': [
+          for (final e in _screenTexts(payload)) _screenTextFacts(doc, e),
+        ],
+      },
+    'subtitles' => {
+        'lines': [
+          for (final s in _subtitles(payload)) _subtitleFacts(doc, s.lineIndex),
+        ],
+      },
+    'bgm' => {
+        'segments': [for (final s in _bgms(payload)) _bgmSegmentFacts(doc, s.startLine)],
+      },
+    _ => const {},
+  };
+}
+
+/// `alloc` 改的是每一镜分到的成片时长——这就是任务书点名要带的
+/// 「改时长要带前后毫秒数」，不是行文本
+Map<String, dynamic> _allocFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final shots = doc.lines[lineIndex].shots;
+  return {
+    'lineIndex': lineIndex,
+    'allocMs': [for (final s in shots) s.allocMs],
+  };
+}
+
+/// `shot-edit` 覆盖 remove/trim/speed/volume 四种操作。
+/// **remove 不报单个下标的字段**：删完后面的镜头会整体前移，下标指的已经
+/// 不是同一个东西——报这一行现在还剩几镜、都是谁，删的是哪一个从
+/// before/after 的 materials 列表一比就看得出来。其余三种操作报的是
+/// 那一镜本身：取段起点、变速倍率、原声音量——变化前后的实际数值都在
+Map<String, dynamic> _shotEditFacts(ScriptDoc doc, ShotEdit e) {
+  if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+    return {'lineIndex': e.lineIndex, 'shotIndex': e.shotIndex, 'op': e.op, 'present': false};
+  }
+  final shots = doc.lines[e.lineIndex].shots;
+  if (e.op == 'remove') {
+    return {
+      'lineIndex': e.lineIndex,
+      'shotIndex': e.shotIndex,
+      'op': e.op,
+      'shotCount': shots.length,
+      'materials': [for (final s in shots) s.materialId],
+    };
+  }
+  if (e.shotIndex < 0 || e.shotIndex >= shots.length) {
+    return {'lineIndex': e.lineIndex, 'shotIndex': e.shotIndex, 'op': e.op, 'present': false};
+  }
+  final s = shots[e.shotIndex];
+  return {
+    'lineIndex': e.lineIndex,
+    'shotIndex': e.shotIndex,
+    'op': e.op,
+    'materialId': s.materialId,
+    'name': s.name,
+    'sceneDescription': s.sceneDescription,
+    'trimStartMs': s.trimStartMs,
+    'speed': s.speed,
+    'sourceVolume': s.sourceVolume,
+  };
+}
+
+/// `word-shots` 划词建镜：按 startWord/endWord 找那一镜——插入会让下标
+/// 漂移，不能按下标定位。改之前那份找不到（还没插），返回里只有
+/// shotCount；改之后那份能找到，材料事实就在
+Map<String, dynamic> _wordShotFacts(ScriptDoc doc, WordShotPick p) {
+  if (p.lineIndex < 0 || p.lineIndex >= doc.lines.length) {
+    return {'lineIndex': p.lineIndex, 'present': false};
+  }
+  final shots = doc.lines[p.lineIndex].shots;
+  final match = shots
+      .where((s) => s.startWord == p.startWord && s.endWord == p.endWord)
+      .toList();
+  return {
+    'lineIndex': p.lineIndex,
+    'startWord': p.startWord,
+    'endWord': p.endWord,
+    'shotCount': shots.length,
+    if (match.isNotEmpty) ...{
+      'materialId': match.first.materialId,
+      'name': match.first.name,
+      'sceneDescription': match.first.sceneDescription,
+    },
+  };
+}
+
+/// `subtitles` 断句：字幕屏的切点（按词序号，不是毫秒）
+Map<String, dynamic> _subtitleFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final screens = doc.lines[lineIndex].subtitleScreens;
+  return {
+    'lineIndex': lineIndex,
+    'cuts': screens == null ? null : [for (final s in screens) s.startWord],
+  };
+}
+
+/// `screen-text` 改某一屏的字幕文字覆盖
+Map<String, dynamic> _screenTextFacts(ScriptDoc doc, ScreenText e) {
+  if (e.lineIndex < 0 || e.lineIndex >= doc.lines.length) {
+    return {'lineIndex': e.lineIndex, 'screenIndex': e.screenIndex, 'present': false};
+  }
+  final screens = doc.lines[e.lineIndex].subtitleScreens;
+  if (screens == null || e.screenIndex < 0 || e.screenIndex >= screens.length) {
+    return {'lineIndex': e.lineIndex, 'screenIndex': e.screenIndex, 'present': false};
+  }
+  return {
+    'lineIndex': e.lineIndex,
+    'screenIndex': e.screenIndex,
+    'text': screens[e.screenIndex].text,
+  };
+}
+
+/// `line-voice` 改某一行的音色/语速覆盖——`voiceIdOf`/`speechRateOf` 拿的是
+/// **生效值**（行覆盖不存在时退回本片基调），跟界面显示口径一致
+Map<String, dynamic> _lineVoiceFacts(ScriptDoc doc, int lineIndex) {
+  if (lineIndex < 0 || lineIndex >= doc.lines.length) {
+    return {'lineIndex': lineIndex, 'present': false};
+  }
+  final line = doc.lines[lineIndex];
+  return {
+    'lineIndex': lineIndex,
+    'voiceId': doc.voiceIdOf(line),
+    'speechRate': doc.speechRateOf(line),
+  };
+}
+
+/// `bgm` 铺的是哪一段——曲子 id/名字/音量，跟 bgm_command.dart 的
+/// `_bgmSegmentFacts` 同一个判据（不是只记素材 id）
+Map<String, dynamic> _bgmSegmentFacts(ScriptDoc doc, int startLine) {
+  final matches =
+      doc.bgmSegments.where((s) => s.startLine <= startLine && s.endLine >= startLine);
+  if (matches.isEmpty) return {'startLine': startLine, 'present': false};
+  final s = matches.first;
+  return {
+    'startLine': s.startLine,
+    'endLine': s.endLine,
+    'materialId': s.material.id,
+    'name': s.material.name,
+    'volume': s.volume,
+  };
+}
+
+/// 收尾报告：有没有提交了镜头却落盘是空的、有没有素材没看成画面。
+/// **报的是「存进去了什么」，不是「你提交了什么」**——真机上第 20、24 行
+/// 拿到 {"ok":true,"applied":1,"changed":"给 1 行挑了镜头"}，而盘上是 0
+/// 个镜头——界面诚实地写着「还没挑镜头」，命令行撒了谎。只信退出码的
+/// Agent 会交付两个空坑位的片子，而且没人会察觉。
+int _reportApplyResult({
+  required String what,
+  required Map<String, dynamic> payload,
+  required RenewTask task,
+  required StringSink sink,
+  required StringSink? out,
+}) {
+  final next = task.script!;
+  final emptied = what == 'shots' ? _picksThatLandedEmpty(payload, next) : const <int>[];
+  if (emptied.isNotEmpty) {
+    sink.writeln('这几行提交了镜头，落盘之后却是空的：'
+        '${emptied.map((i) => '第 ${i + 1} 行').join('、')}。\n'
+        '**这一步没成**——素材时长拿不到（还没下到本地）时会走到这里。'
+        '先 ishkafel script peek <任务> --materials <id,id> 把素材拉下来，'
+        '再重提一次；提完用 script show --json 核一眼那几行的 shots。');
+    return exitFailed;
+  }
+  final unchecked = what == 'shots' ? _uncheckedMaterialIds(next) : const <int>[];
+  emitJson({
+    'ok': true,
+    'what': what,
+    'taskId': task.id,
+    'applied': _countOf(what, payload),
+    // 说清改了什么，别让调用方靠 applied 的数字去猜
+    'changed': _changedOf(what, payload),
+    if (unchecked.isNotEmpty) ...{
+      'uncheckedMaterials': unchecked,
+      'warning': '这 ${unchecked.length} 条素材的画面**没看成**'
+          '（多半是还没落到本地）——不是「没问题」，是「不知道有没有问题」。'
+          '素材上要是烧着别的片子的字，我们再烧一行台词就是两层字打架，'
+          '整条片子废掉。',
+      'next': 'ishkafel script peek <任务> --materials '
+          '${unchecked.join(',')} 把它们拉到本地，'
+          '然后把刚才这份提交**原样再提一次**，这次才会真的看图',
+    },
+  }, out: out);
+  return 0;
 }
 
 // ——— 提交格式的解析。认不出的字段一律忽略，缺的由校验器点名 ———
