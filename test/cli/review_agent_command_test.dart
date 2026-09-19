@@ -10,7 +10,7 @@ import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/agent_request.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
+import 'package:ishkafel/core/storage/ui_where.dart';
 
 /// `ishkafel review list / drop / keep` —— **人在审片台看着，让 Agent 动手**。
 ///
@@ -110,25 +110,31 @@ void main() {
       expect(readAgentPresence(dataDir: dir, taskId: 'r1'), isNull);
     });
 
-    test('另一个 Agent 占着就写不进去，明说是谁', () async {
-      // 用**别的**进程号：同一个持有者不算冲突，会直接写进去。
-      // 不能拿 pid+1——并行跑测试时那个进程可能真的存在，
-      // 锁到底算不算失效就成了掷骰子（真机上全量跑时挂过）
-      final other = 'agent:$pid 的另一个会话';
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire(other);
-      final err = StringBuffer();
-      expect(await run(['drop', 'r1'], items: '0:-:100', err: err), exitLocked);
-      expect(err.toString(), contains(other));
+    test('另一个 Agent 正在动这条任务：照样写得进去，不会被挡住', () async {
+      // 锁删掉之后**没有任何一条路径会因为「有人占着」而失败**。
+      // 两边同时写不再互相抹掉：唯一写入口 TaskMutation 落盘前重读 + 版本
+      // 校验，被抢写就重跑一轮；谁改了什么，改动日志里都有
+      writeAgentPresence(
+        dataDir: dir,
+        taskId: 'r1',
+        presence: AgentPresence(
+            holder: 'agent:另一个会话',
+            at: DateTime.now(),
+            action: '正在剔素材'),
+      );
+      expect(await run(['drop', 'r1'], items: '0:-:100'), 0);
     });
   });
 
-  /// 人正开着审片台看着指挥 Agent：**这不是冲突，是委派**。
-  ///
-  /// 界面持锁时 Agent 不自己写盘——审片台上剔掉的卡是界面里的临时状态，
-  /// 人按「确认」才落盘，绕过界面写盘会让人还没确认盘上就变了。
+  /// 人正开着审片台看着指挥 Agent：**这不是冲突，是委派**——但委派是
+  /// **首选路径，不是必经之路**（2026-09-17 第一批 任务 8）。界面确实
+  /// 停在这条任务上才试着委派；它接了单但没应，就秒级兜底自己直写，
+  /// 不再报失败——可视化一出问题不该把 Agent 挡住。
   group('界面开着时委派给界面', () {
     setUp(() {
-      TaskLockFile(dataDir: dir, taskId: 'r1').acquire('人（审核中）');
+      // 委派只在界面确实停在这条任务上时才有意义——不写这一句，
+      // delegateOrDoItYourself 会判定 onScene 为 false，直接零等待自己写
+      writeUiWhere(dir, module: 'review', taskId: 'r1');
     });
 
     test('下单给界面并等回执，不自己写盘', () async {
@@ -160,11 +166,64 @@ void main() {
       expect(json['next'] as String, contains('确认'));
     });
 
-    test('界面没回应：报失败，不能报成功', () async {
+    /// **委派降级成首选路径 + 秒级兜底**（2026-09-17 第一批 任务 8）：
+    /// 以前这里断言「界面没回应 → 报失败」，那正是这次要清零的东西——
+    /// 可视化一出问题就把 Agent 挡住，因果是反的。现在没应就秒级兜底
+    /// 自己直写，一样把决定落进任务，不再当成失败
+    test('界面没回应：不再报失败，秒级兜底自己直写', () async {
+      final out = StringBuffer();
       final err = StringBuffer();
-      final code = await run(['drop', 'r1'], items: '0:-:100', err: err);
-      expect(code, isNot(0));
-      expect(err.toString(), contains('没有回应'));
+      final code = await run(['drop', 'r1'], items: '0:-:100', out: out, err: err);
+      expect(code, 0, reason: '界面没应不该让 Agent 卡住——它能自己直写落盘');
+      expect(err.toString(), contains('直接自己'),
+          reason: '还是要如实说这是自己直写的，不是界面做成的');
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+      expect(json['delegated'], isNot(true), reason: '这条是自己直写的，不是委派成的');
+      expect(json['dropped'], 1);
+      // 这回真落盘了——不用等人按确认，因为压根没人在等着确认
+      final after = await repo.findById('r1');
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101]);
+    });
+
+    /// **人恰好开着「另一页」不是失败。**
+    ///
+    /// 界面在这条任务上、但停在**工作台**——它不认识 `review.drop`。
+    /// 那句「我接不了」说的是「人开着另一页」，不是「这件事做不成」；
+    /// 当真失败往上抛，Agent 得到的就是「我做不了，因为软件那边不让」。
+    test('界面在这条任务上、但是接不了的那一页：自己直写，不报失败', () async {
+      final err = StringBuffer();
+      final out = StringBuffer();
+      final ui = Future<void>(() async {
+        for (var i = 0; i < 400; i++) {
+          final req = consumeAgentRequest(dataDir: dir, taskId: 'r1');
+          if (req != null) {
+            writeAgentRequestResult(
+                dataDir: dir, taskId: 'r1', id: req.id,
+                ok: false, unsupported: true,
+                message: '工作台接不了「${req.kind}」这件事——你自己做就行');
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+      final code =
+          await run(['drop', 'r1'], items: '0:-:100', err: err, out: out);
+      await ui;
+
+      expect(code, 0, reason: '人开着另一页不该让 Agent 失败');
+      expect(err.toString(), contains('我自己剔除'));
+      final after = await repo.findById('r1');
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101],
+          reason: '活儿真的干了，不是报个成功了事');
+    });
+
+    /// 兜底自己干的时候那张单子必须收回来——否则界面过一会儿取走会再做
+    /// 一遍，人看到两份。内层等回执要比外层超时短，短的那一下把单子拿回来
+    test('秒级兜底之后，盘上不该还挂着一张没人处理的单子', () async {
+      final code = await run(['drop', 'r1'], items: '0:-:100');
+      expect(code, 0);
+      expect(consumeAgentRequest(dataDir: dir, taskId: 'r1'), isNull,
+          reason: '兜底自己剔完了还把单子留在盘上，界面取走会再剔一遍');
     });
 
     test('界面报失败就把原因原样带回来', () async {
@@ -185,6 +244,29 @@ void main() {
       await ui;
       expect(code, isNot(0));
       expect(err.toString(), contains('这张卡不在当前页面上'));
+    });
+  });
+
+  /// 界面开着，但它并不在这条任务上（比如打开过又切走了）：
+  /// **零等待，直接自己直写**——委派只在人确实看着的时候才有意义，
+  /// 少了这条判断，界面开着但没看这条任务时每条写命令都要白等一次超时
+  group('界面开着但不在这条任务上', () {
+    setUp(() {
+      writeUiWhere(dir, module: 'review', taskId: 'r999');
+    });
+
+    test('零等待，直接自己直写，不试着委派', () async {
+      final sw = Stopwatch()..start();
+      final out = StringBuffer();
+      final code = await run(['drop', 'r1'], items: '0:-:100', out: out);
+      sw.stop();
+      expect(code, 0);
+      expect(sw.elapsed, lessThan(const Duration(milliseconds: 300)),
+          reason: '界面不在这条任务上，没有委派的理由，不该等');
+      final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+      expect(json['delegated'], isNot(true));
+      final after = await repo.findById('r1');
+      expect(after!.replacementsByUid['u0']!.wholeCandidateIds, const [101]);
     });
   });
 

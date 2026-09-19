@@ -94,4 +94,55 @@ void main() {
       expect(out.last.uid, isNot(out.first.uid));
     });
   });
+
+  /// 读档补发专用版：**同一份数据推两次必须完全一样**，不能像
+  /// [ensureUnitUids] 那样掷随机数——`findById`/`findAll` 是两次独立的
+  /// 解析，TaskMutation 靠 uid 在它们之间把同一个单元重新认出来，
+  /// 推出不一样的值就永远对不上号（2026-09-17 真机复审揪出来的洞）。
+  group('读档补发身份：确定性推导，不掷随机数', () {
+    test('同一份盘上数据（同一个 taskId）连读两次，uid 必须完全一样', () {
+      final raw = [unit(0, 0, 1000), unit(1, 1000, 2000)];
+
+      final first = ensureUnitUidsDeterministic('t1', raw);
+      final second = ensureUnitUidsDeterministic('t1', raw);
+
+      expect(first.map((u) => u.uid).toList(), second.map((u) => u.uid).toList(),
+          reason: 'findById 和 findAll 各自独立解析同一份磁盘数据，'
+              '推出来的身份必须一样，否则 TaskMutation 靠 uid 重新定位'
+              '单元的每一处都会落空');
+    });
+
+    test('taskId 不同，推出来的 uid 也不同——跨任务不能撞', () {
+      final raw = [unit(0, 0, 1000)];
+
+      final a = ensureUnitUidsDeterministic('taskA', raw);
+      final b = ensureUnitUidsDeterministic('taskB', raw);
+
+      expect(a.single.uid, isNot(b.single.uid));
+    });
+
+    test('同一个任务内，起止一样但下标不同的单元不会撞号', () {
+      // 两条空白任务的占位分子起止经常是同一个数（比如都是 0~10000）——
+      // 光靠内容推不出区分度，index 顶上
+      final raw = [unit(0, 0, 1000), unit(1, 0, 1000)];
+
+      final out = ensureUnitUidsDeterministic('t1', raw);
+
+      expect(out[0].uid, isNot(out[1].uid));
+    });
+
+    test('已经有身份的不动——读档补发不改已经建立好的身份', () {
+      final ok = [unit(0, 0, 1000, uid: 'kept-uid')];
+
+      final out = ensureUnitUidsDeterministic('t1', ok);
+
+      expect(out.single.uid, 'kept-uid');
+    });
+
+    test('一个都不用补时原样返回同一个对象', () {
+      final ok = [unit(0, 0, 1000, uid: 'a'), unit(1, 1000, 2000, uid: 'b')];
+
+      expect(identical(ensureUnitUidsDeterministic('t1', ok), ok), isTrue);
+    });
+  });
 }

@@ -7,6 +7,7 @@ import 'package:ishkafel/core/audio/vocal_separator.dart';
 import 'package:ishkafel/core/ai/tag_dimension.dart';
 import 'package:ishkafel/core/ai/taggers.dart';
 import 'package:ishkafel/core/analysis/analysis_pipeline.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/core/analysis/audio_extractor.dart';
 import 'package:ishkafel/core/analysis/boundary_snapper.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -111,7 +112,8 @@ void main() {
     final task = makeTask();
     await repo.save(task);
 
-    final result = await makePipeline(repo).analyze(task);
+    final result = await makePipeline(repo).analyze(task,
+        by: ActorKind.agent, actor: 'Agent');
 
     expect(result.status, RenewTaskStatus.ready);
     expect(result.units, isNotNull);
@@ -136,7 +138,7 @@ void main() {
     await repo.save(task);
     final workDir = Directory('${tempDir.path}/work');
 
-    await makePipeline(repo).analyze(task);
+    await makePipeline(repo).analyze(task, by: ActorKind.agent, actor: 'Agent');
 
     expect(analysisPcmPath(workDir, 't1'), '${workDir.path}/t1.pcm');
     expect(await File(analysisPcmPath(workDir, 't1')).exists(), isFalse,
@@ -154,7 +156,8 @@ void main() {
       updatedAt: DateTime.utc(2026, 7, 29),
     );
     await expectLater(
-        makePipeline(repo).analyze(noInfo), throwsA(isA<StateError>()));
+        makePipeline(repo).analyze(noInfo,
+            by: ActorKind.agent, actor: 'Agent'), throwsA(isA<StateError>()));
     expect(await repo.findById('t2'), isNull);
   });
 
@@ -163,7 +166,8 @@ void main() {
     final task = makeTask();
     await repo.save(task);
 
-    final result = await makePipeline(repo).analyze(task);
+    final result = await makePipeline(repo).analyze(task,
+        by: ActorKind.agent, actor: 'Agent');
 
     expect(result.asrSentences, await FakeAsr().transcribe(''));
     final persisted = await repo.findById('t1');
@@ -252,7 +256,7 @@ void main() {
         vocabulary: fakeSource({
           136: const ['开箱']
         }),
-      ).analyze(task);
+      ).analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(calls, greaterThan(1), reason: '前提：确实跑了多个镜头的打标');
       expect(peak, greaterThan(1),
@@ -274,7 +278,7 @@ void main() {
               vocabulary: fakeSource({
                 1279: const ['功效演示', '价格机制']
               }))
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(tagger.calls, result.units!.length);
       expect(result.units!.first.tags, ['功效演示']);
@@ -297,10 +301,14 @@ void main() {
       await repo.save(a);
 
       await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
-          .analyze(a);
+          .analyze(a, by: ActorKind.agent, actor: 'Agent');
       final vocabA = tagger.vocabularies.last;
+      // **b 也要先落盘**：管线现在按 `TaskMutation` 写，切分落库读的是盘上
+      // 那一份（人在分析这几分钟里改过的标签组、任务名要算数），打标跟着
+      // 用它的标签组。不落盘的话盘上还是 a，词表自然也还是 a 的
+      await repo.save(b);
       await taggingPipeline(repo, unitTagger: tagger, vocabulary: source)
-          .analyze(b);
+          .analyze(b, by: ActorKind.agent, actor: 'Agent');
 
       expect(vocabA, ['功效演示']);
       expect(tagger.vocabularies.last, ['开箱']);
@@ -320,7 +328,7 @@ void main() {
         vocabulary: fakeSource({
           136: const ['开箱']
         }),
-      ).analyze(task);
+      ).analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       final totalShots =
           result.units!.fold<int>(0, (n, u) => n + u.shots.length);
@@ -340,7 +348,7 @@ void main() {
               vocabulary: fakeSource({
                 1279: const ['功效演示']
               }))
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(tagger.calls, 0);
       expect(asked, isEmpty);
@@ -363,7 +371,7 @@ void main() {
       final result = await taggingPipeline(repo,
               unitTagger: _RecordingUnitTagger(reply: const ['功效演示']),
               vocabulary: _ThrowingVocabularySource())
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(result.status, RenewTaskStatus.ready);
       for (final u in result.units!) {
@@ -387,7 +395,7 @@ void main() {
       await taggingPipeline(repo,
               unitTagger: tagger,
               vocabulary: fakeSource({1279: const []}))
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(tagger.calls, 0);
       expect(logs.join(), contains('空组'));
@@ -404,7 +412,7 @@ void main() {
               vocabulary: fakeSource({
                 1279: const ['功效演示']
               }))
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(result.units, isNotNull);
       for (final u in result.units!) {
@@ -422,7 +430,7 @@ void main() {
       await repo.save(task);
 
       final done = await makePipeline(repo, separator: fakeSeparator())
-          .analyze(task);
+          .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(done.vocalsPath, endsWith('-人声.wav'));
       expect(done.backgroundPath, endsWith('-背景.wav'));
@@ -436,7 +444,7 @@ void main() {
 
       final done =
           await makePipeline(repo, separator: fakeSeparator(fail: true))
-              .analyze(task);
+              .analyze(task, by: ActorKind.agent, actor: 'Agent');
 
       expect(done.units, isNotNull, reason: '为了一条音轨把几分钟的分析废掉不划算');
       expect(done.vocalsPath, isNull, reason: '没成功就得是 null，不能给个不存在的路径');
@@ -447,7 +455,8 @@ void main() {
       final task = makeTask();
       await repo.save(task);
 
-      final done = await makePipeline(repo).analyze(task);
+      final done = await makePipeline(repo).analyze(task,
+          by: ActorKind.agent, actor: 'Agent');
 
       expect(done.units, isNotNull);
       expect(done.vocalsPath, isNull);
@@ -482,7 +491,8 @@ void main() {
       final a = makeTask(id: '任务A', sourcePath: source.path);
       await repo.save(a);
       final doneA =
-          await makePipeline(repo, separator: fakeSeparator()).analyze(a);
+          await makePipeline(repo, separator: fakeSeparator()).analyze(a,
+              by: ActorKind.agent, actor: 'Agent');
       expect(File(doneA.vocalsPath!).existsSync(), isTrue,
           reason: '前提：A 自己得先分离成功');
 
@@ -492,7 +502,8 @@ void main() {
       final b = makeTask(id: '任务B', sourcePath: source.path);
       await repo.save(b);
       final doneB =
-          await makePipeline(repo, separator: fakeSeparator()).analyze(b);
+          await makePipeline(repo, separator: fakeSeparator()).analyze(b,
+              by: ActorKind.agent, actor: 'Agent');
 
       expect(doneB.vocalsPath, isNotNull,
           reason: 'B 有自己的人声轨，不该因为 A 被删就没了');
@@ -511,13 +522,13 @@ void main() {
       await repo.save(a);
       final doneA =
           await makePipeline(repo, separator: fakeSeparator(calls: calls))
-              .analyze(a);
+              .analyze(a, by: ActorKind.agent, actor: 'Agent');
 
       final b = makeTask(id: '任务B', sourcePath: source.path);
       await repo.save(b);
       final doneB =
           await makePipeline(repo, separator: fakeSeparator(calls: calls))
-              .analyze(b);
+              .analyze(b, by: ActorKind.agent, actor: 'Agent');
 
       expect(calls, hasLength(2), reason: '各跑各的分离，不共用一份产物');
       expect(doneA.vocalsPath, isNot(doneB.vocalsPath),
@@ -534,7 +545,8 @@ void main() {
 
       final a = makeTask(id: '任务A', sourcePath: source.path);
       await repo.save(a);
-      final done = await pipeline.analyze(a);
+      final done = await pipeline.analyze(a,
+          by: ActorKind.agent, actor: 'Agent');
       // 产物被清掉（别人删任务、或磁盘清理）
       Directory('${tempDir.path}/work/stems/任务A').deleteSync(recursive: true);
       expect(File(done.vocalsPath!).existsSync(), isFalse, reason: '前提：确实丢了');
@@ -569,12 +581,14 @@ void main() {
       final a = makeTask(id: '任务A', sourcePath: source.path);
       await repo.save(a);
       final doneA =
-          await makePipeline(repo, separator: fakeSeparator()).analyze(a);
+          await makePipeline(repo, separator: fakeSeparator()).analyze(a,
+              by: ActorKind.agent, actor: 'Agent');
 
       final b = makeTask(id: '任务B', sourcePath: source.path);
       await repo.save(b);
       final doneB =
-          await makePipeline(repo, separator: fakeSeparator()).analyze(b);
+          await makePipeline(repo, separator: fakeSeparator()).analyze(b,
+              by: ActorKind.agent, actor: 'Agent');
 
       // 同一条片子切出来的单元数必须一样——这正是按内容缓存要保住的东西
       expect(doneB.units!.length, doneA.units!.length);

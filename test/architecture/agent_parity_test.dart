@@ -64,12 +64,37 @@ void main() {
 
   /// 定位写错，后面写得再细也白搭：Agent 读完开头就形成了「这是个换画面的
   /// 工具」的印象，脚本成片那一半会被当成附属，甚至根本不会想起来用。
+  ///
+  /// **按小节定位，不按字符数切。** 这条原先是 `substring(0, 2200)`——
+  /// 2200 这个数守的不是「开篇」，是「那几节当时有多长」：往日志那一节
+  /// 补两句话，就会把「两条线」挤出窗口、这条测试当场红，而手册一点没写坏
+  /// （2026-09-18 真机撞到，当时是靠把两句话合并成一句挤出空间才过的——
+  /// 那是向坏守卫让步）。现在守的是它真正要守的东西：**选线这一节要排在
+  /// 任何一条线的细节之前**，而且它自己要把两条线都摆出来。
   test('手册开篇要把两条线摆成平级，不能只说替换裂变', () {
-    final head = agentSkillMarkdown.substring(0, 2200);
-    expect(head, contains('替换裂变'));
-    expect(head, contains('脚本成片'),
+    final lines = agentSkillMarkdown.split('\n');
+    final headings = [
+      for (var i = 0; i < lines.length; i++)
+        if (lines[i].startsWith('## ')) (at: i, text: lines[i]),
+    ];
+    final choose = headings.indexWhere((h) => h.text.contains('两条线'));
+    expect(choose, isNot(-1), reason: '手册连「两条线，先选一条」这一节都没有了？回来看看');
+    final firstLineDetail =
+        headings.indexWhere((h) => h.text.contains('全流程'));
+    expect(firstLineDetail, isNot(-1),
+        reason: '找不到讲某一条线全流程的那一节——这条测试守错方向了，回来对一遍');
+    expect(choose, lessThan(firstLineDetail),
+        reason: 'Agent 读到某一条线的细节之前，得先知道有两条线、怎么选');
+
+    // 这一节自己要把两条线都摆出来，并说清怎么选
+    final end = choose + 1 < headings.length
+        ? headings[choose + 1].at
+        : lines.length;
+    final section = lines.sublist(headings[choose].at, end).join('\n');
+    expect(section, contains('替换裂变'));
+    expect(section, contains('脚本成片'),
         reason: '开篇只说替换裂变的话，「从台词直接造一条新片」这条线就被埋没了');
-    expect(head, anyOf(contains('哪条线'), contains('走哪条')),
+    expect(section, anyOf(contains('哪条线'), contains('走哪条')),
         reason: 'Agent 拿到需求第一件事是选线，得先告诉它怎么选');
   });
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -94,6 +95,80 @@ void main() {
 
   test('findById 不存在返回 null', () async {
     expect(await repo.findById('nope'), isNull);
+  });
+
+  /// 老存档（或刚拆分出来还没建立身份的单元）盘上没有 uid，读档时由
+  /// ensureUnitUidsDeterministic 按内容推导补发。这条钉住 2026-09-17
+  /// 真机复审揪出来的那个洞：老实现（ensureUnitUids）读一次掷一次随机数，
+  /// 两次独立的读永远对不上号，等价于「单元刚被删掉了」，TaskMutation
+  /// 靠 uid 重新定位的每一处都会落空
+  group('无 uid 的老存档：确定性推导，两条读路必须对得上号', () {
+    RenewTask legacyTask(String id) => RenewTask(
+          id: id,
+          name: '老存档',
+          status: RenewTaskStatus.ready,
+          createdAt: DateTime.utc(2026, 9, 1),
+          updatedAt: DateTime.utc(2026, 9, 1),
+          // 不给 uid：SemanticUnit 默认 uid: ''，等价于老存档没有这个字段
+          units: [
+            SemanticUnit(index: 0, startMs: 0, endMs: 1000, transcript: 'a'),
+            SemanticUnit(index: 1, startMs: 1000, endMs: 2000, transcript: 'b'),
+          ],
+        );
+
+    test('连续两次 findById，单元身份完全一样', () async {
+      await repo.save(legacyTask('legacy1'));
+
+      final first = (await repo.findById('legacy1'))!;
+      final second = (await repo.findById('legacy1'))!;
+
+      expect(first.units!.map((u) => u.uid).toList(),
+          second.units!.map((u) => u.uid).toList());
+      expect(first.units!.every((u) => u.uid.isNotEmpty), isTrue,
+          reason: '读档这一刻就该补上身份，不能留空等下一步');
+    });
+
+    test('findAll 和 findById 读同一条任务，身份也必须一样', () async {
+      await repo.save(legacyTask('legacy2'));
+
+      // findAll 内部走 decodeTasksDirectory，不写回盘——用它先读一遍，
+      // 确认它跟 findById 各自独立解析出来的身份是不是同一套
+      final all = await repo.findAll();
+      final viaFindAll = all.firstWhere((t) => t.id == 'legacy2');
+      final viaFindById = (await repo.findById('legacy2'))!;
+
+      expect(viaFindAll.units!.map((u) => u.uid).toList(),
+          viaFindById.units!.map((u) => u.uid).toList());
+    });
+
+    test('补发身份之后会顺手写回盘——但这只是一次性迁移优化，不是正确性前提',
+        () async {
+      await repo.save(legacyTask('legacy3'));
+      await repo.findById('legacy3'); // 触发写回
+
+      final raw = jsonDecode(
+          File('${tempDir.path}/tasks/legacy3.json').readAsStringSync())
+          as Map<String, dynamic>;
+      final rawUnits = raw['units'] as List;
+      expect(rawUnits.every((u) => (u as Map)['uid'] is String &&
+          (u['uid'] as String).isNotEmpty), isTrue,
+          reason: '写回之后盘上应该带着真实身份，不用每次读档都重新推一遍');
+    });
+
+    test('身份补发之后的写回失败，不影响这次读取', () async {
+      await repo.save(legacyTask('legacy4'));
+      final tasksDir = Directory('${tempDir.path}/tasks');
+      // 只读+可进入、不可写：save() 里创建 tmp 文件那一步会失败
+      await Process.run('chmod', ['555', tasksDir.path]);
+      addTearDown(() => Process.run('chmod', ['755', tasksDir.path]));
+
+      final task = await repo.findById('legacy4');
+
+      expect(task, isNotNull, reason: '写回失败不该让这次读取本身失败');
+      expect(task!.units!.every((u) => u.uid.isNotEmpty), isTrue,
+          reason: '内存里这份对象照样带着确定性推导出来的正确身份，'
+              '写回只是让盘上也带上、不是正确性的前提');
+    });
   });
 
   test('findAll 按 updatedAt 倒序', () async {

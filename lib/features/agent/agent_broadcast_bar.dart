@@ -87,15 +87,29 @@ class AgentBroadcastBar extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         Text(
             scopeLabel == null
-                ? '$holder 正在操作，请稍候'
-                : '$holder 正在操作 $scopeLabel，请稍候',
+                ? '$holder 正在干活'
+                : '$holder 正在干 $scopeLabel',
             key: const Key('broadcast-title'),
             style: const TextStyle(
                 fontSize: AppFontSize.caption,
                 fontWeight: FontWeight.w600,
                 color: AppColors.textPrimary)),
         const SizedBox(width: AppSpacing.sm),
-        const Text('这期间界面是只读的',
+        // **这里一度写着「这期间界面是只读的」——那句话不是事实。**
+        //
+        // 这条播报挂在全局浮层上，任何一条任务只要有在场状态就显示：
+        // 静默模式也显示，人正开着**完全可编辑**的工作台时也显示。
+        // 软件里已经没有任何一把锁，说「只读」是对用户撒谎；而在场状态
+        // 现在还有心跳（长活儿期间不再过期），这句假话会显示得比以前更久。
+        //
+        // 换成一句**在哪一页都成立**的。
+        //
+        // 一度写成「你照样能自己改」——那在编导台上也不成立（`_mutate` 在
+        // Agent 在场时直接拒绝编辑），**又是一句不成立的话，同一个形状**。
+        // 这条浮层是全局的，它不知道人正开着哪一页，所以它只说
+        // **一条到处都对的忠告**，不作任何「你能干什么」的承诺；
+        // 具体这一页这会儿改不改得动，由各页面自己的横幅说。
+        const Text('它正动着的地方先别跟它抢',
             style: TextStyle(
                 fontSize: AppFontSize.micro, color: AppColors.textTertiary)),
       ]);

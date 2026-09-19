@@ -18,6 +18,8 @@ void main() {
     'runDoctorCommand', 'runTagGroupsCommand', 'runPeekCommand',
     'runScriptPeekCommand', 'runScriptFramesCommand',
     'runScriptBgmCandidatesCommand',
+    // 只读改动日志：只查 TaskLogFile，不写任务数据
+    'runLogCommand',
     // 管理与导航（不改成片内容）
     'runCleanCommand', 'runSkillCommand', 'runOpenCommand', 'runUiCommand',
     'runTaskDeleteCommand', 'runTaskRenameCommand',

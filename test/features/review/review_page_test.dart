@@ -10,7 +10,6 @@ import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/agent_request.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/review/review_hover_player.dart';
 import 'package:ishkafel/features/review/review_page.dart';
@@ -292,34 +291,25 @@ void main() {
     expect(find.byKey(const Key('review-confirm')), findsNothing);
   });
 
-  testWidgets('另一个窗口占着锁时**进门就拦**，给强制接管——互斥是会话级的',
+  /// **打开审片台不需要先「取得」什么，它就是打开。**
+  ///
+  /// 这里原来有一张拦截页：另一个窗口占着锁就只给「返回 / 强制接管」两个
+  /// 按钮。2026-09-18 整套锁删掉之后那张页面没有了——别人开着同一条任务，
+  /// 这里照常能审、能确认。
+  testWidgets('别人也开着这条任务：照常进得来、审得了，没有拦截页',
       (tester) async {
-    // 只在确认那一刻抢锁是补丁：审核期间任务不设防，别人中途改方案
-    // 会让确认剪的是过期状态
-    final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
-    lock.acquire('gui:$pid');
-
     await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
 
-    expect(find.textContaining('gui:$pid 正在操作这个任务'), findsOneWidget);
-    expect(find.byKey(const Key('review-confirm')), findsNothing,
-        reason: '被拦时不该出现确认按钮');
-
-    // 强制接管后照常进入
-    await tester.tap(find.byKey(const Key('review-takeover')));
-    await tester.pumpAndSettle();
-    // 抢锁是破坏性的（对方之后的写入被拒），必须先过确认框
-    expect(find.text('强制接管这个任务？'), findsOneWidget);
-    await tester.tap(find.text('接管'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('review-confirm')), findsOneWidget);
+    expect(find.textContaining('正在操作这个任务'), findsNothing);
+    expect(find.text('强制接管'), findsNothing);
+    expect(find.byKey(const Key('review-confirm')), findsOneWidget,
+        reason: '进得来就该审得了');
   });
 
-  /// Agent 持锁时**不拦成一张空白页**——可视模式下人正是为了看它干活才
+  /// Agent 在干活时**不拦成一张空白页**——可视模式下人正是为了看它干活才
   /// 把这页打开的。拦成空白页等于把要看的东西挡在门外
-  testWidgets('Agent 占着锁：照常显示候选，只读、并说清它在做什么',
+  testWidgets('Agent 正在干活：照常显示候选，并说清它在做什么',
       (tester) async {
-    TaskLockFile(dataDir: dataDir, taskId: 'rv1').acquire('Agent');
     writeAgentPresence(
       dataDir: dataDir,
       taskId: 'rv1',
@@ -341,7 +331,8 @@ void main() {
     expect(find.byKey(const Key('review-card-0/null/101')), findsOneWidget);
     expect(find.textContaining('正在剔除第 1 段的素材 101'), findsOneWidget);
 
-    // 只读：点了不生效
+    // Agent 正在动这一页时人先别同时点同一张卡：不是「没有权限」，
+    // 是两只手在抢同一个格子。它一收工立刻恢复
     await tester.tap(find.byKey(const Key('review-card-0/null/101')));
     await tester.pump();
     expect(find.text('已剔除'), findsNothing);
@@ -351,7 +342,7 @@ void main() {
     expect(readAgentAck(dataDir: dataDir, taskId: 'rv1'), 1);
   });
 
-  /// 人正开着审片台指挥 Agent：界面持锁，Agent 把活儿**委派**过来。
+  /// 人正开着审片台指挥 Agent，Agent 把活儿**委派**过来。
   /// 剔除是界面里的临时状态，人按确认才落盘——所以必须由界面执行
   group('人在场时替人代办', () {
     testWidgets('Agent 下单剔除：卡片当场变成已剔除，并回执', (tester) async {
@@ -432,11 +423,6 @@ void main() {
     });
   });
 
-  testWidgets('独立模式进门持锁——审核期间 Agent 的写入会被拒', (tester) async {
-    await pump(tester, taskWith([UnitReplacement.whole(const [101])]));
-    final lock = TaskLockFile(dataDir: dataDir, taskId: 'rv1');
-    expect(lock.acquire('agent'), isFalse, reason: '人在审核，Agent 拿不到锁');
-  });
 }
 
 class _FakeHoverPlayer implements ReviewHoverPlayer {

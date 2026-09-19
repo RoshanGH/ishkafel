@@ -30,7 +30,8 @@ class TagTraceSection extends StatefulWidget {
 
   final TagTrace? trace;
 
-  /// 手改标签。为 null 表示这一处不给改（比如只读态、或被别人占着）
+  /// 手改标签。为 null 表示这一处此刻不给改
+  /// （比如这条任务还没分析完，或者 Agent 正在动同一处）
   final VoidCallback? onEdit;
 
   /// 这些标签是人手改的（标出来，并且重新打标时会跳过它）

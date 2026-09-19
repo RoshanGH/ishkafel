@@ -127,11 +127,20 @@ class TaskArtifacts {
 
   Directory get coversDir => Directory(p.join(dataDir.path, 'covers'));
 
+  /// 改动日志：`logs/<taskId>.jsonl`，跟 [coversDir] 同一种形状——
+  /// 按任务命名的单文件，不是一个任务一个子目录。
+  ///
+  /// 任务没了，它的日志再没人会去看，是需要清单收的一种产物；而崩溃、
+  /// 手动删存档、换机器都会留下没主的日志文件，只在删任务那一刻清一次是
+  /// 一半，靠 [orphans] 在启动时扫一遍才是根治。
+  Directory get logsDir => Directory(p.join(dataDir.path, 'logs'));
+
   Directory get stemsDir => Directory(p.join(workDir.path, 'stems'));
 
   /// 属于 [taskId] 的全部产物（文件与目录都算）
   List<FileSystemEntity> of(String taskId) => [
         File(p.join(coversDir.path, '$taskId.jpg')),
+        File(p.join(logsDir.path, '$taskId.jsonl')),
         ..._workEntities().where(
             (e) => artifactBelongsTo(p.basename(e.path), taskId)),
         Directory(p.join(stemsDir.path, taskId)),
@@ -183,6 +192,7 @@ class TaskArtifacts {
 
     return [
       ..._children(coversDir).where((e) => orphan(_stem(e))),
+      ..._children(logsDir).where((e) => orphan(_stem(e))),
       ..._workEntities().where((e) => orphan(p.basename(e.path))),
       ..._children(stemsDir).where((e) => orphan(p.basename(e.path))),
       for (final name in perTaskDirNames)

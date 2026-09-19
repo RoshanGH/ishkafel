@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -9,6 +8,7 @@ import '../../core/audio/voice_catalog.dart';
 import '../../core/audio/bgm_plan.dart';
 import '../../core/analysis/scene_detector.dart';
 import '../../core/ai/ark_chat_client.dart';
+import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/ai/volcano_asr_provider.dart';
 import '../../core/ai/volcano_semantic_splitter.dart';
 import '../../core/ffmpeg/process_runner.dart';
@@ -23,16 +23,17 @@ import '../../core/script/script_service_wiring.dart';
 import '../../core/script/script_transcriber.dart';
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
 import '../../core/storage/task_media.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/jianying/jianying_writer.dart';
 import '../../core/jianying/jianying_plan.dart';
 import '../voice_baseline.dart';
 import '../agent_stage.dart';
-import '../agent_lock_holder.dart';
+import '../busy_guard.dart';
 import '../cli_output.dart';
-import '../lock_yield.dart';
+import '../tag_group_lookup.dart';
 import 'analyze_command.dart' show loadCliCredentials;
 
 /// 脚本成片这条线的**执行类**命令：建任务、提取脚本、配音、导出。
@@ -43,17 +44,40 @@ import 'analyze_command.dart' show loadCliCredentials;
 ///
 /// 每一步都上报在场状态：人在界面上看得见它在干什么。
 
-/// `ishkafel script new <名字> [--project <id>]`
+/// `ishkafel script new <名字> --tag-groups <id,id>`
+///
+/// **标签组和 `blank create` 同一个判断**：一个都不给就当场拒绝，别等到
+/// 后面 `script shots` / `tag-ref` 打不出标签才发现。GUI 新建向导给脚本
+/// 成片任务也是这样定标签组的（见 `createScriptTask`）——人在界面上能拧的
+/// 这个旋钮，Agent 用 CLI 建任务时同样要能拧，不能少这一环
 Future<int> runScriptNewCommand({
   required List<String> rest,
   required Directory dataDir,
+  String? tagGroups,
+
+  /// 测试注入：标签组查询用假实现，真机走 miaoa CLI
+  MiaoaTagService? tagService,
   StringSink? out,
   StringSink? err,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
-    sink.writeln('用法：ishkafel script new <任务名>');
+    sink.writeln('用法：ishkafel script new <任务名> --tag-groups <id,id>');
     return exitBadUsage;
+  }
+  final ids = parseTagGroupIds(tagGroups);
+  if (ids.isEmpty) {
+    // 同一条静默失败链（CLAUDE.md 点名过）：没有标签组，AI 打不出标签，
+    // 后面 script shots / tag-ref 就没有词表可用——而那时已经走了好几步
+    sink.writeln('脚本成片任务也要给 --tag-groups（标签是打标的受控词表，'
+        '没有它后面找镜头、给分子打标签都没有词可用）。'
+        '可用 ishkafel tag-groups 查看可选项');
+    return exitBadUsage;
+  }
+  final lookup = await lookupTagGroups(ids, service: tagService);
+  if (!lookup.ok) {
+    sink.writeln('这些标签组在当前企业下找不到：${lookup.missing.join('、')}');
+    return exitNotFound;
   }
   final repository = FileTaskRepository(dataDir);
   final seq = await nextTaskSeq(repository);
@@ -67,6 +91,10 @@ Future<int> runScriptNewCommand({
     status: RenewTaskStatus.ready,
     createdAt: now,
     updatedAt: now,
+    // 语义单元层与视觉镜头层这两层用的是同一套标签组——和 GUI 向导
+    // 的 prefillUnitGroups / prefillShotGroups 同一份，见类文档
+    unitTagGroups: lookup.groups,
+    shotTagGroups: lookup.groups,
   );
   await repository.save(task);
   emitJson({'ok': true, 'taskId': task.id, 'seq': seq, 'name': task.name},
@@ -112,30 +140,11 @@ Future<int> runScriptExtractCommand({
         'speech_access_token 放到 <数据目录>/credentials 或 ./.secrets');
     return exitEnv;
   }
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   final visualStage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await visualStage.begin('正在识别参考片的台词',
       focus: const AgentFocus(module: 'director'));
@@ -176,11 +185,32 @@ Future<int> runScriptExtractCommand({
     // 所以这里先落一个默认音色（人和 Agent 都能改），而不是留空等着谁想起来
     final baseline = task.script?.defaultVoiceId ?? VoiceCatalog.all.first.ref.id;
     final baselineName = VoiceCatalog.byId(baseline)?.ref.name ?? baseline;
-    final doc = ScriptDoc(lines,
-        subtitle: task.script?.subtitle ?? const SubtitleStyle(),
-        refVideoPath: video,
-        defaultVoiceId: baseline);
-    await repository.save(task.copyWith(script: doc));
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.extract',
+      edit: (fresh) {
+        // baseline 沿用外层算好的那个值：转写这个 IO 花了几分钟，重跑一遍
+        // 挑音色没有意义，只需要用 fresh 现有的音色/字幕样式起草文档
+        final doc = ScriptDoc(lines,
+            subtitle: fresh.script?.subtitle ?? const SubtitleStyle(),
+            refVideoPath: video,
+            defaultVoiceId: fresh.script?.defaultVoiceId ?? baseline);
+        return TaskEdit(
+          task: fresh.copyWith(script: doc),
+          before: {'lineCount': fresh.script?.lines.length ?? 0},
+          after: {'lineCount': doc.lines.length, 'defaultVoiceId': doc.defaultVoiceId},
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在提取脚本的过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     if (task.script?.defaultVoiceId == null) {
       sink.writeln('· 本片音色先定为「$baselineName」'
           '——这条线的时间根是配音时长，没有它后面挑画面就不知道每一镜多长。'
@@ -201,9 +231,9 @@ Future<int> runScriptExtractCommand({
     sink.writeln(e.message);
     return exitFailed;
   } finally {
-    heartbeat.cancel();
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
+    // 走 stage.end() 而不是裸 clearAgentPresence：它还要停掉在场状态的
+    // 心跳（见 AgentStage._pulse），漏掉的话撤下去的状态会被心跳写回来
+    visualStage.end();
   }
 }
 
@@ -226,12 +256,18 @@ Future<int> runScriptVoiceCommand({
   /// 可视模式：一句句配音时界面跟着滚到那一行。见
   /// [runScriptExtractCommand] 上的说明——这条命令此前同样收不到它
   bool? visual,
+
+  /// 已经有另一个进程在给这条任务配音时照样再跑一遍。见 `busy_guard.dart`
+  bool force = false,
   StringSink? out,
   StringSink? err,
 
   /// 测试注入：不给就按凭据装配真实服务
   LineVoiceFactory? voiceFactory,
   LineDeliveryFactory? deliveryFactory,
+
+  /// 测试注入：判「有没有人正在配音」时的当前时刻
+  DateTime? now,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -288,26 +324,9 @@ Future<int> runScriptVoiceCommand({
     emitJson({'ok': true, 'generated': 0, 'note': '没有需要配音的行'}, out: out);
     return 0;
   }
+  // 行的**身份**先固定下来：循环里每轮重读盘，下标会漂，id 不会
+  final targetIds = [for (final i in targets) doc.lines[i].id];
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   // **开工先说清这一轮要配几句、已经好了几句**。
   //
   // 不说的话「续配」看起来和「重来」一模一样：真机上第一次配音被锁挡住
@@ -337,31 +356,118 @@ Future<int> runScriptVoiceCommand({
   // 看着：一句配好一句落格。此前这里裸写在场状态——横幅一句句念
   // 「正在给第 10 句配音（10/20）」，界面却停在任务列表，二十句没有
   // 一格出现在屏幕上（产品负责人当场问的就是这个）
+  // **逐句的重读守卫挡不住「同速」那一半**：两个进程同时起步、都看到
+  // 第 12 句还不是 fresh，就都去调一次 TTS，剩下十几句全部念两遍。
+  // 而「命令超时了又起一个」恰恰是同速场景——所以命令级还要有这一道。
+  // **这是劝告不是拒绝**（退出码 0 + `--force`），见 `busy_guard.dart`
+  if (!force) {
+    final busy = someoneElseBusyWith(
+        dataDir: dataDir,
+        taskId: task.id,
+        keywords: const [voiceBusyKeyword],
+        now: now);
+    if (busy != null) {
+      emitJson(
+          busySkipReport(taskId: task.id, busy: busy, what: voiceBusyKeyword),
+          out: out);
+      return 0;
+    }
+  }
+
   final voiceStage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
-  await voiceStage.begin('正在配 ${targets.length} 句',
-      focus: AgentFocus(
-          module: 'director',
-          lineIndex: targets.isEmpty ? 0 : targets.first,
-          panel: AgentPanel.voice));
+  final voiceFocus = AgentFocus(
+      module: 'director',
+      lineIndex: targets.isEmpty ? 0 : targets.first,
+      panel: AgentPanel.voice);
+  // 「配音」两个字来自 busy_guard 那份常量，不手写：上面那道劝告认的就是它，
+  // 手写的话哪天改了文案，判据会静默失效而测试照样全绿
+  final voiceOpening = '正在$voiceBusyKeyword：这一轮 ${targets.length} 句';
+  await voiceStage.begin(voiceOpening, focus: voiceFocus);
+  // 静默模式下 begin 什么都不做，在场状态还是要立刻写——人可能正开着
+  // 这一页，而另一个进程也要靠它才知道「这条任务已经有人在配音了」
+  voiceStage.note(voiceOpening, focus: voiceFocus);
   final failed = <String>[];
   final degraded = <String>[];
   var instructed = 0;
+  // 真生成了几句、跳过了几句。**两个数都要报**：只报「配了 20 句」的话，
+  // 一轮全跳过和一轮全新配长得一模一样，人分不出有没有白烧钱
+  var generated = 0;
+  var skipped = 0;
   try {
+    // --voice 给的音色写成本片基调（不钉进每一行）：这一笔单独持久化一次，
+    // 免得跟下面逐行配音的写入搅在一起
+    if (voiceId != null && task.script?.defaultVoiceId != voiceId) {
+      final baselineUpdated = await TaskMutation(
+        repo: repository,
+        dataDir: dataDir,
+        by: ActorKind.agent,
+        actor: 'Agent',
+      ).apply(
+        taskId: task.id,
+        op: 'script.voice.baseline',
+        edit: (fresh) {
+          final freshDoc = fresh.script;
+          if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+          return TaskEdit(
+            task: fresh.copyWith(script: freshDoc.withDefaultVoiceId(voiceId)),
+            before: {'defaultVoiceId': freshDoc.defaultVoiceId},
+            after: {'defaultVoiceId': voiceId},
+          );
+        },
+      );
+      if (baselineUpdated == null) {
+        sink.writeln('这条任务在配音过程中被删掉了：${task.id}');
+        return exitNotFound;
+      }
+    }
+
     for (var k = 0; k < targets.length; k++) {
       final i = targets[k];
-      final lineId = doc!.lines[i].id;
-      final target = doc.lines[i];
+      final lineId = targetIds[k];
+      // **每一句开工前重读一次盘**，而不是只信循环外那份 targets。
+      //
+      // TTS 按字符计费，而「调用方命令超时了、以为失败又起一个」是常态
+      // （25 句要跑好几分钟）。第二个进程开工时算出来的 targets 是它那一刻
+      // 的快照，第一个进程后来配好的那些句它看不见——不重读就把同一句
+      // 再念一遍、再收一次费。此前替这件事挡枪的是任务锁（第二个进程撞锁
+      // 干等，等完发现「没有需要配音的行」），锁没了，幂等得落到每一句上。
+      //
+      // 顺带也解决了老问题：复用同一份快照几分钟，人在界面上的改动会被
+      // 下一轮 save 整片抹掉。
+      final reread = await repository.findById(task.id);
+      final currentDoc = reread?.script;
+      if (reread == null || currentDoc == null) {
+        failed.add('第 ${i + 1} 句：这条任务在配音过程中被删掉了');
+        break;
+      }
+      // 按 id 找，不按下标：这期间行可能被加被删，下标早就不指向同一句了
+      final hits = currentDoc.lines.where((l) => l.id == lineId);
+      if (hits.isEmpty) {
+        sink.writeln('· 第 ${i + 1} 句在这期间被删掉了，跳过');
+        skipped++;
+        continue;
+      }
+      final target = hits.first;
+      // 显式 `--line N` 是「把这一句重配一遍」，照做；批量模式下已经配好的
+      // 一律跳过——那是另一个进程（多半是超时重试前的自己）刚配完的
+      if (line == null &&
+          currentDoc.voiceStateOf(target) == LineVoiceState.fresh) {
+        sink.writeln('· 第 ${i + 1} 句已经有配音了，跳过（不重复花钱）');
+        skipped++;
+        continue;
+      }
       // 先听一遍参考片这一句是怎么念的。听过的走缓存（按内容指纹），
       // 重配同一句不再花钱；听不了就降级成默认语气，但要点名
-      final request = deliveryRequestOf(doc, target);
+      final request = deliveryRequestOf(currentDoc, target);
       if (delivery != null && request != null) {
         await voiceStage.show(
-            '正在听参考片第 ${i + 1} 句是怎么念的（${k + 1}/${targets.length}）',
+            '$voiceBusyKeyword前先听参考片第 ${i + 1} 句是怎么念的'
+            '（${k + 1}/${targets.length}）',
             focus: AgentFocus(
                 module: 'director', lineIndex: i, panel: AgentPanel.voice));
       }
@@ -373,29 +479,60 @@ Future<int> runScriptVoiceCommand({
         sink.writeln('· 第 ${i + 1} 句的参考片没听成，这一句退回默认语气：'
             '${how.degradedReason}');
       }
-      await voiceStage.show('正在给第 ${i + 1} 句配音（${k + 1}/${targets.length}）',
+      await voiceStage.show(
+          '正在给第 ${i + 1} 句$voiceBusyKeyword（${k + 1}/${targets.length}）',
           focus: AgentFocus(
               module: 'director', lineIndex: i, panel: AgentPanel.voice));
       try {
+        // 网络请求：做完拿到结果再进 apply，edit 里绝不能再发一次
         final vo = await service.generate(
           lineId: lineId,
           text: target.text,
-          voiceId: doc.voiceIdOf(target) ?? defaultVoice,
-          speechRate: doc.speechRateOf(target),
+          voiceId: currentDoc.voiceIdOf(target) ?? defaultVoice,
+          speechRate: currentDoc.speechRateOf(target),
           instruction: how.instruction,
         );
         if (how.hasInstruction) instructed++;
-        doc = doc.setVoiceoverById(lineId, vo);
-        // 配音时长是这一行的根：根变了，镜头分配跟着重算
-        final updated = doc.lines.firstWhere((l) => l.id == lineId);
-        if (updated.shots.isNotEmpty) {
-          doc = doc.setShotsById(
-              lineId,
-              ShotAllocation.fillBySlowdown(
-                  reallocShots(updated, updated.shots),
-                  vo.durationMs));
+
+        final updated = await TaskMutation(
+          repo: repository,
+          dataDir: dataDir,
+          by: ActorKind.agent,
+          actor: 'Agent',
+        ).apply(
+          taskId: task.id,
+          op: 'script.voice.generate',
+          where: {'lineIndex': i},
+          edit: (fresh) {
+            final freshDoc = fresh.script;
+            if (freshDoc == null) throw StateError('这条任务的脚本没了：${task.id}');
+            final before = freshDoc.lines.firstWhere((l) => l.id == lineId,
+                orElse: () => target);
+            var nextDoc = freshDoc.setVoiceoverById(lineId, vo);
+            // 配音时长是这一行的根：根变了，镜头分配跟着重算
+            final afterSet = nextDoc.lines.firstWhere((l) => l.id == lineId);
+            if (afterSet.shots.isNotEmpty) {
+              nextDoc = nextDoc.setShotsById(
+                  lineId,
+                  ShotAllocation.fillBySlowdown(
+                      reallocShots(afterSet, afterSet.shots), vo.durationMs));
+            }
+            return TaskEdit(
+              task: fresh.copyWith(script: nextDoc),
+              before: {'text': before.text, 'durationMs': before.voiceover?.durationMs},
+              after: {
+                'text': target.text,
+                'durationMs': vo.durationMs,
+                if (how.hasInstruction) 'instruction': how.instruction,
+              },
+            );
+          },
+        );
+        if (updated == null) {
+          failed.add('第 ${i + 1} 句：这条任务在配音过程中被删掉了');
+          continue;
         }
-        await repository.save(task.copyWith(script: doc));
+        generated++;
         sink.writeln('· 第 ${i + 1} 句好了（${vo.durationMs}ms'
             '${how.hasInstruction ? '，念法：${how.instruction}' : ''}）');
       } catch (e) {
@@ -404,7 +541,11 @@ Future<int> runScriptVoiceCommand({
     }
     emitJson({
       'ok': failed.isEmpty,
-      'generated': targets.length - failed.length,
+      'generated': generated,
+      if (skipped > 0) 'skipped': skipped,
+      if (skipped > 0)
+        'skippedNote': '这 $skipped 句开工前重读时已经有配音了'
+            '（多半是另一个进程刚配完），没有重复生成、没有重复计费',
       // **带没带上「怎么念」直接决定成片有没有情绪**，所以要报出来：
       // 只报「配了 20 句」的话，一片扁平的配音看起来跟正常的一模一样
       'withDelivery': instructed,
@@ -413,9 +554,7 @@ Future<int> runScriptVoiceCommand({
     }, out: out);
     return failed.isEmpty ? 0 : exitFailed;
   } finally {
-    heartbeat.cancel();
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
+    voiceStage.end();
   }
 }
 
@@ -454,25 +593,6 @@ Future<int> runScriptExportCommand({
       '${stamp.hour.toString().padLeft(2, '0')}'
       '${stamp.minute.toString().padLeft(2, '0')}.mp4';
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    // 走到这儿说明**等了很久还没轮到**（默认二十分钟）——不是「一撞就退」。
-    // 一撞就退的年代，调用方看到「正在操作这个任务」会以为出了故障，
-    // 于是反复重试，而占着锁的往往正是它自己刚起的那个还没跑完的进程
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。\n'
-        '· 如果那是你自己起的进程，用 ishkafel script show <任务> --json '
-        '看看活儿是不是其实已经干完了\n'
-        '· 如果是人正开着这一页，让他点一下横幅上的「我来接手」再放手');
-    return exitLocked;
-  }
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   // 此前只写了一句话到在场状态：没有模块、没有焦点，于是界面根本不进
   // 那个任务，人盯着任务列表上一行滚动的字，画面纹丝不动
   // （用户当场问的就是这个：「可视化模式吗？为什么只有播报没有界面动效」）
@@ -483,7 +603,7 @@ Future<int> runScriptExportCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   try {
     await exportStage.begin('正在导出成片',
@@ -543,11 +663,30 @@ Future<int> runScriptExportCommand({
       },
     );
     exportStage.end();
-    await repository.save(task.copyWith(exports: [
-      ...task.exports,
-      ExportRecord(
-          at: DateTime.now(), total: 1, succeeded: 1, outputDir: dir),
-    ]));
+    // 导出历史进任务：只是往列表末尾追加一条记录，不依赖 fresh 其它字段，
+    // 天然对并发安全
+    final record =
+        ExportRecord(at: DateTime.now(), total: 1, succeeded: 1, outputDir: dir);
+    final recorded = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'script.export.run',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(exports: [...fresh.exports, record]),
+        before: {'exportCount': fresh.exports.length},
+        after: {'exportCount': fresh.exports.length + 1, 'outputDir': dir},
+      ),
+    );
+    if (recorded == null) {
+      // 成片已经落到 dir 了，这条记录没写进任务不该让导出本身算失败——
+      // 但不能不吭声：这条任务在写入这一刻被删了，是事实，得点名
+      sink.writeln('注意：这条任务在记导出历史时已经被删掉了，'
+          '成片已经导出到 $dir，但任务里查不到这条导出记录了。');
+    }
     emitJson({'ok': true, 'output': output}, out: out);
     return 0;
   } on ScriptExportException catch (e) {
@@ -564,9 +703,7 @@ Future<int> runScriptExportCommand({
     }
     return exitFailed;
   } finally {
-    heartbeat.cancel();
-    clearAgentPresence(dataDir: dataDir, taskId: task.id);
-    lock.release(holder ?? agentLockHolder);
+    exportStage.end();
   }
 }
 
@@ -603,30 +740,14 @@ Future<int> runScriptJianyingCommand({
     return exitBadUsage;
   }
 
-  // 生成草稿不写任务数据，但要占锁：素材落地期间人在界面上换素材，
-  // 草稿会拿到一半新一半旧
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!await acquireYieldingFromUi(
-      lock: lock,
-      holder: holder ?? agentLockHolder,
-      dataDir: dataDir,
-      taskId: task.id,
-      onWait: sink.writeln)) {
-    sink.writeln('等了很久，这个任务一直被「${lock.read()?.holder ?? '别人'}」'
-        '占着，先不动它了。如果那是你自己起的进程，'
-        '用 ishkafel script show <任务> --json 看看活儿是不是已经干完了');
-    return exitLocked;
-  }
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
   await stage.begin('正在生成剪映草稿',
       focus: const AgentFocus(module: 'director'));
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
   try {
     final writer = JianyingWriter(
       sourceOf: (shot) {
@@ -672,8 +793,6 @@ Future<int> runScriptJianyingCommand({
     sink.writeln('生成剪映草稿失败：$e');
     return exitFailed;
   } finally {
-    heartbeat.cancel();
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }

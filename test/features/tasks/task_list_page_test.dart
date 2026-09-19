@@ -17,6 +17,7 @@ import 'package:ishkafel/features/tasks/source_availability.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/new_task_wizard.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_page.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
 import 'package:ishkafel/core/miaoa/miaoa_gateway.dart';
@@ -79,10 +80,16 @@ RenewTask makeTask(String id, String name, RenewTaskStatus status) => RenewTask(
       createdAt: DateTime.utc(2026, 7, 29), updatedAt: DateTime.utc(2026, 7, 29),
     );
 
+/// 改动日志的落点：界面上的每一次写入都要记一笔，没有它就不写（见
+/// `gui_task_mutation.dart`）。用一次性的临时目录，测完就删
+final _dataDir =
+    Directory.systemTemp.createTempSync('ishkafel_task_list_page_test_');
+
 Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
     ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        dataDirProvider.overrideWithValue(_dataDir),
         // 默认假定源文件都在：测试不该依赖真实文件系统
         fileExistsProbeProvider.overrideWithValue((_) async => true),
         // 单测零真实依赖：绝不真的去调 miaoa CLI 或弹系统文件框
@@ -94,6 +101,10 @@ Widget wrap(TaskRepository repo, {List<Override> overrides = const []}) =>
     );
 
 void main() {
+  tearDownAll(() {
+    if (_dataDir.existsSync()) _dataDir.deleteSync(recursive: true);
+  });
+
   testWidgets('没有任务时首屏先回答「这是什么、怎么开始」', (tester) async {
     await tester.pumpWidget(wrap(InMemoryTaskRepository()));
     await tester.pumpAndSettle();

@@ -1,10 +1,11 @@
 import 'dart:io';
 
 import '../../core/storage/file_task_repository.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
 import '../../core/subtitle/subtitle_style.dart';
 import '../../core/storage/agent_presence.dart';
-import '../agent_lock_holder.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
 
@@ -43,7 +44,9 @@ Future<int> runSubtitleCommand({
     return exitNotFound;
   }
 
-  var style = task.subtitle;
+  // 只校验参数格式、解析成目标值，不在这里改 style——style 的落点必须是
+  // TaskMutation.apply 里的 fresh.subtitle，不是这份可能已经过期的 task.subtitle
+  SubtitlePreset? parsedPreset;
   var changed = false;
 
   if (preset != null) {
@@ -56,10 +59,11 @@ Future<int> runSubtitleCommand({
           '${SubtitlePreset.values.map((p) => p.name).join(' / ')}');
       return exitBadUsage;
     }
-    style = style.copyWith(preset: found);
+    parsedPreset = found;
     changed = true;
   }
 
+  double? parsedBottomRatio;
   if (bottomRatio != null) {
     final v = double.tryParse(bottomRatio.trim());
     if (v == null || v <= 0 || v >= 1) {
@@ -67,10 +71,11 @@ Future<int> runSubtitleCommand({
           '0.22 大约是竖屏底部安全区上沿）');
       return exitBadUsage;
     }
-    style = style.copyWith(bottomRatio: v);
+    parsedBottomRatio = v;
     changed = true;
   }
 
+  double? parsedFontRatio;
   if (fontRatio != null) {
     final v = double.tryParse(fontRatio.trim());
     if (v == null || v <= 0 || v >= 1) {
@@ -78,10 +83,11 @@ Future<int> runSubtitleCommand({
           '0.034 在 1920 高下约 65px）');
       return exitBadUsage;
     }
-    style = style.copyWith(fontRatio: v);
+    parsedFontRatio = v;
     changed = true;
   }
 
+  var style = task.subtitle;
   if (changed) {
     // 字幕样式是**进成片**的东西（主要拿来遮素材自带的烧字），
     // 人得当场看见改成什么样了
@@ -89,13 +95,49 @@ Future<int> runSubtitleCommand({
       mode: AgentStageMode.from(visual: visual),
       dataDir: dataDir,
       taskId: task.id,
-      holder: holder ?? agentLockHolder,
+      holder: holder ?? 'Agent',
     );
-    await stage.begin('正在改字幕样式（${style.preset.name}）',
+    await stage.begin('正在改字幕样式（${parsedPreset?.name ?? style.preset.name}）',
         focus: const AgentFocus(module: 'director'));
-    await repository
-        .save(task.copyWith(subtitle: style, updatedAt: DateTime.now()));
+
+    final before = style;
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'subtitle.set',
+      edit: (fresh) {
+        final applied = fresh.subtitle.copyWith(
+          preset: parsedPreset,
+          bottomRatio: parsedBottomRatio,
+          fontRatio: parsedFontRatio,
+        );
+        return TaskEdit(
+          task: fresh.copyWith(subtitle: applied),
+          before: {
+            'preset': before.preset.name,
+            'bottomRatio': before.bottomRatio,
+            'fontRatio': before.fontRatio,
+          },
+          after: {
+            'preset': applied.preset.name,
+            'bottomRatio': applied.bottomRatio,
+            'fontRatio': applied.fontRatio,
+          },
+        );
+      },
+    );
     stage.end();
+    if (updated == null) {
+      // 没改成就不能把改之前的旧样式当结果打印出去、还退出码 0——
+      // 那是命令行在撒谎：说改了，其实盘上什么都没变
+      sink.writeln('这条任务在写入字幕样式的过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
+    style = updated.subtitle;
   }
 
   emitJson({

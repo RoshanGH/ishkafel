@@ -2,7 +2,6 @@ import 'dart:io';
 
 import '../../core/storage/agent_presence.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_seq.dart';
 import '../cli_output.dart';
 import '../task_status.dart';
@@ -21,7 +20,11 @@ import '../task_status.dart';
 /// 所以这里报三样东西：
 /// 1. 每一步做完没有、做了多少（照流程排）
 /// 2. **下一步照着敲的那条命令**（带真实 id 和行号）
-/// 3. 现场情况：谁占着这条任务、它此刻在干什么、最后一次改动是什么时候
+/// 3. 现场情况：此刻谁在动这条任务、它在干什么、最后一次改动是什么时候。
+///    **两条通道都报**：另一个 Agent（`busyWith`）和软件自己在跑的活儿
+///    （`appBusyWith`，比如人在界面上点了分析）。后者同样会让你紧接着的
+///    命令被劝退，不报的话你查到的空看起来正好像「没问题」。
+///    **这不是一道闸门**——看清了照样写得进去，只是别蒙着眼睛写
 Future<int> runStatusCommand({
   required List<String> rest,
   required Directory dataDir,
@@ -53,13 +56,25 @@ Future<int> runStatusCommand({
   final rows = <Map<String, dynamic>>[];
   for (final task in tasks) {
     final status = statusOf(task);
-    final lock = TaskLockFile(dataDir: dataDir, taskId: task.id).read();
-    final busy = readAgentPresence(dataDir: dataDir, taskId: task.id);
+    // **两条通道都要读。**
+    //
+    // Agent 的在场状态（播报通道）和**软件自己在忙**那一份是两个文件——
+    // 分开是为了让播报只报 Agent，**不是让 status 装作看不见软件那一边**。
+    // 界面跑分析、界面生成配音、界面打参考镜标，都会让 Agent 紧接着的命令
+    // 被劝退；status 里一个字都没有的话，Agent 查到的空**看起来正好像
+    // 「没问题」**——这个项目在「存了却不报」上栽过不止一次。
+    final agentBusy = readAgentPresence(dataDir: dataDir, taskId: task.id);
+    final appBusy = readAppBusy(dataDir: dataDir, taskId: task.id);
     rows.add({
       ...status.toJson(),
-      // **现场情况**：有人占着就别硬写，先看清是谁
-      if (lock != null) 'heldBy': lock.holder,
-      if (busy?.action != null) 'doingNow': busy!.action,
+      // **现场情况**：有人正在动这条任务就说出来。这不是一道闸门——
+      // 谁都写得进去，只是别蒙着眼睛写
+      if (agentBusy != null) 'busyWith': agentBusy.holder,
+      if (agentBusy?.action != null) 'doingNow': agentBusy!.action,
+      // 软件自己在跑的那件事单独一组：它和「另一个 Agent 在跑」不是一回事，
+      // 混成一个字段的话，Agent 分不清该去问人还是去等自己那条命令
+      if (appBusy != null) 'appBusyWith': appBusy.holder,
+      if (appBusy?.action != null) 'appDoingNow': appBusy!.action,
     });
   }
 
@@ -82,9 +97,13 @@ Future<int> runStatusCommand({
         w.writeln('  ⚠ $b');
       }
     }
-    if (row['heldBy'] != null) {
-      w.writeln('  现在被「${row['heldBy']}」占着'
+    if (row['busyWith'] != null) {
+      w.writeln('  现在「${row['busyWith']}」在动它'
           '${row['doingNow'] == null ? '' : '：${row['doingNow']}'}');
+    }
+    if (row['appBusyWith'] != null) {
+      w.writeln('  软件自己在跑：「${row['appBusyWith']}」'
+          '${row['appDoingNow'] == null ? '' : '：${row['appDoingNow']}'}');
     }
     if (row['next'] != null) w.writeln('  下一步：${row['next']}');
     w.writeln('  最后改动：${row['updatedAt']}');

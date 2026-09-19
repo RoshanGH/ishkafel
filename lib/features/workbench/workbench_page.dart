@@ -32,6 +32,7 @@ import '../../core/replacement/unit_base.dart';
 import 'base_segment_card.dart';
 import 'base_pin_dialogs.dart';
 import '../blank_task/blank_unit_tag_editor.dart';
+import '../../core/editing/segmentation_change.dart';
 import '../../core/editing/segmentation_edit_ops.dart';
 import '../../core/editing/segmentation_editor_controller.dart';
 import '../../core/editing/unit_reorder.dart';
@@ -104,10 +105,11 @@ import '../shared/long_task_dialog.dart';
 import '../shared/subtitle_style_sheet.dart';
 import '../../core/storage/agent_request.dart';
 import '../../core/storage/ui_action.dart';
-import '../../core/storage/task_lock.dart';
 import '../../core/storage/task_artifacts.dart';
 import '../../core/storage/task_media.dart';
-import 'task_lock_banner.dart';
+import '../../core/storage/task_mutation.dart';
+import '../../core/storage/task_repository.dart';
+import '../tasks/gui_task_mutation.dart';
 import 'subtitle_popover.dart';
 
 /// 审片台阶段一页面：三栏（单元列表/播放器/检查器）+ 时间线 + 顶栏/底部栏组装
@@ -198,54 +200,11 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 留着引用只为离开时 [SpeedFitter.prune] 一次
   SpeedFitter? _speedFitter;
 
-  /// 别人（多半是 Agent）持有的锁；为 null 表示没人占着
-  TaskLock? _lock;
-  Timer? _lockTimer;
-
   /// Agent 此刻在不在、在动哪个单元。**这套跟随是全软件共用的**：
   /// 同一份在场状态，编导台按行滚、这里按单元把播放头挪过去——
   /// 各模块只负责「我怎么把那个位置摆到眼前」，不各造一套协议
   AgentPresence? _agent;
   Timer? _agentPoll;
-
-  /// 锁文件。**在 initState 里就存下来**：dispose 时要放锁，而那时候
-  /// 已经不能再碰 ref（Riverpod 会抛 "Cannot use ref after disposed"）
-  TaskLockFile? _lockFile;
-
-  /// 本进程的身份。横幅上要能说出是谁占着，所以带上 pid
-  String get _lockHolder => 'gui:$pid';
-
-  /// 占住锁并盯着它。
-  ///
-  /// **进工作台就占锁**：人正在编辑而 Agent 同时在写，后写的会把先写的覆盖
-  /// 掉。两个方向都要防，不能只防 Agent 那一边。
-  ///
-  /// 每 5 秒一轮：既给自己的锁续命，也看看是不是被别人抢了。这个间隔比 60 秒
-  /// 的失效阈值密得多——对方一结束或一崩掉，很快就能恢复可编辑，而不是让人
-  /// 干等一分钟；自己这把锁也不会因为一次卡顿就过期。
-  void _watchLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    final file = TaskLockFile(dataDir: dataDir, taskId: widget.task.id);
-    _lockFile = file;
-
-    void poll() {
-      // 先试着占住/续命。占不到说明别人正持着，那就进只读
-      final mine = file.heartbeat(_lockHolder) || file.acquire(_lockHolder);
-      final current = mine ? null : file.read();
-      final held = current != null &&
-          current.holder != _lockHolder &&
-          // 带上进程存在性：写锁的 app 已经退了的话，不用干等心跳超时
-          !current.isStale(DateTime.now().toUtc(),
-              processAlive: isProcessAlive);
-      final next = held ? current : null;
-      if (next?.holder == _lock?.holder) return;
-      if (mounted) setState(() => _lock = next);
-    }
-
-    poll();
-    _lockTimer = Timer.periodic(const Duration(seconds: 5), (_) => poll());
-  }
 
   /// 订阅 Agent 的在场状态，跟着它走：它看哪个单元，就把播放头挪过去。
   /// 展示完这一帧再回执——Agent 靠它决定什么时候走下一步（不猜时间）
@@ -255,9 +214,10 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       if (!mounted) return;
       final dataDir = ref.read(dataDirProvider);
       if (dataDir == null) return;
-      // Agent 请这一页代办的事（提交方案）。**界面占着锁不是冲突，
-      // 是委派的时机**：可视模式要求界面停在这个任务上，而写入要求界面
-      // 不能停在这个任务上——请界面去做，人就能眼看着方案落到时间线上
+      // Agent 请这一页代办的事（提交方案 / 打开导出）。**人开着这一页
+      // 不是冲突，是委派的时机**：请界面去做，人就能眼看着方案落到时间线上，
+      // 而且人看到的和落盘的同源。接不了的动作也要当场答复（带 unsupported），
+      // 不然 Agent 只能等到超时
       unawaited(_serveAgentRequest(dataDir));
       final now =
           readAgentPresence(dataDir: dataDir, taskId: widget.task.id);
@@ -310,8 +270,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 代为提交方案：**校验和投影复用 CLI 那一份**（`plan_submission`），
   /// 不另写一套——两份实现迟早对不上，而这一步定的是成片长什么样。
   ///
-  /// 做完把方案投影到界面上：人眼看着三条方案落到时间线，这正是
-  /// 「界面占着锁」时最该发生的事。
+  /// 做完把方案投影到界面上：人眼看着三条方案落到时间线——
+  /// **人正开着这一页的时候，这才是最该发生的事**。
   Future<void> _applyPlansFromAgent(
     String raw,
     void Function(bool ok, String message, {Map<String, dynamic> payload})
@@ -362,7 +322,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       // 这一步到底成没成（和挑素材那处同一个毛病，见 _onReplacementsChanged）
       _syncPreviewAudio();
       _task = _task.copyWith(replacementsByUid: _byUid(replacements));
-      await _tasks!.savePickingPlan(_task, replacements);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, replacements));
       await voice?.sayAndHold(
           '投影完了：${replacements.length} 个单元的替换已经落在时间线上',
           focus: const AgentFocus(module: 'workbench'));
@@ -384,8 +344,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// Agent 请我们把导出对话框打开、参数填好。
   ///
   /// 和提交方案的区别：那件事做完就是做完了，这件事**故意停在人手上**——
-  /// 导出跑几分钟、直接产出要交付的片子、而且花钱。界面占着锁说明人正在
-  /// 旁边看着，最后那一下让他自己点才对。
+  /// 导出跑几分钟、直接产出要交付的片子、而且花钱。委派只在人确实开着
+  /// 这一页时才发生（见 `delegate.dart`），最后那一下让他自己点才对。
   Future<void> _openExportForAgent(
     AgentRequest req,
     void Function(bool ok, String message, {Map<String, dynamic> payload})
@@ -440,26 +400,31 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     if (req == null) return;
     _servingRequest = true;
     void reply(bool ok, String message,
-            {Map<String, dynamic> payload = const {}}) =>
+            {Map<String, dynamic> payload = const {},
+            // 见 [AgentRequestResult.unsupported]：「这一页接不了」和
+            // 「试了没做成」要分开，前者只说明人恰好开着另一页
+            bool unsupported = false}) =>
         writeAgentRequestResult(
             dataDir: dataDir,
             taskId: widget.task.id,
             id: req.id,
             ok: ok,
             message: message,
-            payload: payload);
+            payload: payload,
+            unsupported: unsupported);
     try {
       switch (UiAction.parse(req.kind)) {
         case UiAction.plansApply:
           break;
         case UiAction.exportOpen:
           // **只打开、填好，不替人点导出**：导出跑几分钟、直接出交付物、
-          // 还花钱。人正在旁边看着（不然界面不会占着锁），
+          // 还花钱。委派只在人确实开着这一页时才发生，
           // 最后那一下让他自己点才对
           await _openExportForAgent(req, reply);
           return;
         default:
-          reply(false, '这一页接不了这个动作：${req.kind}');
+          reply(false, '工作台接不了「${req.kind}」这件事——你自己做就行',
+              unsupported: true);
           return;
       }
       await _applyPlansFromAgent(
@@ -483,17 +448,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final units = _editor?.units ?? const [];
     if (index < 0 || index >= units.length) return;
     _playhead.value = units[index].startMs;
-  }
-
-  /// 离开工作台就放锁——不放的话，别人要等 60 秒超时才能接手
-  void _releaseLock() => _lockFile?.release(_lockHolder);
-
-  void _takeoverLock() {
-    final dataDir = ref.read(dataDirProvider);
-    if (dataDir == null) return;
-    TaskLockFile(dataDir: dataDir, taskId: widget.task.id)
-        .forceTakeover(_lockHolder);
-    setState(() => _lock = null);
   }
 
   /// 上一次向 UI 反映的 dirty 值。编辑器每次 notify 都会走 [_onEditorChanged]，
@@ -539,6 +493,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 而离开页面时那次补写恰恰发生在 dispose 里。
   TaskListController? _tasks;
 
+  /// 写任务要用的两样东西，**进门就取好**（跟 [_tasks] 同一个理由）。
+  ///
+  /// 在方法体里现读 `ref` 的话，凡是「SnackBar 上的重试」这类比页面活得久的
+  /// 入口，点下去就会撞上一个已经销毁的 ref：`ref.read` 抛 StateError →
+  /// 被自己的 catch 吞掉 → `_showSaveFailure` 又因为 `mounted` 为 false
+  /// 不弹。人看到的是「点了重试，没反应」
+  TaskRepository? _repo;
+  Directory? _dataDir;
+
   /// 这条任务的最新状态。
   ///
   /// **不能拿 `widget.task` 去存**：切分和替换方案走两条落库通路，两边都
@@ -561,6 +524,8 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void initState() {
     super.initState();
     _tasks = ref.read(taskListProvider.notifier);
+    _repo = ref.read(taskRepositoryProvider);
+    _dataDir = ref.read(dataDirProvider);
     _mediaCache = _buildMediaCache();
     _bgmMediaCache = _buildBgmMediaCache()?..addListener(_onMediaCacheChanged);
     _mediaCache?.addListener(_onMediaCacheChanged);
@@ -584,6 +549,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     );
     editor.addListener(_onEditorChanged);
     _editor = editor;
+    // **进门那一刻手上这份，就是已经落库的那一份。**
+    //
+    // 不先把基线立起来的话，本页**第一次**编辑器通知就会被当成「有改动」
+    // ——哪怕它只是跟着 Agent 挪了一下选中（`select()` 也会 notify）——
+    // 于是这份进门快照整份写回盘：Agent 刚写进去的东西被原样盖没，
+    // 日志里还留下一笔人名下的改动。2026-09-18 真机抓到的正是这一笔
+    // （#8 Agent 打上标签 → 1.35 秒后 #9「人」把它改了回去）
+    _savedUnits = editor.units;
     _replacements = task.replacementsFor(units);
     _syncEditLocks();
     _pinMaterials();
@@ -643,7 +616,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       unawaited(_buildSourceProxy());
     }
     _syncPreviewAudio();
-    _watchLock();
     _watchAgent();
   }
 
@@ -822,9 +794,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   @override
   void dispose() {
-    _lockTimer?.cancel();
     _agentPoll?.cancel();
-    _releaseLock();
     _consequenceTimer?.cancel();
     // 浮层挂在 Overlay 上，页面 pop 不会带走它
     _subtitleStylePanel?.close();
@@ -863,15 +833,19 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final editor = _editor;
     if (!pending || editor == null || !_isEditable) return;
     final units = editor.units;
-    if (_savedUnits != null &&
-        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+    // **比的时候不看来源戳**：`editedBy` 参与 `SemanticUnit` 的 `==`，
+    // 而 Agent 每写一次就盖一次戳——照 `==` 比的话，别人的戳会被当成
+    // 「人改了东西」，白写一次盘、白记一笔账（见 `segmentationChanged`）
+    if (_savedUnits != null && !segmentationChanged(_savedUnits!, units)) {
       return;
     }
     final notifier = _tasks;
     if (notifier == null) return;
     unawaited(() async {
       try {
-        await notifier.saveSegmentationDraft(_task, units);
+        // 页面多半已经在退了，弹不出提示时 _warnIfTaskGone 自己会让开；
+        // 还在的话（防抖窗口里点了返回但还没 pop）照样要说出来
+        _warnIfTaskGone(await notifier.saveSegmentationDraft(_task, units));
       } catch (e) {
         // 页面已经没了，弹不出提示，只能进日志
         AppLog.warn('离开时的自动保存失败（taskId=${widget.task.id}）：$e');
@@ -941,7 +915,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 那是用户照着内容选的曲子，不能悄悄改，所以要弹出来点名。
   Future<void> _reorderUnit(int from, int to) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final next = moveUnit(editor.units, from: from, to: to);
     if (identical(next, editor.units)) return;
 
@@ -1055,7 +1029,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         ));
     // 改了全片打底，预览要跟着换源
     _syncPreviewAudio();
-    await _tasks?.saveMaterialAudio(_task);
+    _warnIfTaskGone(await _tasks?.saveMaterialAudio(_task));
   }
 
   /// 对话框里的一栏：四个档位 + 音量。[onAuto] 非空表示这一栏还有
@@ -1128,7 +1102,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 人刚做的判断就被一个后台步骤抹掉了，而且不问一声。
   Future<void> _editUnitTags(int unitIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final picked = await showTagPicker(
@@ -1153,7 +1127,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 手改视觉镜头的标签（规矩同上，只是词表换成镜头层那几个标签组）
   Future<void> _editShotTags(int unitIndex, int shotIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1249,7 +1223,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// （一边离开才提交、另一边每敲一下就提交，人只会觉得「时好时坏」）
   Future<void> _editSubtitleAtBlock(
       int unitIndex, int shotIndex, Rect blockOnScreen) async {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     await showSubtitlePopover(
       context,
       anchor: blockOnScreen,
@@ -1289,24 +1263,36 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   void _setSubtitleLines(
       int unitIndex, int shotIndex, List<SubtitleLine> lines) {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     final slot = _subtitleSlot(unitIndex, shotIndex);
     if (slot == null) return;
     setState(() => _task = _task.copyWith(
         subtitleTrack: _task.subtitleTrack.withLines(slot, lines)));
     // 预览里那一段是烧好字的切片，不重推就永远停在旧那一版
     _syncPreviewAudio();
-    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+    unawaited(_saveSubtitleTrack());
+  }
+
+  /// 字幕轨落盘。两处调用点都是不等结果的，所以失败要在这里说出来
+  Future<void> _saveSubtitleTrack() async {
+    final tasks = _tasks;
+    if (tasks == null) return;
+    try {
+      _warnIfTaskGone(await tasks.saveSubtitleTrack(_task));
+    } catch (e) {
+      AppLog.warn('字幕轨落库失败（taskId=${widget.task.id}）：$e');
+      if (mounted) _showSaveFailure('字幕', retry: _saveSubtitleTrack);
+    }
   }
 
   void _resetSubtitle(int unitIndex, int shotIndex) {
-    if (!_isEditable || _lock != null) return;
+    if (!_isEditable) return;
     final slot = _subtitleSlot(unitIndex, shotIndex);
     if (slot == null) return;
     setState(() =>
         _task = _task.copyWith(subtitleTrack: _task.subtitleTrack.cleared(slot)));
     _syncPreviewAudio();
-    unawaited(_tasks?.saveSubtitleTrack(_task) ?? Future.value());
+    unawaited(_saveSubtitleTrack());
   }
 
   /// 这一镜换过素材没有。没换就没有「素材的声音」可言，那张卡片不出现
@@ -1380,7 +1366,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _setShotSourceAudio(int unitIndex, int shotIndex,
       MaterialAudioMode? mode, double? volume) {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1408,7 +1394,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   void _setShotMaterialAudio(int unitIndex, int shotIndex,
       MaterialAudioMode? mode, double? volume) {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final units = editor.units;
     if (unitIndex >= units.length) return;
     final shots = units[unitIndex].shots;
@@ -1446,7 +1432,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 不给它挑素材，导出会点名拦住，不会拿黑帧顶上。
   void _addUnit() {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     final next = _task.isBlank
         ? BlankUnitOps.append(editor.units)
         : SegmentationEditOps.appendUnit(editor.units, fps: editor.fps);
@@ -1466,7 +1452,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
         project: _task.project,
         onChanged: (next) {
           final editor = _editor;
-          if (editor == null || !_isEditable || _lock != null) return;
+          if (editor == null || !_isEditable) return;
           final units = BlankUnitOps.setTags(editor.units, unitIndex, next);
           editor.replaceUnitsForBlankTask(
               units, units.isEmpty ? BlankUnitOps.placeholderMs : units.last.endMs);
@@ -1481,7 +1467,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// （见 [shiftReplacementsAfterRemoval] / [shiftBgmAfterRemoval]）。
   Future<void> _deleteBlankUnit(int unitIndex) async {
     final editor = _editor;
-    if (editor == null || !_isEditable || _lock != null) return;
+    if (editor == null || !_isEditable) return;
     // 「至少留几个」是空白任务的规矩：那条片子整个由分子排出来。有原片的
     // 任务这里删的只是手动加的那个，删光了还有分析切出来的一整条
     if (_task.isBlank && editor.units.length <= blankMinUnits) {
@@ -1644,7 +1630,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     setState(() => _task = _task.copyWith(voices: next));
     _syncPreviewAudio();
     try {
-      await _tasks!.saveVoices(_task, next);
+      _warnIfTaskGone(await _tasks!.saveVoices(_task, next));
     } catch (e) {
       AppLog.warn('换音色方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('配音方案');
@@ -1829,7 +1815,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           vocalsPath: stems.vocalsPath, backgroundPath: stems.backgroundPath));
       // 有了纯人声，预览要重新混一遍——否则听到的还是原声叠着新配乐
       _syncPreviewAudio();
-      await _tasks!.saveVocals(_task, stems);
+      _warnIfTaskGone(await _tasks!.saveVocals(_task, stems));
     } on VocalSeparationException catch (e) {
       AppLog.warn('单独分离人声轨失败（taskId=${widget.task.id}）：${e.message}');
       if (mounted) _showVocalsFailure(e.message);
@@ -1959,7 +1945,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // 配乐变了，预览音轨要跟着重合——否则加完配乐播放还是原声
     _syncPreviewAudio();
     try {
-      await _tasks!.saveBgm(_task, next);
+      _warnIfTaskGone(await _tasks!.saveBgm(_task, next));
     } catch (e) {
       AppLog.warn('配乐方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('配乐方案');
@@ -1999,14 +1985,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       clearProject: picked.project == null,
     );
     try {
-      await _tasks!.saveTagGroups(
+      _warnIfTaskGone(await _tasks!.saveTagGroups(
         _task,
         unit: picked.unit,
         shot: picked.shot,
         unitPrompt: picked.unitPrompt,
         shotPrompt: picked.shotPrompt,
         project: picked.project,
-      );
+      ));
     } catch (e) {
       AppLog.warn('标签组落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('标签组');
@@ -2081,13 +2067,13 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               ?.name,
       segmenting: _segmentingUnit == unitIndex,
       retagging: _retaggingBaseUnit == unitIndex,
-      onSegment: _isEditable && _lock == null
+      onSegment: _isEditable
           ? () => _segmentUnitBase(unitIndex)
           : null,
-      onUnpin: _isEditable && _lock == null && hasOwnBaseShots(unit)
+      onUnpin: _isEditable && hasOwnBaseShots(unit)
           ? () => _unpinUnitBase(unitIndex)
           : null,
-      onRetag: _isEditable && _lock == null
+      onRetag: _isEditable
           ? () => _retagBaseUnit(unitIndex)
           : null,
     );
@@ -2356,12 +2342,14 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     final editor = _editor;
     if (editor == null || !_isEditable) return;
     final units = editor.units;
-    if (_savedUnits != null &&
-        const ListEquality<SemanticUnit>().equals(_savedUnits!, units)) {
+    // **比的时候不看来源戳**：`editedBy` 参与 `SemanticUnit` 的 `==`，
+    // 而 Agent 每写一次就盖一次戳——照 `==` 比的话，别人的戳会被当成
+    // 「人改了东西」，白写一次盘、白记一笔账（见 `segmentationChanged`）
+    if (_savedUnits != null && !segmentationChanged(_savedUnits!, units)) {
       return;
     }
     try {
-      await _tasks!.saveSegmentationDraft(_task, units);
+      _warnIfTaskGone(await _tasks!.saveSegmentationDraft(_task, units));
       _task = _task.copyWith(units: units);
       _savedUnits = units;
     } catch (e) {
@@ -2483,7 +2471,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 审核候选：人挑完（或 Agent 挑完）在这里过一遍再导。
   ///
   /// 内嵌模式：审核页把决定交回来，在**本会话**里应用并走既有的落库通路
-  /// ——同一个人的同一次编辑，没有第二把锁
+  /// ——同一个人的同一次编辑，不该有第二条落盘路径
   Future<void> _openReview() async {
     final outcome = await Navigator.of(context).push(
       MaterialPageRoute(
@@ -2536,11 +2524,17 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   /// 直接把画面上的字幕拖到想要的高度——比在面板里拧「距底 21%」直观得多
   Future<void> _dragSubtitleTo(double bottomRatio) async {
-    final next = _task.copyWith(
-        subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio),
-        updatedAt: DateTime.now());
-    setState(() => _task = next);
-    await ref.read(taskRepositoryProvider).save(next);
+    // 内存里这份只改 subtitle，**不碰 updatedAt**：它是 TaskMutation 的
+    // 版本令牌，手写一个就是在 `_task` 上放了个假值，哪天谁拿 `_task` 去跟
+    // 盘上比版本就踩上。真正的 updatedAt 由 apply 落盘时统一推
+    setState(() => _task = _task.copyWith(
+        subtitle: _task.subtitle.copyWith(bottomRatio: bottomRatio)));
+    // 落盘只动**距底比例**这一个值：这一刻 Agent 可能正在改同一条任务的
+    // 别的东西，整份写回去会把它们抹掉
+    await _saveSubtitleStyle(
+      (fresh) => fresh.subtitle.copyWith(bottomRatio: bottomRatio),
+      note: '人直接把画面上的字幕拖到了想要的高度',
+    );
   }
 
   /// 改字幕样式。**主要用途是遮挡**：素材自带烧录字幕时（库里不少见，
@@ -2561,11 +2555,61 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       }
       return;
     }
-    final next = _task.copyWith(subtitle: picked.$1, updatedAt: DateTime.now());
+    final style = picked.$1;
     // 预览的字幕是现画的一层，setState 就已经重画了——不推轨道、不换源
-    setState(() => _task = next);
-    await ref.read(taskRepositoryProvider).save(next);
+    // 同上：updatedAt 不手写，交给 apply
+    setState(() => _task = _task.copyWith(subtitle: style));
+    await _saveSubtitleStyle((_) => style, note: '人在工作台调了全片字幕样式');
   }
+
+  /// 全片字幕样式落盘。**只换 `subtitle` 这一个字段**，其余交给盘上那份。
+  ///
+  /// [next] 拿到的是刚重读回来的那一份，不是这一页手上的 `_task`——后者是
+  /// 打开那一刻的样子，整份写回去会把 Agent 这期间改的东西悄悄抹掉。
+  Future<void> _saveSubtitleStyle(
+    SubtitleStyle Function(RenewTask fresh) next, {
+    required String note,
+  }) async {
+    final repo = _repo;
+    if (repo == null) return;
+    try {
+      final saved = await humanMutation(
+        repo: repo,
+        dataDir: _dataDir,
+        actor: actorWorkbench,
+      ).apply(
+        taskId: _task.id,
+        op: 'subtitle.set',
+        note: note,
+        edit: (fresh) {
+          final style = next(fresh);
+          return TaskEdit(
+            task: fresh.copyWith(subtitle: style),
+            before: _subtitleStyleFacts(fresh.subtitle),
+            after: _subtitleStyleFacts(style),
+          );
+        },
+      );
+      // 画面上的字已经变了、盘上却没变——不说的话人关了窗才发现白调一遍
+      _warnIfTaskGone(saved != null);
+    } catch (e) {
+      AppLog.warn('字幕样式落库失败（taskId=${_task.id}）：$e');
+      if (mounted) {
+        _showSaveFailure('字幕样式',
+            retry: () => _saveSubtitleStyle(next, note: note));
+      }
+    }
+  }
+
+  /// 字幕样式的判断依据。**样式的主要用途是遮挡**（素材自带烧录字幕时，
+  /// 白字黑描边盖不住），所以形态、字号、位置、颜色一个都不能少——
+  /// 只记一个指纹的话，Agent 看不出人是嫌它盖不住还是嫌它太大
+  static Map<String, dynamic> _subtitleStyleFacts(SubtitleStyle style) => {
+        'preset': style.preset.name,
+        'bottomRatio': style.bottomRatio,
+        'fontRatio': style.fontRatio,
+        'colorHex': style.colorHex,
+      };
 
   /// 开着的字幕样式浮层（见 [showSubtitleStylePanel]）
   SubtitleStylePanel? _subtitleStylePanel;
@@ -2795,7 +2839,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 一次导出——「哪天、导了几条、成了几条、在哪个目录」。
   Future<void> _recordExport(ExportRecord record) async {
     try {
-      await _tasks!.addExportRecord(_task, record);
+      _warnIfTaskGone(await _tasks!.addExportRecord(_task, record));
       if (mounted) {
         setState(() =>
             _task = _task.copyWith(exports: [..._task.exports, record]));
@@ -2821,6 +2865,20 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
 
   static String _safeName(String name) =>
       name.replaceAll(RegExp(r'[/:\\]'), '_');
+
+  /// 落盘没成的统一出口。
+  ///
+  /// `false` = 这条任务在写的那一刻已经被删了（另一个窗口删的）。
+  /// **不说的话最危险**：画面上早就变了、盘上没变，人以为改动留住了，
+  /// 关了窗才发现全没了。用项目现成的那句话（[taskMissingMessage]）
+  void _warnIfTaskGone(bool? saved) {
+    if (saved != false || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text(taskMissingMessage),
+      backgroundColor: AppColors.red,
+      duration: Duration(seconds: 6),
+    ));
+  }
 
   /// 保存类操作失败的统一用户提示：说清做什么失败了与可能的原因，
   /// 不把原始异常文本摊给用户（详情已进日志）。
@@ -2859,7 +2917,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
   /// 失败要说出来，不然人只会在下次打开时发现素材跑到了别人身上
   Future<void> _savePickingPlanQuietly(List<UnitReplacement> next) async {
     try {
-      await _tasks!.savePickingPlan(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, next));
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
       if (mounted) _showSaveFailure('替换方案');
@@ -2878,7 +2936,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
     // ——产品负责人 2026-09-16 真机
     _syncPreviewAudio();
     try {
-      await _tasks!.savePickingPlan(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickingPlan(_task, next));
       _task = _task.copyWith(replacementsByUid: _byUid(next));
     } catch (e) {
       AppLog.warn('替换方案落库失败（taskId=${widget.task.id}）：$e');
@@ -2896,7 +2954,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
       return;
     }
     try {
-      await _tasks!.savePickedMaterials(_task, next);
+      _warnIfTaskGone(await _tasks!.savePickedMaterials(_task, next));
       _task = _task.copyWith(pickedMaterials: next);
     } catch (e) {
       AppLog.warn('已选素材落库失败（taskId=${widget.task.id}）：$e');
@@ -3221,7 +3279,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
           onBack: _handleBackRequest,
           onEditTagGroups: _isEditable ? _editTagGroups : null,
           onEditMaterialAudio:
-              _isEditable && _lock == null ? _editMaterialAudio : null,
+              _isEditable ? _editMaterialAudio : null,
           materialAudioOn: _task.materialAudio.mode.audible,
           onEditSubtitle: _isEditable ? _editSubtitleStyle : null,
         ),
@@ -3253,7 +3311,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 text: err,
                 building: false,
                 retryLabel: '重新分离',
-                onRetry: _isEditable && _lock == null
+                onRetry: _isEditable
                     ? () {
                         final sel = _editor?.selection;
                         final u = sel?.unitIndex;
@@ -3276,20 +3334,15 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 text: notice.text,
                 building: false,
                 retryLabel: '重新分离',
-                // 只读时不给出口：这条任务正被别人占着，补出来也写不进去
-                onRetry: notice.retryable && _isEditable && _lock == null
+                // `_isEditable` 现在恒 true（见它的文档注释：项目永远可编辑），
+                // 留着这一层是因为它是全页统一的可编辑判据，哪天真要收紧
+                // 只改那一处。**这里不再有「被别人占着」那回事**
+                onRetry: notice.retryable && _isEditable
                     ? _separateVocals
                     : null,
               ),
             if (_voiceProgress case final p?)
               VoiceGeneratingBanner(done: p.$1, total: p.$2),
-            // 被别人占着时整页只读。只禁不说的话，用户只会以为软件坏了
-            if (_lock case final lock?)
-              TaskLockBanner(
-                holder: lock.holder,
-                action: _agent?.action,
-                onTakeover: _takeoverLock,
-              ),
             Expanded(
               child: WorkbenchBody(
                 // Agent 在看哪儿，界面就跟到哪儿——像人自己点过去那样
@@ -3301,32 +3354,32 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 editor: editor,
                 // 两种任务都能加单元。有原片的任务加出来的那个**原片上没有它**
                 // （hasSource=false）：画面只能来自挑到的素材，成片因此比原片长
-                onAddUnit: _isEditable && _lock == null ? _addUnit : null,
+                onAddUnit: _isEditable ? _addUnit : null,
                 onReorderUnit:
-                    _isEditable && _lock == null ? _reorderUnit : null,
+                    _isEditable ? _reorderUnit : null,
                 materialAudioDefault: _task.materialAudio,
                 shotReplaced: _shotReplaced,
                 shotMaterialVoiceover: _shotMaterialVoiceover,
                 onEditUnitTags:
-                    _isEditable && _lock == null ? _editUnitTags : null,
+                    _isEditable ? _editUnitTags : null,
                 onEditShotTags:
-                    _isEditable && _lock == null ? _editShotTags : null,
+                    _isEditable ? _editShotTags : null,
                 subtitleLinesOf: _subtitleLinesOf,
                 subtitleEdited: _subtitleEdited,
                 subtitleTextOf: _subtitleTextOf,
                 subtitleLineCount: _subtitleLineCount,
                 onEditSubtitleBlock: _editSubtitleAtBlock,
                 onSubtitleChanged:
-                    _isEditable && _lock == null ? _setSubtitleLines : null,
+                    _isEditable ? _setSubtitleLines : null,
                 onSubtitleReset:
-                    _isEditable && _lock == null ? _resetSubtitle : null,
+                    _isEditable ? _resetSubtitle : null,
                 onShotMaterialAudioChanged:
-                    _isEditable && _lock == null ? _setShotMaterialAudio : null,
+                    _isEditable ? _setShotMaterialAudio : null,
                 sourceAudioDefault: _task.sourceAudio,
                 // 时间线靠它判断「字幕改过没有、要不要重画」
                 subtitleTrack: _task.subtitleTrack,
                 onShotSourceAudioChanged:
-                    _isEditable && _lock == null ? _setShotSourceAudio : null,
+                    _isEditable ? _setShotSourceAudio : null,
                 unitVoiceSwapped: (i) {
                   final units = editor.units;
                   return i < units.length &&
@@ -3342,7 +3395,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                     : null,
                 baseCard: _baseCard,
                 blankTask: _task.isBlank,
-                onDeleteUnit: _isEditable && _lock == null
+                onDeleteUnit: _isEditable
                     ? _deleteBlankUnit
                     : null,
                 // 有原片的任务只有**手动加的**单元能删。分析切出来的单元
@@ -3362,7 +3415,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                 waveStatus: _waveStatus,
                 baseMedia: _baseMedia,
                 playhead: _playhead,
-                readOnly: !_isEditable || _lock != null,
+                readOnly: !_isEditable,
                 clock: widget.clock,
                 voices: _task.voices,
                 replacements: _replacements ?? const [],
@@ -3386,7 +3439,7 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
                   unitTagGroups: _task.unitTagGroups,
                   initialReplacements: _replacements,
                   onReplacementsChanged: _onReplacementsChanged,
-                  readOnly: !_isEditable || _lock != null,
+                  readOnly: !_isEditable,
                   project: _task.project,
                   pickedMaterials: _task.pickedMaterials,
                   onPickedMaterialsChanged: _onPickedMaterialsChanged,
@@ -3417,7 +3470,6 @@ class _WorkbenchPageState extends ConsumerState<WorkbenchPage> {
               onExport: blocked == null ? _openExport : null,
               onJianying: _jianyingBusy || !_isEditable ? null : _openJianying,
               onReview: _isEditable &&
-                      _lock == null &&
                       collectReviewItems(_replacements ?? const []).isNotEmpty
                   ? _openReview
                   : null,

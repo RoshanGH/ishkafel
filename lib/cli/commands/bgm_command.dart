@@ -1,11 +1,13 @@
 import 'dart:io';
 
+import 'package:collection/collection.dart';
+
 import '../../core/audio/bgm_plan.dart';
 import '../../core/audio/bgm_range.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/storage/task_seq.dart';
-import '../agent_lock_holder.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
 import '../cli_output.dart';
@@ -92,26 +94,14 @@ Future<int> runBgmCommand({
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  final who = holder ?? agentLockHolder;
-  if (!lock.acquire(who)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，先等它');
-    return exitLocked;
-  }
   try {
-    BgmPlan next;
-    if (remove) {
-      next = task.bgm.removeSegment(from);
-    } else if (volume != null && materialIds == null) {
-      final v = double.tryParse(volume.trim());
-      if (v == null || v < 0 || v > 1) {
-        sink.writeln('--volume 要 0~1 之间的小数');
-        return exitBadUsage;
-      }
-      next = task.bgm.withVolume(startUnit: from, volume: v);
-    } else {
+    // 取素材是网络请求，有副作用——不能放进 edit 闭包（edit 可能被
+    // TaskMutation 重跑一次，重跑网络请求就是把「取一首曲子」算两遍）。
+    // 校验、取素材都在这里做完，edit 里只做纯变换。
+    List<BgmMaterial>? assignMaterials;
+    if (!remove && !(volume != null && materialIds == null)) {
       final ids = <int>[
         for (final p in (materialIds ?? '').split(',')) ?int.tryParse(p.trim()),
       ];
@@ -120,7 +110,7 @@ Future<int> runBgmCommand({
         return exitBadUsage;
       }
       // 取不到就直接失败：铺一段空的进去，导出时那一段会静默没有配乐
-      final materials = <BgmMaterial>[];
+      assignMaterials = <BgmMaterial>[];
       for (final id in ids) {
         final m = await fetchMaterial(id);
         if (m == null) {
@@ -128,30 +118,85 @@ Future<int> runBgmCommand({
               '用 ishkafel script bgm-candidates 重新挑一首');
           return exitFailed;
         }
-        materials.add(m);
+        assignMaterials.add(m);
       }
-      next = task.bgm.assign(
-        startUnit: from,
-        endUnit: to,
-        materials: materials,
-        rangeMs: unitRangeMs(units, from: from, to: to),
-        volume: double.tryParse((volume ?? '').trim()) ??
-            BgmSegment.defaultVolume,
-      );
     }
+
+    double? setVolume;
+    if (!remove && volume != null && materialIds == null) {
+      final v = double.tryParse(volume.trim());
+      if (v == null || v < 0 || v > 1) {
+        sink.writeln('--volume 要 0~1 之间的小数');
+        return exitBadUsage;
+      }
+      setVolume = v;
+    }
+    final assignVolume =
+        double.tryParse((volume ?? '').trim()) ?? BgmSegment.defaultVolume;
+
     // 配乐是进成片的东西，不是装饰——铺到哪一段要让人看见
     await stage.begin('正在铺配乐', focus: const AgentFocus(module: 'workbench'));
-    await repository.save(task.copyWith(bgm: next, updatedAt: DateTime.now()));
+    final updated = await TaskMutation(
+      repo: repository,
+      dataDir: dataDir,
+      by: ActorKind.agent,
+      actor: 'Agent',
+    ).apply(
+      taskId: task.id,
+      op: 'bgm.set',
+      where: {'fromUnit': from, 'toUnit': to},
+      edit: (fresh) {
+        final freshUnits = fresh.units ?? const [];
+        final beforeSegment =
+            fresh.bgm.segments.firstWhereOrNull((s) => s.startUnit == from);
+        final BgmPlan next;
+        if (remove) {
+          next = fresh.bgm.removeSegment(from);
+        } else if (setVolume != null) {
+          next = fresh.bgm.withVolume(startUnit: from, volume: setVolume);
+        } else {
+          next = fresh.bgm.assign(
+            startUnit: from,
+            endUnit: to,
+            materials: assignMaterials!,
+            rangeMs: unitRangeMs(freshUnits, from: from, to: to),
+            volume: assignVolume,
+          );
+        }
+        final afterSegment =
+            next.segments.firstWhereOrNull((s) => s.startUnit == from);
+        return TaskEdit(
+          task: fresh.copyWith(bgm: next),
+          before: _bgmSegmentFacts(beforeSegment),
+          after: _bgmSegmentFacts(afterSegment),
+        );
+      },
+    );
+    if (updated == null) {
+      sink.writeln('这条任务在操作过程中被删掉了：${task.id}');
+      return exitNotFound;
+    }
     emitJson({
       'ok': true,
       'segments': [
-        for (final s in next.segments)
+        for (final s in updated.bgm.segments)
           {'fromUnit': s.startUnit, 'toUnit': s.endUnit, 'count': s.materials.length},
       ],
     }, out: out);
     return 0;
   } finally {
     stage.end();
-    lock.release(who);
   }
 }
+
+/// 配乐段落里值得记进日志的事实：铺了哪几首、音量多少——不是「哪个 id」，
+/// 是「这一段现在是什么状态」，Agent 才能从改前改后对出人到底动了什么
+Map<String, dynamic> _bgmSegmentFacts(BgmSegment? s) => s == null
+    ? {'present': false}
+    : {
+        'present': true,
+        'fromUnit': s.startUnit,
+        'toUnit': s.endUnit,
+        'materials': [for (final m in s.materials) {'id': m.id, 'name': m.name}],
+        'volume': s.volume,
+      };

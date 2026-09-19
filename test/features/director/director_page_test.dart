@@ -21,12 +21,21 @@ import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/director/director_page.dart';
 import 'package:ishkafel/features/director/director_providers.dart';
 import 'package:ishkafel/features/tasks/new_task_wizard/wizard_providers.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 /// 编导台 M1：左栏脚本编辑 + 自动落盘 + 空态起步引导 + 从视频提取脚本。
 /// 验收口径（实现分期）：建任务 → 写十行脚本 → 关掉重开不丢 → 行操作全可用。
 class _MemoryRepo implements TaskRepository {
   final _store = <String, RenewTask>{};
+
+  /// 先把这条任务放到「盘」上。
+  ///
+  /// 编导台的落盘走 `TaskMutation`，它**只改已存在的任务**——重读不到就
+  /// 如实返回「没有这条」，不会凭空建一条出来（那正是它要防的：对话框比
+  /// 任务活得久，写回去等于把删掉的任务复活）。所以打开编导台之前，
+  /// 这条任务本来就该在盘上，测试也要照做
+  void seed(RenewTask task) => _store[task.id] = task;
   @override
   Future<List<RenewTask>> findAll() async => _store.values.toList();
   @override
@@ -133,18 +142,26 @@ ScriptDoc docWith(List<String> texts) {
   return doc;
 }
 
+/// 改动日志的落点：编导台的每一次自动保存都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _dataDir =
+    Directory.systemTemp.createTempSync('ishkafel_director_page_test_');
+
 Widget wrap(TaskRepository repo, RenewTask task,
-        {List<Override> overrides = const []}) =>
-    ProviderScope(
+    {List<Override> overrides = const []}) {
+  // 打开编导台之前这条任务本来就在盘上（见 _MemoryRepo.seed）
+  if (repo is _MemoryRepo) repo.seed(task);
+  return ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        dataDirProvider.overrideWithValue(_dataDir),
         videoFilePickerProvider.overrideWithValue(() async => null),
         ...overrides,
       ],
       // 播放器注入空工厂：单测不碰 libmpv，中栏保持占位态
       child: MaterialApp(
-          home: DirectorPage(task: task, playbackFactory: () => null)),
-    );
+          home: DirectorPage(task: task, playbackFactory: () => null)));
+}
 
 /// hover 到某行上（拖柄/删除按钮都藏在 hover 里）
 Future<TestGesture> hoverLine(WidgetTester tester, int index) async {
@@ -215,6 +232,10 @@ ShotSearchServices _draftFakeServices(_DraftFakeCli cli) {
 }
 
 void main() {
+  tearDownAll(() {
+    if (_dataDir.existsSync()) _dataDir.deleteSync(recursive: true);
+  });
+
   testWidgets('空脚本先回答「从哪里开始」：提取脚本与直接写两条路', (tester) async {
     await pumpDirector(tester, wrap(_MemoryRepo(), scriptTask()));
     await tester.pumpAndSettle();

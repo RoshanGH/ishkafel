@@ -113,7 +113,42 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
     if (!await file.exists()) return null;
     try {
       final json = jsonDecode(await file.readAsString());
-      return RenewTask.fromJson(json as Map<String, dynamic>);
+      final task = RenewTask.fromJson(json as Map<String, dynamic>);
+      // 单元身份（uid）在读档这一刻由 ensureUnitUidsDeterministic 补发——
+      // 老存档、或者刚拆分/新建出来还没建立身份的单元，盘上这个字段是空的。
+      //
+      // **正确性由确定性推导保证，不是由这次写回保证**：`ensureUnitUidsDeterministic`
+      // 按 taskId+index+startMs+endMs 推导，同一份磁盘数据不管被 findById
+      // 还是 findAll 读、读几次、几个进程同时读，推出来的都是同一个值——
+      // TaskMutation 靠 uid 在两次独立的读之间重新定位单元，这条保证不依赖
+      // 这次写回是否成功、甚至不依赖它有没有跑到。
+      //
+      // 这里写回**只是一次性迁移优化**：让这条老任务从此以后盘上就带着
+      // 正式的 uid，不用每次读档都重新跑一遍哈希；也让直接看 JSON 文件的
+      // 人（人工排查、脚本处理）看到的是真实身份，不是推导前的空字符串。
+      // 写失败（只读文件系统、磁盘满……）不影响这次读的正确性，只是丢了
+      // 这次「顺手记一笔」的机会，下次读到同一份数据照样能推出同一个
+      // uid——所以失败了就记一句警告，照常把这次读到的 task 返回，不算作
+      // 读失败。
+      //
+      // **这次写回保留的是原本读到的 updatedAt，不是 DateTime.now()**：
+      // 补的只是身份，不是一次有意义的改动，不该顶掉时间戳去抢
+      // `TaskMutation` 的乐观并发校验那条线——`TaskMutation.apply` 靠
+      // `updatedAt` 变没变来判断「写盘这段窗口里是不是被别人抢写了」，
+      // 这次写回如果推进了 `updatedAt`，会让它把「其实什么有意义的改动
+      // 都没发生」误判成一次抢写。反过来说：`TaskMutation` 的版本校验
+      // 天然看不见这一笔写回，但这不影响正确性——两条读路推出来的 uid
+      // 本来就一样，版本校验要保护的是「谁的改动被覆盖」，这里没有谁的
+      // 改动，无需被看见
+      if (_unitUidsWereJustAssigned(json, task)) {
+        try {
+          await save(task);
+        } catch (e) {
+          AppLog.warn('单元身份补发之后写回失败（不影响这次读取）'
+              ' ${file.path}：$e');
+        }
+      }
+      return task;
     } on FormatException catch (e) {
       // JSON 格式错误：文件损坏返回 null，语义与 findAll 的跳过一致
       AppLog.warn('读取任务文件失败（格式错误） ${file.path}：$e');
@@ -144,5 +179,25 @@ class FileTaskRepository implements TaskRepository, TaskLoadDiagnostics {
   Future<void> delete(String id) async {
     final file = _fileOf(id);
     if (await file.exists()) await file.delete();
+  }
+
+  /// 这一次 `fromJson` 有没有给某个单元现掷了一个身份——**逐个比对盘上
+  /// 原样写的 uid 和解析出来的 uid**，不信任何「变没变」的旁路信号。
+  ///
+  /// 结构对不上（单元数不一致）时不处理，交给别处的校验去报——这里只
+  /// 管「同一批单元，身份是不是这一次才现掷的」这一件事。
+  static bool _unitUidsWereJustAssigned(
+      Map<String, dynamic> json, RenewTask task) {
+    final rawUnits = json['units'];
+    final units = task.units;
+    if (rawUnits is! List || units == null || rawUnits.length != units.length) {
+      return false;
+    }
+    for (var i = 0; i < units.length; i++) {
+      final raw = rawUnits[i];
+      final rawUid = raw is Map ? raw['uid'] : null;
+      if (rawUid != units[i].uid) return true;
+    }
+    return false;
   }
 }

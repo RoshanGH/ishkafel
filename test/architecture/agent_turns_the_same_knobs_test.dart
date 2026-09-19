@@ -77,18 +77,32 @@ void main() {
       final body =
           src.substring(src.indexOf('Future<int> runScriptTagRefCommand'));
       final loop = body.substring(body.indexOf('taggedSoFar++'));
-      expect(loop.substring(0, 500), contains('repository.save'),
+      final window = loop.substring(0, 900);
+      // 落盘机制从直接 repository.save 改成了 TaskMutation（Task 6）：
+      // 原来这个循环复用同一份循环外的旧任务快照几十秒到几分钟，这段窗口里
+      // 人在界面上的改动会被下一轮 save 整片抹掉。TaskMutation 让每一镜的
+      // 落盘各自重读最新数据，但「打完一镜就写」这条行为本身没变
+      expect(window, contains('TaskMutation('),
           reason: '攒到整行才写，人看到的是「播报都到第 7 镜了，'
               '画面上一个都没出现」，然后忽然整行刷出来');
+      expect(window, contains('.apply('),
+          reason: '光 new 一个 TaskMutation 不够，得真的调用 apply 落盘');
     });
 
     test('挑镜头：每落一行就写一次盘', () {
       final src = File('lib/cli/commands/script_apply_command.dart')
           .readAsStringSync();
-      expect(src, contains('onLineDone'),
+      final body =
+          src.substring(src.indexOf('Future<int> _applyShotsPicks'));
+      final loop = body.substring(body.indexOf('for (final pick in _picks'));
+      // 落盘机制从 onLineDone 回调改成了 TaskMutation（Task 6）：原来的
+      // 回调复用循环外的旧任务快照，循环期间（画面自查是网络请求，可能
+      // 几十秒到几分钟）人在界面上的改动会被下一轮 save 整片抹掉。
+      // 改成每行一次独立 apply，「一行一落盘」这条行为本身没变
+      expect(loop.substring(0, 900), contains('TaskMutation('),
           reason: 'Agent 就算一次提交十几行，界面也该一行行长出来');
-      expect(src, contains('await onLineDone?.call(next)'),
-          reason: '钩子留了却不在每行调用，等于没留');
+      expect(loop.substring(0, 900), contains('.apply('),
+          reason: '光 new 一个 TaskMutation 不够，得真的调用 apply 落盘');
     });
   });
 

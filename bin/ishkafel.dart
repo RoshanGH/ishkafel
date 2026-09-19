@@ -11,10 +11,10 @@ import 'package:ishkafel/cli/commands/doctor_command.dart';
 import 'package:ishkafel/cli/commands/export_command.dart';
 import 'package:ishkafel/cli/commands/import_command.dart';
 import 'package:ishkafel/cli/commands/jianying_command.dart';
+import 'package:ishkafel/cli/commands/log_command.dart';
 import 'package:ishkafel/cli/commands/peek_command.dart';
 import 'package:ishkafel/cli/commands/subtitle_command.dart';
 import 'package:ishkafel/core/storage/agent_presence.dart';
-import 'package:ishkafel/core/storage/task_lock.dart';
 import 'package:ishkafel/cli/commands/open_command.dart';
 import 'package:ishkafel/cli/commands/review_command.dart';
 import 'package:ishkafel/cli/commands/ui_command.dart';
@@ -66,7 +66,10 @@ Future<void> main(List<String> args) async {
     ..addFlag('yes',
         negatable: false, help: 'task-delete 用：确认删除（不可逆）')
     ..addOption('by',
-        help: 'script shots 用：检索方式 tags/content/image/voiceover/name')
+        help: 'script shots 用：检索方式 tags/content/image/voiceover/name；'
+            'log 用：只看 human/agent 谁干的')
+    ..addOption('since', help: 'log 用：游标，只看这个序号之后的改动')
+    ..addOption('limit', help: 'log 用：最多看多少条（默认 200）')
     ..addOption('materials',
         help: 'script peek 用：要看哪几条素材的画面，逗号分隔')
     ..addOption('mode',
@@ -94,6 +97,10 @@ Future<void> main(List<String> args) async {
             'whiteBox / blurBox 能盖住素材自带的烧录字幕')
     ..addOption('bottom', help: 'subtitle 用：字幕距画面底部的比例（如 0.22）')
     ..addOption('font', help: 'subtitle 用：字号占画面高度的比例（如 0.034）')
+    ..addFlag('force',
+        help: 'analyze / script voice / script tag-ref 用：已经有另一个进程'
+            '在这条任务上干同一件事时照样再跑一遍（默认不跑，只报一句'
+            '「有人在做」并给出这个开关——这几步都是分钟级、按量计费的）')
     ..addFlag('probe',
         help: 'candidates 用：探一下每条候选多长、选它会变速多少（慢一些）')
     ..addOption('video', help: 'peek 用：要看哪个视频文件')
@@ -147,7 +154,7 @@ Future<void> main(List<String> args) async {
     failWith(e.message, code: exitBadUsage);
   }
 
-  // 人在 Agent 那头喊停（Ctrl+C）时**立刻放手**：撤掉在场状态与锁。
+  // 人在 Agent 那头喊停（Ctrl+C）时**立刻放手**：撤掉在场状态。
   //
   // 不这么做的话，人按了停止还要干等一分钟心跳超时才能自己动手——
   // 「随时插手」就成了一句空话。这正是站在实习生旁边最要紧的那件事：
@@ -217,6 +224,7 @@ Future<void> main(List<String> args) async {
         dataDir: dataDir,
         visual: parsed['visual'] as bool,
         external: parsed['external'] as String?,
+        force: parsed['force'] as bool,
       ),
     'skill' => await runSkillCommand(
         rest: rest,
@@ -271,11 +279,13 @@ Future<void> main(List<String> args) async {
         rest: rest,
         dataDir: dataDir,
         searchTags: parsed['tags'] as String?,
+        tagGroups: parsed['tag-groups'] as String?,
         line: int.tryParse(parsed['line'] as String? ?? ''),
         file: parsed['file'] as String?,
         voiceId: parsed['voice'] as String?,
         outputDir: parsed['out'] as String?,
         visual: parsed['visual'] as bool,
+        force: parsed['force'] as bool,
         keyword: parsed['keyword'] as String?,
         materials: parsed['materials'] as String?,
         by: parsed['by'] as String?,
@@ -285,6 +295,15 @@ Future<void> main(List<String> args) async {
     // 接手用：每条任务干到哪了、下一步敲什么、现场有没有别人在动
     'status' => await runStatusCommand(
         rest: rest, dataDir: dataDir, json: parsed['json'] as bool),
+    // 我不在的时候这条任务上发生了什么——接手前的另一条命令，看历史而非现状
+    'log' => await runLogCommand(
+        rest: rest,
+        dataDir: dataDir,
+        since: int.tryParse(parsed['since'] as String? ?? ''),
+        by: parsed['by'] as String?,
+        json: parsed['json'] as bool,
+        limit: int.tryParse(parsed['limit'] as String? ?? '') ?? 200,
+      ),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
     'apply' => await runApplyCommand(
         rest: rest,
@@ -330,6 +349,9 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   clean [--yes]    把盘上没主的东西清掉（不给 --yes 只报会删什么）
   status [<任务>]   **接手先看这条**：每条任务干到哪了、下一步敲什么、
                    现场有没有别人在动。打断之后接着干，全靠它
+  log <任务> [--since <游标>] [--by human|agent] [--no-json]
+                   我不在的时候这条任务上发生了什么：谁、什么时候、改了哪儿。
+                   只记写操作，翻页看候选这类只读的不算
   doctor           开工前体检：AI 凭据、素材库登录、ffmpeg 是否都就位。
                    第一件事就该敲它——import 不需要凭据，能跑通不代表后面能跑
   bgm <task> [--from 0 --to 2 --materials 7,8] [--remove] [--volume 0.3]
@@ -373,7 +395,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
                    在现场——命令自己也会确认，这条是给你的显式入口。
                    已经在那一页就直接返回，不会把页面弹来弹去
   ui tasks         把界面支开、退回任务列表。**可视模式下一般用不着**：
-                   撞上界面的锁时命令会自动请它让位（人留在那一页看着）。
+                   人开着那一页从来不会挡住任何写操作。
                    支开就等于关掉了可视化现场，得用 ui open 才叫得回来
   review list <id> 列出待审候选（带编号，直接能喂给 drop/keep）
   review drop <id> --items 0:-:100,1:2:202
@@ -394,7 +416,7 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
 ${parser.usage}
 ''';
 
-/// Ctrl+C / kill 时把这个任务的在场状态与锁撤干净，人立刻能接手。
+/// Ctrl+C / kill 时把这个任务的在场状态撤干净，界面立刻不再显示「有人在动它」。
 ///
 /// 任务 id 从命令参数里认（`script apply shots <task>` 这类第二个位置），
 /// 认不出就只撤在场目录里跟本进程有关的那一份——宁可少撤，不要撤错别人的
@@ -407,10 +429,9 @@ void _installInterruptHandler({
       try {
         clearAgentPresence(dataDir: dataDir, taskId: id);
         clearAgentAck(dataDir: dataDir, taskId: id);
-        TaskLockFile(dataDir: dataDir, taskId: id).release('Agent');
       } catch (_) {}
     }
-    stderr.writeln('已停止，界面可以动了。');
+    stderr.writeln('已停止。');
     exit(130); // 130 = 被 SIGINT 中断，与 shell 的惯例一致
   }
 

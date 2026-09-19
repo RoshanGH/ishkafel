@@ -35,10 +35,23 @@ void main() {
         reason: '最新的排在最下，视线自然落在底部');
   });
 
-  testWidgets('说清「这期间界面是只读的」——不然人会以为软件卡了', (tester) async {
+  /// 这条播报挂在**全局浮层**上：任何一条任务只要有在场状态就显示，
+  /// 静默模式也显示，人正开着**完全可编辑**的工作台时也显示。
+  ///
+  /// 所以它这句话必须在**哪一页都成立**。原来写的是「这期间界面是只读的」
+  /// ——软件里已经没有任何一把锁，那是对用户撒谎；而在场状态现在还有心跳，
+  /// 那句假话会显示得比以前更久。
+  testWidgets('说清人这会儿能干什么，而且这句话在哪一页都成立', (tester) async {
     await pump(tester,
         b: AgentBroadcast.empty.push('正在导出'), holder: 'Agent');
-    expect(find.textContaining('只读'), findsOneWidget);
+    expect(find.textContaining('只读'), findsNothing,
+        reason: '工作台一道闸都没有，说「只读」是假话');
+    expect(find.textContaining('先别跟它抢'), findsOneWidget,
+        reason: '不说的话人会以为软件卡了——但要说实话');
+    expect(find.textContaining('你照样能自己改'), findsNothing,
+        reason: '这条浮层是全局的，它不知道人开着哪一页。'
+            '「你能改」在编导台上不成立——**不许作任何能力承诺**，'
+            '只给一条到处都对的忠告');
   });
 
   testWidgets('做完的打勾，正在做的不打——一眼看出走到哪儿了', (tester) async {

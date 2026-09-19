@@ -28,13 +28,17 @@ void main() {
     return end < 0 ? source.substring(start) : source.substring(start, end);
   }
 
-  test('两条路都要收素材，而且走同一个入口', () {
-    for (final name in ['_applyWithLock', '_applyPlansViaUi']) {
-      expect(bodyOf(name), contains('gatherPickedMaterials'),
-          reason: '$name 没收素材：取段会退回快进（20 秒素材塞进 0.5 秒坑位'
-              '整条压缩），画面自查（烧字、产品露出品牌）一次都不跑。'
-              '委派那条路恰恰是**人在旁边看着**时走的');
-    }
+  /// 2026-09-18 删掉任务锁之后，`apply plans` 的两条路（委派给界面 /
+  /// 自己直写）收进同一个函数 `_applyPlansViaUi`——**收素材因此物理上
+  /// 只剩一处**，比原来「两处都要调」更严
+  test('收素材在提交方案这条线上只有一处，而且它真的收了', () {
+    expect(bodyOf('_applyPlansViaUi'), contains('gatherPickedMaterials'),
+        reason: '没收素材：取段会退回快进（20 秒素材塞进 0.5 秒坑位'
+            '整条压缩），画面自查（烧字、产品露出品牌）一次都不跑。'
+            '委派那条路恰恰是**人在旁边看着**时走的');
+    expect(RegExp(r'gatherPickedMaterials\(').allMatches(source).length, 2,
+        reason: '一处定义、一处调用。多出来的那处迟早和这处走散——'
+            '取段在这个项目里已经这样栽过三次');
   });
 
   test('那个入口本身要做画面自查——不然两条路一起漏', () {

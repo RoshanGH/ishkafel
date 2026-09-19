@@ -20,10 +20,15 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
+import 'package:ishkafel/cli/busy_guard.dart';
+import 'package:ishkafel/core/storage/agent_presence.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
 import 'package:ishkafel/features/import_flow/import_service.dart';
 import 'package:ishkafel/features/tasks/analysis_error_message.dart';
 import 'package:ishkafel/features/tasks/task_artifact_cleaner.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
+import 'package:ishkafel/features/tasks/gui_task_mutation.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 
 /// 假 ASR/切分：不会被调用（_FakePipeline 覆写 analyze，不走真实管线）
@@ -46,6 +51,10 @@ class _FakePipeline extends AnalysisPipeline {
   final Object? failWith;
   int analyzeCallCount = 0;
 
+  /// 触发者是谁——管线不该自己决定，由调用方传下来
+  ActorKind? seenBy;
+  String? seenActor;
+
   _FakePipeline({
     required this.repo,
     this.shouldFail = false,
@@ -64,7 +73,11 @@ class _FakePipeline extends AnalysisPipeline {
   @override
   Future<RenewTask> analyze(RenewTask task,
       {AnalysisProgressSink? onProgress,
-      void Function(RenewTask ready)? onUnitsReady}) async {
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    seenBy = by;
+    seenActor = actor;
     analyzeCallCount++;
     onProgress?.call(
         const AnalysisProgress(stage: AnalysisStage.extractingAudio));
@@ -74,6 +87,24 @@ class _FakePipeline extends AnalysisPipeline {
         task.copyWith(status: RenewTaskStatus.ready, updatedAt: DateTime.now());
     await repo.save(updated);
     return updated;
+  }
+}
+
+/// 在进度回调那一刻偷看一眼在场状态：界面自己跑分析时它必须是写着的
+class _PeekingPipeline extends _FakePipeline {
+  final void Function() onProgressPeek;
+  _PeekingPipeline({required super.repo, required this.onProgressPeek});
+
+  @override
+  Future<RenewTask> analyze(RenewTask task,
+      {AnalysisProgressSink? onProgress,
+      void Function(RenewTask ready)? onUnitsReady,
+      ActorKind by = ActorKind.agent,
+      String actor = 'Agent'}) async {
+    return super.analyze(task, onProgress: (p) {
+      onProgress?.call(p);
+      onProgressPeek();
+    }, onUnitsReady: onUnitsReady, by: by, actor: actor);
   }
 }
 
@@ -208,6 +239,8 @@ void main() {
     );
     container = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
     ]);
     addTearDown(container.dispose);
@@ -265,6 +298,8 @@ void main() {
   test('importFile 后自动触发分析并刷新为 awaitingCut', () async {
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo)),
@@ -285,9 +320,56 @@ void main() {
     expect(task.status, RenewTaskStatus.ready);
   });
 
+  /// **界面自己跑分析也要写在场状态。**
+  ///
+  /// 不写的话，`ishkafel analyze` 那道「别把同一条管线跑两遍」的劝告认不出
+  /// 这一边：人在界面上点了分析、Agent 同时敲了 `analyze`，整条管线
+  /// （ASR + LLM 切分 + 逐镜打标，几分钟、按量计费）跑两遍。
+  /// **锁删掉之前这一条是锁挡着的，删了就得接住。**
+  test('界面自己跑分析：报在「软件在忙」那条，不占 Agent 的播报通道', () async {
+    final seen = <String>[];
+    final onAgentChannel = <String>[];
+    final pipeline = _PeekingPipeline(repo: repo, onProgressPeek: () {
+      final p = readAppBusy(dataDir: tempDir, taskId: 'new-id');
+      if (p != null) seen.add('${p.holder}|${p.action}');
+      // **播报通道上必须一个字都没有**：CLAUDE.md「软件自己跑的活儿
+      // 不许占那条通道——占了，人就分不清是谁在动手」
+      final a = readAgentPresence(dataDir: tempDir, taskId: 'new-id');
+      if (a != null) onAgentChannel.add(a.action);
+    });
+    final pipelineContainer = ProviderContainer(overrides: [
+      taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(tempDir),
+      importServiceProvider.overrideWithValue(importService),
+      analysisPipelineProvider.overrideWithValue(pipeline),
+    ]);
+    addTearDown(pipelineContainer.dispose);
+
+    await pipelineContainer.read(taskListProvider.future);
+    await pipelineContainer
+        .read(taskListProvider.notifier)
+        .importFile('/videos/新片.mp4');
+    await pumpEventQueue();
+
+    expect(seen, isNotEmpty,
+        reason: '跑的过程中必须在场——Agent 那边就是靠它才知道有人在做');
+    expect(seen.first, contains(actorAnalysisReport),
+        reason: '横幅上要说得出是谁在动它');
+    expect(onAgentChannel, isEmpty,
+        reason: '软件自己跑的活儿占了播报通道，底部浮层会冒出'
+            '「软件（分析）正在干 #12」+ 转圈，人分不清是谁在动手');
+    expect(readAppBusy(dataDir: tempDir, taskId: 'new-id'), isNull,
+        reason: '收工要撤干净——不撤的话接下来 60 秒里 Agent 的 analyze '
+            '会被一条已经结束的活儿劝退');
+    // 而判据必须看得见它（分开通道不是为了让判据装作看不见）
+    expect(seen.first, contains(analyzeBusyKeyword));
+  });
+
   test('分析失败时任务保持 analyzing、落库 analysisError 且不崩溃', () async {
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
@@ -318,6 +400,8 @@ void main() {
     final longMessage = '错' * 500;
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
@@ -343,6 +427,8 @@ void main() {
     final longMessage = '${'a' * 299}${'😀' * 10}';
     final pipelineContainer = ProviderContainer(overrides: [
       taskRepositoryProvider.overrideWithValue(repo),
+      // 改动日志落这儿：界面的每一次写入都要记一笔
+      dataDirProvider.overrideWithValue(tempDir),
       importServiceProvider.overrideWithValue(importService),
       analysisPipelineProvider
           .overrideWithValue(_FakePipeline(repo: repo, failWith: longMessage)),
@@ -391,6 +477,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -451,6 +539,8 @@ void main() {
     test('本次运行中正在分析的任务不会被 reload 误标为中断', () async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -486,6 +576,8 @@ void main() {
       await repo.save(makeTask('d1'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(
             _RecordingCleaner(cleaned)),
@@ -506,6 +598,8 @@ void main() {
       await repo.save(makeTask('d2'));
       final deleteContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         taskArtifactCleanerProvider.overrideWithValue(_ThrowingCleaner()),
       ]);
@@ -603,6 +697,7 @@ void main() {
       await gated.save(makeAwaitingCut('b'));
       gatedContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(gated),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(gatedContainer.dispose);
@@ -664,6 +759,8 @@ void main() {
     Future<String> analysisErrorFor(Object error) async {
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, failWith: error)),
@@ -747,6 +844,7 @@ void main() {
       await failing.save(makeStored('keep'));
       final failContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(failContainer.dispose);
@@ -774,6 +872,7 @@ void main() {
       await failing.save(makeStored('keep'));
       final failContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(failContainer.dispose);
@@ -808,6 +907,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -846,6 +947,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider
             .overrideWithValue(_FakePipeline(repo: repo, shouldFail: true)),
@@ -889,6 +992,8 @@ void main() {
 
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -924,6 +1029,8 @@ void main() {
       await repo.save(task);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(_FakePipeline(repo: repo)),
       ]);
@@ -938,6 +1045,54 @@ void main() {
       expect(outcome, RetryOutcome.started);
     });
 
+    /// **界面这条路要把「这趟分析记在谁头上」传下去，而且传的是软件。**
+    ///
+    /// 管线切出来的单元、打上的标签都是机器产的：标成「人」的话，Agent 读到
+    /// 「人切的分镜」就会让步于一个根本不存在的人类决定，从此不敢重切。
+    /// 人点「重试」那一下有它自己那一笔（`analyze.retry`，by=human）。
+    ///
+    /// 生产侧靠 `required` 兜住了「不许漏传」，但**传什么值没有门**——
+    /// 将来有人按「谁触发算谁的」改回 human 也不会红，所以在这里钉住。
+    test('界面触发的分析记在软件头上，不是人——机器产的东西不许标成人手定的', () async {
+      final task = makeFailedTask();
+      await repo.save(task);
+      final pipeline = _FakePipeline(repo: repo);
+      final pipelineContainer = ProviderContainer(
+        overrides: [
+          taskRepositoryProvider.overrideWithValue(repo),
+          dataDirProvider.overrideWithValue(tempDir),
+          importServiceProvider.overrideWithValue(importService),
+          analysisPipelineProvider.overrideWithValue(pipeline),
+        ],
+      );
+      addTearDown(pipelineContainer.dispose);
+      await pipelineContainer.read(taskListProvider.future);
+
+      await pipelineContainer
+          .read(taskListProvider.notifier)
+          .retryAnalysis(task);
+      await pumpEventQueue();
+
+      expect(
+        pipeline.seenBy,
+        ActorKind.agent,
+        reason: '管线写进去的是机器切的边界、机器打的标签，不是人的判断',
+      );
+      expect(
+        pipeline.seenActor,
+        actorAnalysisReport,
+        reason:
+            'actor 那一格要说清具体是谁：界面这条是「软件（分析）」，'
+            'CLI 那条才是「Agent」',
+      );
+
+      // 人点的那一下没有丢：它是单独的一笔
+      final entries = TaskLogFile(dataDir: tempDir, taskId: task.id).read();
+      final retry = entries.lastWhere((e) => e.op == 'analyze.retry');
+      expect(retry.by, ActorKind.human);
+      expect(retry.actor, actorTaskList);
+    });
+
     test('并发守卫：连续两次触发 retryAnalysis 同一任务，假管线 analyze 只执行一次', () async {
       final task = makeFailedTask();
       await repo.save(task);
@@ -945,6 +1100,8 @@ void main() {
       final pipeline = _FakePipeline(repo: repo);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+        // 改动日志落这儿：界面的每一次写入都要记一笔
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -974,6 +1131,7 @@ void main() {
       final pipeline = _FakePipeline(repo: failing);
       final pipelineContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(failing),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
         analysisPipelineProvider.overrideWithValue(pipeline),
       ]);
@@ -1032,6 +1190,57 @@ void main() {
       expect(saved!.status, RenewTaskStatus.ready);
       expect(saved.units, units);
     });
+
+    /// **删一个单元不许报「戳没盖上」。**
+    ///
+    /// 戳长在单元对象上，单元都删了就无处可盖——把删掉的 uid 塞进
+    /// `stampUnits`，`TaskMutation._reportMissedStamps` 每次都会 AppLog.error。
+    /// 而删单元、合并单元（合并＝删掉一个）是工作台最常见的动作：
+    /// 让这条告警在最常见的动作上稳定误报，等于把它喊成噪音，
+    /// 下次它为真问题响的时候没人会信。
+    test('删掉一个单元：日志照记，但不许报「戳没盖上」', () async {
+      final before = [
+        SemanticUnit(
+          index: 0,
+          uid: 'aaaaaaaaaaaa',
+          startMs: 0,
+          endMs: 1000,
+          transcript: '留下的这句',
+          shots: const [Shot(startMs: 0, endMs: 1000)],
+        ),
+        SemanticUnit(
+          index: 1,
+          uid: 'bbbbbbbbbbbb',
+          startMs: 1000,
+          endMs: 2000,
+          transcript: '被删掉的这句',
+          shots: const [Shot(startMs: 1000, endMs: 2000)],
+        ),
+      ];
+      final task = makeAwaitingCutTask().copyWith(units: before);
+      await repo.save(task);
+      await container.read(taskListProvider.future);
+
+      final errors = <String>[];
+      final original = AppLog.sink;
+      AppLog.sink = (line) {
+        if (line.contains('[error]')) errors.add(line);
+      };
+      addTearDown(() => AppLog.sink = original);
+
+      await container.read(taskListProvider.notifier).saveSegmentationDraft(
+        task,
+        [before.first],
+      );
+
+      expect(errors, isEmpty, reason: '删掉的单元无处盖戳，不该点它的名——这条告警要留给真问题');
+
+      // 但这一笔必须记进日志，而且要看得出人删掉的是哪一句
+      final entries = TaskLogFile(dataDir: tempDir, taskId: 'cut-1').read();
+      final edit = entries.lastWhere((e) => e.op == 'units.edit');
+      expect(edit.by, ActorKind.human);
+      expect(jsonEncode(edit.before), contains('被删掉的这句'));
+    });
   });
 
   group('保存后局部更新（不再全量重读所有任务 JSON）', () {
@@ -1066,6 +1275,7 @@ void main() {
       await counting.save(makeStored('c', DateTime.utc(2026, 7, 22)));
       localContainer = ProviderContainer(overrides: [
         taskRepositoryProvider.overrideWithValue(counting),
+        dataDirProvider.overrideWithValue(tempDir),
         importServiceProvider.overrideWithValue(importService),
       ]);
       addTearDown(localContainer.dispose);

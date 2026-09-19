@@ -12,6 +12,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/inspector_panel.dart';
 import 'package:ishkafel/features/workbench/player_panel.dart';
@@ -116,7 +117,7 @@ Widget _wrapWithNavigator({
   DateTime Function()? clock,
 }) {
   return ProviderScope(
-    overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+    overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
     child: MaterialApp(
       home: Builder(
         builder: (context) => Scaffold(
@@ -158,7 +159,15 @@ Future<void> _settleAutosave(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   _spaceStopsSegmentPlayback();
 
   late InMemoryTaskRepository repo;
@@ -309,7 +318,7 @@ void main() {
   testWidgets('播放器初始化异常时不崩溃且显示可见提示（评审 Important 1）', (tester) async {
     await repo.save(task);
     await tester.pumpWidget(ProviderScope(
-      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+      overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
       child: MaterialApp(
         home: WorkbenchPage(
           task: task,
@@ -332,7 +341,7 @@ void main() {
       (tester) async {
     await repo.save(task);
     await tester.pumpWidget(ProviderScope(
-      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+      overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
       child: MaterialApp(
         home: WorkbenchPage(
           task: task,

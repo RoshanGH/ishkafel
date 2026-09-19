@@ -32,8 +32,11 @@ void main() {
     expect(((decoded['units'] as List).single as Map)['tags'], ['促单']);
   });
 
+  /// 失败的理由只剩三类：参数不对、外部依赖坏了、干了没成。
+  /// **没有第四类**——「被别人占着」这一类随着任务锁一起删掉了
   test('退出码彼此不同——调用方要靠它分辨发生了什么', () {
-    expect({exitBadUsage, exitNotFound, exitLocked}, hasLength(3));
-    expect([exitBadUsage, exitNotFound, exitLocked], everyElement(isNot(0)));
+    expect({exitBadUsage, exitNotFound, exitEnv, exitFailed}, hasLength(4));
+    expect([exitBadUsage, exitNotFound, exitEnv, exitFailed],
+        everyElement(isNot(0)));
   });
 }

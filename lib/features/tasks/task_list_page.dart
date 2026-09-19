@@ -98,9 +98,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
       AppLog.info('补标签：没有打标服务（AI 凭据未配置），跳过');
       return;
     }
+    final dataDir = ref.read(dataDirProvider);
+    if (dataDir == null) {
+      AppLog.info('补标签：数据目录未接线，跳过（补出来的标签没地方记账）');
+      return;
+    }
     final fixed = await TaggingResumer(
       repository: ref.read(taskRepositoryProvider),
       tagging: tagging,
+      dataDir: dataDir,
     ).resumeAll(
       onProgress: (p) {
         if (mounted) setState(() => _tagging = p);
@@ -278,14 +284,15 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
   Future<void> _runUiAction(Directory dataDir, AgentRequest req) async {
     void reply(bool ok, String message,
-        {Map<String, dynamic> payload = const {}}) {
+        {Map<String, dynamic> payload = const {}, bool unsupported = false}) {
       writeAgentRequestResult(
           dataDir: dataDir,
           taskId: globalPresenceSlot,
           id: req.id,
           ok: ok,
           message: message,
-          payload: payload);
+          payload: payload,
+          unsupported: unsupported);
       // **回执一发出就放行下一个动作**，不等这个 Future 走完。
       //
       // 建脚本成片任务那条路会 `await` 进编导台的路由，而它要等**人退出
@@ -299,7 +306,12 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
 
     final action = UiAction.parse(req.kind);
     if (action == null) {
-      reply(false, '认不出这个动作：${req.kind}');
+      // 认不出的动作**也是「这一页接不了」**，不是「试了没做成」：
+      // 带上标记，调用方自己去干（见 [AgentRequestResult.unsupported]）。
+      // 今天走不到这儿（wire 名都是从同一个枚举来的），但形状要一致——
+      // 不一致的那一天，谁也想不起来还有这么一处
+      reply(false, '任务列表接不了「${req.kind}」这件事——你自己做就行',
+          unsupported: true);
       return;
     }
     switch (action) {
@@ -317,19 +329,18 @@ class _TaskListPageState extends ConsumerState<TaskListPage> {
         }
         reply(true, '已关掉新建任务');
       case UiAction.tasksOpen:
-        // 把压在列表上面的页面全弹掉（工作台/编导台/它们的子页）。
-        // 那些页面一退出就松锁，Agent 接着就能写这条任务
+        // 把压在列表上面的页面全弹掉（工作台/编导台/它们的子页）
         if (mounted) {
           Navigator.of(context).popUntil((r) => r.isFirst);
         }
-        reply(true, '已回到任务列表，锁松开了');
+        reply(true, '已回到任务列表');
       case UiAction.plansApply:
       case UiAction.exportOpen:
-      case UiAction.lockYield:
-        // 这几个动作是给那条任务的工作页的（它占着锁）。列表页收到说明
-        // 发错了地方——说清楚，别让 Agent 等到超时。
-        // 让位这一条尤其要说明白：列表页本来就没占任何任务的写锁
-        reply(false, '${action.label}要发给那条任务的工作页，不是任务列表');
+        // 这两个动作是给那条任务的工作页的。列表页收到说明发错了地方——
+        // 说清楚，别让 Agent 等到超时。**带上 unsupported**：
+        // 这是「这一页接不了」，不是「这件事做不成」
+        reply(false, '${action.label}要发给那条任务的工作页，不是任务列表',
+            unsupported: true);
     }
   }
 

@@ -6,6 +6,10 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/cli/script_view.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/script/script_doc.dart';
+import 'package:ishkafel/core/analysis/providers.dart';
+import 'package:ishkafel/core/audio/material_audio.dart';
+import 'package:ishkafel/core/storage/edit_stamp.dart';
+import 'package:ishkafel/core/storage/task_log.dart';
 
 /// **存进去了、但 `task --json` 不报**——同一个坑三天里栽了三次
 /// （burnedText、framesSeen、shots 的 productBrand）。
@@ -18,6 +22,7 @@ import 'package:ishkafel/core/script/script_doc.dart';
 /// 就得报什么。以后再加字段也跑不掉，不用记得回来补测试。
 void main() {
   _scriptViewTests();
+  _unitLayerTest();
   Map shotJson(Shot shot) {
     final json = taskToJson(_task(shots: [shot]));
     final units = json['units'] as List;
@@ -71,7 +76,51 @@ void main() {
   });
 }
 
-RenewTask _task({List<Shot> shots = const [], List<PickedMaterial> picked = const []}) =>
+/// 台词语义单元这一层同理，而且这一层此前**整个没人盯**：
+/// `uid`（日志全按它记）、`editedBy`（「这一处是谁定的」）、
+/// `wholeAudioMode`（整体替换那一段放哪一路声音）三个字段存了却都不报。
+void _unitLayerTest() {
+  test('台词语义单元存下来的每个字段都要报出来', () {
+    final unit = SemanticUnit(
+      uid: 'kabcdefghijk',
+      index: 0,
+      startMs: 0,
+      endMs: 1000,
+      transcript: 'a',
+      tags: const ['促单'],
+      tagsHandpicked: true,
+      editedBy: EditStamp(by: ActorKind.human, at: DateTime.utc(2026, 9, 18)),
+      baseCandidateId: 7,
+      baseSentences: const [
+        AsrSentence(startMs: 0, endMs: 1000, text: 'a'),
+      ],
+      wholeAudioMode: MaterialAudioMode.original,
+      wholeAudioVolume: 0.5,
+      shots: const [Shot(startMs: 0, endMs: 1000)],
+    );
+    final json = taskToJson(_task(units: [unit]));
+    final reported = (json['units'] as List).single as Map;
+    for (final key in unit.toJson().keys) {
+      // trace 是「标签为什么是这个」的留痕大对象，命令行不报是有意的
+      // （同镜头那一层）；tagsStale 同理；baseSentences 报的是句数
+      // （baseSentenceCount）——整份转写塞进来对判断没用
+      if (key == 'trace' || key == 'tagsStale' || key == 'baseSentences') {
+        continue;
+      }
+      expect(reported.containsKey(key), isTrue,
+          reason: '台词语义单元存了 $key 却没在 task --json 里报出来。'
+              'Agent 查到的空看起来正好像「没问题」');
+    }
+    expect(reported.containsKey('baseSentenceCount'), isTrue,
+        reason: 'baseSentences 不整份报，但「转出几句」必须报');
+  });
+}
+
+RenewTask _task({
+  List<Shot> shots = const [],
+  List<PickedMaterial> picked = const [],
+  List<SemanticUnit>? units,
+}) =>
     RenewTask(
       id: 't1',
       name: 'n',
@@ -80,10 +129,15 @@ RenewTask _task({List<Shot> shots = const [], List<PickedMaterial> picked = cons
       updatedAt: DateTime.utc(2026, 8, 29),
       status: RenewTaskStatus.ready,
       pickedMaterials: picked,
-      units: [
-        SemanticUnit(
-            index: 0, startMs: 0, endMs: 1000, transcript: 'a', shots: shots),
-      ],
+      units: units ??
+          [
+            SemanticUnit(
+                index: 0,
+                startMs: 0,
+                endMs: 1000,
+                transcript: 'a',
+                shots: shots),
+          ],
     );
 
 /// 脚本成片那条线同理：`LineShot` 存了什么，`script show --json` 就得报

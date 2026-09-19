@@ -21,6 +21,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/playback/playback_controller.dart';
 import 'package:ishkafel/core/storage/task_repository.dart';
+import 'package:ishkafel/features/settings/settings_providers.dart';
 import 'package:ishkafel/features/tasks/task_list_controller.dart';
 import 'package:ishkafel/features/workbench/timeline_media_builder.dart';
 import 'package:ishkafel/features/workbench/workbench_page.dart';
@@ -78,7 +79,15 @@ Finder get _retry => find.descendant(
       matching: find.byKey(const Key('preview-audio-retry')),
     );
 
+/// 改动日志的落点：工作台的每一次落盘都要记一笔，没有它就不写
+/// （见 `gui_task_mutation.dart`）。一次性临时目录，测完就删
+final _logDir = Directory.systemTemp.createTempSync('ishkafel_wb_test_');
+
 void main() {
+  tearDownAll(() {
+    if (_logDir.existsSync()) _logDir.deleteSync(recursive: true);
+  });
+
   late Directory tempDir;
 
   setUp(() => tempDir = Directory.systemTemp.createTempSync('ishkafel_vocals_'));
@@ -162,6 +171,7 @@ void main() {
     await tester.pumpWidget(ProviderScope(
       overrides: [
         taskRepositoryProvider.overrideWithValue(repo),
+      dataDirProvider.overrideWithValue(_logDir),
         analysisPipelineProvider
             .overrideWithValue(withPipeline ?? pipeline(stderr: stderr)),
       ],
@@ -243,7 +253,7 @@ void main() {
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(ProviderScope(
-      overrides: [taskRepositoryProvider.overrideWithValue(repo)],
+      overrides: [taskRepositoryProvider.overrideWithValue(repo), dataDirProvider.overrideWithValue(_logDir)],
       child: MaterialApp(
         home: WorkbenchPage(
           task: task,

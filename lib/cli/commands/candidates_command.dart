@@ -318,6 +318,8 @@ Future<int> runCandidatesCommand({
     'context': shotIndex == null
         ? {
             'unitIndex': unitIndex,
+            // 身份和位置一起给（同 shotContext）：日志按 uid 记
+            'unitUid': units[unitIndex].uid,
             'slotMs': units[unitIndex].endMs - units[unitIndex].startMs,
             'unitTranscript': units[unitIndex].transcript,
             'unitTags': units[unitIndex].tags,

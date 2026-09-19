@@ -1,3 +1,4 @@
+import '../replacement/picked_material.dart';
 import '../replacement/replacement_plan.dart';
 
 /// 人审核挑好的候选：这一层是**确定的剔除规则**。
@@ -37,6 +38,35 @@ class ReviewDecision {
       keep: raw['keep'] != false,
     );
   }
+}
+
+/// 一条决定的**判断依据**，给改动日志用。
+///
+/// 只记「剔除了 U3S1 的 12345」的话，Agent 什么也看不出来。产品负责人举的
+/// 例子就是这件事：「Agent 挑了四五个分镜，人删除了其中两个，Agent 要能
+/// 只凭日志总结出人不想要的是哪个类型」——素材的名字、画面描述、时长、
+/// 烧没烧字、是哪家的品牌，才是那个「类型」。
+///
+/// **人和 Agent 两条路共用这一份**（界面的审片台、CLI 的 `review`）：
+/// 各写各的迟早会漂，而日志漂了没人看得出来。
+Map<String, dynamic> reviewDecisionFacts(
+  ReviewDecision d,
+  Map<int, PickedMaterial> materials,
+) {
+  final m = materials[d.material];
+  return {
+    'unit': d.unit,
+    'shot': d.shot,
+    'material': d.material,
+    'keep': d.keep,
+    if (m != null) ...{
+      'name': m.name,
+      'sceneDescription': m.sceneDescription,
+      'durationMs': m.durationMs,
+      'burnedText': m.burnedText,
+      'productBrand': m.productBrand,
+    },
+  };
 }
 
 /// 一个待审的位置：这个单元/镜头挑了这条素材

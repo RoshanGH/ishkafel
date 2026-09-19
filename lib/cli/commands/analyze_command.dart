@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
@@ -7,18 +6,20 @@ import '../app_locator.dart';
 
 import '../../app/service_wiring.dart';
 import '../../core/ai/ai_credentials.dart';
+import '../../core/analysis/analysis_pipeline.dart';
 import '../../core/analysis/tag_vocabulary.dart';
 import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/models/tag_group_ref.dart';
 import '../../core/storage/file_task_repository.dart';
-import '../../core/storage/task_lock.dart';
+import '../../core/storage/task_log.dart';
+import '../../core/storage/task_mutation.dart';
 import '../../core/models/renew_task.dart';
 import '../../core/storage/task_seq.dart';
 import '../external_steps.dart';
 import '../todo_view.dart';
-import '../agent_lock_holder.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
+import '../busy_guard.dart';
 import '../cli_output.dart';
 import '../task_view.dart';
 
@@ -37,8 +38,17 @@ Future<int> runAnalyzeCommand({
 
   /// 可视模式：分析要跑好几分钟，人得看着它一步步走到哪儿了
   bool? visual,
+
+  /// 已经有人在分析这条任务时照样再跑一遍。见 `busy_guard.dart`
+  bool force = false,
   StringSink? out,
   StringSink? err,
+
+  /// 测试注入：判「有没有人正在分析」时的当前时刻
+  DateTime? now,
+
+  /// 测试注入：不给就按凭据装配真实管线（与 script 那几条同一种做法）
+  AnalysisPipeline? pipeline,
 }) async {
   final sink = err ?? stderr;
   if (rest.isEmpty) {
@@ -83,39 +93,73 @@ Future<int> runAnalyzeCommand({
     return exitEnv;
   }
 
-  final pipeline = buildAnalysisPipeline(credentials, dataDir);
-  if (pipeline == null) {
+  final line = pipeline ?? buildAnalysisPipeline(credentials, dataDir);
+  if (line == null) {
     sink.writeln('分析流水线装配失败（凭据不完整）');
     return exitEnv;
   }
 
-  final lock = TaskLockFile(dataDir: dataDir, taskId: task.id);
-  if (!lock.acquire(holder ?? agentLockHolder)) {
-    sink.writeln('${lock.read()?.holder ?? '别人'} 正在操作这个任务，分析不了');
-    return exitLocked;
+  // **别把同一条管线跑两遍。**
+  //
+  // 整条分析是 ASR + LLM 切分 + 逐镜打标，几分钟、真金白银。而「调用方的
+  // 命令超时了、以为失败又起一个」在真机上是常态——此前挡住这件事的是
+  // 任务锁（第二个进程撞锁退出），锁删掉之后得有别的东西接住它。
+  //
+  // 配音、打标那种循环能把幂等落到每一项上（每一句/每一镜开工前重读盘，
+  // 做过的跳过）；分析不行，它是一整条管线，没有「项」可跳。
+  //
+  // **所以这里给的是劝告，不是拒绝**——这一条一定要分清楚：
+  //
+  // - 退出码是 0，不是失败
+  // - 报的是**事实**（「另一个进程正在分析，我没有重复做」），不是规则
+  // - `--force` 这条明路就写在输出里，决定权仍在调用方手上
+  //
+  // 产品负责人的原话：「任何它不应该做的事情，都应该是人告诉 Agent 的，
+  // 而非是软件限制的。」给事实和出路，不给规则。
+  if (!force) {
+    final busy = someoneElseBusyWith(
+        dataDir: dataDir,
+        taskId: task.id,
+        keywords: const [analyzeBusyKeyword],
+        now: now);
+    if (busy != null) {
+      emitJson(
+          busySkipReport(
+              taskId: task.id, busy: busy, what: analyzeBusyKeyword),
+          out: out);
+      return 0;
+    }
   }
+
   // 分析要跑好几分钟，是这条线上最长的一段等待——**每一步都要说出来**，
   // 不然人对着一块不动的板子不知道它是在跑还是卡死了
   final stage = AgentStage(
     mode: AgentStageMode.from(visual: visual),
     dataDir: dataDir,
     taskId: task.id,
-    holder: holder ?? agentLockHolder,
+    holder: holder ?? 'Agent',
   );
-  await stage.begin('正在分析原片',
+  // 「分析」两个字来自 busy_guard 那份常量：上面那道劝告认的就是它，
+  // 手写的话改文案会让判据静默失效
+  await stage.begin('正在$analyzeBusyKeyword原片',
       focus: const AgentFocus(module: 'workbench'));
-
-  // 分析要跑好几分钟，中途得续命，否则锁会在 60 秒后被判失效
-  final heartbeat =
-      Timer.periodic(const Duration(seconds: 20), (_) => lock.heartbeat(holder ?? agentLockHolder));
+  // **静默模式下 begin 什么都不做，在场状态还是要立刻写**：
+  // 一来人可能正开着这一页，二来上面那道「别把同一条管线跑两遍」的劝告
+  // 认的就是它——不在这儿写，第二个进程要等到第一次进度回调才看得见，
+  // 而 prepare 那一段（抽音频、分离）好几分钟里它什么都看不见
+  stage.note('正在$analyzeBusyKeyword原片',
+      focus: const AgentFocus(module: 'workbench'));
 
   try {
     if (external0.isEmpty) {
-      final analyzed = await pipeline.analyze(
+      final analyzed = await line.analyze(
         task,
+        // 这一趟是 Agent 叫起来的——管线两边共用，谁触发算谁的
+        by: ActorKind.agent,
+        actor: 'Agent',
         onProgress: (progress) {
           sink.writeln('· ${progress.stage.name}');
-          stage.note('正在分析原片：${progress.stage.name}',
+          stage.note('正在$analyzeBusyKeyword原片：${progress.stage.name}',
               focus: const AgentFocus(module: 'workbench'));
         },
       );
@@ -129,39 +173,66 @@ Future<int> runAnalyzeCommand({
 
     // 有要外包的步骤：先把不可外包的前半程跑完（抽音频、分离、镜头切点、
     // ASR），落盘，然后把第一件待办交出去
-    final prepared = await pipeline.prepare(
+    final prepared = await line.prepare(
       task,
       onProgress: (progress) {
         sink.writeln('· ${progress.stage.name}');
-        stage.note('正在分析原片：${progress.stage.name}',
+        stage.note('正在$analyzeBusyKeyword原片：${progress.stage.name}',
             focus: const AgentFocus(module: 'workbench'));
       },
     );
     saveAnalysisState(dataDir, id,
         AnalysisState(prepared: prepared, pending: external0));
-    await repository.save(task.copyWith(
-      asrSentences: prepared.sentences,
-      vocalsPath: prepared.vocalsPath,
-      backgroundPath: prepared.backgroundPath,
-    ));
+    final mutation = TaskMutation(
+        repo: repository, dataDir: dataDir, by: ActorKind.agent, actor: 'Agent');
+    final prepped = await mutation.apply(
+      taskId: task.id,
+      op: 'analyze.prepare',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(
+          asrSentences: prepared.sentences,
+          vocalsPath: prepared.vocalsPath,
+          backgroundPath: prepared.backgroundPath,
+        ),
+        before: {'sentenceCount': fresh.asrSentences?.length ?? 0},
+        after: {'sentenceCount': prepared.sentences.length},
+      ),
+    );
+    if (prepped == null) {
+      sink.writeln('这条任务在分析过程中被删掉了：$id');
+      return exitNotFound;
+    }
 
     if (external0.contains(ExternalStep.segment)) {
       emitJson(segmentTodo(id, prepared.sentences), out: out);
       return 0;
     }
 
-    // 只外包打标：切分照常走内置，跑到「等你打标」那一步
-    final drafts = await pipeline.splitter.split(prepared.sentences);
+    // 只外包打标：切分照常走内置，跑到「等你打标」那一步。
+    // 语义切分是网络请求，做完拿到 drafts 再进第二次独立的 apply——
+    // 不能塞进上面那次 edit，重跑一次 edit 就是把切分又算一遍
+    final drafts = await line.splitter.split(prepared.sentences);
     final units =
-        pipeline.assemble(task: task, drafts: drafts, prepared: prepared);
-    final ready = task.copyWith(
-      units: units,
-      status: RenewTaskStatus.ready,
-      asrSentences: prepared.sentences,
-      vocalsPath: prepared.vocalsPath,
-      backgroundPath: prepared.backgroundPath,
+        line.assemble(task: task, drafts: drafts, prepared: prepared);
+    final ready = await mutation.apply(
+      taskId: task.id,
+      op: 'units.assemble',
+      edit: (fresh) => TaskEdit(
+        task: fresh.copyWith(
+          units: units,
+          status: RenewTaskStatus.ready,
+          asrSentences: prepared.sentences,
+          vocalsPath: prepared.vocalsPath,
+          backgroundPath: prepared.backgroundPath,
+        ),
+        before: {'unitCount': fresh.units?.length ?? 0, 'status': fresh.status.name},
+        after: {'unitCount': units.length, 'status': RenewTaskStatus.ready.name},
+      ),
     );
-    await repository.save(ready);
+    if (ready == null) {
+      sink.writeln('这条任务在切分过程中被删掉了：$id');
+      return exitNotFound;
+    }
     emitJson(
       tagTodo(
         id,
@@ -176,9 +247,7 @@ Future<int> runAnalyzeCommand({
     sink.writeln('分析失败：$e');
     return 1;
   } finally {
-    heartbeat.cancel();
     stage.end();
-    lock.release(holder ?? agentLockHolder);
   }
 }
 
