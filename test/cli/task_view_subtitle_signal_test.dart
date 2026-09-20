@@ -5,6 +5,8 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/replacement/picked_material.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/time/rational.dart';
 
 import '../support/seed_task.dart';
@@ -72,5 +74,50 @@ void main() {
     expect(sub['suspect'], 0, reason: '没有检出任何问题');
     expect(sub['note'], contains('不含素材烧字'),
         reason: 'note 要说明 suspect 不含烧字检查，否则是静默降级');
+  });
+
+  /// 整体替换选了候选，但素材时长还没探出——跟 subtitle_view_test.dart 里的
+  /// taskWithUnknownWholeDuration 是同一种夹具
+  RenewTask taskWithUnknownWholeDuration() => RenewTask(
+        id: 't_unknown', name: '素材时长未知', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+        videoInfo: VideoInfo(
+            width: 1080, height: 1920, fps: 30,
+            duration: const Duration(milliseconds: 2000),
+            fpsExact: Rational.fps30,
+            fileSizeBytes: 0),
+        asrSentences: const [
+          AsrSentence(startMs: 0, endMs: 900, text: '甲乙', words: [
+            AsrWord(startMs: 0, endMs: 400, text: '甲'),
+            AsrWord(startMs: 400, endMs: 900, text: '乙'),
+          ]),
+        ],
+        units: const [
+          SemanticUnit(
+            uid: 'u0', index: 0, startMs: 0, endMs: 2000, transcript: '甲乙',
+            shots: [
+              Shot(startMs: 0, endMs: 1000),
+              Shot(startMs: 1000, endMs: 2000),
+            ],
+          ),
+        ],
+        replacementsByUid: {
+          'u0': UnitReplacement.whole(const [1]),
+        },
+        // 挑了候选（id 1），但这条素材没有 durationMs——时长还没探出来
+        pickedMaterials: const [PickedMaterial(id: 1, name: '候选')],
+      );
+
+  test('算不准的时候，要说算不准，不许报成「查过、没问题」', () {
+    final task = taskWithUnknownWholeDuration();
+    final sub = taskToJson(task)['subtitle'] as Map<String, dynamic>;
+    expect(sub['note'], contains('算不准'),
+        reason: '这条线上已经三次把某一态混进「没问题」里了');
+    expect(sub['note'], contains('ishkafel'),
+        reason: '每一态都要给一条能照做的去处');
+    expect(sub['shotsWithout'], 0,
+        reason: '算不准时不许报假的计数');
+    expect(sub['shotsWith'], 0);
+    expect(sub['suspect'], 0);
   });
 }
