@@ -160,6 +160,14 @@ Future<int> _runReadOnly({
 Map<String, dynamic> _checkReport(RenewTask task, {required Directory dataDir}) {
   final report = subtitleReport(task, dataDir: dataDir);
   if (report.containsKey('framesUnavailable')) return report;
+  // notAnalyzed 跟 framesUnavailable 一样是「整块拒答」，原样透出去。
+  // 漏判这一条的话，report['shots'] 是 null，下面那行 as List 当场抛——
+  // 而面向用户的命令不该抛 Dart 类型错。
+  //
+  // 这条路原来唯一的覆盖，正是 I6 改夹具时换走的那两条（旧夹具的 units
+  // 是 null，无意中盖住了这条路）。**覆盖跟着修复一起没了**，所以全量
+  // 4769 绿也照不出来——加拒答分支时，一并看一眼谁在消费这份报告
+  if (report.containsKey('notAnalyzed')) return report;
 
   final shots = (report['shots'] as List).cast<Map<String, dynamic>>();
   final problems = <Map<String, dynamic>>[];

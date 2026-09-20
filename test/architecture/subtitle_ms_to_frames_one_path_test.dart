@@ -26,6 +26,13 @@ void main() {
           reason: '$f 裸调了 FrameSpan.fromMs');
       expect(src.contains('frameIndex('), isFalse,
           reason: '$f 裸调了 frameIndex');
+      // **C1 的原始 bug 写的就是 frameAt**（`frames.frameAt(unitStart + from)`），
+      // 漏掉它的话这条测试正好漏在它本该拦住的那个写法上——复评把
+      // heard_words 整段退回 bug 形态，这条测试照样全绿。
+      // 只扫这三个下游文件：ComposedFrames 自己内部要用 frameAt
+      expect(src.contains('frameAt('), isFalse,
+          reason: '$f 裸调了 frameAt——C1 的原始 bug 就是这个写法，'
+              '首尾各四舍五入一次，段头对称全丢');
     }
   });
 

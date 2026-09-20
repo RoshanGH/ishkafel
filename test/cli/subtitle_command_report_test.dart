@@ -99,6 +99,39 @@ void main() {
     expect((jsonDecode(out.toString()) as Map).keys, contains('shots'));
   });
 
+  /// **这条路原来唯一的覆盖，正是 I6 改夹具时换走的那两条。**
+  ///
+  /// 「check 只出问题清单」和「show 出全片报告」以前用的是 `seedTask`
+  /// （`units` 为 null），无意中把「还没分析」这条路盖住了；I6 把它们换成
+  /// 已分析的夹具之后，覆盖跟着修复一起没了，于是 `_checkReport` 漏判
+  /// `notAnalyzed`、`report['shots']` 是 null、`as List` 当场抛，
+  /// 全量 4769 绿照不出来。
+  ///
+  /// **面向用户的命令不该抛 Dart 类型错。** 这两条专门钉住「还没分析」
+  /// 这条路
+  test('还没分析的任务跑 check：给实话，不许抛', () async {
+    final id = (await seedTask(dataDir)).id; // units 为 null
+    final out = StringBuffer();
+    final code =
+        await runSubtitleCommand(rest: ['check', id], dataDir: dataDir, out: out);
+    expect(code, 0);
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json.containsKey('notAnalyzed'), isTrue,
+        reason: '这条路原来唯一的覆盖，被 I6 换夹具时一起换走了');
+  });
+
+  test('还没分析的任务跑 show：同样给实话，不许抛', () async {
+    final id = (await seedTask(dataDir)).id;
+    final out = StringBuffer();
+    final code =
+        await runSubtitleCommand(rest: ['show', id], dataDir: dataDir, out: out);
+    expect(code, 0);
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    expect(json.containsKey('notAnalyzed'), isTrue);
+    expect(json.containsKey('shots'), isFalse,
+        reason: '空的 shots 跟「分析完了、确实没有镜头」分不开');
+  });
+
   test('不给子命令时还是老样子——样式现状', () async {
     final id = (await seedTask(dataDir)).id;
     final out = StringBuffer();
@@ -167,13 +200,24 @@ void main() {
 
   test('bin 里 subtitle 的 --unit/--shot 要真走 intArg', () {
     // 上面那条只测了 intArg 本身。bin 那头还写着 int.tryParse 的话，
-    // 它照样全绿，而真敲命令的人还是碰到静默忽略
+    // 它照样全绿，而真敲命令的人还是碰到静默忽略。
+    //
+    // **截块不能靠 `'),'`**：那个标记在 `_intArgOrFail(parsed, 'unit'),`
+    // 这一行就命中了，`shotIndex` 那行压根不在检查范围里——名字写着
+    // --unit/--shot，实际只守住 unit（复评把 shotIndex 单独退回
+    // int.tryParse，这条测试照样全绿）。改成截到下一条命令的分发行，
+    // 并且**点两处**：两个参数各一处，只守住一个等于没守
     final src = File('bin/ishkafel.dart').readAsStringSync();
     final start = src.indexOf("'subtitle' => await runSubtitleCommand(");
     expect(start, greaterThan(0), reason: '找不到 subtitle 的分发点了，回来看看');
-    final block = src.substring(start, src.indexOf('),', start));
+    // 顶层每条命令的分发都是「换行 + 4 个空格 + 单引号命令名」
+    final end = src.indexOf("\n    '", start + 1);
+    expect(end, greaterThan(start), reason: '截不到这一块的结尾，这条测试是空转的');
+    final block = src.substring(start, end);
     expect(block.contains('int.tryParse'), isFalse,
         reason: 'int.tryParse 把「给了但不是整数」和「没给」混成一件事');
+    expect(RegExp('_intArgOrFail').allMatches(block).length, 2,
+        reason: '--unit 和 --shot 各要一处；只有一处就是只守住了其中一个');
   });
 
   test('任务不存在就直说', () async {
