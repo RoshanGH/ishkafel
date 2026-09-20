@@ -121,41 +121,35 @@ class CandidateSearchController extends ChangeNotifier {
   /// 上一次检索是什么——翻页要拿它换一页重跑。null 表示还没检索过。
   Future<CandidatePage> Function(int page)? _lastQuery;
 
-  /// 「按标签搜」这个查询本身（还没发出去）。
+  /// 按标签搜。
   ///
-  /// 单独抽出来是给 [searchWithFallback] 用的：那条路要拿到查询、试一次、
-  /// 看结果值不值得用，再决定发布谁。写成 `searchByTags` 那样「一调用就发布」
-  /// 的话，中间那批必然在界面上过一遍。
-  Future<CandidatePage> Function(int page) tagQuery(List<int> tagIds,
-          {String mode = 'or'}) =>
-      (page) => service.searchByTags(
+  /// **原样发出去**：标签是什么就传什么，结果回来什么就展示什么。
+  /// 这里不做任何加工——不剔标签、不判结果值不值得用、不偷偷换检索方式。
+  /// 2026-09-20 产品负责人定的：「我们唯一控制的是条件……它是什么结果
+  /// 展示出来，你就展示什么结果。至于对于结果进行二次的判断，然后去掉
+  /// 一些不符合要求的结果，这些不要。」
+  Future<void> searchByTags({
+    required List<int> tagIds,
+    String mode = 'or',
+  }) =>
+      _start((page) => service.searchByTags(
             tagIds: tagIds,
             mode: mode,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,
-          );
+          ));
 
-  /// 「按画面描述语义搜」这个查询本身（还没发出去）
-  Future<CandidatePage> Function(int page) descriptionQuery(String keyword,
+  /// 按画面描述语义搜
+  Future<void> searchByDescription(String keyword,
           {List<int> tagIds = const []}) =>
-      (page) => service.searchByDescription(
+      _start((page) => service.searchByDescription(
             keyword: keyword,
             tagIds: tagIds,
             projectIds: projectIds,
             page: page,
             pageSize: pageSize,
-          );
-
-  Future<void> searchByTags({
-    required List<int> tagIds,
-    String mode = 'or',
-  }) =>
-      _start(tagQuery(tagIds, mode: mode));
-
-  Future<void> searchByDescription(String keyword,
-          {List<int> tagIds = const []}) =>
-      _start(descriptionQuery(keyword, tagIds: tagIds));
+          ));
 
   /// 按文件名搜（兜底：标签和描述都筛不到时，直接按名字捞）
   Future<void> searchByName(String keyword,
@@ -228,47 +222,6 @@ class CandidateSearchController extends ChangeNotifier {
     _failureKind = null;
     _status = CandidateSearchStatus.idle;
     _notify();
-  }
-
-  /// 一次检索，两套方案：先试 [primary]，[accept] 判它不值得用就改走
-  /// [fallback]——**被否掉的那一批一帧都不发布**。
-  ///
-  /// 为什么必须做在控制器里：在外面写成「先 search、再判断、再 search」，
-  /// 等于把中间那批推到界面上走一遍。真机上规格探测要几秒，那几秒里它就
-  /// 明晃晃摆在用户面前，而它恰恰是「按标签搜给的是最新的、不是最像的」
-  /// 那一堆。2026-09-18 用户原话：「它这个镜头的搜索都会经过明显的两次
-  /// 跳转……如果它慢的话，我接受它一个 Loading，但是我不接受它这样跳来
-  /// 跳去，因为中间我真的可能会选到那些。」
-  ///
-  /// [onFellBack] 拿到的是被否掉的那一页——换了检索方式要说出来，
-  /// 但说的是「换了」这件事，不是把那批结果摆出来。
-  Future<void> searchWithFallback({
-    required Future<CandidatePage> Function(int page) primary,
-    required bool Function(CandidatePage page) accept,
-    Future<CandidatePage> Function(int page)? fallback,
-    void Function(CandidatePage rejected)? onFellBack,
-  }) async {
-    final generation = _beginLoading();
-    _page = 1;
-    var query = primary;
-    CandidatePage page;
-    try {
-      page = await primary(1);
-      if (generation != _generation) return;
-      if (!accept(page) && fallback != null) {
-        onFellBack?.call(page);
-        query = fallback;
-        page = await fallback(1);
-      }
-    } catch (e) {
-      _failIfCurrent(generation, e);
-      return;
-    }
-    if (generation != _generation) return;
-    // 翻页要重发的是**最终赢的那个**查询，不是被否掉的那个
-    _lastQuery = query;
-    _publish(page);
-    await _probeAll(generation);
   }
 
   Future<void> _run(Future<CandidatePage> Function() search) async {

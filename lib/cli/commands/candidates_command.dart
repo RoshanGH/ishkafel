@@ -9,10 +9,7 @@ import '../../core/miaoa/miaoa_tag_service.dart';
 import '../../core/miaoa/tag_id_resolver.dart';
 import '../../core/storage/file_task_repository.dart';
 import '../../core/storage/task_seq.dart';
-import '../../features/picking/tag_hit_probe.dart';
-import '../../features/picking/tag_query_narrowing.dart';
 import '../../features/picking/project_exclusion.dart';
-import '../../features/picking/tag_result_usability.dart';
 import '../../core/storage/agent_presence.dart';
 import '../agent_stage.dart';
 import '../../core/storage/task_media.dart';
@@ -122,9 +119,6 @@ Future<int> runCandidatesCommand({
   final projectIds = [?task.project?.id];
 
   final ExcludedCandidatePage filtered;
-  Map<String, Object?>? narrowNote;
-  Map<String, Object?>? fallbackNote;
-  int? libraryTotal;
   if (keyword != null && keyword.trim().isNotEmpty) {
     // 画面描述语义搜：标签打不上（话术标签几乎没人打）时的第二条路
     await stage.show('正在按画面描述找：${keyword.trim()}',
@@ -165,110 +159,39 @@ Future<int> runCandidatesCommand({
       return exitNotFound;
     }
 
-    // 与 GUI 相同的收窄：剔掉 0 条的和「实拍」这类命中全库九成、等于
-    // 没筛的标签——不收窄的话半个素材库都会被捞回来
-    var effectiveIds = tagIds;
-    try {
-      final probe = TagHitProbe(service);
-      final hits = await probe.probe(tags: [
-        for (final name in tagNames)
-          if (resolver.idsOf([name]).firstOrNull case final id?)
-            (name: name, id: id),
-      ], projectIds: projectIds);
-      libraryTotal = await probe.libraryTotal(projectIds: projectIds);
-      final narrowed =
-          narrowTagQuery(hits: hits, libraryTotal: libraryTotal);
-      if (narrowed.tagIds.isNotEmpty) {
-        effectiveIds = narrowed.tagIds;
-        final dropped = [...narrowed.droppedEmpty, ...narrowed.droppedBroad];
-        if (dropped.isNotEmpty) {
-          narrowNote = {
-            'droppedTags': dropped,
-            'note': '这些标签命中 0 条或宽到等于没筛，已从检索键中剔除',
-          };
-          // **这是它在改主意，不是流水账**：人正是靠看懂这一步才敢
-          // 把花钱的活交给静默模式（见 BroadcastKind.judgement）
-          await stage.think(
-              '「${dropped.take(2).join('」「')}」这些标签筛不出东西，先剔掉',
-              focus: _focus(unitIndex, shotIndex));
-        }
-      }
-    } catch (e) {
-      // 收窄失败不拦检索：按原样搜，宽也好过搜不出
-      sink.writeln('标签收窄失败，按原样检索：$e');
-    }
-
     await stage.show('正在按这一镜的标签找素材',
         focus: _focus(unitIndex, shotIndex));
     final byTags = await service.searchByTags(
-      tagIds: effectiveIds,
+      tagIds: tagIds,
       mode: tagMode,
       projectIds: projectIds,
       page: page,
       pageSize: pageSize,
     );
 
-    // 收窄之后还是没筛住的话，这 50 条就是「几万条里最新的 50 条」，
-    // 跟像不像无关（真机：total 11265，要「女孩在书桌前诉说」，
-    // 首条给「户外街道女士与男孩交谈」）。这时候自动改走画面描述语义搜，
-    // 并把换了这件事说出来——不说就是静默换了一套结果
-    final usable = tagResultIsUsable(
-      total: byTags.total,
-      returned: byTags.items.length,
-      pageSize: pageSize,
-    );
-    final semantic = (shotIndex == null
-            ? units[unitIndex].transcript
-            : shots[shotIndex].description) ??
-        '';
-    if (!usable && semantic.trim().isNotEmpty) {
-      await stage.show(
-          '标签命中 ${byTags.total} 条太宽，改用画面描述再找一轮',
-          focus: _focus(unitIndex, shotIndex));
-      filtered = await searchExcluding(
-        fetch: (p) => service.searchByDescription(
-          keyword: semantic.trim(),
-          projectIds: projectIds,
-          page: p,
-          pageSize: pageSize,
-        ),
-        exclude: excluded,
-        want: pageSize,
-        firstPage: page,
-      );
-      await stage.think(
-          '标签命中 ${byTags.total} 条，宽到等于没筛，改用画面描述再搜一轮',
-          focus: _focus(unitIndex, shotIndex));
-      fallbackNote = {
-        'from': 'tags',
-        'to': 'description',
-        'tagTotal': byTags.total,
-        'keyword': semantic.trim(),
-        'note': '按标签命中 ${byTags.total} 条，宽到等于没筛——'
-            '素材库返回的是最新 50 条而不是最像的 50 条，'
-            '已改用这一镜的画面描述做语义检索。'
-            '想自己指定说法用 --keyword',
-      };
-    } else {
-      filtered = excluded.isEmpty
-          ? ExcludedCandidatePage(
-              items: byTags.items,
-              total: byTags.total,
-              excludedCount: 0,
-              pagesFetched: 1)
-          : await searchExcluding(
-              fetch: (p) => service.searchByTags(
-                tagIds: effectiveIds,
-                mode: tagMode,
-                projectIds: projectIds,
-                page: p,
-                pageSize: pageSize,
-              ),
-              exclude: excluded,
-              want: pageSize,
-              firstPage: page,
-            );
-    }
+    // **命中多少就是多少，不替 Agent 判断够不够用。**
+    //
+    // 这里曾经会在「命中太宽」时自动改走画面描述语义搜。拆了：换检索方式
+    // 是判断，判断权归 Agent——它拿得到 total，要改走语义搜就自己带
+    // `--keyword` 再调一次。软件只把事实摆出来。
+    filtered = excluded.isEmpty
+        ? ExcludedCandidatePage(
+            items: byTags.items,
+            total: byTags.total,
+            excludedCount: 0,
+            pagesFetched: 1)
+        : await searchExcluding(
+            fetch: (p) => service.searchByTags(
+              tagIds: tagIds,
+              mode: tagMode,
+              projectIds: projectIds,
+              page: p,
+              pageSize: pageSize,
+            ),
+            exclude: excluded,
+            want: pageSize,
+            firstPage: page,
+          );
   }
 
   // 时长要不要探：探了才知道「选它会变速多少」——那才是真正要判断的东西。
@@ -333,8 +256,6 @@ Future<int> runCandidatesCommand({
     'pagesFetched': filtered.pagesFetched == 1 ? null : filtered.pagesFetched,
     'page': page,
     'pageSize': pageSize,
-    'narrowed': ?narrowNote,
-    'searchFallback': ?fallbackNote,
     'candidates': [
       for (final c in filtered.items)
         {

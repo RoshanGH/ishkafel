@@ -9,7 +9,7 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/tag_group_ref.dart';
 import 'package:ishkafel/features/workbench/candidate_tab.dart';
 
-/// 候选面板**只能落地一次**。
+/// 候选面板**只能落地一次**，而且落的就是妙啊原样给的那一批。
 ///
 /// 2026-09-18 真机，用户原话：「点了 U 的 S1，然后点替换这个镜头，无论是替换
 /// 整段还是替换镜头，它这个镜头的搜索都会经过明显的两次跳转，然后才会跳转到
@@ -17,19 +17,25 @@ import 'package:ishkafel/features/workbench/candidate_tab.dart';
 /// 来的……如果它慢的话，我接受它一个 Loading，但是我不接受它这样跳来跳去，
 /// 因为中间我真的可能会选到那些。」
 ///
-/// 两条独立的成因，各一组用例：
+/// 2026-09-20 他又指出：改完之后**匹配的结果都不对了**，并定死了检索该怎么写：
+/// 「搜索的逻辑不应该有任何的处理，它就是在妙啊的上面拿到搜索结果就好了。
+/// 我们唯一控制的是条件……筛选条件当我选的是标签的时候，你就把对应的这个
+/// 参考视频的标签放进去就好了。它是什么结果展示出来，你就展示什么结果。
+/// 至于对于结果进行二次的判断，然后去掉一些不符合要求的结果，这些不要。」
 ///
-/// **一、回退判定发生在结果已经发布之后**（确定性，每次都犯）
-/// `searchByTags` 一返回就把 status 置成 ready 并通知，界面立刻把那批画出来；
-/// 之后才判定「标签太宽，这批没用」，再改走画面描述重搜。那批被画出来的正是
-/// 「按标签搜给的是最新的、不是最像的」那一堆——也就是用户说的「不知道怎么
-/// 来的分镜」，而且**那几秒里他真的能点中**。
+/// 所以这一组守三条：
 ///
-/// **二、切模式会连发两次检索**（竞态）
+/// **一、条件原样传**：这一镜有几个标签就传几个，一个都不许剔。
+/// 曾经会把「命中得太宽」的标签从检索键里拿掉——用户选的条件被改掉了，
+/// 而界面上仍显示他自己那几个标签，结果对不上就无从查起。
+///
+/// **二、结果原样收**：命中一万多条也照样用这一批，不许自动改走画面描述。
+/// 换检索方式是判断，不是软件该替人做的事。
+///
+/// **三、只跳一次**：连发两次检索的另一条成因是切模式——
 /// `setMode(perShot)` 自己猜了个第一镜（`_selectedShotIndex = 0`）并通知，
-/// 紧接着调用方再把真正选中的那一镜纠正回来、又通知一次。两次通知各触发一次
-/// 检索，而第一次那发是注定作废的。代次号只在真正发请求那一刻才自增，它前面
-/// 还 `await` 着标签收窄的网络往返——所以作废的那一发完全可能先回来、先渲染。
+/// 紧接着调用方再把真正选中的那一镜纠正回来、又通知一次。
+/// 两次通知各触发一次检索，而第一次那发是注定作废的。
 void main() {
   group('选一次模式，候选面板只落地一次', () {
     testWidgets('注定作废的那一发不该打出去：选中 S2 点镜头替换，只检索 S2 的标签',
@@ -49,7 +55,7 @@ void main() {
           reason: '唯一该发出去的是 S2（中景）那一发');
     });
 
-    testWidgets('标签那批既然不用，就一帧都不该露面', (tester) async {
+    testWidgets('命中再宽也用这一批，不许偷偷改走画面描述', (tester) async {
       final (editor, content, seen) = await _pump(tester);
 
       editor.select(const EditorSelection.shot(0, 1));
@@ -64,13 +70,27 @@ void main() {
       await tester.pumpAndSettle();
       seen.record(tester);
 
-      expect(seen.totals, isNot(contains(_tagTotal)),
-          reason: '按标签命中 $_tagTotal 条、宽到等于没筛，这批最终会被丢掉。'
-              '它一旦被画出来，用户就可能在那几秒里点中一条跟这一镜毫无关系的素材');
-      expect(seen.totals.last, _descTotal,
-          reason: '最终落在画面描述那批上');
-      expect(content.keywordQueries, hasLength(1),
-          reason: '回退只该发生一次');
+      expect(content.keywordQueries, isEmpty,
+          reason: '用户选的是标签检索。命中 $_tagTotal 条宽不宽是他自己判断的事，'
+              '软件不许因为嫌宽就换一套结果给他——换了他还以为自己在按标签搜');
+      expect(seen.totals, [_tagTotal],
+          reason: '整个过程只出现过一个「共 N 条」：标签那一批。'
+              '出现两个就说明中间那批露过面，而他真的会在那几秒里点中');
+    });
+
+    testWidgets('这一镜有几个标签就传几个，一个都不许剔', (tester) async {
+      final (editor, content, _) = await _pump(tester, shotTags: ['近景', '实拍']);
+
+      editor.select(const EditorSelection.shot(0, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('picking-mode-per-shot')));
+      await tester.pumpAndSettle();
+
+      expect(content.tagQueries, hasLength(1));
+      expect(content.tagQueries.single,
+          unorderedEquals([_tagIds['近景'], _tagIds['实拍']]),
+          reason: '「实拍」命中得再宽也是用户选的条件。'
+              '曾经会把它剔掉，于是界面显示的标签和真正搜的标签对不上');
     });
 
     testWidgets('整体替换同理：选中 S2 之后点整段替换，也只该打一发',
@@ -87,35 +107,19 @@ void main() {
       expect(content.tagQueries.single, unorderedEquals([_unitTagId]),
           reason: '整体替换用这个台词语义单元自己的标签，不是镜头标签');
     });
-
-    testWidgets('标签那批够用时，不该再多打一发画面描述', (tester) async {
-      final (editor, content, _) =
-          await _pump(tester, tagTotal: _usableTagTotal);
-
-      editor.select(const EditorSelection.shot(0, 1));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('picking-mode-per-shot')));
-      await tester.pumpAndSettle();
-
-      expect(content.tagQueries, hasLength(1));
-      expect(content.keywordQueries, isEmpty,
-          reason: '标签结果一页就装得下，本来就该用它——不必再问一次语义搜');
-    });
   });
 }
 
 // ---------------------------------------------------------------------------
 
-/// 标签搜命中这么多：四页以上，前几十条等于随机取样，判定为不可用
+/// 标签搜命中这么多。真机上 35 个镜头每一镜都是这个数——宽得离谱，
+/// 但宽不宽由用户自己判断，软件照搜照显示
 const _tagTotal = 11265;
 
-/// 画面描述语义搜命中这么多：这才是最终该落地的那批
+/// 画面描述语义搜命中这么多。这一批**不该出现**：没人点过画面描述
 const _descTotal = 554;
 
-/// 一页就装得下，标签结果可用
-const _usableTagTotal = 12;
-
-const _tagIds = {'近景': 11, '中景': 12};
+const _tagIds = {'近景': 11, '中景': 12, '实拍': 13};
 
 /// 台词语义单元层那一个标签（整体替换用它）
 const _unitTagId = 21;
@@ -158,8 +162,7 @@ class _FakeContentService implements MiaoaContentService {
     int pageSize = 20,
   }) async {
     tagQueries.add(List.of(tagIds));
-    // 标签收窄那一步要打网络，真机上它先走完、这一发才出去。
-    // 这里给一个往返延迟，好让「作废的那一发先回来」这条竞态能被复现
+    // 给一个往返延迟，好让「作废的那一发先回来、先渲染」这条竞态能被复现
     await Future<void>.delayed(const Duration(milliseconds: 20));
     return CandidatePage(
       items: [_material(id: 9001, name: '标签宽结果')],
@@ -211,18 +214,23 @@ class _FakeTagService implements MiaoaTagService {
 }
 
 /// 一个单元两个镜头，镜头标签各不相同——检索键能唯一指认是哪一镜。
-/// 镜头带画面描述，回退到语义搜才有检索键
-List<SemanticUnit> _units() => const [
+/// 镜头带画面描述：真有人去点画面描述检索时才有检索键，
+/// 也让「软件自己偷偷换过去」这件事能被抓住
+List<SemanticUnit> _units(List<String> firstShotTags) => [
       SemanticUnit(
         uid: 'u0',
         index: 0,
         startMs: 0,
         endMs: 2000,
         transcript: '这个东西能把衣服洗干净',
-        tags: ['主卖点解决方案'],
+        tags: const ['主卖点解决方案'],
         shots: [
-          Shot(startMs: 0, endMs: 1000, tags: ['近景'], description: '脏衣服特写'),
           Shot(
+              startMs: 0,
+              endMs: 1000,
+              tags: firstShotTags,
+              description: '脏衣服特写'),
+          const Shot(
               startMs: 1000,
               endMs: 2000,
               tags: ['中景'],
@@ -234,9 +242,10 @@ List<SemanticUnit> _units() => const [
 Future<(SegmentationEditorController, _FakeContentService, _SeenTotals)> _pump(
   WidgetTester tester, {
   int tagTotal = _tagTotal,
+  List<String> shotTags = const ['近景'],
 }) async {
   final editor = SegmentationEditorController(
-    initialUnits: _units(),
+    initialUnits: _units(shotTags),
     durationMs: 2000,
     fps: 30,
     sentences: const [],

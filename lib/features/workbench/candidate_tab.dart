@@ -23,8 +23,6 @@ import '../picking/picked_tray.dart';
 import '../picking/candidate_preview.dart';
 import '../../core/log/app_log.dart';
 import '../picking/tag_hit_probe.dart';
-import '../picking/tag_query_narrowing.dart';
-import '../picking/tag_result_usability.dart';
 import '../picking/candidate_search_controller.dart';
 import '../picking/picking_controller.dart';
 import '../picking/picking_widgets.dart';
@@ -131,13 +129,6 @@ class CandidateTabState extends State<CandidateTab> {
   /// 前者要在标签恢复可用时收回来，后者绝不能被抢走。见 [nextSearchMode]
   bool _modeAutoFellBack = false;
   bool _modeUserPinned = false;
-
-  /// 这一次实际用了哪几个标签、剔掉了哪几个。界面要说清楚——否则用户看到
-  /// 结果变了却不知道为什么
-  TagQueryPlan? _tagPlan;
-
-  /// 标签没筛住、已自动改走语义搜——这句话要显示给人看
-  String? _autoSemanticNote;
 
   /// 台词 / 画面。整体替换默认台词——那一层换的是「一句话对应的一段画面」
   CandidateView _view = CandidateView.transcript;
@@ -538,39 +529,6 @@ class CandidateTabState extends State<CandidateTab> {
     await _runSearch();
   }
 
-  /// 收紧检索标签：把没有区分度的剔出去（见 [narrowTagQuery]）。
-  ///
-  /// 必须做，否则真机上会出现「51 个镜头搜出来的东西一模一样」——它们全带
-  /// 「实拍」，而「实拍」单独就命中该项目的全部 5437 条，「满足其一」的并集
-  /// 永远被它撑满。
-  ///
-  /// 各标签的条数走 [TagHitProbe]（按项目+标签缓存），且**并发数**：同一批
-  /// 标签在几十个镜头之间反复出现，第一次之后就是命中缓存，几乎不花时间。
-  Future<TagQueryPlan> _narrowedTags(PickingScope scope) async {
-    final tags = <({String name, int id})>[
-      for (var i = 0; i < scope.tagNames.length; i++)
-        if (i < scope.tagIds.length)
-          (name: scope.tagNames[i], id: scope.tagIds[i]),
-    ];
-    if (tags.length < 2) {
-      return TagQueryPlan(tagIds: scope.tagIds);
-    }
-    try {
-      final hits =
-          await _tagHitProbe.probe(tags: tags, projectIds: _projectIds);
-      // 分母：判断一个标签宽不宽，要看它占本项目的多少，不能拿标签之间互相比
-      final total = await _tagHitProbe.libraryTotal(projectIds: _projectIds);
-      final narrowed = narrowTagQuery(hits: hits, libraryTotal: total);
-      // 收紧之后一个标签都不剩（比如一条条数都没数出来）就退回原样。
-      // 空检索键换来的是 CLI 那句「未选择任何标签」的红字，比搜得宽糟得多
-      if (narrowed.tagIds.isEmpty) return TagQueryPlan(tagIds: scope.tagIds);
-      return narrowed;
-    } catch (e) {
-      AppLog.warn('收紧检索标签失败，按原样检索：$e');
-      return TagQueryPlan(tagIds: scope.tagIds);
-    }
-  }
-
   /// 就地重新拉标签表。
   ///
   /// 拉失败后原来没有任何重试路径，只能退出任务再进来——面板上那句
@@ -611,33 +569,21 @@ class CandidateTabState extends State<CandidateTab> {
         // 原因（标签表还在拉 / 这一层的标签不在当前标签组里）已经写在
         // 检索方式下方那行灰字里了，红字反而把它压住。
         if (scope.tagIds.isEmpty) {
-          setState(() => _tagPlan = null);
           _search.clear();
           return;
         }
-        final plan = await _narrowedTags(scope);
+        // **标签原样传出去，结果原样展示。**
+        //
+        // 这里曾经夹着两道加工：先把「命中得太宽」的标签剔掉，再判这批结果
+        // 值不值得用、不值就偷偷改走画面描述语义搜。两道都拆了——
+        // 剔标签等于把用户选的条件改掉，换检索方式等于换掉他要的那套结果，
+        // 而他看到的仍是自己那几个标签，对不上就无从查起。
+        // 2026-09-20 产品负责人原话：「搜索的逻辑不应该有任何的处理，
+        // 它就是在妙啊上面拿到搜索结果就好了……我们唯一控制的是条件。」
+        //
+        // 顺带也治好了「一进来要连跳两三次才稳定」：跳的正是回退那一发。
+        await _search.searchByTags(tagIds: scope.tagIds);
         if (!mounted) return;
-        setState(() => _tagPlan = plan);
-        // 标签这批不一定用得上。**判定要在发布之前做完**——先发布再回退，
-        // 那批被否掉的结果会实实在在地在界面上摆几秒（规格探测的时间），
-        // 而用户完全可能在那几秒里点中一条跟这一镜毫无关系的素材。
-        final keyword = scope.descriptionKeyword.trim();
-        var fellBack = false;
-        await _search.searchWithFallback(
-          primary: _search.tagQuery(plan.tagIds),
-          accept: (page) => tagResultIsUsable(
-              total: page.total,
-              returned: page.items.length,
-              pageSize: _search.pageSize),
-          fallback: keyword.isEmpty ? null : _search.descriptionQuery(keyword),
-          onFellBack: (rejected) {
-            fellBack = true;
-            _autoSemanticNote = _autoSemanticNoteFor(rejected.total);
-          },
-        );
-        if (!mounted) return;
-        // 换没换都要如实反映：换了说清楚为什么换，没换就把上一次的话收回去
-        if (!fellBack && _autoSemanticNote != null) _autoSemanticNote = null;
         setState(() {});
       case CandidateSearchMode.description:
         await _search.searchByDescription(scope.descriptionKeyword);
@@ -646,22 +592,6 @@ class CandidateTabState extends State<CandidateTab> {
         _search.clear();
     }
   }
-
-  /// 标签没筛住就自动改走画面描述语义搜，**这句话解释为什么换**。
-  ///
-  /// **为什么必须自动做**：素材库按标签检索**不做相关性排序**，返回的是 id
-  /// 最新的一批。真机上一个 35 镜的任务每一镜都命中一万多条，于是每一镜拿到的
-  /// 都是同样那批最新素材——要「女孩在书桌前情绪激动诉说」，首条给的是
-  /// 「户外街道上女士与男孩并排走着交谈」。换成语义搜，同一镜命中四百多条，
-  /// 首条就是「夜晚室内脸上长满红痘的女孩坐在书桌前」。
-  ///
-  /// 换了要说出来（走 notes 那行灰字）——不说就是悄悄换了一套结果。
-  /// 但**说归说，那批被否掉的结果一帧都不该露面**，判定在发布之前就做完了
-  /// （见 [CandidateSearchController.searchWithFallback]）。
-  String _autoSemanticNoteFor(int tagTotal) => tagTotal == 0
-      ? '这组标签在素材库里一条都没有，已改用画面描述检索'
-      : '按标签命中 $tagTotal 条，宽到等于没筛（素材库按标签搜给的是最新的，'
-          '不是最像的），已改用画面描述检索';
 
   void _onSearchModeChanged(CandidateSearchMode mode) {
     if (mode == _searchMode) return;
@@ -708,8 +638,6 @@ class CandidateTabState extends State<CandidateTab> {
           picking: _picking,
           search: _search,
           scope: _scope,
-          tagPlan: _tagPlan,
-          autoSemanticNote: _autoSemanticNote,
           onRetryTags: _retryTagVocabulary,
           onRetrySearch: _search.retry,
           onRelogin: () => _reloginThenRetry(context),

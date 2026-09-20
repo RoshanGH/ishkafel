@@ -66,6 +66,13 @@ Map<String, dynamic> taskToJson(RenewTask task) {
         ? 'script'
         : (task.sourcePath == null ? 'blank' : 'replace'),
     'sourcePath': task.sourcePath,
+    // 这条任务绑在哪个项目上——**检索候选素材就按它限定范围**。
+    // 为 null 就是不限项目（妙啊按账号下全部项目给结果），这是合法状态，
+    // 但得看得见：以前这里一个字都不报，于是「搜出来的东西跨了项目」
+    // 只能靠猜，Agent 也无从确认自己搜的是不是这条线的素材
+    'project': task.project == null
+        ? null
+        : {'id': task.project!.id, 'name': task.project!.name},
     'durationMs': task.videoInfo?.duration.inMilliseconds,
     'fps': task.videoInfo?.fps,
     // 精确帧率：29.97 是 30000/1001，转成 double 之后它和 30 在很多运算里

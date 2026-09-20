@@ -15,7 +15,6 @@ import 'tag_hit_probe.dart';
 import 'picking_controller.dart';
 import 'picking_messages.dart';
 import 'picking_scope.dart';
-import 'tag_query_narrowing.dart';
 import '../../core/replacement/picked_material.dart';
 import 'picked_tray.dart';
 import 'picking_widgets.dart';
@@ -28,13 +27,6 @@ class CandidatePanel extends StatelessWidget {
   final PickingController picking;
   final CandidateSearchController search;
   final PickingScope scope;
-
-  /// 这一次实际用了哪几个标签、剔掉了哪几个（见 [narrowTagQuery]）。
-  /// 不说清楚的话，用户看到结果变了却不知道为什么
-  final TagQueryPlan? tagPlan;
-
-  /// 标签没筛住、已自动改走语义搜的说明。null = 没发生过切换
-  final String? autoSemanticNote;
 
   /// 重新拉标签表并重跑检索。为空表示上层没接（测试里常见）
   final VoidCallback? onRetryTags;
@@ -102,8 +94,6 @@ class CandidatePanel extends StatelessWidget {
     required this.picking,
     required this.search,
     required this.scope,
-    this.tagPlan,
-    this.autoSemanticNote,
     this.onRetryTags,
     this.onRetrySearch,
     this.onRelogin,
@@ -383,17 +373,6 @@ class CandidatePanel extends StatelessWidget {
     if (!picking.canUsePerShot) {
       notes.add('这个台词语义单元没有切出视觉镜头，只能整体替换或保留原片');
     }
-    final plan = tagPlan;
-    if (searchMode == CandidateSearchMode.tag && plan != null) {
-      final reasons = <String>[
-        if (plan.droppedEmpty.isNotEmpty)
-          '${plan.droppedEmpty.join('、')}（本项目下没有素材）',
-        if (plan.droppedBroad.isNotEmpty)
-          '${plan.droppedBroad.join('、')}（几乎命中全部素材，用了等于没筛）',
-      ];
-      if (reasons.isNotEmpty) notes.add('已排除 ${reasons.join('；')}');
-    }
-    if (autoSemanticNote case final note?) notes.add(note);
     if (scope.tagUnavailableText case final reason?) notes.add(reason);
     if (searchMode == CandidateSearchMode.image) {
       notes.add(imageSearchUnavailableReason);
