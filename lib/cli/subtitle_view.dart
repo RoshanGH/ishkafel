@@ -298,9 +298,13 @@ Map<String, dynamic>? subtitleShotReport(
   final unitStart = ctx.timeline.startOf(unitIndex);
   final shotOffset = f.shot.startMs - f.unit.startMs;
   final fpsDouble = ctx.frames.fps.num / ctx.frames.fps.den;
+  // 整块段落上，行的帧号跟 shot 级的帧号是同一种假精度：
+  // 这里的镜头偏移量的是原片，而那一段在成片里的长度跟着素材走，
+  // 偏移根本不成立。文本是真的，帧号不是——所以只报文本
   final lineRows = [
     for (var i = 0; i < f.lines.length; i++)
-      _lineRow(f.lines[i], i, unitStart, shotOffset, fpsDouble, f.by),
+      _lineRow(f.lines[i], i, unitStart, shotOffset, fpsDouble, f.by,
+          hasFrames: f.span != null),
   ];
 
   // **没过滤过的全部镜头**：隔壁是不是整体替换的一整块，「隔壁」还是它，
@@ -354,21 +358,29 @@ Map<String, dynamic> _heardMap(Heard heard) => {
 /// 字幕存的是**镜头内毫秒**，报的时候换算成**成片绝对帧**：
 /// `frames.frameAt(单元成片起点 + 镜头在单元内的偏移 + 行内偏移)`。
 /// 首尾各算一次，规则跟 shot 边界（[ComposedFrames.shotSpan]）一致——
-/// 相邻两行不共享任何一帧
+/// 相邻两行不共享任何一帧。
+///
+/// [hasFrames] 为 false 时（整块段落，`shotSpan` 为 null）不算这个数、
+/// 也不报 `frames` 键——见调用点那句注释：这里的镜头偏移量的是原片，
+/// 而整块替换那一段在成片里的长度跟着素材走，偏移根本不成立，是跟
+/// shot 级的 `frames`/`tc`/`durationFrames` 同一种假精度，只是藏在
+/// 更低一层。文本是真的，照报；帧号不是，不编
 Map<String, dynamic> _lineRow(
   SubtitleLine l,
   int index,
   int unitStartMs,
   int shotOffsetMs,
   double fpsDouble,
-  String by,
-) {
-  final absStart = unitStartMs + shotOffsetMs + l.startMs;
-  final absEnd = unitStartMs + shotOffsetMs + l.endMs;
-  final span = FrameSpan.fromMs(absStart, absEnd, fpsDouble);
+  String by, {
+  required bool hasFrames,
+}) {
+  final frames = hasFrames
+      ? FrameSpan.fromMs(unitStartMs + shotOffsetMs + l.startMs,
+          unitStartMs + shotOffsetMs + l.endMs, fpsDouble)
+      : null;
   return {
     'i': index,
-    'frames': [span.first, span.last],
+    if (frames != null) 'frames': [frames.first, frames.last],
     'text': l.text,
     'by': by,
   };

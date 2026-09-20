@@ -7,6 +7,8 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'package:ishkafel/core/time/rational.dart';
 
 /// 报告的三条规矩（spec §5）：
@@ -160,5 +162,20 @@ void main() {
     expect(r, isNotNull, reason: 'null 的含义是这个下标不存在');
     expect((r!['voice'] as Map)['source'], 'replaced');
     expect(r.containsKey('frames'), isFalse);
+  });
+
+  test('整块段落上，行的帧号也不许编', () {
+    // 给 U1S1 的字幕轨手改上一行内容——文本是真的（要报），但镜头偏移量的
+    // 是原片，那一段在成片里的长度跟着素材走，偏移根本不成立（帧号不能编）
+    final track = const SubtitleTrack.empty().withLines(
+      const SubtitleSlot(unitUid: 'u0', shotIndex: 0),
+      const [SubtitleLine(startMs: 0, endMs: 500, text: '手改的字')],
+    );
+    final task = taskWithSolidBlockUnit().copyWith(subtitleTrack: track);
+    final r = subtitleShotReport(task, unitIndex: 0, shotIndex: 0)!;
+    final lines = r['lines'] as List;
+    expect(lines, isNotEmpty, reason: '手改过，文本是真的，要报');
+    expect((lines.first as Map).containsKey('frames'), isFalse,
+        reason: '镜头偏移量的是原片，在成片里不成立——跟 shot 级同一条纪律');
   });
 }
