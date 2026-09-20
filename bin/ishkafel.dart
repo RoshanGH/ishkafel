@@ -104,6 +104,8 @@ Future<void> main(List<String> args) async {
             'whiteBox / blurBox 能盖住素材自带的烧录字幕')
     ..addOption('bottom', help: 'subtitle 用：字幕距画面底部的比例（如 0.22）')
     ..addOption('font', help: 'subtitle 用：字号占画面高度的比例（如 0.034）')
+    ..addOption('color',
+        help: 'subtitle 用：自定义字色，六位十六进制色值，不带 #（如 33D6A6）')
     ..addFlag('force',
         help: 'analyze / script voice / script tag-ref 用：已经有另一个进程'
             '在这条任务上干同一件事时照样再跑一遍（默认不跑，只报一句'
@@ -184,6 +186,9 @@ Future<void> main(List<String> args) async {
         preset: parsed['preset'] as String?,
         bottomRatio: parsed['bottom'] as String?,
         fontRatio: parsed['font'] as String?,
+        colorHex: parsed['color'] as String?,
+        unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
+        shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
       ),
     'peek' => await runPeekCommand(
         rest: rest,
@@ -405,6 +410,12 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
                    直接给短编号（#12 或 12）——所有带 <id> 的命令都认
   candidates <id> --unit <i> [--shot <j>]
                    候选素材与上下文（本单元台词、相邻镜头及其已选素材）
+  subtitle check <任务>        字幕自查：哪几镜有毛病、为什么（只报事实）
+  subtitle show  <任务> [--unit i --shot j]
+                   字幕报告：每一镜占哪几帧、听到哪几个字、显示哪几个字。
+                   给了 --unit --shot 就是单镜详情（带相邻镜，判断串字用）
+  subtitle <任务> [--preset blurBox] [--bottom 0.22] [--font 0.034] [--color RRGGBB]
+                   字幕样式（主要用途是遮挡素材自带的烧录字幕）
   open <id>        把 app 弹出来并落到这个任务的工作台
   review <id>      把 app 弹出来进**审核模式**：人过一遍你挑的候选、勾选去留。
                    确认后 task <id> 里的方案就是最终结果，等用户发话再继续

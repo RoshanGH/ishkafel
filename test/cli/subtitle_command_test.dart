@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/subtitle_command.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/storage/file_task_repository.dart';
@@ -86,5 +87,33 @@ void main() {
     final style = (await repo.findById('t1'))!.subtitle;
     expect(style.bottomRatio, closeTo(0.18, 0.001));
     expect(style.fontRatio, closeTo(0.04, 0.001));
+  });
+
+  test('--color 收一个六位十六进制色值，写进 colorHex', () async {
+    final code = await runSubtitleCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      colorHex: '33D6A6',
+      out: StringBuffer(),
+      err: StringBuffer(),
+    );
+
+    expect(code, 0);
+    expect((await repo.findById('t1'))!.subtitle.colorHex, '33D6A6');
+  });
+
+  test('--color 认不出的值要当场说清，不能静默忽略', () async {
+    final err = StringBuffer();
+    final code = await runSubtitleCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      colorHex: '不是颜色',
+      out: StringBuffer(),
+      err: err,
+    );
+
+    expect(code, exitBadUsage);
+    // 改之前的颜色不能被这个坏参数悄悄带偏——没改就是没改
+    expect((await repo.findById('t1'))!.subtitle.colorHex, isNull);
   });
 }
