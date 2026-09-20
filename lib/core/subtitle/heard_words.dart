@@ -128,10 +128,23 @@ Heard _project({
     for (final w in s.words) {
       final from = wordOffsetToUnit(w.startMs);
       final to = wordOffsetToUnit(w.endMs);
-      // 只要跟这一镜有重叠就算「这一镜听得到」
-      if (to <= shotStartInAxis || from >= shotEndInAxis) continue;
-      final firstFrame = frames.frameAt(unitStart + from);
-      final lastFrame = frames.frameAt(unitStart + to);
+      // **成员判定和位置显示必须用同一把尺子。** 原来成员判定用毫秒、
+      // 位置显示用帧，同一个函数两条轴：毫秒上跟这一镜还沾一点边、帧上
+      // 一帧都不沾的词照样被算进来，还因为「末帧超出本镜末帧」被报成
+      // wordSplit——真机任务 #1 有 5 个词是这样，而它们**根本没有
+      // 「后半截」**，同一个字在隔壁镜的 words 里又完整出现一次。
+      // Agent 照手册把 heard 和 lines 并排看，会判成「漏字」去补，
+      // 把对的那一镜改错
+      final span = frames.spanOfMs(unitStart + from, unitStart + to);
+      // shotSpan 为 null（整块段落）时帧上无从判起，退回毫秒兜底——
+      // 那种段落本来也走不到这里（replaced 档在上面就返回了），
+      // 留着是为了别让意外的调用崩掉
+      final overlaps = shotSpan == null
+          ? to > shotStartInAxis && from < shotEndInAxis
+          : span.first <= shotSpan.last && span.last >= shotSpan.first;
+      if (!overlaps) continue;
+      final firstFrame = span.first;
+      final lastFrame = span.last;
       out.add(HeardWord(
         text: w.text,
         firstFrame: firstFrame,

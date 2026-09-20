@@ -90,8 +90,12 @@ void main() {
     // 5237ms 是整体替换给出的素材真实时长——它直接来自 ffprobe，
     // 根本不过帧对齐那一步，所以这是生产里必然出现的输入，不是边角
     final f = framesOf(whole: {0: 5237}, fps: Rational.fps30);
-    expect(f.unitSpan(1).first, greaterThan(f.unitSpan(0).last),
+    // **断言必须是「正好接上」，不是「大于」。** greaterThan 只挡得住
+    // 「共享同一帧」，挡不住「中间凭空空掉几帧」——而这是整条分支里唯一
+    // 守「相邻段不共享帧」的边界用例，松一档就等于没守。
+    // 5237ms 这组实际是 157/158，正好接上
+    expect(f.unitSpan(1).first, f.unitSpan(0).last + 1,
         reason: '帧 157 的时间戳是 5233ms，早于边界 5237ms——'
-            '四舍五入会把它同时判给两段');
+            '四舍五入会把它同时判给两段；而跳着走又会让中间那几帧无主');
   });
 }

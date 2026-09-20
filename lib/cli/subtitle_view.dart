@@ -26,8 +26,9 @@ import 'task_view.dart' show wholeDurationsOf;
 /// 1. **对外只出帧，不出毫秒**：毫秒退回存储格式，两套数字并存就一定有人
 ///    对错。
 /// 2. **位置一律是成片帧轴上的绝对帧**：字幕存的是「相对这一镜开头」，
-///    这里按 `frames.frameAt(单元成片起点 + 镜头在单元内的偏移 + 行内偏移)`
-///    换算成绝对帧再报出去。
+///    这里按 `frames.spanOfMs(单元成片起点 + 镜头在单元内的偏移 + 行内偏移, …)`
+///    换算成绝对帧再报出去——**毫秒变帧只许走这一条路**，裸调
+///    `FrameSpan.fromMs` 会丢掉段头对称，相邻两行就会共享同一帧。
 /// 3. **「听到什么」和「显示什么」分成两块字段，永不混写**：`heard` 是耳朵
 ///    听到的（[heardInShot]），`lines` 是要烧的字（[subtitleLinesForSlot]）
 ///    ——两者对不上正是这个模块要抓的那类问题（见 [subtitleProblemsOf]）。
@@ -510,13 +511,12 @@ Map<String, dynamic>? subtitleShotReport(
 
   final unitStart = ctx.timeline.startOf(unitIndex);
   final shotOffset = f.shot.startMs - f.unit.startMs;
-  final fpsDouble = ctx.frames.fps.num / ctx.frames.fps.den;
   // 整块段落上，行的帧号跟 shot 级的帧号是同一种假精度：
   // 这里的镜头偏移量的是原片，而那一段在成片里的长度跟着素材走，
   // 偏移根本不成立。文本是真的，帧号不是——所以只报文本
   final lineRows = [
     for (var i = 0; i < f.lines.length; i++)
-      _lineRow(f.lines[i], i, unitStart, shotOffset, fpsDouble, f.by,
+      _lineRow(f.lines[i], i, unitStart, shotOffset, ctx.frames, f.by,
           hasFrames: f.span != null),
   ];
 
@@ -583,9 +583,14 @@ Map<String, dynamic> _heardMap(Heard heard) => {
     };
 
 /// 字幕存的是**镜头内毫秒**，报的时候换算成**成片绝对帧**：
-/// `frames.frameAt(单元成片起点 + 镜头在单元内的偏移 + 行内偏移)`。
-/// 首尾各算一次，规则跟 shot 边界（[ComposedFrames.shotSpan]）一致——
-/// 相邻两行不共享任何一帧。
+/// `frames.spanOfMs(单元成片起点 + 镜头在单元内的偏移 + 行内偏移, …)`。
+///
+/// **必须走 [ComposedFrames.spanOfMs]，不许裸调 `FrameSpan.fromMs`。**
+/// 后者的段头是直接四舍五入的，边界毫秒的小数部分小于 0.5 时，前一行的
+/// 末帧和后一行的首帧会是同一帧——真机任务 #1 的 11 对相邻字幕里有 4 对
+/// 这样，而这行注释上一版就写着「相邻两行不共享任何一帧」，实现却没守。
+/// 现在这条纪律由 `test/architecture/subtitle_ms_to_frames_one_path_test.dart`
+/// 守着。
 ///
 /// [hasFrames] 为 false 时（整块段落，`shotSpan` 为 null）不算这个数、
 /// 也不报 `frames` 键——见调用点那句注释：这里的镜头偏移量的是原片，
@@ -597,17 +602,17 @@ Map<String, dynamic> _lineRow(
   int index,
   int unitStartMs,
   int shotOffsetMs,
-  double fpsDouble,
+  ComposedFrames frames,
   String by, {
   required bool hasFrames,
 }) {
-  final frames = hasFrames
-      ? FrameSpan.fromMs(unitStartMs + shotOffsetMs + l.startMs,
-          unitStartMs + shotOffsetMs + l.endMs, fpsDouble)
+  final span = hasFrames
+      ? frames.spanOfMs(unitStartMs + shotOffsetMs + l.startMs,
+          unitStartMs + shotOffsetMs + l.endMs)
       : null;
   return {
     'i': index,
-    if (frames != null) 'frames': [frames.first, frames.last],
+    if (span != null) 'frames': [span.first, span.last],
     'text': l.text,
     'by': by,
   };

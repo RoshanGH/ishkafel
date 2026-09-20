@@ -49,16 +49,24 @@ class ComposedFrames {
 
   /// 从毫秒区间取帧区间，**并把段头补成对称的**。
   ///
+  /// **下游凡是要把毫秒区间变成帧区间的，一律走这里。** 裸调
+  /// [FrameSpan.fromMs]（或 `frameIndex`）会丢掉段头对称，相邻段就会共享帧
+  /// ——那正好废掉整条轴选「帧」而不是「毫秒」的唯一理由。
+  ///
   /// [FrameSpan.fromMs] 只在段尾做了「回退到严格早于 endMs」的修正，段头是
   /// 直接四舍五入。边界不落在帧点上时（整体替换的时长直接来自素材的
-  /// ffprobe 结果，根本不过帧对齐这一步），舍出来的那一帧的时间戳可能早于
-  /// [startMs]，于是它**同时被判给前一段的尾帧和后一段的头帧**——真机数据
-  /// 5237ms 的边界上，帧 157 就被两个单元同时认领。
+  /// ffprobe 结果，根本不过帧对齐这一步；ASR 的词级时间戳同理），舍出来的
+  /// 那一帧的时间戳可能早于 [startMs]，于是它**同时被判给前一段的尾帧和
+  /// 后一段的头帧**——真机数据 5237ms 的边界上，帧 157 就被两个单元同时
+  /// 认领；任务 #1 的 487 对相邻词里有 375 对共享了同一帧。
   ///
   /// **相邻段不共享任何一帧是这个类存在的唯一理由**，所以它得自己守住。
   /// 为什么不去改 `FrameSpan.fromMs`：它还被播放器逐帧步进、时间线编辑、
   /// mpv 播放用着，动它要跑预览体检（`scripts/preview_health.sh`）。
-  FrameSpan _spanOf(int startMs, int endMs) {
+  ///
+  /// 守这条纪律的架构测试在
+  /// `test/architecture/subtitle_ms_to_frames_one_path_test.dart`。
+  FrameSpan spanOfMs(int startMs, int endMs) {
     final raw = FrameSpan.fromMs(startMs, endMs, _fps);
     var first = raw.first;
     while (msOfFrame(first, _fps) < startMs) {
@@ -70,7 +78,7 @@ class ComposedFrames {
 
   FrameSpan unitSpan(int unitIndex) {
     final start = timeline.startOf(unitIndex);
-    return _spanOf(start, start + timeline.durationOf(unitIndex));
+    return spanOfMs(start, start + timeline.durationOf(unitIndex));
   }
 
   /// 这一镜占成片的哪几帧。**整块段落返回 null**——那一段整个换成了另一条
@@ -79,7 +87,7 @@ class ComposedFrames {
     final start = timeline.composedShotStart(unitIndex, shotIndex);
     final end = timeline.composedShotEnd(unitIndex, shotIndex);
     if (start == null || end == null) return null;
-    return _spanOf(start, end);
+    return spanOfMs(start, end);
   }
 
   /// 帧号 → `00:00:20:12`（时:分:秒:帧）。对标剪映 / FCP 的读法。

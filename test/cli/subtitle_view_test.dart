@@ -183,6 +183,30 @@ void main() {
         reason: '镜头偏移量的是原片，在成片里不成立——跟 shot 级同一条纪律');
   });
 
+  /// 报告里「相邻两行不共享任何一帧」这句话，以前只写在注释里没人守——
+  /// `_lineRow` 裸调 `FrameSpan.fromMs`，段头是直接四舍五入的，边界毫秒的
+  /// 小数部分小于 0.5 时前一行的末帧和后一行的首帧就是同一帧。真机任务 #1
+  /// 的 11 对相邻字幕里有 4 对这样
+  test('相邻两行字幕不许共享同一帧', () {
+    // 510 毫秒不落在帧点上（30fps 的第 15 帧是 500 毫秒）——裸四舍五入
+    // 会把第 15 帧同时判给两行
+    final track = const SubtitleTrack.empty().withLines(
+      const SubtitleSlot(unitUid: 'u0', shotIndex: 0),
+      const [
+        SubtitleLine(startMs: 0, endMs: 510, text: '甲'),
+        SubtitleLine(startMs: 510, endMs: 1000, text: '乙'),
+      ],
+    );
+    final r = subtitleShotReport(task().copyWith(subtitleTrack: track),
+        unitIndex: 0, shotIndex: 0)!;
+    final lines = (r['lines'] as List).cast<Map<String, dynamic>>();
+    final a = (lines[0]['frames'] as List).cast<int>();
+    final b = (lines[1]['frames'] as List).cast<int>();
+    expect(b.first, a.last + 1,
+        reason: '同一帧不能既是上一行的末帧、又是下一行的首帧——'
+            '整条轴选「帧」而不是「毫秒」就是为了这个');
+  });
+
   test('单镜报告带上 caption：字幕落在画面哪个矩形，纯计算', () {
     final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0)!;
     final caption = r['caption'] as Map;
