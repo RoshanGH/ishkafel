@@ -248,6 +248,9 @@ function run(argv) {
     attrs.setObjectForKey($.NSNumber.numberWithDouble(-2.5), $.NSStrokeWidthAttributeName);
     attrs.setObjectForKey(para, $.NSParagraphStyleAttributeName);
     const ns = $(it.text);
+    // 左右留白：字真正会被画在哪儿，以这个数为准。
+    // caption_box.dart 的 _sideMargin 报给 Agent 的是同一个矩形，
+    // 改这里要同步改那里（caption_box_test.dart 会现抓这个数来核对）
     const margin = Math.round(w * 0.055);
     const box = $.NSMakeSize(w - margin * 2, h);
     const bounds = ns.boundingRectWithSizeOptionsAttributesContext(box, 1, attrs, $());

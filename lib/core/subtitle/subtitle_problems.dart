@@ -95,12 +95,15 @@ List<SubtitleProblem> subtitleProblemsOf({
 
   // **一屏放几个字是对「一行字幕」说的，不是对整镜的总字数说的。**
   //
-  // 自动切出来的行本来就过了分屏那一关（见 SubtitleStyle.maxCharsPerScreen），
-  // 按总字数求和的话，「已经正确切成三屏、每屏都放得下」会被误报成超长——
-  // 而这份自查声称只报事实，误报就是报了一条假事实。
+  // 按总字数求和的话，「已经切成三行、每行都放得下」会被误报成超长——
+  // 而这份自查声称只报事实，误报就是报了一条假事实。所以逐行判。
   //
-  // 真会超的是手改过的行：人或 Agent 直接写进 SubtitleTrack 的内容
-  // 不过自动分屏这一关
+  // **别以为自动切出来的行就「过了分屏那一关」——它没有。** 替换裂变的
+  // 自动行走 subtitleLinesForSlot → subtitleLinesInSlot，那里按**写死的
+  // 18 字**切（subtitle_overlay.dart 的 _maxCharsPerLine），跟
+  // SubtitleStyle.maxCharsPerScreen 毫无关系。字号一调大（0.065 下一屏只
+  // 剩 7 个字），自动行必然大量超——真机任务 #1 是 43 条超长、手改 0 镜，
+  // 正好反证「真会超的是手改过的行」那句旧注释。
   //
   // **折行不是「切成两屏先后显示」。** 替换裂变的导出走
   // `SubtitleRasterizer`（`export_runner.dart` 里 `rasterizer.rasterize`），

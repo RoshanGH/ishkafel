@@ -183,7 +183,9 @@ Map<String, dynamic> taskToJson(RenewTask task) {
     // 一句话 + 一条去处，不给细节。task 是现状概览，不是数据倾倒场：
     // #1（6 单元 51 镜）的 units 已经占了整份 17KB 的 99.8%，词级 ASR
     // 再塞进来要翻三倍，而 Agent 第一眼根本不看这些
-    'subtitle': subtitleSignal(task),
+    // wd 是上面已经算好的 wholeDurationsOf——传下去，不让 subtitleSignal
+    // 自己再算一遍。它头上明写「这个算法全项目只许有这一处」
+    'subtitle': subtitleSignal(task, whole: wd),
     'exports': [
       for (final e in task.exports)
         {

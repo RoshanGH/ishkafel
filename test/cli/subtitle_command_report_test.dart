@@ -48,13 +48,40 @@ Future<String> _seedTaskWithBurnedCandidate(Directory dataDir) async {
   return task.id;
 }
 
+/// 造一条**已经分析过**的任务（有单元、有镜头）。
+///
+/// `seedTask` 那份最小任务的 `units` 是 null——那是「还没分析」，报告会
+/// 如实退回一句 `notAnalyzed`，拿它去验报告内容等于在验一条降级路径。
+/// 真机上这个洞害过一轮：报告看起来正常，其实一个镜头都没算
+Future<String> _seedAnalyzedTask(Directory dataDir) async {
+  final task = RenewTask(
+    id: 't_analyzed',
+    name: '测试已分析',
+    status: RenewTaskStatus.ready,
+    createdAt: DateTime.now(),
+    updatedAt: DateTime.now(),
+    units: const [
+      SemanticUnit(
+        uid: 'u0',
+        index: 0,
+        startMs: 0,
+        endMs: 2000,
+        transcript: '甲乙',
+        shots: [Shot(startMs: 0, endMs: 1000), Shot(startMs: 1000, endMs: 2000)],
+      ),
+    ],
+  );
+  await FileTaskRepository(dataDir).save(task);
+  return task.id;
+}
+
 void main() {
   late Directory dataDir;
   setUp(() => dataDir = Directory.systemTemp.createTempSync('ishkafel_subcmd'));
   tearDown(() => dataDir.deleteSync(recursive: true));
 
   test('check 只出问题清单，别的什么都不给', () async {
-    final id = (await seedTask(dataDir)).id;
+    final id = await _seedAnalyzedTask(dataDir);
     final out = StringBuffer();
     final code =
         await runSubtitleCommand(rest: ['check', id], dataDir: dataDir, out: out);
@@ -66,7 +93,7 @@ void main() {
   });
 
   test('show 出全片报告', () async {
-    final id = (await seedTask(dataDir)).id;
+    final id = await _seedAnalyzedTask(dataDir);
     final out = StringBuffer();
     await runSubtitleCommand(rest: ['show', id], dataDir: dataDir, out: out);
     expect((jsonDecode(out.toString()) as Map).keys, contains('shots'));
@@ -80,6 +107,73 @@ void main() {
     expect(code, 0);
     expect(out.toString(), contains('preset'),
         reason: '老用法不许一声不响地失效');
+  });
+
+  /// **拧了旋钮、软件当没看见，还看起来像成功了**，是这三条的共同形状。
+  /// 实测下来三种全是 exit 0、照常吐全片报告，一句话都不说
+  test('show 只给了 --unit：当场说清要两个一起给，不许默默吐全片', () async {
+    final id = (await seedTask(dataDir)).id;
+    final out = StringBuffer();
+    final err = StringBuffer();
+    final code = await runSubtitleCommand(
+        rest: ['show', id], dataDir: dataDir, unitIndex: 1,
+        out: out, err: err);
+    expect(code, exitBadUsage);
+    expect(out.toString(), isEmpty, reason: '别一边报错一边照样吐报告');
+    expect(err.toString(), contains('--shot'));
+  });
+
+  test('show 只给了 --shot：同理', () async {
+    final id = (await seedTask(dataDir)).id;
+    final err = StringBuffer();
+    final code = await runSubtitleCommand(
+        rest: ['show', id], dataDir: dataDir, shotIndex: 2, err: err);
+    expect(code, exitBadUsage);
+    expect(err.toString(), contains('--unit'));
+  });
+
+  test('check 是全片自查，给了 --unit/--shot 要说清该敲哪条命令', () async {
+    final id = (await seedTask(dataDir)).id;
+    final err = StringBuffer();
+    final code = await runSubtitleCommand(
+        rest: ['check', id], dataDir: dataDir,
+        unitIndex: 1, shotIndex: 2, err: err);
+    expect(code, exitBadUsage);
+    expect(err.toString(), contains('subtitle show'),
+        reason: '不能只说「不行」，要指一条能照做的路');
+  });
+
+  /// 失败理由只能是「参数不对」这一类——仓库有架构测试拦
+  /// （`no_permission_refusals_test`），这里再当场守一道
+  test('这几条的说法里不许出现「没有权限 / 被占用」那一套', () async {
+    final id = (await seedTask(dataDir)).id;
+    final err = StringBuffer();
+    await runSubtitleCommand(
+        rest: ['show', id], dataDir: dataDir, unitIndex: 1, err: err);
+    for (final word in ['没有权限', '不许', '被占用']) {
+      expect(err.toString().contains(word), isFalse, reason: '是参数不对，不是禁止');
+    }
+  });
+
+  test('--unit 给了但不是整数：报错，不许当没给', () {
+    final bad = intArg('unit', 'abc');
+    expect(bad.value, isNull);
+    expect(bad.error, isNotNull,
+        reason: 'int.tryParse 失败变 null，跟「没给 --unit」长得一模一样——'
+            '命令会照常吐全片报告、退出码 0');
+    expect(intArg('unit', null).error, isNull, reason: '真没给就是真没给');
+    expect(intArg('unit', ' 3 ').value, 3);
+  });
+
+  test('bin 里 subtitle 的 --unit/--shot 要真走 intArg', () {
+    // 上面那条只测了 intArg 本身。bin 那头还写着 int.tryParse 的话，
+    // 它照样全绿，而真敲命令的人还是碰到静默忽略
+    final src = File('bin/ishkafel.dart').readAsStringSync();
+    final start = src.indexOf("'subtitle' => await runSubtitleCommand(");
+    expect(start, greaterThan(0), reason: '找不到 subtitle 的分发点了，回来看看');
+    final block = src.substring(start, src.indexOf('),', start));
+    expect(block.contains('int.tryParse'), isFalse,
+        reason: 'int.tryParse 把「给了但不是整数」和「没给」混成一件事');
   });
 
   test('任务不存在就直说', () async {

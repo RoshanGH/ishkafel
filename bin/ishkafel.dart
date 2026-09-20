@@ -179,6 +179,9 @@ Future<void> main(List<String> args) async {
       ),
     'doctor' => await runDoctorCommand(
         dataDir: dataDir, out: stdout, err: stderr),
+    // --unit / --shot 走 intArg，不走 int.tryParse：后者把「给了但不是整数」
+    // 和「没给」混成同一个 null，`--unit abc` 会被当成没给，命令照常吐一份
+    // 全片报告、退出码 0——拧了旋钮、软件当没看见
     'subtitle' => await runSubtitleCommand(
         rest: rest,
         dataDir: dataDir,
@@ -187,8 +190,8 @@ Future<void> main(List<String> args) async {
         bottomRatio: parsed['bottom'] as String?,
         fontRatio: parsed['font'] as String?,
         colorHex: parsed['color'] as String?,
-        unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
-        shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
+        unitIndex: _intArgOrFail(parsed, 'unit'),
+        shotIndex: _intArgOrFail(parsed, 'shot'),
       ),
     'peek' => await runPeekCommand(
         rest: rest,
@@ -360,6 +363,16 @@ Future<void> main(List<String> args) async {
     _ => failWith('未知命令：$command\n\n${usageText(parser)}', code: exitBadUsage),
   };
   exit(code);
+}
+
+/// 取一个整数参数，**给了但不是整数就当场失败**，不当没给。
+///
+/// 见 `cli_output.dart` 的 [intArg]：`int.tryParse` 对「没给」和「给错了」
+/// 返回的都是 null，命令那头分不出来，只能照「没给」走下去。
+int? _intArgOrFail(ArgResults parsed, String name) {
+  final r = intArg(name, parsed[name] as String?);
+  if (r.error != null) failWith(r.error!, code: exitBadUsage);
+  return r.value;
 }
 
 /// 用法说明。抽出来是为了让「没给命令」「命令不认识」「-h」三条路

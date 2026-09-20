@@ -32,3 +32,24 @@ Never failWith(String humanReason, {int code = 1, StringSink? err}) {
   (err ?? stderr).writeln(humanReason);
   exit(code);
 }
+
+/// 整数参数：**「给了但不是整数」不等于「没给」。**
+///
+/// `int.tryParse(parsed['unit'] ?? '')` 对这两件事给的都是 null，于是
+/// `--unit abc` 会被当成「没给 --unit」：命令照常吐一份全片报告、退出码 0，
+/// Agent 拧了旋钮、软件当没看见，还看起来像成功了。
+///
+/// 返回的 `error` 非空就是「给了，但解析不出来」，调用方该当用法错误处理；
+/// `value` 为 null 且 `error` 为空才是真的没给。
+({int? value, String? error}) intArg(String name, String? raw) {
+  if (raw == null) return (value: null, error: null);
+  final v = int.tryParse(raw.trim());
+  if (v == null) {
+    return (
+      value: null,
+      error: '--$name 要一个整数，给的是「$raw」。'
+          '单元和镜头都从 0 数起，比如 --$name 0'
+    );
+  }
+  return (value: v, error: null);
+}

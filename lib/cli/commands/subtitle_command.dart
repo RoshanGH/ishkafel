@@ -96,6 +96,24 @@ Future<int> _runReadOnly({
     err.writeln(_usage);
     return exitBadUsage;
   }
+
+  // **拧了旋钮、软件当没看见，还看起来像成功了**——这三条实测下来全是
+  // exit 0 加一份全片报告，一句话都不说。Agent 以为自己看的是单镜详情，
+  // 其实看的是全片；以为 check 只查了这一镜，其实查的是整条片子。
+  //
+  // 理由只说「参数不对」这一类，不说「不行 / 没有权限」——那不是这里的
+  // 情况（仓库有 no_permission_refusals_test 拦着）
+  if (sub == 'check' && (unitIndex != null || shotIndex != null)) {
+    err.writeln('check 是全片自查，不挑镜头。'
+        '要看单镜详情：ishkafel subtitle show <任务 id> --unit i --shot j');
+    return exitBadUsage;
+  }
+  if (sub == 'show' && (unitIndex == null) != (shotIndex == null)) {
+    err.writeln('要看单镜，--unit 和 --shot 要一起给。'
+        '只给一个的话定不到是哪一镜；两个都不给就是全片报告');
+    return exitBadUsage;
+  }
+
   final repository = FileTaskRepository(dataDir);
   final task = await resolveTaskRef(repository, rest[1]);
   if (task == null) {

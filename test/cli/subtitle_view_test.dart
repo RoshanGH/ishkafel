@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/subtitle_view.dart';
+import 'package:ishkafel/cli/task_view.dart' show wholeDurationsOf;
 import 'package:ishkafel/core/ai/frame_check.dart';
 import 'package:ishkafel/core/ai/frame_check_wiring.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
@@ -12,6 +13,7 @@ import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_style.dart';
 import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'package:ishkafel/core/time/rational.dart';
 
@@ -75,6 +77,51 @@ void main() {
 
   test('越界返回 null，不抛', () {
     expect(subtitleShotReport(task(), unitIndex: 9, shotIndex: 0), isNull);
+  });
+
+  /// **这条线上已经栽过三次「三态混成两态」。**
+  ///
+  /// `subtitleSignal` 把三态分开了（还没分析 / 算不准 / 数得出来），
+  /// 而 `subtitleReport` 只有两态：`units == null` 时返回
+  /// `{projectFps, fpsSource, totalFrames: 0, shots: []}`——和「分析完了、
+  /// 确实一个镜头都没有」一模一样。而信号的 note 正是「分析完再来看：
+  /// ishkafel subtitle show <任务>」，Agent 照着敲过去，拿到的是一份
+  /// 看不出区别的空报告
+  RenewTask taskNotAnalyzed() => RenewTask(
+        id: 't7', name: '测试7', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+      );
+
+  test('还没分析的任务：给一句实话，不拿空数组顶', () {
+    final r = subtitleReport(taskNotAnalyzed());
+    expect(r.containsKey('shots'), isFalse,
+        reason: '空的 shots 和「分析完了、确实没有镜头」分不开');
+    expect(r['notAnalyzed'], isA<String>());
+    expect(r['notAnalyzed'], contains('analyze'),
+        reason: '要给一条能照做的去处，不能只说「没有」');
+  });
+
+  test('单镜同理：还没分析跟「这个下标不存在」不能共用 null', () {
+    final r = subtitleShotReport(taskNotAnalyzed(), unitIndex: 0, shotIndex: 0);
+    expect(r, isNotNull,
+        reason: 'null 的含义是这个下标不存在——还没分析时根本谈不上下标对不对');
+    expect(r!.containsKey('notAnalyzed'), isTrue);
+  });
+
+  /// `taskToJson` 已经算过一次 `wholeDurationsOf` 了，`subtitleSignal` 里面
+  /// 再算一次是白算——而 `wholeDurationsOf` 头上明写「这个算法全项目只许有
+  /// 这一处」。传进来的那份和自己算的那份必须是同一个答案，否则这个入参
+  /// 就成了一条能悄悄给出不同结论的旁路
+  test('调用方算好的 wholeDurations 传进来，结论不变', () {
+    final t = task();
+    expect(subtitleSignal(t, whole: wholeDurationsOf(t)), subtitleSignal(t));
+  });
+
+  test('task_view 要真把算好的那份传下来，不然这个入参形同虚设', () {
+    final src = File('lib/cli/task_view.dart').readAsStringSync();
+    expect(src.contains('subtitleSignal(task, whole:'), isTrue,
+        reason: 'taskToJson 里 wholeDurationsOf 算过一次了，'
+            '不传下来就等于白加这个入参');
   });
 
   // 整体替换选了候选，但那条候选还没探出时长——ComposedTimeline 会静默退回
@@ -207,6 +254,65 @@ void main() {
             '整条轴选「帧」而不是「毫秒」就是为了这个');
   });
 
+  /// 真机任务 #1 的 U1 是**手动加的单元**（`hasSource: false`、`shots: []`），
+  /// 在成片里占 0~299 帧，而 `subtitle show` 里一行都没有：报告顶上写
+  /// `totalFrames: 3227`，第一行却从第 300 帧开始，那 300 帧属于谁、
+  /// 为什么没字幕，报告一个字不说。
+  ///
+  /// Task 6 修过同一个洞的镜头层版本——「Agent 看到的是这段镜头凭空消失，
+  /// 连它存在过都不知道」。同一句话在单元这一层照样成立，何况**手动加的
+  /// 单元正是设计文档 §2.5 论证「必须用成片轴」的唯一论据**：轴立了，
+  /// 却唯独看不见它
+  RenewTask taskWithShotlessUnit() => RenewTask(
+        id: 't5', name: '测试5', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+        videoInfo: VideoInfo(
+            width: 1080, height: 1920, fps: 30,
+            duration: const Duration(milliseconds: 3000),
+            fpsExact: Rational.fps30,
+            fileSizeBytes: 0),
+        units: const [
+          // 手动加的单元：原片里没有它，也没切出视觉镜头
+          SemanticUnit(
+            uid: 'u-manual', index: 0, startMs: 0, endMs: 1000,
+            transcript: '手动加的', hasSource: false, shots: [],
+          ),
+          SemanticUnit(
+            uid: 'u0', index: 1, startMs: 0, endMs: 2000, transcript: '甲乙',
+            shots: [
+              Shot(startMs: 0, endMs: 1000),
+              Shot(startMs: 1000, endMs: 2000),
+            ],
+          ),
+        ],
+      );
+
+  test('没有自己镜头的单元，照样占一行——不许在报告里凭空消失', () {
+    final rows =
+        (subtitleReport(taskWithShotlessUnit())['shots'] as List).cast<Map>();
+    final row = rows.firstWhere((r) => r['at'] == 'U1',
+        orElse: () => throw StateError('U1 整行不见了'));
+    expect(row['at'], 'U1', reason: '没有镜头就不带 S');
+    expect(row['unit'], 0);
+    expect(row['unitUid'], 'u-manual');
+    expect(row['frames'], [0, 29],
+        reason: 'ComposedFrames.unitSpan 算得出它的确切帧区间，'
+            '报出来不是编数字');
+    expect(row['voice'], 'none');
+    expect(row['note'], isNotNull,
+        reason: '那几帧属于谁、为什么没字幕，报告得说一句');
+    expect(row.containsKey('shot'), isFalse,
+        reason: '它没有镜头下标，编一个出来 Agent 会拿去敲 --shot');
+  });
+
+  test('第一行的首帧要接上片头，不许从半截开始', () {
+    final rows =
+        (subtitleReport(taskWithShotlessUnit())['shots'] as List).cast<Map>();
+    expect((rows.first['frames'] as List).first, 0,
+        reason: 'totalFrames 从 0 算起，报告第一行却从第 30 帧开始的话，'
+            '开头那 30 帧就是一段无人认领的空白');
+  });
+
   test('单镜报告带上 caption：字幕落在画面哪个矩形，纯计算', () {
     final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0)!;
     final caption = r['caption'] as Map;
@@ -238,6 +344,60 @@ void main() {
         .map((p) => (p as Map)['kind'])
         .toSet();
     expect(kinds, isNot(contains('captionOverflows')));
+  });
+
+  /// **自动切出来的行并没有「过了分屏那一关」。**
+  ///
+  /// 替换裂变的自动行走 `subtitleLinesForSlot → subtitleLinesInSlot`，
+  /// 那里按**写死的 18 字**切（`subtitle_overlay.dart` 的 `_maxCharsPerLine`），
+  /// 跟 `SubtitleStyle.maxCharsPerScreen` 毫无关系。所以字号一调大，
+  /// 自动行必然大量超——真机任务 #1 是 43 条超长、手改 0 镜，正好反证
+  /// 「真会超的是手改过的行」那句注释
+  test('字号调大之后，没人碰过的自动行照样会超', () {
+    final t = RenewTask(
+      id: 't6', name: '测试6', status: RenewTaskStatus.ready,
+      createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+      videoInfo: VideoInfo(
+          width: 1080, height: 1920, fps: 30,
+          duration: const Duration(milliseconds: 2000),
+          fpsExact: Rational.fps30,
+          fileSizeBytes: 0),
+      // 0.065 下一屏只放得下 7 个字（真机 U2S3 就是这个字号）
+      subtitle: const SubtitleStyle(fontRatio: 0.065),
+      asrSentences: const [
+        AsrSentence(startMs: 0, endMs: 1000, text: '一二三四五六七八九十', words: [
+          AsrWord(startMs: 0, endMs: 100, text: '一'),
+          AsrWord(startMs: 100, endMs: 200, text: '二'),
+          AsrWord(startMs: 200, endMs: 300, text: '三'),
+          AsrWord(startMs: 300, endMs: 400, text: '四'),
+          AsrWord(startMs: 400, endMs: 500, text: '五'),
+          AsrWord(startMs: 500, endMs: 600, text: '六'),
+          AsrWord(startMs: 600, endMs: 700, text: '七'),
+          AsrWord(startMs: 700, endMs: 800, text: '八'),
+          AsrWord(startMs: 800, endMs: 900, text: '九'),
+          AsrWord(startMs: 900, endMs: 1000, text: '十'),
+        ]),
+      ],
+      units: const [
+        SemanticUnit(
+          uid: 'u0', index: 0, startMs: 0, endMs: 2000, transcript: '一二三',
+          shots: [
+            Shot(startMs: 0, endMs: 1000),
+            Shot(startMs: 1000, endMs: 2000),
+          ],
+        ),
+      ],
+    );
+    final r = subtitleShotReport(t, unitIndex: 0, shotIndex: 0)!;
+    expect((r['lines'] as List).first, isA<Map>());
+    expect(((r['lines'] as List).first as Map)['by'], 'auto',
+        reason: '没人碰过这一镜');
+    final kinds = ((r['problems'] as List?) ?? const [])
+        .map((p) => (p as Map)['kind'])
+        .toSet();
+    expect(kinds, contains('captionOverflows'),
+        reason: '自动分行按写死的 18 字切，跟 maxCharsPerScreen 无关——'
+            '「自动行本来就过了分屏那一关」是句假话');
   });
 
   test('没给 dataDir 就没查烧字，报告里整个不出现 burned 字段', () {

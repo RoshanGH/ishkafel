@@ -252,24 +252,39 @@ List<({int unit, int shot})> _allShots(List<SemanticUnit> units) => [
         for (var s = 0; s < units[u].shots.length; s++) (unit: u, shot: s),
     ];
 
+/// [wholeDurationsOf] 的返回形状。算法全项目只许有那一处，所以凡是要用它
+/// 结果的地方都把整份记录往下传，不各自再算一遍
+typedef WholeDurations = ({
+  Map<int, int> durations,
+  List<int> unknown,
+  List<UnitReplacement>? plans
+});
+
 /// 建一次全片都要用到的上下文，全片报告和单镜报告共用，
 /// 不许各自再拼一份——那正是这个模块要堵住的洞。
 ///
-/// [wholeDurations] 由调用方传入（算法只有 [wholeDurationsOf] 这一处，
+/// [whole] 由调用方传入（算法只有 [wholeDurationsOf] 这一处，
 /// 见 `task_view.dart`）——调用方要先看一眼 `unknown` 是否为空，
 /// 那关系到整份报告要不要整块拒答（见 [subtitleReport] / [_framesUnavailableNote]）。
-({
+///
+/// **`replacements` 也直接从 [whole] 里取**：`wholeDurationsOf` 本来就为了
+/// 算时长调过一次 `task.replacementsFor`，这里再调一次是白算。纯函数，
+/// 结果不会错，但跟「同一件事只许算一处」自相矛盾——Task 6 刚清掉同样的
+/// 形状，清完当场又长回来了。
+typedef _Ctx = ({
   List<SemanticUnit> units,
   List<UnitReplacement> replacements,
   ComposedTimeline timeline,
   ComposedFrames frames,
   SubtitleTrack track,
   List<AsrSentence> sentences,
-}) _contextOf(RenewTask task, Map<int, int> wholeDurations) {
+});
+
+_Ctx _contextOf(RenewTask task, WholeDurations whole) {
   final units = task.units ?? const <SemanticUnit>[];
-  final replacements = task.replacementsFor(units);
+  final replacements = whole.plans ?? task.replacementsFor(units);
   final timeline =
-      ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
+      ComposedTimeline.of(units: units, wholeDurations: whole.durations);
   final frames = ComposedFrames.of(
     timeline: timeline,
     fps: task.videoInfo?.fpsExact,
@@ -303,29 +318,59 @@ String _framesUnavailableNote(List<int> unknown) =>
     '${unknown.map((i) => 'U${i + 1}').join('、')}。'
     '先把素材下下来（candidates fetch），再来看字幕';
 
+/// 还没分析过的任务——**跟「分析完了、确实一个镜头都没有」分得开**。
+///
+/// 原来这两种情形返回的是同一份
+/// `{projectFps, fpsSource, totalFrames: 0, shots: []}`，一模一样。而
+/// [subtitleSignal] 的 note 正是「字幕还没分析。分析完再来看：
+/// ishkafel subtitle show <任务>」——Agent 照着敲过去，拿到一份看不出
+/// 区别的空报告，只能以为是功能坏了。
+///
+/// 这条线上已经栽过三次「三态混成两态」，形状照 [_framesUnavailableNote]：
+/// 一个专门的键 + 一句实话 + 一条去处。
+const String _notAnalyzedNote = '这条任务还没分析过，连台词语义单元都还没切出来，'
+    '字幕无从谈起。先跑 ishkafel analyze <任务>，分析完再回来看';
+
 /// 全片那份——`subtitle show <任务>`。一镜一行，扫得动。
 Map<String, dynamic> subtitleReport(RenewTask task, {Directory? dataDir}) {
+  if (task.units == null) return {'notAnalyzed': _notAnalyzedNote};
   final whole = wholeDurationsOf(task);
   if (whole.unknown.isNotEmpty) {
     return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
   }
-  final ctx = _contextOf(task, whole.durations);
+  final ctx = _contextOf(task, whole);
 
-  final shots = [
-    for (final pos in _allShots(ctx.units))
-      _shotRow(_factsOf(
-        frames: ctx.frames,
-        timeline: ctx.timeline,
-        units: ctx.units,
-        replacements: ctx.replacements,
-        track: ctx.track,
-        originalSentences: ctx.sentences,
-        style: task.subtitle,
-        dataDir: dataDir,
-        unitIndex: pos.unit,
-        shotIndex: pos.shot,
-      ), pos.unit, pos.shot, ctx.frames),
-  ];
+  final shots = <Map<String, dynamic>>[];
+  for (var u = 0; u < ctx.units.length; u++) {
+    // 没切出视觉镜头的单元（手动加的那些）照样占一行——**它在成片里有确切
+    // 的帧区间，报出来不是编数字**。整段不报的话，报告顶上写着
+    // totalFrames: 3227、第一行却从第 300 帧开始，那 300 帧属于谁、为什么
+    // 没字幕，一个字都没有。Task 6 修过同一个洞的镜头层版本，当时的话是
+    // 「Agent 看到的是这段镜头凭空消失，连它存在过都不知道」——在单元这
+    // 一层照样成立，何况手动加的单元正是「必须用成片轴」的唯一论据
+    if (ctx.units[u].shots.isEmpty) {
+      shots.add(_shotlessUnitRow(ctx, u));
+      continue;
+    }
+    for (var s = 0; s < ctx.units[u].shots.length; s++) {
+      shots.add(_shotRow(
+          _factsOf(
+            frames: ctx.frames,
+            timeline: ctx.timeline,
+            units: ctx.units,
+            replacements: ctx.replacements,
+            track: ctx.track,
+            originalSentences: ctx.sentences,
+            style: task.subtitle,
+            dataDir: dataDir,
+            unitIndex: u,
+            shotIndex: s,
+          ),
+          u,
+          s,
+          ctx.frames));
+    }
+  }
 
   return {
     'projectFps': ctx.frames.fps.toString(),
@@ -349,7 +394,12 @@ Map<String, dynamic> subtitleReport(RenewTask task, {Directory? dataDir}) {
 /// 3. 否则直接数一遍
 ///
 /// **`suspect` 不含烧字检查**（没有 dataDir），note 要点名这个缺口，否则是静默降级。
-Map<String, dynamic> subtitleSignal(RenewTask task) {
+///
+/// [whole] 给调用方把**已经算好的** [wholeDurationsOf] 结果传进来用——
+/// `taskToJson` 本来就先算了一遍，不传的话同一次 `task --json` 里这个算法
+/// 会跑两遍、`replacementsFor` 跑四遍。它头上明写「这个算法全项目只许有
+/// 这一处」。
+Map<String, dynamic> subtitleSignal(RenewTask task, {WholeDurations? whole}) {
   final units = task.units;
 
   // 还没分析
@@ -364,8 +414,8 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
   }
 
   // 整体替换时长未知
-  final whole = wholeDurationsOf(task);
-  if (whole.unknown.isNotEmpty) {
+  final wd = whole ?? wholeDurationsOf(task);
+  if (wd.unknown.isNotEmpty) {
     return {
       'shotsWith': 0,
       'shotsWithout': 0,
@@ -375,9 +425,10 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
     };
   }
 
-  // 建立计算上下文，和 subtitleReport 用同一份（都调 wholeDurationsOf）
-  final ctx = _contextOf(task, whole.durations);
-  final replacements = task.replacementsFor(units);
+  // 建立计算上下文，和 subtitleReport 用同一份（都走 wholeDurationsOf 的结果）。
+  // replacements 直接用 ctx 里的那份——再调一次 task.replacementsFor 是白算，
+  // 而且往下传的还是后算的那份、不是 ctx 里的，两份一旦走岔就没人发现
+  final ctx = _contextOf(task, wd);
 
   var shotsWith = 0;
   var shotsWithout = 0;
@@ -394,7 +445,7 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
         frames: ctx.frames,
         timeline: ctx.timeline,
         units: ctx.units,
-        replacements: replacements,
+        replacements: ctx.replacements,
         track: ctx.track,
         originalSentences: ctx.sentences,
         style: task.subtitle,
@@ -441,6 +492,30 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
   };
 }
 
+/// 没切出视觉镜头的单元那一行。形状跟镜头行一致，只是**没有 `shot`**——
+/// 它没有镜头下标，编一个出来 Agent 会拿去敲 `--shot`。
+///
+/// `frames` 走 [ComposedFrames.unitSpan]：它算得出这个单元在成片里的确切
+/// 帧区间，报出来不是编数字（顺带这个方法终于有人用了）。
+Map<String, dynamic> _shotlessUnitRow(_Ctx ctx, int unitIndex) {
+  final unit = ctx.units[unitIndex];
+  final replacement = unitIndex < ctx.replacements.length
+      ? ctx.replacements[unitIndex]
+      : UnitReplacement.keepOriginal();
+  final voice = voiceSourceOf(unit: unit, replacement: replacement);
+  final span = ctx.frames.unitSpan(unitIndex);
+  return {
+    'at': 'U${unitIndex + 1}',
+    'unitUid': unit.uid,
+    'unit': unitIndex,
+    'frames': [span.first, span.last],
+    'tc': '${ctx.frames.tc(span.first)} → ${ctx.frames.tc(span.last)}',
+    'voice': voice.source.name,
+    'note': '这个单元没有切出视觉镜头，'
+        '成片里这一段照样占着位置（${voice.note}）',
+  };
+}
+
 Map<String, dynamic> _shotRow(
   _ShotFacts f,
   int unitIndex,
@@ -483,6 +558,9 @@ Map<String, dynamic>? subtitleShotReport(
   required int shotIndex,
   Directory? dataDir,
 }) {
+  // 「还没分析」要排在下标校验之前：连单元都没切出来的时候，说「这一镜
+  // 不存在」是句误导——下标本身根本还谈不上对不对（见 [_notAnalyzedNote]）
+  if (task.units == null) return {'notAnalyzed': _notAnalyzedNote};
   final rawUnits = task.units ?? const <SemanticUnit>[];
   if (unitIndex < 0 || unitIndex >= rawUnits.length) return null;
   if (shotIndex < 0 || shotIndex >= rawUnits[unitIndex].shots.length) {
@@ -494,7 +572,7 @@ Map<String, dynamic>? subtitleShotReport(
     return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
   }
 
-  final ctx = _contextOf(task, whole.durations);
+  final ctx = _contextOf(task, whole);
 
   final f = _factsOf(
     frames: ctx.frames,
@@ -543,8 +621,8 @@ Map<String, dynamic>? subtitleShotReport(
     'heard': _heardMap(f.heard),
     'lines': lineRows,
     'neighbours': {
-      if (prev != null) 'prev': prev,
-      if (next != null) 'next': next,
+      'prev': ?prev,
+      'next': ?next,
     },
     'caption': {
       'box': {
@@ -620,17 +698,7 @@ Map<String, dynamic> _lineRow(
 
 /// 相邻镜的字幕文本——判断串字必须看得到隔壁。只取显示什么，
 /// 不重算听到什么/问题，那些只对“当前这一镜”有意义
-Map<String, dynamic> _neighbourRow(
-  ({
-    List<SemanticUnit> units,
-    List<UnitReplacement> replacements,
-    ComposedTimeline timeline,
-    ComposedFrames frames,
-    SubtitleTrack track,
-    List<AsrSentence> sentences,
-  }) ctx,
-  ({int unit, int shot}) at,
-) {
+Map<String, dynamic> _neighbourRow(_Ctx ctx, ({int unit, int shot}) at) {
   final unit = ctx.units[at.unit];
   final shot = unit.shots[at.shot];
   final lines = subtitleLinesForSlot(
