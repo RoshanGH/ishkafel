@@ -72,4 +72,26 @@ void main() {
   test('拿得到就标 original', () {
     expect(framesOf(fps: Rational.fps30).fpsSource, 'original');
   });
+
+  test('29.97 下帧号不许溢出——每一秒的最后一帧最容易犯', () {
+    final f = ComposedFrames.of(
+      timeline: ComposedTimeline.of(units: units(), wholeDurations: const {}),
+      fps: Rational(30000, 1001),
+    );
+    for (final frame in [30, 1798, 2997, 5000]) {
+      final ff = int.parse(f.tc(frame).split(':').last);
+      expect(ff, lessThan(30),
+          reason: '帧号字段必须落在 [0, 标称帧率) 内，'
+              'tc($frame) 给的是 ${f.tc(frame)}');
+    }
+  });
+
+  test('边界不落在帧点上时，相邻两段也不许共享帧', () {
+    // 5237ms 是整体替换给出的素材真实时长——它直接来自 ffprobe，
+    // 根本不过帧对齐那一步，所以这是生产里必然出现的输入，不是边角
+    final f = framesOf(whole: {0: 5237}, fps: Rational.fps30);
+    expect(f.unitSpan(1).first, greaterThan(f.unitSpan(0).last),
+        reason: '帧 157 的时间戳是 5233ms，早于边界 5237ms——'
+            '四舍五入会把它同时判给两段');
+  });
 }

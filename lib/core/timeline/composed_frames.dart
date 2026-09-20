@@ -47,9 +47,30 @@ class ComposedFrames {
   /// 某个成片毫秒落在第几帧
   int frameAt(int composedMs) => frameIndex(composedMs, _fps);
 
+  /// 从毫秒区间取帧区间，**并把段头补成对称的**。
+  ///
+  /// [FrameSpan.fromMs] 只在段尾做了「回退到严格早于 endMs」的修正，段头是
+  /// 直接四舍五入。边界不落在帧点上时（整体替换的时长直接来自素材的
+  /// ffprobe 结果，根本不过帧对齐这一步），舍出来的那一帧的时间戳可能早于
+  /// [startMs]，于是它**同时被判给前一段的尾帧和后一段的头帧**——真机数据
+  /// 5237ms 的边界上，帧 157 就被两个单元同时认领。
+  ///
+  /// **相邻段不共享任何一帧是这个类存在的唯一理由**，所以它得自己守住。
+  /// 为什么不去改 `FrameSpan.fromMs`：它还被播放器逐帧步进、时间线编辑、
+  /// mpv 播放用着，动它要跑预览体检（`scripts/preview_health.sh`）。
+  FrameSpan _spanOf(int startMs, int endMs) {
+    final raw = FrameSpan.fromMs(startMs, endMs, _fps);
+    var first = raw.first;
+    while (msOfFrame(first, _fps) < startMs) {
+      first++;
+    }
+    return FrameSpan(
+        first: first, last: raw.last < first ? first : raw.last, fps: _fps);
+  }
+
   FrameSpan unitSpan(int unitIndex) {
     final start = timeline.startOf(unitIndex);
-    return FrameSpan.fromMs(start, start + timeline.durationOf(unitIndex), _fps);
+    return _spanOf(start, start + timeline.durationOf(unitIndex));
   }
 
   /// 这一镜占成片的哪几帧。**整块段落返回 null**——那一段整个换成了另一条
@@ -58,16 +79,24 @@ class ComposedFrames {
     final start = timeline.composedShotStart(unitIndex, shotIndex);
     final end = timeline.composedShotEnd(unitIndex, shotIndex);
     if (start == null || end == null) return null;
-    return FrameSpan.fromMs(start, end, _fps);
+    return _spanOf(start, end);
   }
 
-  /// 帧号 → `00:00:20:12`（时:分:秒:帧）。对标剪映 / FCP 的读法
+  /// 帧号 → `00:00:20:12`（时:分:秒:帧）。对标剪映 / FCP 的读法。
+  ///
+  /// **整数取模，不要用浮点连乘再四舍五入去凑。** 原来写成
+  /// `frame ~/ _fps` 配 `(totalSeconds * _fps).round()`：这两个公式在非整数
+  /// 帧率下互不自洽，29.97 下几乎每一秒的最后一帧都会算出 `ff == 30` 这种
+  /// 不合法的帧号（`tc(1798)` 印出 `00:00:59:30`）。
+  ///
+  /// 非整数帧率的时间码惯例是按**标称帧率**取模（29.97 的标称帧率是 30），
+  /// 这样帧号恒落在 `[0, 标称)` 内，不会溢出也不会变负。
   String tc(int frame) {
-    final perSecond = _fps <= 0 ? 1 : _fps;
-    final totalSeconds = frame ~/ perSecond;
-    final ff = frame - (totalSeconds * perSecond).round();
+    final nominal = _fps.round().clamp(1, 1000);
+    final totalSeconds = frame ~/ nominal;
+    final ff = frame % nominal;
     String two(int n) => n.toString().padLeft(2, '0');
     return '${two(totalSeconds ~/ 3600)}:${two((totalSeconds % 3600) ~/ 60)}:'
-        '${two(totalSeconds % 60)}:${two(ff < 0 ? 0 : ff)}';
+        '${two(totalSeconds % 60)}:${two(ff)}';
   }
 }
