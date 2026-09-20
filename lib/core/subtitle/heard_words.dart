@@ -68,17 +68,26 @@ Heard heardInShot({
           note: '整段替换，这一段的台词时间在成片里已经不成立，不给逐字位置');
     case VoiceSource.base:
       // 底片自己的转写，时间戳是**素材内**毫秒
+      //
+      // **null 和空列表是两个事实**（见 SemanticUnit.baseSentences 的注释）：
+      // null = 还没转写过；空列表 = 转过、这条素材没人说话。写死一句
+      // emptyNote 会把后者也说成「还没转写」——Agent 照着这句话会去触发
+      // 一次根本没必要的转写。voice_source.dart 已经分对了，这里不能开倒车。
+      final baseSentences = unit.baseSentences;
       return _project(
         frames: frames,
         units: units,
         unitIndex: unitIndex,
         shotIndex: shotIndex,
-        sentences: unit.baseSentences ?? const [],
+        sentences: baseSentences ?? const [],
         // 素材内偏移：镜头坐标减掉单元起点
         shotStartInAxis: unit.shots[shotIndex].startMs - unit.startMs,
         shotEndInAxis: unit.shots[shotIndex].endMs - unit.startMs,
         wordOffsetToUnit: (ms) => ms,
-        emptyNote: '这一段固定了底片，但它还没转写过，没有台词可取',
+        // 转写过（哪怕是空列表）就交给 _project 的默认文案，跟 original 那一档一致
+        emptyNote: baseSentences == null
+            ? '这一段固定了底片，但它还没转写过，没有台词可取'
+            : null,
       );
     case VoiceSource.original:
       return _project(
@@ -129,7 +138,7 @@ Heard _project({
         lastFrame: lastFrame,
         confidence: w.confidence,
         spillsInto: shotSpan != null && lastFrame > shotSpan.last
-            ? _labelOf(units, unitIndex, shotIndex + 1)
+            ? _landsOn(frames, units, unitIndex, shotIndex, lastFrame)
             : null,
       ));
     }
@@ -141,11 +150,36 @@ Heard _project({
   return Heard(text: [for (final w in out) w.text].join(), words: out);
 }
 
-/// `U2S4` 这种人话写法。越到下一个单元的第一镜也认
-String _labelOf(List<SemanticUnit> units, int unitIndex, int shotIndex) {
-  if (shotIndex < units[unitIndex].shots.length) {
-    return 'U${unitIndex + 1}S${shotIndex + 1}';
+/// 这个词的尾巴越过本镜末帧之后，**真正落在哪一镜**。
+///
+/// 原来无条件报「紧邻的下一镜」——可判据只是「超过了本镜末帧」，并没有
+/// 验证它真的落在下一镜里。一条片子要切 25~45 镜，短镜头很常见，一个词
+/// 完全可能跨过不止一镜，那时报出来的标号是错的，**而 Agent 会拿它当
+/// 精确事实去挪字**。
+///
+/// 所以这里往后逐镜走（必要时跨单元），找到帧区间真正包住 [frame] 的
+/// 那一镜。碰到整块段落、或者越过片尾，就**如实说是什么情况**——
+/// 不编一个标号出来。
+String _landsOn(
+  ComposedFrames frames,
+  List<SemanticUnit> units,
+  int unitIndex,
+  int shotIndex,
+  int frame,
+) {
+  var u = unitIndex;
+  var s = shotIndex + 1;
+  while (u < units.length) {
+    if (s >= units[u].shots.length) {
+      u++;
+      s = 0;
+      continue;
+    }
+    final span = frames.shotSpan(u, s);
+    // 整块段落没有镜头可定位（整体替换把那一段整个换掉了）
+    if (span == null) return '下一段是整段替换，没有镜头可定位';
+    if (frame <= span.last) return 'U${u + 1}S${s + 1}';
+    s++;
   }
-  if (unitIndex + 1 < units.length) return 'U${unitIndex + 2}S1';
   return '片尾之后';
 }
