@@ -192,6 +192,30 @@ void main() {
     expect(box['left'], lessThan(box['right']));
   });
 
+  test('已经切成几屏、每屏都放得下时，willWrap 不许跟 problems 打架', () {
+    // 字幕轨手改成三行，每行都 <= maxCharsPerScreen（默认字号下是 15），
+    // 加起来远超——拼起来求和的话 willWrap 会是 true，而这三行本来就
+    // 每屏都放得下，problems 里也不该报 captionOverflows
+    final track = const SubtitleTrack.empty().withLines(
+      const SubtitleSlot(unitUid: 'u0', shotIndex: 0),
+      const [
+        SubtitleLine(startMs: 0, endMs: 300, text: '一二三四五六七八九十'),
+        SubtitleLine(startMs: 300, endMs: 600, text: '甲乙丙丁戊己庚辛壬癸'),
+        SubtitleLine(startMs: 600, endMs: 900, text: '子丑寅卯辰巳午未申酉'),
+      ],
+    );
+    final r = subtitleShotReport(task().copyWith(subtitleTrack: track),
+        unitIndex: 0, shotIndex: 0)!;
+    final caption = r['caption'] as Map;
+    expect(caption['willWrap'], isFalse,
+        reason: '每屏都放得下。拼起来求和的话这里会是 true，'
+            '而 problems 里不报 captionOverflows——同一份报告两个相反的事实');
+    final kinds = ((r['problems'] as List?) ?? const [])
+        .map((p) => (p as Map)['kind'])
+        .toSet();
+    expect(kinds, isNot(contains('captionOverflows')));
+  });
+
   test('没给 dataDir 就没查烧字，报告里整个不出现 burned 字段', () {
     final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0)!;
     expect(r.containsKey('burned'), isFalse,
@@ -231,6 +255,20 @@ void main() {
     final r = subtitleShotReport(taskWithShotCandidate(),
         unitIndex: 0, shotIndex: 0, dataDir: dataDir)!;
     expect(r['burned'], ['冰冰凉凉的好舒服呀']);
+  });
+
+  test('查过了、画面干净：burned 是空数组，不是整个键不见', () {
+    final dataDir =
+        Directory.systemTemp.createTempSync('subtitle_view_test_');
+    addTearDown(() => dataDir.deleteSync(recursive: true));
+    frameCheckCacheIn(dataDir).put(7, const FrameCheck(burnedText: []));
+
+    final r = subtitleShotReport(taskWithShotCandidate(),
+        unitIndex: 0, shotIndex: 0, dataDir: dataDir)!;
+    expect(r.containsKey('burned'), isTrue,
+        reason: '「查了，干净」和「根本没查」必须分得开——'
+            '后者才是整个键不出现');
+    expect(r['burned'], isEmpty);
   });
 
   test('给了 dataDir，但这条候选还没被看过：没查过，不报字段', () {

@@ -135,8 +135,20 @@ _ShotFacts _factsOf({
     baseSlotEndMs: shot.endMs - unit.startMs,
   );
   final span = frames.shotSpan(unitIndex, shotIndex);
-  final caption =
-      captionBoxOf(style: style, text: lines.map((l) => l.text).join());
+  // **拿最长的那一行去判，不是把几行拼起来。**
+  //
+  // lines 是 subtitleLinesForSlot 已经按 maxCharsPerScreen 分好屏的结果。
+  // 拼回一整段再判，等于又走回「按总字数求和」那条老路——而 problems 里的
+  // captionOverflows 已经改成逐行判了，两者会在同一份报告里给出互相矛盾
+  // 的结论：一个说不超，一个说超。
+  //
+  // willWrap 的语义是「有没有哪一屏放不下」，所以拿最长那行比就够了
+  final longestLine = lines.isEmpty
+      ? ''
+      : lines
+          .map((l) => l.text)
+          .reduce((a, b) => a.runes.length >= b.runes.length ? a : b);
+  final caption = captionBoxOf(style: style, text: longestLine);
   final burned = _burnedTextOf(
     replacement: replacement,
     shotIndex: shotIndex,
