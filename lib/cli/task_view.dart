@@ -246,6 +246,13 @@ Map<String, dynamic> _unitToJson(
             'sourceEndMs': unit.baseCandidateId == null
                 ? unit.shots[i].endMs
                 : unit.shots[i].endMs - unit.startMs,
+            // **这两个数量的是哪个文件。** 同一个字段名两种含义，靠
+            // baseCandidateId 是不是 null 来推——人在界面上看不到这个区别
+            // （界面显示成片时间），Agent 拿到的是裸 JSON：照原片去抽帧
+            // 会抽到一段毫不相干的画面，而且不会报错
+            'sourceOf': unit.baseCandidateId == null ? 'original' : 'material',
+            if (unit.baseCandidateId != null)
+              'sourceMaterialId': unit.baseCandidateId,
             // 整体替换的单元这里是 null：那一段整个换成了另一条素材，
             // 原片的镜头切分在成片里已经不存在，编一个数出来是假精度
             'composedStartMs': ?composed?.composedShotStart(at, i),

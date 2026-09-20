@@ -1272,7 +1272,10 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 
 任务 JSON 里每个单元、每一镜都给两套时间，**基准写在名字里**：
 
-- `sourceStartMs` / `sourceEndMs`：**原片**位置。这是切分点，是存下来的数据。
+- `sourceStartMs` / `sourceEndMs`：**取材位置**——从哪个文件的第几毫秒取画面。
+  **量的是哪个文件看 `sourceOf`**：`original` = 原片，`material` = 这一段
+  固定过底片，量的是那条素材（`sourceMaterialId` 是哪一条）。
+  搞错参照物去抽帧，抽到的是一段毫不相干的画面，**而且不会报错**。
 - `composedStartMs` / `composedDurationMs`（镜头是 `composedEndMs`）：
   **成片**位置——这一段在最终片子里落到第几毫秒。界面上显示的就是这一套。
 
