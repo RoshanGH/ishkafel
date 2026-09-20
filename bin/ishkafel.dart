@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:ishkafel/cli/cli_output.dart';
 import 'package:ishkafel/cli/commands/analyze_command.dart';
+import 'package:ishkafel/cli/commands/say_command.dart';
 import 'package:ishkafel/cli/commands/status_command.dart';
 import 'package:ishkafel/cli/commands/blank_command.dart';
 import 'package:ishkafel/cli/commands/apply_command.dart';
@@ -68,6 +69,12 @@ Future<void> main(List<String> args) async {
     ..addOption('by',
         help: 'script shots 用：检索方式 tags/content/image/voiceover/name；'
             'log 用：只看 human/agent 谁干的')
+    ..addOption('judgement',
+        help: 'say 用：说一句「你为什么改主意了」——三类播报里最值钱的一类')
+    ..addOption('warning',
+        help: 'say 用：说一句「我发现了一个可能要喊停的问题」')
+    ..addOption('step',
+        help: 'say 用：说一句「我正在干的这件事没有命令对应」')
     ..addOption('since', help: 'log 用：游标，只看这个序号之后的改动')
     ..addOption('limit', help: 'log 用：最多看多少条（默认 200）')
     ..addOption('materials',
@@ -305,6 +312,18 @@ Future<void> main(List<String> args) async {
         limit: int.tryParse(parsed['limit'] as String? ?? '') ?? 200,
       ),
     'open' => await runOpenCommand(rest: rest, dataDir: dataDir),
+    // 把话筒交给 Agent：判断和发现问题这两类，本来就不该由软件替它说
+    'say' => await runSayCommand(
+        rest: rest,
+        dataDir: dataDir,
+        judgement: parsed['judgement'] as String?,
+        warning: parsed['warning'] as String?,
+        step: parsed['step'] as String?,
+        unitIndex: int.tryParse(parsed['unit'] as String? ?? ''),
+        shotIndex: int.tryParse(parsed['shot'] as String? ?? ''),
+        lineIndex: int.tryParse(parsed['line'] as String? ?? ''),
+        visual: parsed['visual'] as bool,
+      ),
     'apply' => await runApplyCommand(
         rest: rest,
         dataDir: dataDir,
@@ -349,6 +368,11 @@ ishkafel —— 竖屏口播短视频工具的命令行入口
   clean [--yes]    把盘上没主的东西清掉（不给 --yes 只报会删什么）
   status [<任务>]   **接手先看这条**：每条任务干到哪了、下一步敲什么、
                    现场有没有别人在动。打断之后接着干，全靠它
+  say [<任务>] --judgement|--warning|--step "…" [--unit i --shot j] [--visual]
+                   **你自己说一句话**，出现在界面底部的播报条上。
+                   --judgement 你为什么改主意（最值钱的一类，人靠它敢放手）、
+                   --warning 可能要喊停的发现、--step 没有命令对应的活儿。
+                   不给任务就挂在全局：它播的是你在整个软件上干了什么
   log <任务> [--since <游标>] [--by human|agent] [--no-json]
                    我不在的时候这条任务上发生了什么：谁、什么时候、改了哪儿。
                    只记写操作，翻页看候选这类只读的不算

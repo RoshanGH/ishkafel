@@ -21,6 +21,7 @@ const List<String> topLevelCommands = [
   'open',
   'peek',
   'review',
+  'say',
   'script',
   'skill',
   'status',
