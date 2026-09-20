@@ -208,6 +208,41 @@ List<String>? _burnedTextOf({
 String _at(int unitIndex, int shotIndex) =>
     'U${unitIndex + 1}S${shotIndex + 1}';
 
+/// 八条 `kind` 对应的人话——`subtitleSignal` 的 note 按这份表分组报数，
+/// 不直接吐英文 kind 名（那是给程序认的，不是给人读的）
+const Map<String, String> _kindLabels = {
+  'wordSplit': '跨镜断字',
+  'outOfSlot': '字幕越界',
+  'overlap': '两段打架',
+  'empty': '空段',
+  'heardButSilent': '听得到没字幕',
+  'silentButCaptioned': '幽灵字幕',
+  'captionOverflows': '折行',
+  'burnedTextPresent': '素材自带烧字',
+};
+
+/// 把「多少镜有问题」压成「按类分组的条数」，不列镜头标号。
+///
+/// **真机上踩过的坑**：一条任务 48 镜有问题，旧版 note 把 48 个 `U#S#`
+/// 标号全列了进去，`task --json` 从 17295 字节涨到 28449（+65%）。这个信号
+/// 存在的全部意义就是「一句话 + 一条去处，不给细节」——列标号就是把细节
+/// 倒回来了。这里改成「折行 43、跨镜断字 29、幽灵字幕 8」这种按类计数，
+/// 比列 48 个标号短得多，还更有信息量：一眼看出主要是哪类毛病。
+/// 逐镜的标号留给 `subtitle check`，那才是该给细节的地方。
+///
+/// **只报出现过的类，条数为 0 的不列**——不许为了「看着全」硬凑数。
+String _kindBreakdown(List<String> kinds) {
+  final counts = <String, int>{};
+  for (final k in kinds) {
+    counts[k] = (counts[k] ?? 0) + 1;
+  }
+  final parts = [
+    for (final kind in _kindLabels.keys)
+      if (counts.containsKey(kind)) '${_kindLabels[kind]} ${counts[kind]}',
+  ];
+  return parts.join('、');
+}
+
 /// 全片有哪些镜头——`unit.shots` 里有的都算，**不按 `shotSpan` 筛**
 /// （见 [_factsOf] 上方那段注释：有没有精确帧位置，跟这一镜在不在报告里
 /// 是两件事）。
@@ -347,7 +382,9 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
   var shotsWithout = 0;
   var handEdited = 0;
   var suspect = 0;
-  final problemShots = <String>[];
+  // **按 kind 收集，不按标号收集**：note 只报「有几类、各几条」，
+  // 逐镜标号是 subtitle check 该给的细节（见 _kindBreakdown 上方注释）
+  final problemKinds = <String>[];
 
   // 逐镜统计
   for (var u = 0; u < units.length; u++) {
@@ -380,7 +417,7 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
       // 统计可疑的
       if (f.problems.isNotEmpty) {
         suspect++;
-        problemShots.add(_at(u, s));
+        problemKinds.addAll(f.problems.map((p) => p.kind));
       }
     }
   }
@@ -390,8 +427,8 @@ Map<String, dynamic> subtitleSignal(RenewTask task) {
   if (suspect == 0) {
     note = '字幕没查出毛病（不含素材烧字，那一项要跑 ishkafel subtitle show <任务> 才查得到）。要逐镜核对：ishkafel subtitle show <任务>';
   } else {
-    final atList = problemShots.join('、');
-    note = '$suspect 镜有问题（$atList，不含烧字）。逐镜检查：ishkafel subtitle check <任务>';
+    final breakdown = _kindBreakdown(problemKinds);
+    note = '$suspect 镜有问题（$breakdown，不含烧字）。逐镜检查：ishkafel subtitle check <任务>';
   }
 
   return {

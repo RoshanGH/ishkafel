@@ -89,7 +89,7 @@ void main() {
     );
   });
 
-  test('一行字这个字号一屏放不下，会被自动切开', () {
+  test('一行字这个字号一屏放不下，画面上会折成两行', () {
     final overflowingCaption = captionBoxOf(
       style: const SubtitleStyle(),
       text: '这一句话特别特别长长到一屏根本放不下它会被自动切成两屏',
@@ -106,6 +106,34 @@ void main() {
       ),
       contains('captionOverflows'),
     );
+  });
+
+  test('文案说的必须是替换裂变真实会发生的事——折行，不是切成两屏', () {
+    // 替换裂变的导出走 SubtitleRasterizer（AppKit 按宽度折行），
+    // 不是 subtitleScreensAt 那套「切成两屏」（那只在剪映草稿/脚本成片用）。
+    // 说成「会被自动切开」是在这条产品线上的假话，会让人以为不影响观感
+    final overflowingCaption = captionBoxOf(
+      style: const SubtitleStyle(),
+      text: '这一句话特别特别长长到一屏根本放不下它会被自动切成两屏',
+    );
+    final problems = subtitleProblemsOf(
+      shotSpan: span,
+      heard: const Heard(text: '甲乙'),
+      lines: const [
+        SubtitleLine(
+            startMs: 0,
+            endMs: 900,
+            text: '这一句话特别特别长长到一屏根本放不下它会被自动切成两屏')
+      ],
+      slotDurationMs: 1000,
+      caption: overflowingCaption,
+      burnedText: const [],
+    );
+    final note =
+        problems.firstWhere((p) => p.kind == 'captionOverflows').note;
+    expect(note, contains('折成两行'));
+    expect(note, isNot(contains('切开')),
+        reason: '「切开」暗示两屏先后显示，替换裂变没有这回事');
   });
 
   test('已经切成几屏、每屏都放得下，不许报超长', () {

@@ -99,13 +99,20 @@ List<SubtitleProblem> subtitleProblemsOf({
   //
   // 真会超的是手改过的行：人或 Agent 直接写进 SubtitleTrack 的内容
   // 不过自动分屏这一关
+  //
+  // **折行不是「切成两屏先后显示」。** 替换裂变的导出走
+  // `SubtitleRasterizer`（`export_runner.dart` 里 `rasterizer.rasterize`），
+  // AppKit 按给定宽度折行，超长的那一行是在画面上折成两行、同时挂着。
+  // （`subtitleScreensAt` 那套「切成两屏」只在剪映草稿 `jianying_plan.dart`
+  // 和脚本成片 `script_export.dart` 那条线用，替换裂变不走那条路。）
+  // 说错了人会以为不影响观感，2026-09-20 真机核实过这处文案说的是假话
   for (var i = 0; i < lines.length; i++) {
     final chars = lines[i].text.runes.length;
     if (chars <= caption.maxCharsPerScreen) continue;
     out.add(SubtitleProblem(
       kind: 'captionOverflows',
       note: '第 ${i + 1} 段有 $chars 个字，这个字号一屏只放得下 '
-          '${caption.maxCharsPerScreen} 个，会被自动切开',
+          '${caption.maxCharsPerScreen} 个，画面上会折成两行',
     ));
   }
   if (burnedText.isNotEmpty) {

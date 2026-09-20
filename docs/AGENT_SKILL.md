@@ -1272,7 +1272,7 @@ ishkafel review keep <task> --items 0:-:100      # 剔错了恢复回来
 ishkafel task <任务> --json | jq '.subtitle'
 # {
 #   "shotsWith": 38, "shotsWithout": 13, "handEdited": 4, "suspect": 6,
-#   "note": "6 镜有问题（U2S3、U4S1...，不含烧字）。逐镜检查：ishkafel subtitle check <任务>"
+#   "note": "6 镜有问题（折行 4、跨镜断字 2，不含烧字）。逐镜检查：ishkafel subtitle check <任务>"
 # }
 ```
 

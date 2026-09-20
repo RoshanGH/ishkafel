@@ -7,6 +7,8 @@ import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
 import 'package:ishkafel/core/replacement/picked_material.dart';
 import 'package:ishkafel/core/replacement/replacement_plan.dart';
+import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
+import 'package:ishkafel/core/subtitle/subtitle_track.dart';
 import 'package:ishkafel/core/time/rational.dart';
 
 import '../support/seed_task.dart';
@@ -119,5 +121,65 @@ void main() {
         reason: '算不准时不许报假的计数');
     expect(sub['shotsWith'], 0);
     expect(sub['suspect'], 0);
+  });
+
+  /// 6 个单元、每个 8 镜（共 48 镜），照真机上那条任务的规模来——
+  /// 没有 ASR 台词（heard 永远是空），但每一镜都被手动挂了字幕：
+  /// 触发 silentButCaptioned；其中一半的手改字幕还写得特别长，
+  /// 顺带触发 captionOverflows，凑出「不止一种毛病」的真实分布。
+  RenewTask taskWithManyProblems() {
+    const unitCount = 6;
+    const shotsPerUnit = 8;
+    final units = <SemanticUnit>[];
+    var track = const SubtitleTrack.empty();
+    for (var u = 0; u < unitCount; u++) {
+      final unitStart = u * shotsPerUnit * 1000;
+      final shots = <Shot>[];
+      for (var s = 0; s < shotsPerUnit; s++) {
+        final shotStart = unitStart + s * 1000;
+        shots.add(Shot(startMs: shotStart, endMs: shotStart + 1000));
+        final long = s.isEven;
+        track = track.withLines(
+          SubtitleSlot(unitUid: 'u$u', shotIndex: s),
+          [
+            SubtitleLine(
+              startMs: 0,
+              endMs: 900,
+              text: long ? '这一句写得特别特别长长到一屏根本放不下它啦' : '没来源',
+            ),
+          ],
+        );
+      }
+      units.add(SemanticUnit(
+        uid: 'u$u',
+        index: u,
+        startMs: unitStart,
+        endMs: unitStart + shotsPerUnit * 1000,
+        transcript: '',
+        shots: shots,
+      ));
+    }
+    return RenewTask(
+      id: 't_many', name: '真机规模', status: RenewTaskStatus.ready,
+      createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+      videoInfo: VideoInfo(
+          width: 1080, height: 1920, fps: 30,
+          duration: Duration(milliseconds: unitCount * shotsPerUnit * 1000),
+          fpsExact: Rational.fps30,
+          fileSizeBytes: 0),
+      asrSentences: const [],
+      units: units,
+      subtitleTrack: track,
+    );
+  }
+
+  test('note 不许列标号——真机上 48 个标号把 task --json 撑大了 65%', () {
+    final task = taskWithManyProblems();
+    final note = (taskToJson(task)['subtitle'] as Map)['note'] as String;
+    expect(note.length, lessThan(200),
+        reason: 'task 是现状概览不是数据倾倒场。真机上列 48 个标号让整份从 '
+            '17295 涨到 28449 字节');
+    expect(RegExp(r'U\d+S\d+').hasMatch(note), isFalse,
+        reason: '要给的是「有几类、各几条」和一条去处，不是清单');
   });
 }
