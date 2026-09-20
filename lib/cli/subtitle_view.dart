@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import '../core/ai/frame_check_wiring.dart' show frameCheckCacheIn;
 import '../core/analysis/providers.dart' show AsrSentence;
 import '../core/editing/frame_time.dart';
 import '../core/export/composed_timeline.dart';
@@ -6,10 +9,12 @@ import '../core/models/semantic_unit.dart';
 import '../core/models/shot.dart';
 import '../core/replacement/replacement_plan.dart';
 import '../core/replacement/unit_base.dart';
+import '../core/subtitle/caption_box.dart';
 import '../core/subtitle/heard_words.dart';
 import '../core/subtitle/slot_subtitles.dart';
 import '../core/subtitle/subtitle_overlay.dart';
 import '../core/subtitle/subtitle_problems.dart';
+import '../core/subtitle/subtitle_style.dart';
 import '../core/subtitle/subtitle_track.dart';
 import '../core/subtitle/voice_source.dart';
 import '../core/timeline/composed_frames.dart';
@@ -46,6 +51,15 @@ class _ShotFacts {
   final List<SubtitleLine> lines;
   final List<SubtitleProblem> problems;
 
+  /// 这一行字落在画面的哪个矩形——纯计算，见 [captionBoxOf]
+  final CaptionBox caption;
+
+  /// 这一镜挑的素材画面上自带的烧录字（读缓存）。
+  /// **null 不等于「查了没有」**：null 是「没查」（没给 dataDir、
+  /// 这一镜没有对应素材、或者这条素材还没被看过），空数组才是
+  /// 「查了，画面干净」——两件事不能混
+  final List<String>? burned;
+
   /// 这一镜在成片帧轴上的精确位置。**null 不等于「这一镜不存在」**，
   /// 只是给不了精确帧位置——见 [_factsOf] 上方那段注释
   final FrameSpan? span;
@@ -58,6 +72,8 @@ class _ShotFacts {
     required this.heard,
     required this.lines,
     required this.problems,
+    required this.caption,
+    required this.burned,
     required this.span,
     required this.by,
   });
@@ -85,6 +101,8 @@ _ShotFacts _factsOf({
   required List<UnitReplacement> replacements,
   required SubtitleTrack track,
   required List<AsrSentence> originalSentences,
+  required SubtitleStyle style,
+  required Directory? dataDir,
   required int unitIndex,
   required int shotIndex,
 }) {
@@ -117,11 +135,23 @@ _ShotFacts _factsOf({
     baseSlotEndMs: shot.endMs - unit.startMs,
   );
   final span = frames.shotSpan(unitIndex, shotIndex);
+  final caption =
+      captionBoxOf(style: style, text: lines.map((l) => l.text).join());
+  final burned = _burnedTextOf(
+    replacement: replacement,
+    shotIndex: shotIndex,
+    dataDir: dataDir,
+  );
   final problems = subtitleProblemsOf(
     shotSpan: span,
     heard: heard,
     lines: lines,
     slotDurationMs: shot.endMs - shot.startMs,
+    caption: caption,
+    // **不知道就当没有**：burnedTextPresent 是个提醒，不是判定。
+    // dataDir 拿不到、这一镜没有对应素材、或者素材还没被看过时，
+    // 缓存给不出结论，这里不替它编一个「有」——宁可漏报也不许瞎报
+    burnedText: burned ?? const [],
   );
   final slot = SubtitleSlot(unitUid: unit.uid, shotIndex: shotIndex);
   final by = track.linesOf(slot) == null ? 'auto' : 'edited';
@@ -132,9 +162,29 @@ _ShotFacts _factsOf({
     heard: heard,
     lines: lines,
     problems: problems,
+    caption: caption,
+    burned: burned,
     span: span,
     by: by,
   );
+}
+
+/// 这一镜挑的是哪条素材，查它有没有自带烧录字（**只读缓存，不现查**——
+/// 现查要调 AI，那不是报告该做的事）。
+///
+/// 返回 null 的三种情形都叫「没查」，不叫「查了没有」：没给 [dataDir]、
+/// 这一镜没有走镜头级替换（没有候选可查）、或者这条素材压根没被看过
+/// （[FrameCheckCache.get] 本身就用 null 区分「没看过」和「看过、画面干净」，
+/// 这里原样把这条纪律接下去）。
+List<String>? _burnedTextOf({
+  required UnitReplacement replacement,
+  required int shotIndex,
+  required Directory? dataDir,
+}) {
+  if (dataDir == null) return null;
+  final candidateId = replacement.shotPreviewId(shotIndex);
+  if (candidateId == null) return null;
+  return frameCheckCacheIn(dataDir).get(candidateId)?.burnedText;
 }
 
 /// 这一镜的「地址」，人和 Agent 都按这个格式说话
@@ -201,7 +251,7 @@ String _framesUnavailableNote(List<int> unknown) =>
     '先把素材下下来（candidates fetch），再来看字幕';
 
 /// 全片那份——`subtitle show <任务>`。一镜一行，扫得动。
-Map<String, dynamic> subtitleReport(RenewTask task) {
+Map<String, dynamic> subtitleReport(RenewTask task, {Directory? dataDir}) {
   final whole = wholeDurationsOf(task);
   if (whole.unknown.isNotEmpty) {
     return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
@@ -217,6 +267,8 @@ Map<String, dynamic> subtitleReport(RenewTask task) {
         replacements: ctx.replacements,
         track: ctx.track,
         originalSentences: ctx.sentences,
+        style: task.subtitle,
+        dataDir: dataDir,
         unitIndex: pos.unit,
         shotIndex: pos.shot,
       ), pos.unit, pos.shot, ctx.frames),
@@ -270,6 +322,7 @@ Map<String, dynamic>? subtitleShotReport(
   RenewTask task, {
   required int unitIndex,
   required int shotIndex,
+  Directory? dataDir,
 }) {
   final rawUnits = task.units ?? const <SemanticUnit>[];
   if (unitIndex < 0 || unitIndex >= rawUnits.length) return null;
@@ -291,6 +344,8 @@ Map<String, dynamic>? subtitleShotReport(
     replacements: ctx.replacements,
     track: ctx.track,
     originalSentences: ctx.sentences,
+    style: task.subtitle,
+    dataDir: dataDir,
     unitIndex: unitIndex,
     shotIndex: shotIndex,
   );
@@ -333,6 +388,20 @@ Map<String, dynamic>? subtitleShotReport(
       if (prev != null) 'prev': prev,
       if (next != null) 'next': next,
     },
+    'caption': {
+      'box': {
+        'left': f.caption.left,
+        'right': f.caption.right,
+        'top': f.caption.top,
+        'bottom': f.caption.bottom,
+      },
+      'maxCharsPerScreen': f.caption.maxCharsPerScreen,
+      'willWrap': f.caption.willWrap,
+    },
+    // null（没查）整个不报这个键；查了（哪怕结果是空数组）才报——
+    // 空数组是「查了，画面干净」，跟「没查」是两件事，不能用同一个
+    // 「键不出现」含糊过去
+    if (f.burned != null) 'burned': f.burned,
     if (f.problems.isNotEmpty)
       'problems': [
         for (final p in f.problems) {'kind': p.kind, 'note': p.note},

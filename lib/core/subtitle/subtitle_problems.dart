@@ -1,4 +1,5 @@
 import '../editing/frame_time.dart';
+import 'caption_box.dart';
 import 'heard_words.dart';
 import 'subtitle_overlay.dart';
 
@@ -22,6 +23,8 @@ List<SubtitleProblem> subtitleProblemsOf({
   required Heard heard,
   required List<SubtitleLine> lines,
   required int slotDurationMs,
+  required CaptionBox caption,
+  required List<String> burnedText,
 }) {
   final out = <SubtitleProblem>[];
 
@@ -85,6 +88,22 @@ List<SubtitleProblem> subtitleProblemsOf({
       kind: 'silentButCaptioned',
       note: '这一镜没有台词来源${heard.note == null ? '' : '（${heard.note}）'}，'
           '却挂着字幕——它是从哪来的？',
+    ));
+  }
+
+  if (caption.willWrap) {
+    out.add(SubtitleProblem(
+      kind: 'captionOverflows',
+      note: '这一行有 ${lines.map((l) => l.text.runes.length).fold(0, (a, b) => a + b)} '
+          '个字，这个字号一屏只放得下 ${caption.maxCharsPerScreen} 个，会被自动切开',
+    ));
+  }
+  if (burnedText.isNotEmpty) {
+    out.add(SubtitleProblem(
+      kind: 'burnedTextPresent',
+      note: '这一镜的素材画面上自带烧录字（${burnedText.join('、')}），'
+          '我们还要再烧一行台词字幕。烧在哪儿现在查不出来——'
+          '底部就是两层字打架，别处只是画面里有别人的文案，要看图确认',
     ));
   }
 

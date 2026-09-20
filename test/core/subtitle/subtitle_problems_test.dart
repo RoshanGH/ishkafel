@@ -1,8 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/core/editing/frame_time.dart';
+import 'package:ishkafel/core/subtitle/caption_box.dart';
 import 'package:ishkafel/core/subtitle/heard_words.dart';
 import 'package:ishkafel/core/subtitle/subtitle_overlay.dart';
 import 'package:ishkafel/core/subtitle/subtitle_problems.dart';
+import 'package:ishkafel/core/subtitle/subtitle_style.dart';
 
 /// **只报机械可查的事实。**
 ///
@@ -11,16 +13,25 @@ import 'package:ishkafel/core/subtitle/subtitle_problems.dart';
 void main() {
   const span = FrameSpan(first: 0, last: 29, fps: 30);
 
+  // 默认给一个放得下、没有烧字的矩形——这两条不是本文件要测的东西，
+  // 免得每条既有用例都要为它们额外操心
+  final defaultCaption =
+      captionBoxOf(style: const SubtitleStyle(), text: '');
+
   Set<String> kindsOf({
     Heard heard = const Heard(text: '甲乙'),
     List<SubtitleLine> lines = const [],
     int slotDurationMs = 1000,
+    CaptionBox? caption,
+    List<String> burnedText = const [],
   }) =>
       subtitleProblemsOf(
         shotSpan: span,
         heard: heard,
         lines: lines,
         slotDurationMs: slotDurationMs,
+        caption: caption ?? defaultCaption,
+        burnedText: burnedText,
       ).map((p) => p.kind).toSet();
 
   test('一个字跨了镜头边界', () {
@@ -78,6 +89,42 @@ void main() {
     );
   });
 
+  test('一行字这个字号一屏放不下，会被自动切开', () {
+    final overflowingCaption = captionBoxOf(
+      style: const SubtitleStyle(),
+      text: '这一句话特别特别长长到一屏根本放不下它会被自动切成两屏',
+    );
+    expect(
+      kindsOf(
+        lines: const [
+          SubtitleLine(
+              startMs: 0,
+              endMs: 900,
+              text: '这一句话特别特别长长到一屏根本放不下它会被自动切成两屏')
+        ],
+        caption: overflowingCaption,
+      ),
+      contains('captionOverflows'),
+    );
+  });
+
+  test('素材画面上自带烧录字，要点名两层字打架的风险', () {
+    expect(
+      kindsOf(
+        lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '甲乙')],
+        burnedText: const ['冰冰凉凉的好舒服呀'],
+      ),
+      contains('burnedTextPresent'),
+    );
+  });
+
+  test('素材画面干净就不报', () {
+    expect(
+      kindsOf(lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '甲乙')]),
+      isNot(contains('burnedTextPresent')),
+    );
+  });
+
   test('说不出落在哪一镜时，文案不许拼成「落在 片尾之后 上」', () {
     final problems = subtitleProblemsOf(
       shotSpan: span,
@@ -87,6 +134,8 @@ void main() {
       ]),
       lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '乙')],
       slotDurationMs: 1000,
+      caption: defaultCaption,
+      burnedText: const [],
     );
     final note = problems.firstWhere((p) => p.kind == 'wordSplit').note;
     expect(note, contains('片尾之后'));
@@ -103,6 +152,8 @@ void main() {
       ]),
       lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '乙')],
       slotDurationMs: 1000,
+      caption: defaultCaption,
+      burnedText: const [],
     );
     expect(problems.firstWhere((p) => p.kind == 'wordSplit').note,
         contains('落在 U1S2 上'));

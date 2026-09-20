@@ -1,5 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ishkafel/cli/subtitle_view.dart';
+import 'package:ishkafel/core/ai/frame_check.dart';
+import 'package:ishkafel/core/ai/frame_check_wiring.dart';
 import 'package:ishkafel/core/analysis/providers.dart';
 import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
@@ -177,5 +181,75 @@ void main() {
     expect(lines, isNotEmpty, reason: '手改过，文本是真的，要报');
     expect((lines.first as Map).containsKey('frames'), isFalse,
         reason: '镜头偏移量的是原片，在成片里不成立——跟 shot 级同一条纪律');
+  });
+
+  test('单镜报告带上 caption：字幕落在画面哪个矩形，纯计算', () {
+    final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0)!;
+    final caption = r['caption'] as Map;
+    expect(caption['maxCharsPerScreen'], isA<int>());
+    expect(caption['willWrap'], isA<bool>());
+    final box = caption['box'] as Map;
+    expect(box['left'], lessThan(box['right']));
+  });
+
+  test('没给 dataDir 就没查烧字，报告里整个不出现 burned 字段', () {
+    final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0)!;
+    expect(r.containsKey('burned'), isFalse,
+        reason: '没查等于没查，不能报一个空数组假装查过');
+  });
+
+  // 镜头级替换选中了候选 id 7——burned 要从这条候选的画面自查缓存里查
+  RenewTask taskWithShotCandidate() => RenewTask(
+        id: 't4', name: '测试4', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+        videoInfo: VideoInfo(
+            width: 1080, height: 1920, fps: 30,
+            duration: const Duration(milliseconds: 2000),
+            fpsExact: Rational.fps30,
+            fileSizeBytes: 0),
+        units: const [
+          SemanticUnit(
+            uid: 'u0', index: 0, startMs: 0, endMs: 2000, transcript: '甲乙',
+            shots: [
+              Shot(startMs: 0, endMs: 1000),
+              Shot(startMs: 1000, endMs: 2000),
+            ],
+          ),
+        ],
+        replacementsByUid: {
+          'u0': UnitReplacement.perShot({0: const [7]}),
+        },
+      );
+
+  test('给了 dataDir、这一镜的候选也被看过：报出烧字（可以是空数组）', () {
+    final dataDir =
+        Directory.systemTemp.createTempSync('subtitle_view_test_');
+    addTearDown(() => dataDir.deleteSync(recursive: true));
+    frameCheckCacheIn(dataDir)
+        .put(7, const FrameCheck(burnedText: ['冰冰凉凉的好舒服呀']));
+
+    final r = subtitleShotReport(taskWithShotCandidate(),
+        unitIndex: 0, shotIndex: 0, dataDir: dataDir)!;
+    expect(r['burned'], ['冰冰凉凉的好舒服呀']);
+  });
+
+  test('给了 dataDir，但这条候选还没被看过：没查过，不报字段', () {
+    final dataDir =
+        Directory.systemTemp.createTempSync('subtitle_view_test_');
+    addTearDown(() => dataDir.deleteSync(recursive: true));
+
+    final r = subtitleShotReport(taskWithShotCandidate(),
+        unitIndex: 0, shotIndex: 0, dataDir: dataDir)!;
+    expect(r.containsKey('burned'), isFalse);
+  });
+
+  test('给了 dataDir，但这一镜没有替换候选：没什么可查，不报字段', () {
+    final dataDir =
+        Directory.systemTemp.createTempSync('subtitle_view_test_');
+    addTearDown(() => dataDir.deleteSync(recursive: true));
+
+    final r = subtitleShotReport(task(), unitIndex: 0, shotIndex: 0,
+        dataDir: dataDir)!;
+    expect(r.containsKey('burned'), isFalse);
   });
 }
