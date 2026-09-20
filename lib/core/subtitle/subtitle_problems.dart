@@ -91,11 +91,21 @@ List<SubtitleProblem> subtitleProblemsOf({
     ));
   }
 
-  if (caption.willWrap) {
+  // **一屏放几个字是对「一行字幕」说的，不是对整镜的总字数说的。**
+  //
+  // 自动切出来的行本来就过了分屏那一关（见 SubtitleStyle.maxCharsPerScreen），
+  // 按总字数求和的话，「已经正确切成三屏、每屏都放得下」会被误报成超长——
+  // 而这份自查声称只报事实，误报就是报了一条假事实。
+  //
+  // 真会超的是手改过的行：人或 Agent 直接写进 SubtitleTrack 的内容
+  // 不过自动分屏这一关
+  for (var i = 0; i < lines.length; i++) {
+    final chars = lines[i].text.runes.length;
+    if (chars <= caption.maxCharsPerScreen) continue;
     out.add(SubtitleProblem(
       kind: 'captionOverflows',
-      note: '这一行有 ${lines.map((l) => l.text.runes.length).fold(0, (a, b) => a + b)} '
-          '个字，这个字号一屏只放得下 ${caption.maxCharsPerScreen} 个，会被自动切开',
+      note: '第 ${i + 1} 段有 $chars 个字，这个字号一屏只放得下 '
+          '${caption.maxCharsPerScreen} 个，会被自动切开',
     ));
   }
   if (burnedText.isNotEmpty) {

@@ -108,6 +108,19 @@ void main() {
     );
   });
 
+  test('已经切成几屏、每屏都放得下，不许报超长', () {
+    // 三行，每行都 <= maxCharsPerScreen（默认字号下是 15），但加起来
+    // 远超——按总字数求和会误报，按逐行判就不会
+    expect(
+      kindsOf(lines: const [
+        SubtitleLine(startMs: 0, endMs: 300, text: '一二三四五六七八九十'),
+        SubtitleLine(startMs: 300, endMs: 600, text: '甲乙丙丁戊己庚辛壬癸'),
+        SubtitleLine(startMs: 600, endMs: 900, text: '子丑寅卯辰巳午未申酉'),
+      ]),
+      isNot(contains('captionOverflows')),
+    );
+  });
+
   test('素材画面上自带烧录字，要点名两层字打架的风险', () {
     expect(
       kindsOf(

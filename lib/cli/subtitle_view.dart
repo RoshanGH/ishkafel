@@ -176,6 +176,11 @@ _ShotFacts _factsOf({
 /// 这一镜没有走镜头级替换（没有候选可查）、或者这条素材压根没被看过
 /// （[FrameCheckCache.get] 本身就用 null 区分「没看过」和「看过、画面干净」，
 /// 这里原样把这条纪律接下去）。
+///
+/// **只查镜头级替换选中的素材。** 整体替换那一段不会烧我们自己的台词
+/// 字幕（见 `subtitle_coverage.dart`），两层字打架的风险不成立；
+/// 而「这条素材画面上烧着别人的文案」这个事实，在挑素材那条路上
+/// 已经看得见（candidates 会报 frameCheck 的 burnedText）
 List<String>? _burnedTextOf({
   required UnitReplacement replacement,
   required int shotIndex,
