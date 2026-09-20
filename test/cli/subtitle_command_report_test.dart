@@ -104,14 +104,34 @@ void main() {
     expect(json['burned'], contains('冰冰凉凉的好舒服呀'));
   });
 
+  test('show 全片那条路也要把 dataDir 递下去', () async {
+    // check/show --unit --shot 两条走的都是单镜路径（subtitleShotReport），
+    // show 不带 --unit/--shot 时走的是另一处调用（subtitleReport）——
+    // 四处传参各自独立，这条专守全片报告那一处
+    final id = await _seedTaskWithBurnedCandidate(dataDir);
+    final out = StringBuffer();
+    await runSubtitleCommand(rest: ['show', id], dataDir: dataDir, out: out);
+    final json = jsonDecode(out.toString()) as Map<String, dynamic>;
+    final shots = (json['shots'] as List).cast<Map<String, dynamic>>();
+    final row = shots.firstWhere((s) => s['at'] == 'U1S1');
+    final kinds = (row['problems'] as List?) ?? const [];
+    expect(kinds, contains('burnedTextPresent'),
+        reason: '四处调用各传各的，漏一处就静默变成「根本没查」，'
+            '而这一处是 Agent 扫全片时唯一会走的路');
+  });
+
   test('check 同理：漏传 dataDir 会让烧字风险从问题清单里消失', () async {
     final id = await _seedTaskWithBurnedCandidate(dataDir);
     final out = StringBuffer();
     await runSubtitleCommand(rest: ['check', id], dataDir: dataDir, out: out);
     final json = jsonDecode(out.toString()) as Map<String, dynamic>;
     final problems = (json['problems'] as List).cast<Map<String, dynamic>>();
-    expect(problems.any((p) => p['kind'] == 'burnedTextPresent'), isTrue,
-        reason: 'check 内部也调了 subtitleReport/subtitleShotReport，'
-            '同一个 dataDir 漏传的话这条问题会从清单里悄悄消失');
+    final p = problems.firstWhere((p) => p['kind'] == 'burnedTextPresent');
+    // 只断言 kind 逮不住「check 里为了拿 note 补的那次 subtitleShotReport
+    // 漏传 dataDir」——那一步漏传的话代码会走 fallback，拿全片报告（已经
+    // 传了 dataDir）的 kind 拼一条没有 note 的记录，kind 照样在、测试照样
+    // 绿。note 只有单镜报告算得出来，断言它的内容才逮得住这一处漏传
+    expect(p['note'], isNotNull, reason: 'note 只有单镜报告给得出来');
+    expect(p['note'], contains('冰冰凉凉的好舒服呀'));
   });
 }
