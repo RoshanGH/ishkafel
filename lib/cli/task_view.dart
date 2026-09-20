@@ -4,6 +4,7 @@ import '../core/export/composed_timeline.dart';
 import '../core/models/renew_task.dart';
 import '../core/models/semantic_unit.dart';
 import '../core/replacement/replacement_plan.dart';
+import 'subtitle_view.dart' show subtitleSignal;
 
 /// 任务的 JSON 视图——**给事实，不给结论**。
 ///
@@ -179,6 +180,10 @@ Map<String, dynamic> taskToJson(RenewTask task) {
         'unitsWithout': subtitleCoverage(r).unitsWithout,
         'note': ?subtitleGapNotice(r),
       },
+    // 一句话 + 一条去处，不给细节。task 是现状概览，不是数据倾倒场：
+    // #1（6 单元 51 镜）的 units 已经占了整份 17KB 的 99.8%，词级 ASR
+    // 再塞进来要翻三倍，而 Agent 第一眼根本不看这些
+    'subtitle': subtitleSignal(task),
     'exports': [
       for (final e in task.exports)
         {

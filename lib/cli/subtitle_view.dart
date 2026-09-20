@@ -299,6 +299,98 @@ Map<String, dynamic> subtitleReport(RenewTask task, {Directory? dataDir}) {
   };
 }
 
+/// 全片字幕信号——一句话 + 一条去处，不给细节。
+///
+/// 给 `task --json` 用，让 Agent 知道该不该敲字幕模块。
+/// **只返回五个字段**：`shotsWith` / `shotsWithout` / `handEdited` / `suspect` / `note`。
+///
+/// 算不准（整体替换的时长探不出来）时不许炸，也不许报假的计数——
+/// 直接说算不准、点名去处。
+Map<String, dynamic> subtitleSignal(RenewTask task) {
+  final report = subtitleReport(task);
+
+  // 算不准时点名原因和去处
+  if (report.containsKey('framesUnavailable')) {
+    return {
+      'shotsWith': 0,
+      'shotsWithout': 0,
+      'handEdited': 0,
+      'suspect': 0,
+      'note': '字幕位置算不准。先把素材下下来（candidates fetch），再来看：ishkafel subtitle show <任务>',
+    };
+  }
+
+  // 从报告中统计。如果没有 shots 信息，返回全零
+  final shotsData = report['shots'];
+  if (shotsData is! List) {
+    return {
+      'shotsWith': 0,
+      'shotsWithout': 0,
+      'handEdited': 0,
+      'suspect': 0,
+      'note': '字幕还没分析。分析完再来看：ishkafel subtitle show <任务>',
+    };
+  }
+
+  var shotsWith = 0;
+  var shotsWithout = 0;
+  var handEdited = 0;
+  var suspect = 0;
+
+  for (final shot in shotsData) {
+    if (shot is! Map<String, dynamic>) continue;
+
+    final shotMap = shot;
+    final heardData = shotMap['heard'];
+    final heard = (heardData is Map ? (heardData as Map)['text'] : null) as String? ?? '';
+    final lines = (shotMap['lines'] as List<dynamic>?) ?? [];
+    final by = shotMap['by'] as String?;
+    final problems = shotMap['problems'] as List<dynamic>?;
+
+    // 统计有台词和没台词的
+    if (heard.isNotEmpty && lines.isNotEmpty) {
+      shotsWith++;
+    } else {
+      shotsWithout++;
+    }
+
+    // 统计手改的
+    if (by == 'edited') {
+      handEdited++;
+    }
+
+    // 统计可疑的
+    if (problems != null && problems.isNotEmpty) {
+      suspect++;
+    }
+  }
+
+  // 生成 note
+  String note;
+  if (suspect == 0) {
+    note = '字幕没查出毛病。要逐镜核对：ishkafel subtitle show <任务>';
+  } else {
+    final problemShots = shotsData
+        .whereType<Map<String, dynamic>>()
+        .where((shot) {
+          final problems = shot['problems'] as List<dynamic>?;
+          return problems != null && problems.isNotEmpty;
+        })
+        .map((shot) => shot['at'] as String?)
+        .whereType<String>()
+        .join('、');
+    note = '$suspect 镜有问题（$problemShots）。逐镜检查：ishkafel subtitle check <任务>';
+  }
+
+  return {
+    'shotsWith': shotsWith,
+    'shotsWithout': shotsWithout,
+    'handEdited': handEdited,
+    'suspect': suspect,
+    'note': note,
+  };
+}
+
 Map<String, dynamic> _shotRow(
   _ShotFacts f,
   int unitIndex,
