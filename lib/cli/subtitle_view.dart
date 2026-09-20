@@ -144,7 +144,11 @@ List<({int unit, int shot})> _addressableShots(
     ];
 
 /// 建一次全片都要用到的上下文，全片报告和单镜报告共用，
-/// 不许各自再拼一份——那正是这个模块要堵住的洞
+/// 不许各自再拼一份——那正是这个模块要堵住的洞。
+///
+/// [wholeDurations] 由调用方传入（算法只有 [wholeDurationsOf] 这一处，
+/// 见 `task_view.dart`）——调用方要先看一眼 `unknown` 是否为空，
+/// 那关系到整份报告要不要整块拒答（见 [subtitleReport] / [_framesUnavailableNote]）。
 ({
   List<SemanticUnit> units,
   List<UnitReplacement> replacements,
@@ -152,16 +156,11 @@ List<({int unit, int shot})> _addressableShots(
   ComposedFrames frames,
   SubtitleTrack track,
   List<AsrSentence> sentences,
-}) _contextOf(RenewTask task) {
+}) _contextOf(RenewTask task, Map<int, int> wholeDurations) {
   final units = task.units ?? const <SemanticUnit>[];
   final replacements = task.replacementsFor(units);
-  // 整体替换的单元在成片里有多长，全项目只有 wholeDurationsOf 这一处算
-  // （见 task_view.dart）。这里不额外拦「候选时长还没探出来」的单元——
-  // 拦不拦，heardInShot / subtitleProblemsOf 已经会把这类过渡态如实报出来
-  // （台词来源报 replaced、听到的是空、字幕却还挂着，会被 silentButCaptioned
-  // 点名），比在这里整块拒答更诚实
-  final durations = wholeDurationsOf(task).durations;
-  final timeline = ComposedTimeline.of(units: units, wholeDurations: durations);
+  final timeline =
+      ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
   final frames = ComposedFrames.of(
     timeline: timeline,
     fps: task.videoInfo?.fpsExact,
@@ -176,9 +175,32 @@ List<({int unit, int shot})> _addressableShots(
   );
 }
 
+/// 算不准就整块不报并点名——跟 `task_view.dart` 的 `composedUnavailable`
+/// 是同一条判据、同一句文案。
+///
+/// 整体替换选了候选、但那条候选的时长还没探出来时，[ComposedTimeline]
+/// 会静默退回原片那个坑位的长度（它自己管不了「这个数以后会变」这件事，
+/// 只能就着手头的数字往下算）。后果不止于那一个单元：**它之后每一段在
+/// 成片里的起点都跟着错**，于是整份报告里的帧号全部不作数，而且会在
+/// `candidates fetch` 探出真时长之后整体平移。报出去的帧号看起来精确、
+/// 实际不作数，正是这份设计要防的「不编假数字」——宁可不报，也不给一份
+/// 会变的坐标。
+///
+/// 跟「下标越界」分得开：那是 null，这是一份带 `framesUnavailable` 的 map，
+/// 两件事不能共用一个返回值，否则调用方分不清「问错了」还是「算不出来」。
+String _framesUnavailableNote(List<int> unknown) =>
+    '这几个单元是整体替换，但还不知道选中素材有多长，'
+    '所以整条片子的成片位置都算不准，字幕的帧号也就无从谈起：'
+    '${unknown.map((i) => 'U${i + 1}').join('、')}。'
+    '先把素材下下来（candidates fetch），再来看字幕';
+
 /// 全片那份——`subtitle show <任务>`。一镜一行，扫得动。
 Map<String, dynamic> subtitleReport(RenewTask task) {
-  final ctx = _contextOf(task);
+  final whole = wholeDurationsOf(task);
+  if (whole.unknown.isNotEmpty) {
+    return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
+  }
+  final ctx = _contextOf(task, whole.durations);
   final addressable = _addressableShots(ctx.frames, ctx.units);
 
   final shots = [
@@ -227,16 +249,30 @@ Map<String, dynamic> _shotRow(
 /// 单镜那份——`subtitle show <任务> --unit 1 --shot 2`。
 ///
 /// 下标越界、或者落在整体替换的一整块上（没有镜头可定位），一律返回 null，
-/// 不抛——这跟全片列表里“这一镜整段不出现”是同一件事
+/// 不抛——这跟全片列表里“这一镜整段不出现”是同一件事。
+///
+/// **`null` 和 `{'framesUnavailable': ...}` 是两件事，不能共用**：前者是
+/// 「问的这个下标根本不存在」，后者是「下标本身没问题，但全片的成片位置
+/// 算不准，这一镜的帧号也就跟着不作数」（见 [_framesUnavailableNote]）。
+/// 下标是不是合法只看 `task.units` 本身的形状，跟算不算得出帧号无关，
+/// 所以这层校验要在「算不准就拒答」之前做。
 Map<String, dynamic>? subtitleShotReport(
   RenewTask task, {
   required int unitIndex,
   required int shotIndex,
 }) {
-  final ctx = _contextOf(task);
-  if (unitIndex < 0 || unitIndex >= ctx.units.length) return null;
-  final unit = ctx.units[unitIndex];
-  if (shotIndex < 0 || shotIndex >= unit.shots.length) return null;
+  final rawUnits = task.units ?? const <SemanticUnit>[];
+  if (unitIndex < 0 || unitIndex >= rawUnits.length) return null;
+  if (shotIndex < 0 || shotIndex >= rawUnits[unitIndex].shots.length) {
+    return null;
+  }
+
+  final whole = wholeDurationsOf(task);
+  if (whole.unknown.isNotEmpty) {
+    return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
+  }
+
+  final ctx = _contextOf(task, whole.durations);
   if (ctx.frames.shotSpan(unitIndex, shotIndex) == null) return null;
 
   final f = _factsOf(

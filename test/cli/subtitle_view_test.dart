@@ -5,6 +5,8 @@ import 'package:ishkafel/core/models/renew_task.dart';
 import 'package:ishkafel/core/models/semantic_unit.dart';
 import 'package:ishkafel/core/models/shot.dart';
 import 'package:ishkafel/core/models/video_info.dart';
+import 'package:ishkafel/core/replacement/picked_material.dart';
+import 'package:ishkafel/core/replacement/replacement_plan.dart';
 import 'package:ishkafel/core/time/rational.dart';
 
 /// 报告的三条规矩（spec §5）：
@@ -67,5 +69,48 @@ void main() {
 
   test('越界返回 null，不抛', () {
     expect(subtitleShotReport(task(), unitIndex: 9, shotIndex: 0), isNull);
+  });
+
+  // 整体替换选了候选，但那条候选还没探出时长——ComposedTimeline 会静默退回
+  // 原片坑位的长度，那个单元之后每一段的成片起点都跟着错，报出去的帧号
+  // 看着精确却会在 candidates fetch 之后整体平移。跟 task_view.dart 的
+  // composedUnavailable 是同一条判据，这里不能各写各的
+  RenewTask taskWithUnknownWholeDuration() => RenewTask(
+        id: 't2', name: '测试2', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+        videoInfo: VideoInfo(
+            width: 1080, height: 1920, fps: 30,
+            duration: const Duration(milliseconds: 2000),
+            fpsExact: Rational.fps30,
+            fileSizeBytes: 0),
+        units: const [
+          SemanticUnit(
+            uid: 'u0', index: 0, startMs: 0, endMs: 2000, transcript: '甲乙',
+            shots: [
+              Shot(startMs: 0, endMs: 1000),
+              Shot(startMs: 1000, endMs: 2000),
+            ],
+          ),
+        ],
+        replacementsByUid: {
+          'u0': UnitReplacement.whole(const [1]),
+        },
+        // 挑了候选（id 1），但这条素材没有 durationMs——时长还没探出来
+        pickedMaterials: const [PickedMaterial(id: 1, name: '候选')],
+      );
+
+  test('整体替换的素材时长还没探出来：整块拒答并点名，不给会变的帧号', () {
+    final r = subtitleReport(taskWithUnknownWholeDuration());
+    expect(r.containsKey('shots'), isFalse,
+        reason: '那个单元之后每一段的成片起点都是错的，帧号会在 fetch 之后整体平移');
+    expect(r['framesUnavailable'], contains('candidates fetch'),
+        reason: '要给一条能照做的补救命令，不能只说「算不出来」');
+  });
+
+  test('单镜同理：拒答要跟「这个下标不存在」分得开', () {
+    final r = subtitleShotReport(taskWithUnknownWholeDuration(),
+        unitIndex: 0, shotIndex: 0);
+    expect(r, isNotNull, reason: 'null 的含义是下标不存在，别拿它兼作「算不准」');
+    expect(r!.containsKey('framesUnavailable'), isTrue);
   });
 }
