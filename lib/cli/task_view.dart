@@ -11,12 +11,17 @@ import '../core/replacement/replacement_plan.dart';
 /// 「该挑哪个」是调用方的判断（见 spec 第一节：软件提供事实与保护，
 /// skill 提供方法论）。
 ///
-/// `analyzed` 与 `units: null` 是两件事：还没分析完就是 null，**不能拿空数组
-/// 冒充**「分析完了但没有单元」——调用方据此决定是等着还是往下走。
-Map<String, dynamic> taskToJson(RenewTask task) {
+/// 整体替换的单元在成片里有多长——跟挑中的那条素材走，素材时长探不出来的
+/// 那些单独记下来。**这个算法全项目只许有这一处**：`taskToJson` 和
+/// `subtitle_view.dart` 都要用它算成片位置，同一件事两处算是这个项目
+/// 栽过不止三次的坑（`wholeDurations` 曾经在两个文件里各写一遍）。
+///
+/// `unknown` 不含「一条候选都没选」的单元——那只是「还没挑」，这一段照旧
+/// 用它自己的长度，成片位置算得出来；只有「选了候选、但那条候选的时长
+/// 还没探出来」才算真的未知。
+({Map<int, int> durations, List<int> unknown}) wholeDurationsOf(
+    RenewTask task) {
   final units = task.units;
-  // 整体替换的单元在成片里有多长——跟挑中的那条素材走。素材时长不知道的
-  // 那些记下来，下面整块不报
   final unknown = <int>[];
   final wholeDurations = <int, int>{};
   final plans = units == null ? null : task.replacementsFor(units);
@@ -31,9 +36,6 @@ Map<String, dynamic> taskToJson(RenewTask task) {
           (plans[i].wholeCandidateIds.isEmpty
               ? null
               : plans[i].wholeCandidateIds.first);
-      // **一条候选都没选 ≠ 素材时长未知**：那只是「还没挑」，这一段照旧
-      // 用它自己的长度，成片位置算得出来。混为一谈的话，只要有一个单元切到
-      // 整体替换还没挑素材，整条片子的成片位置就全都不报了
       if (pick == null) continue;
       final ms = durationOf[pick];
       if (ms == null) {
@@ -43,14 +45,23 @@ Map<String, dynamic> taskToJson(RenewTask task) {
       }
     }
   }
-  final composed = (units == null || unknown.isNotEmpty)
+  return (durations: wholeDurations, unknown: unknown);
+}
+
+/// `analyzed` 与 `units: null` 是两件事：还没分析完就是 null，**不能拿空数组
+/// 冒充**「分析完了但没有单元」——调用方据此决定是等着还是往下走。
+Map<String, dynamic> taskToJson(RenewTask task) {
+  final units = task.units;
+  final wd = wholeDurationsOf(task);
+  final plans = units == null ? null : task.replacementsFor(units);
+  final composed = (units == null || wd.unknown.isNotEmpty)
       ? null
-      : ComposedTimeline.of(units: units, wholeDurations: wholeDurations);
-  final composedBlockedBy = unknown.isEmpty
+      : ComposedTimeline.of(units: units, wholeDurations: wd.durations);
+  final composedBlockedBy = wd.unknown.isEmpty
       ? null
       : '这几个单元是整体替换，但还不知道选中素材有多长，'
           '所以整条片子的成片位置都算不准：'
-          '${unknown.map((i) => 'U${i + 1}').join('、')}。'
+          '${wd.unknown.map((i) => 'U${i + 1}').join('、')}。'
           '先把素材下下来（candidates fetch），再来看 composedStartMs';
 
   return {

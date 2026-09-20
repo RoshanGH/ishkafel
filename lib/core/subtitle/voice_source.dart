@@ -41,7 +41,7 @@ enum VoiceSource {
     return (
       source: VoiceSource.base,
       note: unit.baseSentences == null
-          ? '这一段固定了底片，但那条素材**还没转写过**，取不到台词'
+          ? '这一段固定了底片，但那条素材「还没转写过」，取不到台词'
           : '这一段固定了底片，台词来自素材自己的转写（时间戳是素材内的）',
     );
   }
