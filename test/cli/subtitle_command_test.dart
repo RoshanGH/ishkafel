@@ -116,4 +116,31 @@ void main() {
     // 改之前的颜色不能被这个坏参数悄悄带偏——没改就是没改
     expect((await repo.findById('t1'))!.subtitle.colorHex, isNull);
   });
+
+  test('只改 --bottom 时，已经设好的颜色不许被带偏', () async {
+    // SubtitleStyle.copyWith 用哨兵值区分「没给这个参数」和「给了 null
+    // （清掉颜色）」。--color 和别的旋钮如果混在同一次 copyWith 里，
+    // 没给 --color 时会被当成显式传了 null，把用户已经设好的颜色悄悄清空
+    await runSubtitleCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      colorHex: '33D6A6',
+      out: StringBuffer(),
+      err: StringBuffer(),
+    );
+
+    final code = await runSubtitleCommand(
+      rest: ['t1'],
+      dataDir: dir,
+      bottomRatio: '0.3',
+      out: StringBuffer(),
+      err: StringBuffer(),
+    );
+
+    expect(code, 0);
+    final style = (await repo.findById('t1'))!.subtitle;
+    expect(style.colorHex, '33D6A6',
+        reason: '只改了 --bottom，没提 --color 的那次调用不该动到颜色');
+    expect(style.bottomRatio, closeTo(0.3, 0.001));
+  });
 }
