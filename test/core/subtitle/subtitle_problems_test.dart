@@ -77,4 +77,34 @@ void main() {
       isEmpty,
     );
   });
+
+  test('说不出落在哪一镜时，文案不许拼成「落在 片尾之后 上」', () {
+    final problems = subtitleProblemsOf(
+      shotSpan: span,
+      heard: const Heard(text: '乙', words: [
+        HeardWord(
+            text: '乙', firstFrame: 25, lastFrame: 33, spillsInto: '片尾之后'),
+      ]),
+      lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '乙')],
+      slotDurationMs: 1000,
+    );
+    final note = problems.firstWhere((p) => p.kind == 'wordSplit').note;
+    expect(note, contains('片尾之后'));
+    expect(note, isNot(contains('落在 片尾之后 上')),
+        reason: '上游特意不编造假标号，这里不能把那句实话硬塞进介词结构');
+  });
+
+  test('是镜头标号时照旧说「落在 X 上」', () {
+    final problems = subtitleProblemsOf(
+      shotSpan: span,
+      heard: const Heard(text: '乙', words: [
+        HeardWord(
+            text: '乙', firstFrame: 25, lastFrame: 33, spillsInto: 'U1S2'),
+      ]),
+      lines: const [SubtitleLine(startMs: 0, endMs: 900, text: '乙')],
+      slotDurationMs: 1000,
+    );
+    expect(problems.firstWhere((p) => p.kind == 'wordSplit').note,
+        contains('落在 U1S2 上'));
+  });
 }

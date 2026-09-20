@@ -25,20 +25,26 @@ List<SubtitleProblem> subtitleProblemsOf({
 }) {
   final out = <SubtitleProblem>[];
 
-  // 检查：字跨镜头边界
   for (final w in heard.words ?? const <HeardWord>[]) {
-    if (w.spillsInto == null) continue;
+    final landsOn = w.spillsInto;
+    if (landsOn == null) continue;
+    // **spillsInto 不一定是镜头标号**：上游说不出落在哪一镜时，给的是
+    // 一句实话（「下一段是整段替换，没有镜头可定位」「片尾之后」）。
+    // 无脑套「落在 X 上」会拼出「后半截落在 片尾之后 上」这种病句——
+    // 而这条 note 是整件事里最该被读懂的一句
+    final where = RegExp(r'^U\d+S\d+$').hasMatch(landsOn)
+        ? '落在 $landsOn 上'
+        : landsOn;
     out.add(SubtitleProblem(
       kind: 'wordSplit',
       note: '「${w.text}」从第 ${w.firstFrame} 帧说到第 ${w.lastFrame} 帧，'
-          '跨过了这一镜的末帧（${shotSpan?.last}）——后半截落在 ${w.spillsInto} 上',
+          '跨过了这一镜的末帧（${shotSpan?.last ?? '未知'}）——后半截$where',
     ));
   }
 
-  // 检查：空段、越界、打架
+  var maxEndSoFar = 0;
   for (var i = 0; i < lines.length; i++) {
     final l = lines[i];
-    // 空文本或零长度
     if (l.text.trim().isEmpty || l.endMs <= l.startMs) {
       out.add(SubtitleProblem(
         kind: 'empty',
@@ -46,7 +52,6 @@ List<SubtitleProblem> subtitleProblemsOf({
             '它在轨上点不中，在画面上也只是一闪',
       ));
     }
-    // 越出镜头
     if (l.startMs < 0 || l.endMs > slotDurationMs) {
       out.add(SubtitleProblem(
         kind: 'outOfSlot',
@@ -54,17 +59,19 @@ List<SubtitleProblem> subtitleProblemsOf({
             '——出了界根本没地方烧',
       ));
     }
-    // 与前一段打架
-    if (i > 0 && l.startMs < lines[i - 1].endMs) {
+    // **跟「到目前为止最大的 endMs」比，不是只跟紧邻的上一段比。**
+    // 只比紧邻的话，[0,1000][100,200][300,400] 这种被长段包住的情形
+    // 会漏报——而 overlap 是一条事实声明，不该有缺口
+    if (i > 0 && l.startMs < maxEndSoFar) {
       out.add(SubtitleProblem(
         kind: 'overlap',
-        note: '第 $i 段和第 ${i + 1} 段在时间上打架，'
+        note: '第 ${i + 1} 段和前面某一段在时间上打架，'
             '两句字同时挂在画面上就是两层字',
       ));
     }
+    if (l.endMs > maxEndSoFar) maxEndSoFar = l.endMs;
   }
 
-  // 检查：有声音但无字幕，或无声音但有字幕
   final hasVoice = heard.text.trim().isNotEmpty;
   final hasLines = lines.any((l) => l.text.trim().isNotEmpty);
   if (hasVoice && !hasLines) {
