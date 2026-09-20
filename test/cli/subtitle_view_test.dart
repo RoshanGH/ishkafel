@@ -113,4 +113,52 @@ void main() {
     expect(r, isNotNull, reason: 'null 的含义是下标不存在，别拿它兼作「算不准」');
     expect(r!.containsKey('framesUnavailable'), isTrue);
   });
+
+  // 整体替换、候选时长已知（避开上面那个「framesUnavailable」分支）——这时
+  // 那个单元是真正的整块（ComposedTimeline.isSolidBlock），shotSpan 为
+  // null。它的镜头不许从报告里消失：voiceSourceOf 会把它报成 replaced，
+  // Agent 得看得见这段存在过，只是给不了精确帧位置
+  RenewTask taskWithSolidBlockUnit() => RenewTask(
+        id: 't3', name: '测试3', status: RenewTaskStatus.ready,
+        createdAt: DateTime(2026, 9, 20), updatedAt: DateTime(2026, 9, 20),
+        videoInfo: VideoInfo(
+            width: 1080, height: 1920, fps: 30,
+            duration: const Duration(milliseconds: 2000),
+            fpsExact: Rational.fps30,
+            fileSizeBytes: 0),
+        units: const [
+          SemanticUnit(
+            uid: 'u0', index: 0, startMs: 0, endMs: 2000, transcript: '甲乙',
+            shots: [
+              Shot(startMs: 0, endMs: 1000),
+              Shot(startMs: 1000, endMs: 2000),
+            ],
+          ),
+        ],
+        replacementsByUid: {
+          'u0': UnitReplacement.whole(const [1]),
+        },
+        // 候选时长已知，且跟原坑位不等——真正的整块替换
+        pickedMaterials: const [
+          PickedMaterial(id: 1, name: '候选', durationMs: 1500),
+        ],
+      );
+
+  test('整体替换的镜头照样出现在报告里，只是没有帧位置', () {
+    final rows = subtitleReport(taskWithSolidBlockUnit())['shots'] as List;
+    final row =
+        rows.firstWhere((r) => (r as Map)['at'] == 'U1S1') as Map;
+    expect(row['voice'], 'replaced',
+        reason: '整段消失的话，Agent 连这段存在过都不知道');
+    expect(row.containsKey('frames'), isFalse,
+        reason: '给不了精确帧位置就整个字段不出现，不编一个');
+  });
+
+  test('单镜：落在整块上的合法下标，不许跟「下标不存在」共用 null', () {
+    final r = subtitleShotReport(taskWithSolidBlockUnit(),
+        unitIndex: 0, shotIndex: 0);
+    expect(r, isNotNull, reason: 'null 的含义是这个下标不存在');
+    expect((r!['voice'] as Map)['source'], 'replaced');
+    expect(r.containsKey('frames'), isFalse);
+  });
 }

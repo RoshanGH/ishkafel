@@ -19,8 +19,16 @@ import '../core/replacement/replacement_plan.dart';
 /// `unknown` 不含「一条候选都没选」的单元——那只是「还没挑」，这一段照旧
 /// 用它自己的长度，成片位置算得出来；只有「选了候选、但那条候选的时长
 /// 还没探出来」才算真的未知。
-({Map<int, int> durations, List<int> unknown}) wholeDurationsOf(
-    RenewTask task) {
+///
+/// 顺带把 `task.replacementsFor(units)` 的结果也带出来（[plans]）：算
+/// `wholeDurations` 本来就要它，调用方（`taskToJson`）后面填 `replacements`
+/// 字段也要用同一份——不带出来的话，同一次调用里 `replacementsFor` 会被
+/// 各算一遍，纯函数、结果不会错，但跟「同一件事只许算一处」这条自相矛盾。
+({
+  Map<int, int> durations,
+  List<int> unknown,
+  List<UnitReplacement>? plans
+}) wholeDurationsOf(RenewTask task) {
   final units = task.units;
   final unknown = <int>[];
   final wholeDurations = <int, int>{};
@@ -45,7 +53,7 @@ import '../core/replacement/replacement_plan.dart';
       }
     }
   }
-  return (durations: wholeDurations, unknown: unknown);
+  return (durations: wholeDurations, unknown: unknown, plans: plans);
 }
 
 /// `analyzed` 与 `units: null` 是两件事：还没分析完就是 null，**不能拿空数组
@@ -53,7 +61,7 @@ import '../core/replacement/replacement_plan.dart';
 Map<String, dynamic> taskToJson(RenewTask task) {
   final units = task.units;
   final wd = wholeDurationsOf(task);
-  final plans = units == null ? null : task.replacementsFor(units);
+  final plans = wd.plans;
   final composed = (units == null || wd.unknown.isNotEmpty)
       ? null
       : ComposedTimeline.of(units: units, wholeDurations: wd.durations);

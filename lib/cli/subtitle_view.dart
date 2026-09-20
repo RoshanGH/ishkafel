@@ -45,7 +45,10 @@ class _ShotFacts {
   final Heard heard;
   final List<SubtitleLine> lines;
   final List<SubtitleProblem> problems;
-  final FrameSpan span;
+
+  /// 这一镜在成片帧轴上的精确位置。**null 不等于「这一镜不存在」**，
+  /// 只是给不了精确帧位置——见 [_factsOf] 上方那段注释
+  final FrameSpan? span;
   final String by;
 
   const _ShotFacts({
@@ -60,10 +63,21 @@ class _ShotFacts {
   });
 }
 
-/// 算出第 [unitIndex]/[shotIndex] 镜的四步事实。调用前必须先确认
-/// `frames.shotSpan(unitIndex, shotIndex)` 非 null——整块段落（整体替换、
-/// 没有自己镜头）没有帧位置可言，这里不做这层校验，交给调用方（两处都已经
-/// 只在“可定位”的镜头上调它，见 [_addressableShots]）。
+// 这一镜出不出现在报告里，只看它在不在 unit.shots 里；shotSpan 是不是 null
+// 只决定有没有精确帧位置，两件事不能混为一谈。
+//
+// 整体替换把这一段整个换成了另一条素材，原片的镜头切分在成片里确实不存在
+// 了——但那一镜在 unit.shots 里是有的，voiceSourceOf 会把它报成 replaced，
+// heardInShot 也专门为这一档写了不依赖 shotSpan 的分支（直接给空文本+理由，
+// 不用等 shotSpan 判断）。原来这里按 span 是不是 null 去筛掉整行，Agent
+// 看到的是「这段镜头凭空消失」，连它存在过都不知道——比把几种「没台词」
+// 混成一种还糟：那好歹这一行还在，这里是整行没了。
+//
+// 设计文档「整体替换段不给词级」那条，说的是不给逐字位置（词级），
+// 不是不给这一行。
+/// 算出第 [unitIndex]/[shotIndex] 镜的四步事实：[voiceSourceOf] →
+/// [heardInShot] → [subtitleLinesForSlot] → [subtitleProblemsOf]。
+/// `span` 为 null 时照样把四步走完——后两步本来就支持可空的 `shotSpan`。
 _ShotFacts _factsOf({
   required ComposedFrames frames,
   required ComposedTimeline timeline,
@@ -102,7 +116,7 @@ _ShotFacts _factsOf({
     baseSlotStartMs: shot.startMs - unit.startMs,
     baseSlotEndMs: shot.endMs - unit.startMs,
   );
-  final span = frames.shotSpan(unitIndex, shotIndex)!;
+  final span = frames.shotSpan(unitIndex, shotIndex);
   final problems = subtitleProblemsOf(
     shotSpan: span,
     heard: heard,
@@ -127,20 +141,12 @@ _ShotFacts _factsOf({
 String _at(int unitIndex, int shotIndex) =>
     'U${unitIndex + 1}S${shotIndex + 1}';
 
-/// 全片有哪些镜头**可定位**（`frames.shotSpan` 非 null）。
-///
-/// 整体替换、且没自己切过镜头的单元是一整块——原片的切分在成片里已经不
-/// 存在了，编一个位置出来是假精度（见 [ComposedFrames.shotSpan] 的注释）。
-/// 这类单元的镜头在全片列表里整段不出现，问它的单镜详情也如实答 null——
-/// 这跟“下标越界”是同一件事的两种成因，答法理应一样。
-List<({int unit, int shot})> _addressableShots(
-  ComposedFrames frames,
-  List<SemanticUnit> units,
-) =>
-    [
+/// 全片有哪些镜头——`unit.shots` 里有的都算，**不按 `shotSpan` 筛**
+/// （见 [_factsOf] 上方那段注释：有没有精确帧位置，跟这一镜在不在报告里
+/// 是两件事）。
+List<({int unit, int shot})> _allShots(List<SemanticUnit> units) => [
       for (var u = 0; u < units.length; u++)
-        for (var s = 0; s < units[u].shots.length; s++)
-          if (frames.shotSpan(u, s) != null) (unit: u, shot: s),
+        for (var s = 0; s < units[u].shots.length; s++) (unit: u, shot: s),
     ];
 
 /// 建一次全片都要用到的上下文，全片报告和单镜报告共用，
@@ -201,10 +207,9 @@ Map<String, dynamic> subtitleReport(RenewTask task) {
     return {'framesUnavailable': _framesUnavailableNote(whole.unknown)};
   }
   final ctx = _contextOf(task, whole.durations);
-  final addressable = _addressableShots(ctx.frames, ctx.units);
 
   final shots = [
-    for (final pos in addressable)
+    for (final pos in _allShots(ctx.units))
       _shotRow(_factsOf(
         frames: ctx.frames,
         timeline: ctx.timeline,
@@ -230,28 +235,33 @@ Map<String, dynamic> _shotRow(
   int unitIndex,
   int shotIndex,
   ComposedFrames frames,
-) =>
-    {
-      'at': _at(unitIndex, shotIndex),
-      'unitUid': f.unit.uid,
-      'unit': unitIndex,
-      'shot': shotIndex,
-      'frames': [f.span.first, f.span.last],
-      'tc': '${frames.tc(f.span.first)} → ${frames.tc(f.span.last)}',
-      'voice': f.voice.source.name,
-      'heard': f.heard.text,
-      'lines': [for (final l in f.lines) l.text],
-      'by': f.by,
-      if (f.problems.isNotEmpty)
-        'problems': [for (final p in f.problems) p.kind],
-    };
+) {
+  final span = f.span;
+  return {
+    'at': _at(unitIndex, shotIndex),
+    'unitUid': f.unit.uid,
+    'unit': unitIndex,
+    'shot': shotIndex,
+    // 给不了精确帧位置（整体替换的一整块）就整个键不出现，不编一个
+    if (span != null) 'frames': [span.first, span.last],
+    if (span != null) 'tc': '${frames.tc(span.first)} → ${frames.tc(span.last)}',
+    'voice': f.voice.source.name,
+    'heard': f.heard.text,
+    'lines': [for (final l in f.lines) l.text],
+    'by': f.by,
+    if (f.problems.isNotEmpty)
+      'problems': [for (final p in f.problems) p.kind],
+  };
+}
 
 /// 单镜那份——`subtitle show <任务> --unit 1 --shot 2`。
 ///
-/// 下标越界、或者落在整体替换的一整块上（没有镜头可定位），一律返回 null，
-/// 不抛——这跟全片列表里“这一镜整段不出现”是同一件事。
+/// 下标越界一律返回 null，不抛。**落在整体替换的一整块上的合法下标不算
+/// 越界**——那一镜照样在 `unit.shots` 里，只是给不了精确帧位置（见
+/// [_factsOf] 上方那段注释），返回的是一份没有 `frames`/`tc`/
+/// `durationFrames` 的正常详情，不是 null。
 ///
-/// **`null` 和 `{'framesUnavailable': ...}` 是两件事，不能共用**：前者是
+/// `null` 和 `{'framesUnavailable': ...}` 是两件事，不能共用：前者是
 /// 「问的这个下标根本不存在」，后者是「下标本身没问题，但全片的成片位置
 /// 算不准，这一镜的帧号也就跟着不作数」（见 [_framesUnavailableNote]）。
 /// 下标是不是合法只看 `task.units` 本身的形状，跟算不算得出帧号无关，
@@ -273,7 +283,6 @@ Map<String, dynamic>? subtitleShotReport(
   }
 
   final ctx = _contextOf(task, whole.durations);
-  if (ctx.frames.shotSpan(unitIndex, shotIndex) == null) return null;
 
   final f = _factsOf(
     frames: ctx.frames,
@@ -294,19 +303,25 @@ Map<String, dynamic>? subtitleShotReport(
       _lineRow(f.lines[i], i, unitStart, shotOffset, fpsDouble, f.by),
   ];
 
-  final addressable = _addressableShots(ctx.frames, ctx.units);
-  final pos = addressable.indexWhere(
-      (p) => p.unit == unitIndex && p.shot == shotIndex);
-  final prev = pos > 0 ? _neighbourRow(ctx, addressable[pos - 1]) : null;
-  final next = pos >= 0 && pos < addressable.length - 1
-      ? _neighbourRow(ctx, addressable[pos + 1])
+  // **没过滤过的全部镜头**：隔壁是不是整体替换的一整块，「隔壁」还是它，
+  // 不能因为它算不出帧位置就当它不存在、指向更远的一镜——那样判断串字的
+  // 依据本身就是错的
+  final allShots = _allShots(ctx.units);
+  final pos =
+      allShots.indexWhere((p) => p.unit == unitIndex && p.shot == shotIndex);
+  final prev = pos > 0 ? _neighbourRow(ctx, allShots[pos - 1]) : null;
+  final next = pos >= 0 && pos < allShots.length - 1
+      ? _neighbourRow(ctx, allShots[pos + 1])
       : null;
 
+  final span = f.span;
   return {
     'at': _at(unitIndex, shotIndex),
-    'frames': [f.span.first, f.span.last],
-    'tc': '${ctx.frames.tc(f.span.first)} → ${ctx.frames.tc(f.span.last)}',
-    'durationFrames': f.span.frameCount,
+    // 给不了精确帧位置（整体替换的一整块）就整个键不出现，不编一个
+    if (span != null) 'frames': [span.first, span.last],
+    if (span != null)
+      'tc': '${ctx.frames.tc(span.first)} → ${ctx.frames.tc(span.last)}',
+    if (span != null) 'durationFrames': span.frameCount,
     'voice': {'source': f.voice.source.name, 'note': f.voice.note},
     'heard': _heardMap(f.heard),
     'lines': lineRows,
