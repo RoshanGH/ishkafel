@@ -102,7 +102,12 @@ void main() {
                       'end_time': 200,
                       'confidence': 0.98
                     },
-                    {'text': '一', 'start_time': 200, 'end_time': 400},
+                    {
+                      'text': '一',
+                      'start_time': 200,
+                      'end_time': 400,
+                      'confidence': 0
+                    },
                     {
                       'text': '句',
                       'start_time': 400,
@@ -140,7 +145,12 @@ void main() {
     expect(sentences.first.words[0].startMs, 40);
     expect(sentences.first.words[0].endMs, 200);
     expect(sentences.first.words[0].confidence, 0.98);
-    expect(sentences.first.words[1].confidence, isNull);
+    // 火山真实响应里每个词都带 confidence，值恒为 0（四条真实任务
+    // 1703/1703 个词）。「百分百听错」没有哪个 ASR 会这么报，所以 0 就是
+    // 「没这个字段」——不在这一层置 null 的话，报告那层会把一列 0.0 当成
+    // 事实报出去，而手册教 Agent 拿低置信度认错别字
+    expect(sentences.first.words[1].confidence, isNull,
+        reason: 'confidence: 0 等于没给');
     expect(sentences.first.words[2].endMs, 600);
     // 第二句无 words 字段 → 空列表，不报错
     expect(sentences.last.words, isEmpty);

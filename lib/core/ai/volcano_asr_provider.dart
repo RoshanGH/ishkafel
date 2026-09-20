@@ -209,14 +209,13 @@ class VolcanoAsrProvider implements AsrProvider {
     final endMs = _tryMs(raw['end_time']);
     final text = raw['text'];
     if (startMs == null || endMs == null || text is! String) return null;
-    final confidence = raw['confidence'];
     return AsrWord(
       startMs: startMs,
       endMs: endMs,
       text: text,
-      // 置信度是可选信息，类型不对就当没有，不因此丢字
-      confidence:
-          confidence is num && confidence.isFinite ? confidence.toDouble() : null,
+      // 置信度是可选信息，类型不对、或者恰好是 0（火山恒给 0，见
+      // asrConfidenceOf 的注释）都当没有，但不因此丢字
+      confidence: asrConfidenceOf(raw['confidence']),
     );
   }
 

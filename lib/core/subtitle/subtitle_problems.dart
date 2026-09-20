@@ -17,7 +17,9 @@ class SubtitleProblem {
 /// ——软件只报事实（与 2026-09-20 同日定下的检索原则同源）。
 ///
 /// 错别字尤其查不了：ASR 自己就听错了，**参照物本身是错的**。
-/// 软件能给的只是判断材料（产品名、标签词表、词的置信度）。
+/// 软件能给的只是判断材料（产品名、标签词表）——词的置信度指望不上，
+/// 火山 ASR 给的值恒为 0，解析那一层已经把它当「没给」（见
+/// `providers.dart` 的 `asrConfidenceOf`）。
 List<SubtitleProblem> subtitleProblemsOf({
   required FrameSpan? shotSpan,
   required Heard heard,

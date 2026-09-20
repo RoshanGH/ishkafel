@@ -1,6 +1,19 @@
 import 'package:collection/collection.dart';
 import 'segmentation_builder.dart';
 
+/// ASR 给的置信度：**恰好为 0 就是「这个字段没给」。**
+///
+/// 火山 ASR 的响应里每个词都带 `confidence`，值恒为 0——四条真实任务
+/// 1703 个词，一个例外都没有。而「百分百听错」这种断言没有哪个 ASR 会下，
+/// 所以 0 只能理解成「没这个字段」。
+///
+/// 在解析这一层就置 null，「没给」和「给了 0」才分得开：报告那层的
+/// `if (confidence != null)` 只挡得住字段缺失，挡不住「字段在、但恒为 0」，
+/// Agent 会看到一列 0.0，而手册曾教它拿低置信度认错别字——那是一条死路。
+/// 盘上已有的任务也走这里（[AsrWord.fromJson]），不是只管新转写的。
+double? asrConfidenceOf(Object? raw) =>
+    raw is num && raw.isFinite && raw != 0 ? raw.toDouble() : null;
+
 /// ASR 识别出的一个字/词（字级时间戳，精度红线：ASR 返回什么精度就保留什么精度）
 class AsrWord {
   final int startMs;
@@ -26,7 +39,7 @@ class AsrWord {
         startMs: json['startMs'] as int,
         endMs: json['endMs'] as int,
         text: json['text'] as String,
-        confidence: (json['confidence'] as num?)?.toDouble(),
+        confidence: asrConfidenceOf(json['confidence']),
       );
 
   @override

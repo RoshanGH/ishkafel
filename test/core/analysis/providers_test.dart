@@ -14,6 +14,22 @@ void main() {
     expect(AsrWord.fromJson(word2.toJson()), word2);
   });
 
+  /// **置信度恰好为 0 就是「这个字段没给」。**
+  ///
+  /// 火山 ASR 的响应里每个词都带 confidence，值恒为 0——四条真实任务
+  /// 1703 个词，一个例外都没有。而「百分百听错」这种断言没有哪个 ASR 会下，
+  /// 所以 0 只能是「没这个字段」。不在解析这一层分开的话，报告那层
+  /// `if (confidence != null)` 只挡得住「字段缺失」，挡不住「字段在、
+  /// 但恒为 0」，Agent 会看到一列 0.0，而手册教它拿低置信度认错别字——
+  /// 那是一条死路。
+  test('confidence 为 0 视同没给——ASR 不会断言「百分百听错」', () {
+    final w = AsrWord.fromJson(
+        const {'startMs': 0, 'endMs': 100, 'text': '甲', 'confidence': 0});
+    expect(w.confidence, isNull,
+        reason: '给了 0 和没给要分得开，分不开就只能一律当「没给」——'
+            '否则报告里那一列 0.0 看起来像事实');
+  });
+
   test('AsrSentence 序列化往返一致（含 words）', () {
     const sentence = AsrSentence(
       startMs: 40,

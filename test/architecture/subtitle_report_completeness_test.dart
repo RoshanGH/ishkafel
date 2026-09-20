@@ -66,6 +66,18 @@ void main() {
     }
   });
 
+  /// 手册不许把一个软件根本给不出来的东西当线索教出去。
+  ///
+  /// `AsrWord.confidence` 在真实数据里恒为 0（四条任务 1703/1703 个词），
+  /// 火山 ASR 就是这么报的。现在解析那一层把 0 当成「没给」置成 null，
+  /// 报告里这个键自然不出现——手册那条「低置信度的词是听错的高发处」
+  /// 就成了一条走不通的路，认错别字的线索只剩 `productBrand` 和标签词表。
+  test('手册不许拿 confidence 当认错别字的线索——软件给不出来', () {
+    expect(subtitleSection().contains('confidence'), isFalse,
+        reason: 'ASR 给的置信度恒为 0，报告里报不出这个键；'
+            '教 Agent 去看它，等于教了一条死路');
+  });
+
   test('手册里每条 ishkafel subtitle 子命令都要真能敲', () {
     // **真实子命令从代码的分发点抓，不是整份文件子串匹配。**
     // `command.contains("'$sub'")` 这种写法测得对是巧合——
